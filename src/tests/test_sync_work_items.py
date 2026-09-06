@@ -1,0 +1,222 @@
+# -*- coding: UTF-8 -*-
+import unittest
+from unittest.mock import MagicMock, patch
+import urllib.error
+import tempfile
+import os
+import shutil
+
+import sys
+test_dir = os.path.dirname(os.path.realpath(__file__))
+py_dir = os.path.dirname(test_dir)
+if py_dir not in sys.path:
+    sys.path.insert(0, py_dir)
+
+from azure import AzureDevOpsCache, AzureInfoHandler
+import devops_helper
+
+
+class TestSyncWorkItems(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.test_dir, "test_cache.db")
+        self.cache = AzureDevOpsCache(self.db_path)
+        self.handler = AzureInfoHandler("https://tfs.example.com/tfs", "fake-token")
+
+    def tearDown(self):
+        try:
+            shutil.rmtree(self.test_dir)
+        except Exception:
+            pass
+
+    def test_sync_work_items_success_and_deleted(self):
+        # Seed 2 work items in database
+        self.cache.save_work_item(1001, "Active Task", "Task", "Active", "Dev A", "2025-01-01", {"id": 1001})
+        self.cache.save_work_item(1002, "Obsolete Task", "Task", "Active", "Dev B", "2025-01-01", {"id": 1002})
+
+        # Mock get_work_item: 1001 exists, 1002 returns 404 HTTPError
+        def mock_get_wi(task_id):
+            if int(task_id) == 1001:
+                return {
+                    "id": 1001,
+                    "fields": {
+                        "System.Title": "Active Task Updated",
+                        "System.WorkItemType": "Task",
+                        "System.State": "Resolved",
+                        "System.AssignedTo": {"displayName": "Dev A"},
+                        "System.ChangedDate": "2025-02-01",
+                    }
+                }
+            elif int(task_id) == 1002:
+                raise urllib.error.HTTPError(None, 404, "Work item does not exist", None, None)
+            raise ValueError(f"Unexpected task id: {task_id}")
+
+        self.handler.get_work_item = MagicMock(side_effect=mock_get_wi)
+
+        summary = self.handler.sync_work_items(self.cache)
+
+        self.assertEqual(summary["synced"], 1)
+        self.assertEqual(summary["deleted"], 1)
+        self.assertEqual(summary["errors"], 0)
+
+        # Verify 1001 is updated and active
+        wi_1001 = self.cache.get_work_item(1001)
+        self.assertEqual(wi_1001["Title"], "Active Task Updated")
+        self.assertEqual(wi_1001["State"], "Resolved")
+        self.assertFalse(wi_1001["deleted"])
+
+        # Verify 1002 is marked deleted while retaining original title
+        wi_1002 = self.cache.get_work_item(1002)
+        self.assertEqual(wi_1002["Title"], "Obsolete Task")
+        self.assertTrue(wi_1002["deleted"])
+        self.assertEqual(wi_1002["is_deleted"], 1)
+
+    def test_sync_work_items_server_error_not_marked_deleted(self):
+        # Work item in DB
+        self.cache.save_work_item(1003, "Important Task", "Task", "Active", "Dev C", "2025-01-01", {"id": 1003})
+
+        # Server error 500 should NOT mark work item deleted
+        self.handler.get_work_item = MagicMock(
+            side_effect=urllib.error.HTTPError(None, 500, "Internal Server Error", None, None)
+        )
+
+        summary = self.handler.sync_work_items(self.cache)
+
+        self.assertEqual(summary["synced"], 0)
+        self.assertEqual(summary["deleted"], 0)
+        self.assertEqual(summary["errors"], 1)
+
+        wi_1003 = self.cache.get_work_item(1003)
+        self.assertFalse(wi_1003["deleted"])
+
+    @patch("devops_helper.ParseMarkdown")
+    @patch("devops_helper._getHandler")
+    @patch("devops_helper._getDBCacheHandler")
+    def test_devops_helper_sync_replaces_parse_markdown(self, mock_get_db, mock_get_handler, mock_parse_md):
+        mock_handler = MagicMock()
+        mock_handler.GetTFSRepositories.return_value = {"repo1": {}}
+        mock_handler.sync_work_items.return_value = {"synced": 2, "deleted": 1, "errors": 0}
+        mock_get_handler.return_value = mock_handler
+
+        mock_db = MagicMock()
+        mock_db.get_project_last_synced.return_value = None
+        mock_db.get_all_work_item_ids.return_value = [101, 102, 103]
+        mock_get_db.return_value = (self.db_path, mock_db)
+
+        # Run devops_helper.sync
+        devops_helper.sync(force_sync=True)
+
+        # Verify ParseMarkdown was NOT called
+        mock_parse_md.assert_not_called()
+
+        # Verify sync_work_items was called with project_id
+        mock_handler.sync_work_items.assert_called_once_with(mock_db, project_id=devops_helper.AZURE_PROJECT_ID)
+
+    def test_query_work_item_ids_wiql(self):
+        mock_response = {
+            "workItems": [
+                {"id": 501, "url": "https://.../501"},
+                {"id": 502, "url": "https://.../502"}
+            ]
+        }
+        self.handler._request = MagicMock(return_value=(mock_response, 200))
+
+        ids = self.handler.query_work_item_ids_wiql("TEST_PROJECT")
+        self.assertEqual(ids, [501, 502])
+        self.handler._request.assert_called_with(
+            "POST", "TEST_PROJECT/_apis/wit/wiql", params={"api-version": "6.0"},
+            data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'TEST_PROJECT' ORDER BY [System.Id]"}
+        )
+
+    def test_sync_work_items_wiql_discovery(self):
+        # Database already has 401 (active) and 402 (will be deleted because not returned by WIQL/batch)
+        self.cache.save_work_item(401, "Task 401", "Task", "Active", "Dev A", "2025-01-01", {"id": 401})
+        self.cache.save_work_item(402, "Task 402", "Task", "Active", "Dev B", "2025-01-01", {"id": 402})
+
+        # WIQL discovers 401 and 403 (brand new task never seen before)
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[401, 403])
+
+        # Batch API returns 401 and 403
+        self.handler.get_work_items_batch = MagicMock(return_value=[
+            {"id": 401, "fields": {"System.Title": "Task 401 Updated", "System.WorkItemType": "Task", "System.State": "Resolved"}},
+            {"id": 403, "fields": {"System.Title": "Brand New Task 403", "System.WorkItemType": "Bug", "System.State": "New"}},
+        ])
+
+        # Sync without knowing task IDs in advance!
+        summary = self.handler.sync_work_items(self.cache, project_id="TEST_PROJECT")
+
+        self.assertEqual(summary["synced"], 2)   # 401 and 403
+        self.assertEqual(summary["deleted"], 1)  # 402 was in db, but not returned by API -> marked deleted
+
+        # 401 updated
+        wi_401 = self.cache.get_work_item(401)
+        self.assertEqual(wi_401["Title"], "Task 401 Updated")
+        self.assertFalse(wi_401["deleted"])
+
+        # 403 newly created
+        wi_403 = self.cache.get_work_item(403)
+        self.assertIsNotNone(wi_403)
+        self.assertEqual(wi_403["Title"], "Brand New Task 403")
+        self.assertFalse(wi_403["deleted"])
+
+        # 402 marked deleted
+        wi_402 = self.cache.get_work_item(402)
+        self.assertTrue(wi_402["deleted"])
+        self.assertEqual(wi_402["Title"], "Task 402")
+
+    def test_get_work_items_batch(self):
+        # Mock _request
+        mock_response = {
+            "count": 2,
+            "value": [
+                {"id": 201, "fields": {"System.Title": "Task 201"}},
+                {"id": 202, "fields": {"System.Title": "Task 202"}}
+            ]
+        }
+        self.handler._request = MagicMock(return_value=(mock_response, 200))
+
+        items = self.handler.get_work_items_batch([201, 202, 203], chunk_size=2)
+        self.assertEqual(len(items), 4)  # 2 calls * 2 items returned
+        # Verify endpoint and method
+        self.handler._request.assert_called_with(
+            "POST", "_apis/wit/workitemsbatch", params={"api-version": "6.0"}, data={"ids": [203]}
+        )
+
+    def test_sync_work_items_batch_mode(self):
+        self.cache.save_work_item(301, "Old Title 301", "Task", "Active", "Dev A", "2025-01-01", {"id": 301})
+        self.cache.save_work_item(302, "Old Title 302", "Task", "Active", "Dev B", "2025-01-01", {"id": 302})
+
+        # Batch returns only 301 (302 is deleted/omitted)
+        self.handler.get_work_items_batch = MagicMock(return_value=[
+            {
+                "id": 301,
+                "fields": {
+                    "System.Title": "New Title 301",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Closed",
+                    "System.AssignedTo": {"displayName": "Dev A"},
+                    "System.ChangedDate": "2025-03-01",
+                }
+            }
+        ])
+
+        # WIQL returns 301 from remote
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[301])
+        summary = self.handler.sync_work_items(self.cache)
+
+        self.assertEqual(summary["synced"], 1)
+        self.assertEqual(summary["deleted"], 1)
+        self.assertEqual(summary["errors"], 0)
+
+        wi_301 = self.cache.get_work_item(301)
+        self.assertEqual(wi_301["Title"], "New Title 301")
+        self.assertEqual(wi_301["State"], "Closed")
+        self.assertFalse(wi_301["deleted"])
+
+        wi_302 = self.cache.get_work_item(302)
+        self.assertTrue(wi_302["deleted"])
+        self.assertEqual(wi_302["Title"], "Old Title 302")
+
+
+if __name__ == "__main__":
+    unittest.main()

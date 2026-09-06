@@ -1,0 +1,61 @@
+# Build & Artifact Storage Report{% if project_name %} ({{ project_name }}){% endif %}
+> **Report Generation Date:** `{{ now_str }}`  
+> **Scope:** Azure DevOps / TFS Build Definitions, Executions, and Published Artifacts  
+> **External Data Export:** [:material-file-delimited: Download Full CSV Inventory]({{ csv_filename }}){ .md-button .md-button--primary }
+
+## 1. Executive Summary & Storage KPIs
+
+| Metric | Value | Notes |
+| :--- | :--- | :--- |
+| **Total Builds Tracked** | `{{ metrics.total_builds }}` | Distinct build runs analyzed |
+| **Total Artifacts Registered** | `{{ metrics.total_artifacts }}` | Across all recorded builds |
+| **Active Artifacts** | `{{ metrics.active_artifacts_count }}` | Currently retained on disk |
+| **Deleted / Tombstoned** | `{{ metrics.deleted_artifacts_count }}` | Cleaned up or pruned from server |
+| **Total Allocated Storage** | **`{{ "%.2f"|format(metrics.total_size_gb) }} GB`** (`{{ "%.1f"|format(metrics.total_size_mb) }} MB`) | Cumulative footprint |
+| **Active Storage Consumption** | **`{{ "%.2f"|format(metrics.active_size_gb) }} GB`** (`{{ "%.1f"|format(metrics.active_size_mb) }} MB`) | Net live storage on TFS |
+| **Deleted Storage Reclaimed** | **`{{ "%.2f"|format(metrics.deleted_size_gb) }} GB`** (`{{ "%.1f"|format(metrics.deleted_size_mb) }} MB`) | Already reclaimed by deletion |
+| **Average Artifact Size** | `{{ "%.2f"|format(metrics.avg_size_mb) }} MB` | Mean per published artifact |
+
+**Disk Space Optimization Highlights:**
+
+- **Reclaimed Space to Date:** `{{ "%.2f"|format(metrics.deleted_size_gb) }} GB` has been successfully cleared or marked as deleted.
+- **Failed Build Waste:** Found **{{ metrics.failed_count }} active artifacts** from failed builds consuming **`{{ "%.2f"|format(metrics.failed_size_mb) }} MB`**.
+- **Stale Builds (>90 days):** Found **{{ metrics.stale_count }} active artifacts** older than 90 days consuming **`{{ "%.2f"|format(metrics.stale_size_mb) }} MB`**.
+- **Immediate Pruning Potential:** Cleaning failed and stale artifacts can recover up to **`{{ "%.2f"|format(reclaimable_gb) }} GB`**.
+
+## 2. Storage Usage by Pipeline
+
+| Pipeline Definition | Builds | Artifacts | Active Size (MB) | Deleted (MB) | Total (MB) | % of Storage |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+{% for p in metrics.by_pipeline -%}
+| **{{ p.pipeline }}** | {{ p.builds_count }} | {{ p.artifacts_count }} | {{ "%.1f"|format(p.active_mb) }} MB | {{ "%.1f"|format(p.deleted_mb) }} MB | **{{ "%.1f"|format(p.total_mb) }} MB** | `{{ "%.1f"|format(p.percent) }}%` |
+{% endfor %}
+## 3. Storage Usage by Repository
+
+| Repository | Builds | Artifacts | Active Size (MB) | Deleted (MB) | Total (MB) | % of Storage |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+{% for r in metrics.by_repo -%}
+| [`{{ r.repo }}`]({{ azure_base_url }}/{{ azure_collection }}/{{ project_name }}/_git/{{ r.repo }}) | {{ r.builds_count }} | {{ r.artifacts_count }} | {{ "%.1f"|format(r.active_mb) }} MB | {{ "%.1f"|format(r.deleted_mb) }} MB | **{{ "%.1f"|format(r.total_mb) }} MB** | `{{ "%.1f"|format(r.percent) }}%` |
+{% endfor %}
+## 4. Build Outcome vs. Storage Footprint
+
+| Build Result | Builds | Artifacts | Total Storage (MB) | Share of Storage |
+| :--- | :---: | :---: | :---: | :---: |
+{% for res in metrics.by_result -%}
+| {{ res.label }} | {{ res.builds_count }} | {{ res.artifacts_count }} | **{{ "%.1f"|format(res.size_mb) }} MB** | `{{ "%.1f"|format(res.percent) }}%` |
+{% endfor %}
+## 5. Top 15 Largest Artifacts
+
+| # | Artifact Name | Build | Pipeline | Repository | Size (MB) | Status |
+| -: | :--- | :--- | :--- | :--- | -: | :---: |
+{% for art in metrics.top_artifacts -%}
+| {{ loop.index }} | **{{ art.artifact_name }}** | `#{{ art.build_number }}` | {{ art.pipeline_name }} | `{{ art.repo_name }}` | **{{ "%.2f"|format(art.size_mb) }} MB** | {% if status_icons and status_icons.artifact_status %}{{ status_icons.artifact_status.deleted if art.is_deleted else status_icons.artifact_status.active }}{% else %}{% if art.is_deleted %}:material-delete-empty: { .red } Deleted{% else %}:octicons-package-16: { .green } Active{% endif %}{% endif %} |
+{% endfor %}
+## 6. Retention Policies & Optimization Roadmap
+
+To maintain disk stability on the TFS build host, the following retention rules are recommended:
+
+1. **Prune Failed Build Outputs**: Artifacts attached to failed or canceled builds (`*.dmp`, crash logs, broken builds) should be purged after **7 days**.
+2. **Deduplicate Debug Symbols (`.pdb`)**: Debug symbols represent the single largest individual files (often >800 MB). Move symbol files to a centralized symbol server rather than packaging inside build drops.
+3. **Stale Branch Cleanup**: Artifacts generated on feature or testing branches should automatically expire **30 days** after PR merge or closure.
+4. **Automate via CLI**: Regularly execute `devops_helper.py --check-artefacts` to audit and synchronize the latest state with the local SQLite cache.

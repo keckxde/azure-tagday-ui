@@ -1,0 +1,13 @@
+*node_modules*/
+package-lock.json
+.env
+
+__pycache__/
+.venv/
+tfs_cache*.db
+config/user_settings.yaml
+build*/
+dist*/
+*.egg-info/
+*.egg
+*.dist-info/

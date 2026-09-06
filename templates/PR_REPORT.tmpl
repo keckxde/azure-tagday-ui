@@ -1,0 +1,18 @@
+# Pull Requests Export Report
+
+{% for repo_name in keys %}
+{% set branches = grouped[repo_name] %}
+## Repository: {{ repo_name }}
+
+{% for branch in branches.keys()|sort %}
+{% set pr_list = branches[branch] %}
+### Branch: {{ branch }}
+
+| PR ID | Title | Status | Created By | Closed Date |
+| --- | --- | --- | --- | --- |
+{%- for pr in pr_list %}
+| {{ pr.pr_id }} | {{ pr.title|replace("|", "\|")|replace("\n", " ") }} | {{ pr.status_str }} | {{ pr.created_by }} | {{ pr.closed_date or "-" }} |
+{%- endfor %}
+
+{% endfor %}
+{% endfor %}

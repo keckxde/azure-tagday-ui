@@ -1,0 +1,30 @@
+default_category: OTHERS
+prefix_rules:
+  prefix1: Group1
+  prefix2: Group2
+  prefix3: Group3
+  prefix4: Group4
+  prefix5: Group5
+  prefix6: Group6
+  prefix7: Group7
+  prefix8: Group8
+  prefix9: Group9
+  prefix10: Group10
+repositories:
+  test-repo-prefix1: Group1
+category_colors:
+  Group1: '#1f6feb'
+  Group2: '#238636'
+  Group3: '#6e40c9'
+  Group4: '#d29922'
+  Group5: '#da3633'
+  Group6: '#8957e5'
+  Group7: '#0969da'
+  Group8: '#bf8700'
+  Group9: '#2ea043'
+  Group10: '#f0883e'
+  CORE: '#1f6feb'
+  CORE APPS: '#238636'
+  GENERIC: '#6e40c9'
+  3RDPARTY: '#d29922'
+  OTHERS: '#6e7681'
