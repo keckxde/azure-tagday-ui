@@ -1,0 +1,118 @@
+# ==============================================================================
+# GitLab CI/CD Pipeline for Azure TagDay & DevOps UI
+# ==============================================================================
+
+stages:
+  - test
+  - build
+  - release
+
+variables:
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+
+default:
+  interruptible: true
+
+# --- Global Cache Configuration ---
+cache:
+  key:
+    files:
+      - uv.lock
+      - pyproject.toml
+  paths:
+    - .uv-cache/
+    - .venv/
+
+# ==============================================================================
+# 1. TEST STAGE
+# ==============================================================================
+
+test:unit:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+  before_script:
+    - uv sync --frozen
+  script:
+    - echo "Running unit test suite..."
+    - uv run python -m unittest discover -s src/tests
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
+# ==============================================================================
+# 2. BUILD STAGE
+# ==============================================================================
+
+# Build standard Python wheel and sdist packages
+build:python-package:
+  stage: build
+  image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+  before_script:
+    - uv sync --frozen
+  script:
+    - echo "Building Python Wheel and Source Distribution..."
+    - uv build
+  artifacts:
+    name: "python-packages-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/*.whl
+      - dist/*.tar.gz
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# Build Windows standalone executable and setup installer on Windows runner
+build:windows-installer:
+  stage: build
+  tags:
+    - windows
+    - powershell
+  before_script:
+    - echo "Syncing Python virtual environment on Windows..."
+    - uv sync
+  script:
+    - echo "Compiling standalone PyInstaller bundle & NSIS Windows Installer..."
+    - uv run python build_installer.py
+  artifacts:
+    name: "windows-installer-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/AzureTagDayUI-Setup-*.exe
+      - dist/azure-tagday-ui/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - when: manual
+      allow_failure: true
+
+# ==============================================================================
+# 3. RELEASE STAGE
+# ==============================================================================
+
+release:publish:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build:python-package
+      artifacts: true
+    - job: build:windows-installer
+      artifacts: true
+      optional: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+.*$/'
+  script:
+    - echo "Creating GitLab Release for $CI_COMMIT_TAG..."
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    tag_name: "$CI_COMMIT_TAG"
+    description: "Automated release build for $CI_COMMIT_TAG containing standalone Windows installer and Python distribution wheel."
+    assets:
+      links:
+        - name: "Windows Setup Installer (.exe)"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/azure-tagday-ui/${CI_COMMIT_TAG}/AzureTagDayUI-Setup-${CI_COMMIT_TAG}.exe"
+          link_type: package
