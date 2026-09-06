@@ -432,14 +432,17 @@ ApplicationWindow {
                 Rectangle {
                     id: syncLogDrawer
                     Layout.fillWidth: true
-                    height: window.isSyncLogDrawerOpen ? window.syncLogDrawerHeight : 0
-                    visible: height > 0
+                    Layout.preferredHeight: window.isSyncLogDrawerOpen ? window.syncLogDrawerHeight : 0
+                    Layout.minimumHeight: window.isSyncLogDrawerOpen ? 140 : 0
+                    Layout.maximumHeight: window.isSyncLogDrawerOpen ? Math.round(window.height * 0.85) : 0
+                    visible: window.isSyncLogDrawerOpen && Layout.preferredHeight > 0
                     color: "#0d1117"
                     border.color: "#30363d"
                     border.width: 1
                     clip: true
 
-                    Behavior on height {
+                    Behavior on Layout.preferredHeight {
+                        enabled: !dragHandleMa.pressed
                         NumberAnimation {
                             duration: 200
                             easing.type: Easing.OutCubic
@@ -452,19 +455,27 @@ ApplicationWindow {
                         anchors.top: parent.top
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        height: 6
-                        color: dragHandleMa.containsMouse ? "#30363d" : "transparent"
-                        z: 10
+                        height: 12
+                        color: dragHandleMa.containsMouse ? "#21262d" : "#161b22"
+                        border.color: dragHandleMa.containsMouse ? "#58a6ff" : "#30363d"
+                        border.width: 1
+                        z: 20
 
-                        Rectangle {
-                            width: 36
-                            height: 3
-                            radius: 1.5
+                        Row {
                             anchors.centerIn: parent
-                            color: dragHandleMa.containsMouse ? "#58a6ff" : "#30363d"
+                            spacing: 3
+                            Repeater {
+                                model: 5
+                                Rectangle {
+                                    width: 8
+                                    height: 3
+                                    radius: 1.5
+                                    color: dragHandleMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                }
+                            }
                         }
 
-                        property real _startY: 0
+                        property real _startGlobalY: 0
                         property real _startH: 0
 
                         MouseArea {
@@ -472,14 +483,18 @@ ApplicationWindow {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.SizeVerCursor
-                            onPressed: {
-                                dragHandle._startY = mouseY;
+                            onPressed: function(mouse) {
+                                var pt = mapToItem(null, mouse.x, mouse.y);
+                                dragHandle._startGlobalY = pt.y;
                                 dragHandle._startH = window.syncLogDrawerHeight;
                             }
-                            onMouseYChanged: {
+                            onPositionChanged: function(mouse) {
                                 if (pressed) {
-                                    var delta = dragHandle._startY - mouseY;
-                                    var newH = Math.max(160, Math.min(window.height * 0.7, dragHandle._startH + delta));
+                                    var pt = mapToItem(null, mouse.x, mouse.y);
+                                    var delta = dragHandle._startGlobalY - pt.y;
+                                    var minH = 140;
+                                    var maxH = Math.max(minH, Math.round(window.height * 0.85));
+                                    var newH = Math.max(minH, Math.min(maxH, dragHandle._startH + delta));
                                     window.syncLogDrawerHeight = newH;
                                 }
                             }
@@ -487,13 +502,18 @@ ApplicationWindow {
                     }
 
                     SyncLogView {
-                        anchors.fill: parent
-                        anchors.topMargin: 6
+                        anchors.top: dragHandle.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
                         anchors.margins: 6
                         showHeaderTitle: true
                         headerTitleText: "Background Activity & Sync Log"
                         canClose: true
                         onCloseRequested: window.isSyncLogDrawerOpen = false
+                        onHeightPresetRequested: function(h) {
+                            window.syncLogDrawerHeight = Math.max(140, Math.min(Math.round(window.height * 0.85), h));
+                        }
                     }
                 }
             }

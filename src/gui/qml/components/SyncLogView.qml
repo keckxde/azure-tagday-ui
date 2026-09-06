@@ -16,10 +16,11 @@ Item {
     // Signal when close is requested (for drawer mode)
     signal closeRequested()
     property bool canClose: false
+    signal heightPresetRequested(real height)
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 8
+        spacing: 6
 
         // ==========================================
         // Toolbar / Controls Header
@@ -365,6 +366,99 @@ Item {
                         }
                     }
 
+                    // Divider before drawer controls
+                    Rectangle {
+                        width: 1
+                        height: 20
+                        color: "#30363d"
+                        visible: root.canClose
+                    }
+
+                    // Height Preset Buttons (Compact / Normal / Expanded)
+                    Row {
+                        spacing: 2
+                        visible: root.canClose
+                        Layout.alignment: Qt.AlignVCenter
+
+                        // Compact (220px)
+                        Rectangle {
+                            implicitHeight: 28
+                            implicitWidth: 32
+                            radius: 4
+                            color: compMa.containsMouse ? "#30363d" : "transparent"
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "◱"
+                                font.pixelSize: 12
+                                color: compMa.containsMouse ? "#58a6ff" : "#8b949e"
+                            }
+                            ToolTip.visible: compMa.containsMouse
+                            ToolTip.text: "Compact height (220px)"
+                            MouseArea {
+                                id: compMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.heightPresetRequested(220)
+                            }
+                        }
+
+                        // Normal (380px)
+                        Rectangle {
+                            implicitHeight: 28
+                            implicitWidth: 32
+                            radius: 4
+                            color: midMa.containsMouse ? "#30363d" : "transparent"
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "◰"
+                                font.pixelSize: 12
+                                color: midMa.containsMouse ? "#58a6ff" : "#8b949e"
+                            }
+                            ToolTip.visible: midMa.containsMouse
+                            ToolTip.text: "Default height (380px)"
+                            MouseArea {
+                                id: midMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.heightPresetRequested(380)
+                            }
+                        }
+
+                        // Expanded (600px)
+                        Rectangle {
+                            implicitHeight: 28
+                            implicitWidth: 32
+                            radius: 4
+                            color: expMa.containsMouse ? "#30363d" : "transparent"
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "◲"
+                                font.pixelSize: 12
+                                color: expMa.containsMouse ? "#58a6ff" : "#8b949e"
+                            }
+                            ToolTip.visible: expMa.containsMouse
+                            ToolTip.text: "Expanded height (600px)"
+                            MouseArea {
+                                id: expMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.heightPresetRequested(600)
+                            }
+                        }
+                    }
+
                     // Optional Close button (for slide-up drawer)
                     Rectangle {
                         visible: root.canClose
@@ -412,16 +506,16 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 8
                 clip: true
-                spacing: 2
+                spacing: 4
                 boundsBehavior: Flickable.StopAtBounds
 
                 ScrollBar.vertical: ScrollBar {
                     id: vScrollBar
                     policy: ScrollBar.AsNeeded
                     contentItem: Rectangle {
-                        implicitWidth: 6
-                        radius: 3
-                        color: "#30363d"
+                        implicitWidth: 8
+                        radius: 4
+                        color: vScrollBar.pressed ? "#58a6ff" : (vScrollBar.hovered ? "#8b949e" : "#30363d")
                     }
                 }
 
@@ -431,15 +525,16 @@ Item {
 
                 delegate: Item {
                     id: logItemDelegate
-                    width: logListView.width - 12
+                    width: logListView.width - 16
                     visible: root.matchesFilter(model.level, model.text)
-                    height: visible ? logContentLayout.implicitHeight + 4 : 0
+                    height: visible ? logContentLayout.implicitHeight + 6 : 0
 
                     RowLayout {
                         id: logContentLayout
+                        anchors.top: parent.top
+                        anchors.topMargin: 3
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
                         spacing: 8
 
                         // 1. Timestamp
