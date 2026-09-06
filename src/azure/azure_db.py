@@ -631,24 +631,35 @@ class AzureDevOpsCache:
                         pass
                 fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
                 assigned = fields.get("System.AssignedTo")
-                if not assigned:
-                    assigned = {"id": 0, "displayName": row["assigned_to"] or "undefined"}
-                elif not isinstance(assigned, dict):
-                    assigned = {"id": 0, "displayName": str(assigned)}
+                assigned_name = ""
+                if isinstance(assigned, dict):
+                    assigned_name = assigned.get("displayName") or assigned.get("uniqueName") or ""
+                elif isinstance(assigned, str):
+                    assigned_name = assigned
+                if not assigned_name or assigned_name.lower() in ("undefined", "none", "unknown"):
+                    assigned_name = row["assigned_to"] or "Unassigned"
+
+                resolved_state = row["state"] or fields.get("System.State", "") or "Active"
+                resolved_type = row["type"] or fields.get("System.WorkItemType", "") or "Task"
+                resolved_title = row["title"] or fields.get("System.Title", "") or f"Work Item #{row['id']}"
 
                 result.append({
                     "id": row["id"],
                     "teamProject": fields.get("System.TeamProject"),
                     "url": raw.get("url"),
                     "htmlLink": raw.get("_links", {}).get("html", {}).get("href", ""),
-                    "Title": row["title"] or fields.get("System.Title", ""),
-                    "title": row["title"] or fields.get("System.Title", ""),
-                    "WorkItemType": row["type"] or fields.get("System.WorkItemType", ""),
-                    "State": row["state"] or fields.get("System.State", ""),
+                    "Title": resolved_title,
+                    "title": resolved_title,
+                    "WorkItemType": resolved_type,
+                    "type": resolved_type,
+                    "State": resolved_state,
+                    "state": resolved_state,
                     "CreatedDate": fields.get("System.CreatedDate"),
                     "AssignedTo": assigned,
+                    "assigned_to": assigned_name,
                     "CreatedBy": fields.get("System.CreatedBy"),
                     "ChangedBy": fields.get("System.ChangedBy"),
+                    "changed_date": row["changed_date"] or fields.get("System.ChangedDate", ""),
                     "deleted": is_del,
                     "is_deleted": 1 if is_del else 0,
                     "raw_json": row["raw_json"],
@@ -1233,10 +1244,17 @@ class AzureDevOpsCache:
 
         fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
         assigned = fields.get("System.AssignedTo")
-        if not assigned:
-            assigned = {"id": 0, "displayName": row["assigned_to"] or "undefined"}
-        elif not isinstance(assigned, dict):
-            assigned = {"id": 0, "displayName": str(assigned)}
+        assigned_name = ""
+        if isinstance(assigned, dict):
+            assigned_name = assigned.get("displayName") or assigned.get("uniqueName") or ""
+        elif isinstance(assigned, str):
+            assigned_name = assigned
+        if not assigned_name or assigned_name.lower() in ("undefined", "none", "unknown"):
+            assigned_name = row["assigned_to"] or "Unassigned"
+
+        resolved_state = row["state"] or fields.get("System.State", "") or "Active"
+        resolved_type = row["type"] or fields.get("System.WorkItemType", "") or "Task"
+        resolved_title = row["title"] or fields.get("System.Title", "") or f"Work Item #{row['id']}"
 
         is_del = bool(row["deleted"]) if ("deleted" in row.keys() and row["deleted"] is not None) else False
 
@@ -1245,14 +1263,18 @@ class AzureDevOpsCache:
             "teamProject": fields.get("System.TeamProject"),
             "url": raw.get("url"),
             "htmlLink": raw.get("_links", {}).get("html", {}).get("href", ""),
-            "Title": row["title"] or fields.get("System.Title", ""),
-            "title": row["title"] or fields.get("System.Title", ""),
-            "WorkItemType": row["type"] or fields.get("System.WorkItemType", ""),
-            "State": row["state"] or fields.get("System.State", ""),
+            "Title": resolved_title,
+            "title": resolved_title,
+            "WorkItemType": resolved_type,
+            "type": resolved_type,
+            "State": resolved_state,
+            "state": resolved_state,
             "CreatedDate": fields.get("System.CreatedDate"),
             "AssignedTo": assigned,
+            "assigned_to": assigned_name,
             "CreatedBy": fields.get("System.CreatedBy"),
             "ChangedBy": fields.get("System.ChangedBy"),
+            "changed_date": row["changed_date"] or fields.get("System.ChangedDate", ""),
             "deleted": is_del,
             "is_deleted": 1 if is_del else 0,
             "raw_json": row["raw_json"],

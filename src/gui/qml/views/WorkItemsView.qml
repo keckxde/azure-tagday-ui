@@ -13,13 +13,20 @@ Item {
     property int totalPages: 1
     property int totalMatchingCount: 0
 
-    // -- Type filter list, updated when work items reload --
+    // -- State and Type filter lists, updated dynamically from database cache --
     property var typesList: []
+    property var statesList: []
 
     function refreshTypesList() {
         if (!backend) return
         var types = backend.workItemTypes || []
         typesList = ["ALL"].concat(types)
+    }
+
+    function refreshStatesList() {
+        if (!backend) return
+        var states = backend.workItemStates || []
+        statesList = ["ALL"].concat(states).concat(["DELETED"])
     }
 
     // ========================
@@ -42,17 +49,21 @@ Item {
     function stateColor(s, deleted) {
         if (deleted) return "#f85149"
         switch ((s || "").toLowerCase()) {
-            case "closed": case "done": case "resolved": return "#3fb950"
-            case "active": case "in progress":            return "#d29922"
-            case "new":                                   return "#388bfd"
-            default:                                      return "#8b949e"
+            case "closed": case "done":       return "#3fb950"
+            case "resolved":                  return "#2ea043"
+            case "active": case "in progress": return "#d29922"
+            case "in planning":               return "#a371f7"
+            case "proposed":                  return "#bf8700"
+            case "new": case "open": case "to do": return "#388bfd"
+            case "removed": case "cut":       return "#f85149"
+            default:                          return "#8b949e"
         }
     }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 20
-        spacing: 16
+        spacing: 14
 
         // ====================== Top Toolbar ======================
         RowLayout {
@@ -75,39 +86,6 @@ Item {
             }
 
             Item { Layout.fillWidth: true }
-
-            // Status filter chips
-            Row {
-                spacing: 6
-                Repeater {
-                    model: ["ALL", "ACTIVE", "DELETED"]
-                    Button {
-                        text: modelData
-                        checkable: true
-                        checked: root.filterState === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 28
-                            implicitWidth: 72
-                            radius: 14
-                            color: parent.checked ? (modelData === "DELETED" ? "#da3633" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? (modelData === "DELETED" ? "#f85149" : "#388bfd") : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterState = modelData
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
 
             SearchBar {
                 placeholder: "Search ID, Title, Assignee, Tag..."
@@ -141,10 +119,70 @@ Item {
             }
         }
 
+        // ====================== State Filter Row ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Text {
+                text: "State:"
+                font.family: "Segoe UI, sans-serif"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                color: "#8b949e"
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: 42
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Repeater {
+                    model: root.statesList
+                    Button {
+                        text: modelData === "ALL" ? "All States" : (modelData === "DELETED" ? "Deleted" : modelData)
+                        checkable: true
+                        checked: root.filterState === modelData
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26
+                            implicitWidth: stateLabel.implicitWidth + 20
+                            radius: 13
+                            property color stateC: {
+                                if (modelData === "ALL") return "#1f6feb"
+                                if (modelData === "DELETED") return "#da3633"
+                                return root.stateColor(modelData, false)
+                            }
+                            color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? Qt.lighter(stateC, 1.3) : "#30363d"
+                            Text {
+                                id: stateLabel
+                                text: parent.parent.text
+                                visible: false
+                            }
+                        }
+                        onClicked: {
+                            root.filterState = modelData
+                            root.currentPage = 1
+                        }
+                    }
+                }
+            }
+        }
+
         // ====================== Type Filter Row ======================
         RowLayout {
             Layout.fillWidth: true
-            spacing: 6
+            spacing: 8
 
             Text {
                 text: "Type:"
@@ -153,6 +191,7 @@ Item {
                 font.weight: Font.DemiBold
                 color: "#8b949e"
                 Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: 42
             }
 
             Flow {
@@ -673,9 +712,14 @@ Item {
                 (item.type || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.state || "").toLowerCase().indexOf(q) !== -1
 
-            var matchesState = (st === "ALL") ||
-                (st === "ACTIVE" && !item.deleted) ||
-                (st === "DELETED" && item.deleted)
+            var matchesState = true
+            if (st === "ALL") {
+                matchesState = !item.deleted
+            } else if (st === "DELETED") {
+                matchesState = item.deleted
+            } else {
+                matchesState = !item.deleted && ((item.state || "").toLowerCase() === st.toLowerCase())
+            }
 
             var matchesType = (ft === "ALL") || (item.type === ft)
 
@@ -716,6 +760,7 @@ Item {
         target: backend
         function onWorkItemsChanged() {
             root.refreshTypesList()
+            root.refreshStatesList()
             root.updateFilteredModel()
         }
     }
@@ -726,6 +771,7 @@ Item {
 
     Component.onCompleted: {
         refreshTypesList()
+        refreshStatesList()
         updateFilteredModel()
     }
 }

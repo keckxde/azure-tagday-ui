@@ -231,10 +231,19 @@ Item {
                     Layout.fillWidth: true
                     icon: "📋"
                     title: "Active Work Items"
-                    value: ((backend && backend.stats && backend.stats.active_work_items_count) ? backend.stats.active_work_items_count : 0).toString()
+                    value: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0).toString()
                     status: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? (backend.stats.active_work_items_count + " PENDING") : "NOTHING PENDING"
-                    subtitle: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? (backend.stats.active_work_items_count + " active tasks & bugs in progress • Click to view") : "All work items resolved • Nothing pending"
+                    badgeText: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? (backend.stats.active_work_items_count + " ACTIVE") : "ALL RESOLVED"
+                    subtitle: {
+                        if (!backend || !backend.stats) return "Loading work items...";
+                        var act = backend.stats.active_work_items_count || 0;
+                        var cl = backend.stats.closed_work_items_count || 0;
+                        var tot = backend.stats.work_items_count || 0;
+                        if (act > 0) {
+                            return act + " active / in progress · " + cl + " closed (" + tot + " total) • Click to view";
+                        }
+                        return "All " + tot + " work items closed / resolved • Nothing pending";
+                    }
                     clickable: true
                     onClicked: {
                         if (typeof window !== "undefined") {

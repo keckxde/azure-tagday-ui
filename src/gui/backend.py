@@ -214,6 +214,7 @@ class DevOpsBackend(QObject):
             "latest_unstable_date": "",
             "work_items_count": 0,
             "active_work_items_count": 0,
+            "closed_work_items_count": 0,
             "deleted_work_items_count": 0,
             "prs_count": 0,
             "prs_open_count": 0,
@@ -344,6 +345,29 @@ class DevOpsBackend(QObject):
             t = wi.get("type") or ""
             if t:
                 seen.add(t)
+        return sorted(seen)
+
+    @Property(list, notify=workItemsChanged)
+    def workItemStates(self):
+        """Returns the sorted unique list of work item states currently in cache."""
+        preferred_order = ["Active", "In Progress", "In Planning", "Proposed", "New", "Resolved", "Closed", "Done"]
+        seen = set()
+        for wi in self._work_items:
+            s = wi.get("state") or ""
+            if s and s != "Deleted":
+                seen.add(s)
+        ordered = [s for s in preferred_order if s in seen]
+        others = sorted([s for s in seen if s not in preferred_order])
+        return ordered + others
+
+    @Property(list, notify=workItemsChanged)
+    def workItemAssignees(self):
+        """Returns the sorted unique list of assignees currently in cache."""
+        seen = set()
+        for wi in self._work_items:
+            a = wi.get("assigned_to") or ""
+            if a and a != "Unassigned":
+                seen.add(a)
         return sorted(seen)
 
     @Property(list, notify=pullRequestsChanged)
@@ -617,6 +641,8 @@ class DevOpsBackend(QObject):
             raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
             wi_list = []
             deleted_count = 0
+            active_wi_count = 0
+            closed_wi_count = 0
             for wi in raw_wis:
                 is_del = bool(wi.get("deleted"))
                 if is_del:
@@ -628,12 +654,31 @@ class DevOpsBackend(QObject):
                 html_link = wi.get("htmlLink", "") or ""
                 if not html_link and tfs_wi_url_base and wi_id:
                     html_link = f"{tfs_wi_url_base}{wi_id}"
+                
+                raw_state = (wi.get("state") or wi.get("State") or "").strip()
+                state_val = "Deleted" if is_del else (raw_state if raw_state else "Unknown")
+                
+                raw_assigned = wi.get("assigned_to") or wi.get("AssignedTo") or ""
+                if isinstance(raw_assigned, dict):
+                    assigned_val = raw_assigned.get("displayName") or raw_assigned.get("uniqueName") or ""
+                else:
+                    assigned_val = str(raw_assigned).strip()
+                if not assigned_val or assigned_val.lower() in ("undefined", "none", "unknown"):
+                    assigned_val = "Unassigned"
+
+                if not is_del:
+                    s_lower = state_val.lower()
+                    if s_lower in ("closed", "done", "resolved", "completed", "removed", "cut"):
+                        closed_wi_count += 1
+                    else:
+                        active_wi_count += 1
+
                 wi_list.append({
                     "id": wi_id,
                     "title": wi.get("title") or f"Work Item #{wi_id}",
                     "type": wi.get("type") or wi.get("WorkItemType") or "Task",
-                    "state": "Deleted" if is_del else (wi.get("state") or "Active"),
-                    "assigned_to": wi.get("assigned_to") or "Unassigned",
+                    "state": state_val,
+                    "assigned_to": assigned_val,
                     "changed_date": wi.get("changed_date") or "",
                     "deleted": is_del,
                     "tfs_url": html_link,
@@ -756,7 +801,8 @@ class DevOpsBackend(QObject):
                 "latest_unstable_repo": global_latest_unstable["repo"] if global_latest_unstable else "",
                 "latest_unstable_date": global_latest_unstable["date"] if global_latest_unstable else "",
                 "work_items_count": len(self._work_items),
-                "active_work_items_count": len(self._work_items) - deleted_count,
+                "active_work_items_count": active_wi_count,
+                "closed_work_items_count": closed_wi_count,
                 "deleted_work_items_count": deleted_count,
                 "prs_count": len(self._pull_requests),
                 "prs_open_count": prs_open_count,
