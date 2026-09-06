@@ -11,3 +11,4 @@ dist*/
 *.egg-info/
 *.egg
 *.dist-info/
+src/config/user_settings.yaml

@@ -30,30 +30,15 @@ except ImportError:
 
 from jinja2 import Template
 from azure import AzureDevOpsCache
-from utils import load_status_icons, load_repo_categories, categorize_repository, sort_categories_for_report
+from utils import (
+    load_status_icons,
+    load_repo_categories,
+    categorize_repository,
+    sort_categories_for_report,
+    parse_semver_tuple,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def parse_semver_tuple(tag_name):
-    """
-    Parses a tag name like 'v01.02.2632' into an integer tuple (1, 2, 2632) for semantic sorting.
-    Returns (0, 0, 0) if parsing fails.
-    """
-    if not tag_name:
-        return (0, 0, 0)
-    cleaned = tag_name.strip().lstrip("vV")
-    parts = cleaned.split(".")
-    nums = []
-    for p in parts:
-        m = re.search(r"^\d+", p)
-        if m:
-            nums.append(int(m.group(0)))
-        else:
-            nums.append(0)
-    while len(nums) < 3:
-        nums.append(0)
-    return tuple(nums[:3])
 
 
 def check_branch_important(text: str) -> bool:

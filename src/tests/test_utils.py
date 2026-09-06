@@ -69,6 +69,16 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(utils.UpdateDateString(None), "")
         self.assertEqual(utils.UpdateDateString("not a date"), "")
 
+    def test_parse_semver_tuple(self):
+        self.assertEqual(utils.parse_semver_tuple("v01.02.2632"), (1, 2, 2632))
+        self.assertEqual(utils.parse_semver_tuple("v2.1.0"), (2, 1, 0))
+        self.assertEqual(utils.parse_semver_tuple("1.2.3"), (1, 2, 3))
+        self.assertEqual(utils.parse_semver_tuple("v1"), (1, 0, 0))
+        self.assertEqual(utils.parse_semver_tuple("v01.02.0003-alpha"), (1, 2, 3))
+        self.assertEqual(utils.parse_semver_tuple(""), (0, 0, 0))
+        self.assertEqual(utils.parse_semver_tuple(None), (0, 0, 0))
+        self.assertEqual(utils.parse_semver_tuple((1, 2, 3)), (1, 2, 3))
+
     def test_GetEnvVariable(self):
         test_key = "TEST_CUSTOM_VAR_123"
         try:

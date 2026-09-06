@@ -101,6 +101,36 @@ def UpdateDateString(date_val):
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def parse_semver_tuple(tag_name):
+    """
+    Parses a tag or version string like 'v01.02.2632' or 'v1.2.3' into an integer tuple (major, minor, patch)
+    for semantic sorting, comparison, and version analysis.
+    Returns (0, 0, 0) if parsing fails or input is empty/None.
+
+    Args:
+        tag_name (str/tuple): The tag or version string to parse.
+
+    Returns:
+        tuple[int, int, int]: (major, minor, patch)
+    """
+    if not tag_name:
+        return (0, 0, 0)
+    if isinstance(tag_name, (tuple, list)):
+        return tuple(tag_name)
+    cleaned = str(tag_name).strip().lstrip("vV")
+    parts = cleaned.split(".")
+    nums = []
+    for p in parts:
+        m = re.search(r"^\d+", p)
+        if m:
+            nums.append(int(m.group(0)))
+        else:
+            nums.append(0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+
 def parseYAMLFile(filename):
     """
     Parses a YAML configuration file.

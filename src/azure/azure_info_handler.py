@@ -11,7 +11,7 @@ for p in (py_dir, parent_dir):
         sys.path.insert(0, p)
 
 
-from utils import UpdateDateString,parse_iso_datetime, timedelta
+from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple
 try:
     from .azure_info_base_client import AzureBaseClient
 except ImportError:
@@ -503,12 +503,7 @@ class AzureInfoHandler(AzureBaseClient):
 
             if len(version_parts) == 3:
                 try:
-                    major = 0 
-                    major_v_splits = version_parts[0].split("v")
-                    if len(major_v_splits)>0:
-                        major = int(major_v_splits[1])
-                    minor = int(version_parts[1])
-                    patch = int(version_parts[2].split("-")[0])
+                    major, minor, patch = parse_semver_tuple(tag["FriendlyName"])
                     tag["FriendlyName"] = f"v{major:02d}.{minor:02d}.{patch:04d}"
 
                     # todo: Try to understand if we can get the information here to see to which branch a Tag / Tagged Commit actually belongs
