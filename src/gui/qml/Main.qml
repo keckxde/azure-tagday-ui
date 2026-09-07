@@ -65,6 +65,12 @@ ApplicationWindow {
         window.isSyncLogDrawerOpen = !window.isSyncLogDrawerOpen;
     }
 
+    function openMilestonesManager() {
+        if (milestonesManagerDialog) {
+            milestonesManagerDialog.openDialog();
+        }
+    }
+
     // ==========================================
     // Scalable Root Container for Typography & High-DPI Zoom
     // ==========================================
@@ -685,4 +691,11 @@ ApplicationWindow {
         }
     }
 }
+
+    // ==========================================
+    // Global Milestones Manager Modal Dialog
+    // ==========================================
+    MilestonesManagerDialog {
+        id: milestonesManagerDialog
+    }
 }

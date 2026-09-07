@@ -265,7 +265,59 @@ class AzureDevOpsCache:
                 recorded_at TEXT NOT NULL
             )""")
 
+            # Table: project_config (stores environment & project configuration previously kept in .env)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_config (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # Table: milestone_categories
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS milestone_categories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL,
+                bg_color TEXT NOT NULL,
+                icon TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0
+            )""")
+
+            # Table: milestones
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                target_date TEXT NOT NULL,
+                category_id TEXT NOT NULL,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(category_id) REFERENCES milestone_categories(id)
+            )""")
+
+            # Populate default milestone categories if none exist
+            try:
+                cat_count = conn.execute("SELECT COUNT(*) AS c FROM milestone_categories").fetchone()["c"]
+                if cat_count == 0:
+                    default_cats = [
+                        ("ddqs", "Internal Process (DDQS)", "#bc8cff", "#2c1b4d", "⚙️", 1),
+                        ("qiav", "External Process (QIAV)", "#58a6ff", "#0d2344", "🔷", 2),
+                        ("scenario", "External Scenario", "#f0883e", "#3d2800", "🚀", 3),
+                        ("release", "Release Milestone", "#3fb950", "#162b20", "🏁", 4),
+                        ("general", "General Milestone", "#79c0ff", "#16243b", "🚩", 5),
+                    ]
+                    conn.executemany("""
+                    INSERT INTO milestone_categories (id, name, color, bg_color, icon, sort_order)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, default_cats)
+            except Exception:
+                pass
+
             # Indexes for faster joins and queries
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_date ON milestones(target_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_cat ON milestones(category_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_repos_project ON repositories(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_repo ON tags(repo_id)")
@@ -403,6 +455,167 @@ class AzureDevOpsCache:
             LEFT JOIN repositories r ON b.repo_id = r.id
             LEFT JOIN projects p ON b.project_id = p.id
             """)
+
+    def get_config(self, key, default=None):
+        """
+        Retrieves a project configuration value by key.
+        """
+        try:
+            with self._connection() as conn:
+                row = conn.execute("SELECT value FROM project_config WHERE key = ?", (key,)).fetchone()
+                return row["value"] if row and row["value"] is not None else default
+        except Exception:
+            return default
+
+    def set_config(self, key, value):
+        """
+        Sets or updates a project configuration value.
+        """
+        now_str = datetime.now().isoformat()
+        val_str = str(value) if value is not None else ""
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO project_config (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """, (key, val_str, now_str))
+
+    def get_all_config(self):
+        """
+        Returns all project configuration key-value pairs as a dictionary.
+        """
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("SELECT key, value FROM project_config").fetchall()
+                return {row["key"]: row["value"] for row in rows}
+        except Exception:
+            return {}
+
+    def set_many_config(self, config_dict):
+        """
+        Sets or updates multiple project configuration values in a single transaction.
+        """
+        if not config_dict:
+            return
+        now_str = datetime.now().isoformat()
+        with self._connection() as conn:
+            for k, v in config_dict.items():
+                val_str = str(v) if v is not None else ""
+                conn.execute("""
+                INSERT INTO project_config (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """, (k, val_str, now_str))
+
+    def get_milestone_categories(self):
+        """Returns all milestone categories sorted by sort_order ascending."""
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("""
+                SELECT id, name, color, bg_color, icon, sort_order
+                FROM milestone_categories
+                ORDER BY sort_order ASC, name ASC
+                """).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def save_milestone_category(self, cat_id, name, color, bg_color, icon, sort_order=0):
+        """Creates or updates a milestone category."""
+        import re
+        clean_name = (name or "").strip()
+        clean_id = (cat_id or "").strip().lower()
+        if not clean_id:
+            clean_id = re.sub(r'[^a-z0-9_]+', '_', clean_name.lower()).strip('_')
+        if not clean_id:
+            clean_id = "category"
+        clean_color = (color or "#79c0ff").strip()
+        clean_bg = (bg_color or "#16243b").strip()
+        clean_icon = (icon or "🚩").strip()
+
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO milestone_categories (id, name, color, bg_color, icon, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                color = excluded.color,
+                bg_color = excluded.bg_color,
+                icon = excluded.icon,
+                sort_order = excluded.sort_order
+            """, (clean_id, clean_name, clean_color, clean_bg, clean_icon, int(sort_order or 0)))
+        return clean_id
+
+    def delete_milestone_category(self, cat_id):
+        """Deletes a milestone category and its associated milestones."""
+        try:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM milestones WHERE category_id = ?", (str(cat_id),))
+                conn.execute("DELETE FROM milestone_categories WHERE id = ?", (str(cat_id),))
+            return True
+        except Exception:
+            return False
+
+    def get_milestones(self):
+        """Returns all milestones joined with category information sorted by target_date ascending."""
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("""
+                SELECT 
+                    m.id,
+                    m.name,
+                    m.target_date,
+                    m.category_id,
+                    m.description,
+                    m.created_at,
+                    m.updated_at,
+                    COALESCE(c.name, 'General') AS category_name,
+                    COALESCE(c.color, '#79c0ff') AS category_color,
+                    COALESCE(c.bg_color, '#16243b') AS category_bg_color,
+                    COALESCE(c.icon, '🚩') AS category_icon
+                FROM milestones m
+                LEFT JOIN milestone_categories c ON m.category_id = c.id
+                ORDER BY m.target_date ASC, m.name ASC
+                """).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0):
+        """Creates or updates a milestone."""
+        now_str = datetime.now().isoformat()
+        clean_name = (name or "").strip()
+        clean_date = (target_date or "").strip()
+        clean_cat = (category_id or "general").strip()
+        clean_desc = (description or "").strip()
+
+        with self._connection() as conn:
+            if milestone_id and int(milestone_id) > 0:
+                conn.execute("""
+                UPDATE milestones
+                SET name = ?, target_date = ?, category_id = ?, description = ?, updated_at = ?
+                WHERE id = ?
+                """, (clean_name, clean_date, clean_cat, clean_desc, now_str, int(milestone_id)))
+                return int(milestone_id)
+            else:
+                cursor = conn.execute("""
+                INSERT INTO milestones (name, target_date, category_id, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (clean_name, clean_date, clean_cat, clean_desc, now_str, now_str))
+                return cursor.lastrowid
+
+    def delete_milestone(self, milestone_id):
+        """Deletes a milestone by ID."""
+        try:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM milestones WHERE id = ?", (int(milestone_id),))
+            return True
+        except Exception:
+            return False
 
     def get_last_push_id(self, repo_id):
         """

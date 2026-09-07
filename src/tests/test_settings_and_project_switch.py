@@ -157,6 +157,16 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
                 settings = yaml.safe_load(f)
             self.assertEqual(settings["project_name"], "Newly Created Project")
             self.assertEqual(settings["pat"], "secret-pat-token")
+
+            # Check project_config table in SQLite
+            db_cfg = cache.get_all_config()
+            self.assertEqual(db_cfg.get("AZURE_BASE_URL"), "http://tfs.test.local:8080/tfs")
+            self.assertEqual(db_cfg.get("AZURE_COLLECTION"), "CustomCollection")
+            self.assertEqual(db_cfg.get("AZURE_PROJECT_ID"), "guid-12345")
+            self.assertEqual(db_cfg.get("PROJECT_NAME"), "Newly Created Project")
+            self.assertEqual(db_cfg.get("AZURE_PERSONAL_ACCESS_TOKEN"), "secret-pat-token")
+            self.assertTrue("WORK_ITEM_DEADLINE_FIELD" in db_cfg)
+            self.assertTrue("TAGDAY_FILE_MD" in db_cfg)
         finally:
             if os.path.exists(new_db_file):
                 try:
@@ -168,6 +178,46 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_project_config_stored_in_database(self):
+        """Test direct reading, setting, and switching with database project_config."""
+        temp_dir = tempfile.mkdtemp()
+        db_file = os.path.join(temp_dir, "tfs_config_test.db")
+        try:
+            cache = AzureDevOpsCache(db_file)
+            cache.set_config("AZURE_BASE_URL", "https://tfs.mycorp.com/tfs")
+            cache.set_config("AZURE_COLLECTION", "Engineering")
+            cache.set_config("AZURE_PROJECT_ID", "Enterprise-Portal")
+            cache.set_config("WORK_ITEM_DEADLINE_FIELD", "Custom.ReleaseDate")
+
+            self.assertEqual(cache.get_config("AZURE_BASE_URL"), "https://tfs.mycorp.com/tfs")
+            self.assertEqual(cache.get_config("AZURE_COLLECTION"), "Engineering")
+            self.assertEqual(cache.get_config("WORK_ITEM_DEADLINE_FIELD"), "Custom.ReleaseDate")
+
+            # Switch backend database to this db and verify backend loads config from DB
+            success = self.backend.switch_database(db_file)
+            self.assertTrue(success)
+            self.assertEqual(self.backend.tfsUrl, "https://tfs.mycorp.com/tfs")
+            self.assertEqual(self.backend.tfsCollection, "Engineering")
+            self.assertEqual(self.backend.projectName, "Enterprise-Portal")
+
+            # Test backend slots
+            backend_cfg = self.backend.get_project_config()
+            self.assertEqual(backend_cfg.get("AZURE_PROJECT_ID"), "Enterprise-Portal")
+
+            self.backend.set_project_config("TAGDAY_FILE_MD", "CUSTOM_TAGDAY.md")
+            self.assertEqual(cache.get_config("TAGDAY_FILE_MD"), "CUSTOM_TAGDAY.md")
+        finally:
+            if os.path.exists(db_file):
+                try:
+                    os.remove(db_file)
+                except Exception:
+                    pass
+            try:
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()
+

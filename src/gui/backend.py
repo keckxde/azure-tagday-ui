@@ -170,6 +170,8 @@ class DevOpsBackend(QObject):
     storageDataChanged = Signal()
     sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
     workloadMatrixChanged = Signal()
+    milestonesChanged = Signal()
+    milestoneCategoriesChanged = Signal()
     iterationShiftsChanged = Signal()
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
@@ -283,21 +285,65 @@ class DevOpsBackend(QObject):
                 self._cache_db = cache_db
                 self._stats["db_path"] = db_path
 
-            # Also check if project name is stored in projects table
+            # Load project configuration stored inside the SQLite database if available
             if self._cache_db:
-                try:
-                    with self._cache_db._connection() as conn:
-                        p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
-                        if p_row and p_row["name"]:
-                            devops_helper.AZURE_PROJECT_ID = p_row["name"]
-                            self._stats["project_name"] = p_row["name"]
-                except Exception:
-                    pass
+                self._load_project_config_from_db(self._cache_db)
 
         except Exception as e:
             logger.error(f"Error initializing SQLite cache: {e}")
             self._db_path = ""
             self._cache_db = None
+
+    def _load_project_config_from_db(self, cache_db):
+        """Loads and applies configuration keys stored in the database's project_config table."""
+        if not cache_db:
+            return
+        try:
+            db_cfg = cache_db.get_all_config()
+            if not db_cfg:
+                # Fallback to check projects table for project name if no config table yet
+                with cache_db._connection() as conn:
+                    p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
+                    if p_row and p_row["name"]:
+                        devops_helper.AZURE_PROJECT_ID = p_row["name"]
+                        self._stats["project_name"] = p_row["name"]
+                return
+
+            if db_cfg.get("AZURE_BASE_URL"):
+                devops_helper.AZURE_BASE_URL = db_cfg["AZURE_BASE_URL"]
+            if db_cfg.get("AZURE_COLLECTION"):
+                devops_helper.AZURE_COLLECTION = db_cfg["AZURE_COLLECTION"]
+            if db_cfg.get("AZURE_PROJECT_ID") or db_cfg.get("PROJECT_NAME"):
+                p_name = db_cfg.get("PROJECT_NAME") or db_cfg.get("AZURE_PROJECT_ID")
+                devops_helper.AZURE_PROJECT_ID = p_name
+                self._stats["project_name"] = p_name
+            if db_cfg.get("AZURE_PERSONAL_ACCESS_TOKEN"):
+                devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = db_cfg["AZURE_PERSONAL_ACCESS_TOKEN"]
+            if db_cfg.get("WORK_ITEM_DEADLINE_FIELD"):
+                self._custom_deadline_field = db_cfg["WORK_ITEM_DEADLINE_FIELD"]
+            if db_cfg.get("bug_behavior"):
+                self._bug_hierarchy_mode = db_cfg["bug_behavior"]
+            if "IGNORE_REPOS" in db_cfg:
+                devops_helper.IGNORE_REPOS = db_cfg["IGNORE_REPOS"]
+            if "FILTER_REPOS" in db_cfg:
+                devops_helper.FILTER_REPOS = db_cfg["FILTER_REPOS"]
+            if "TAGDAY_FILE_MD" in db_cfg:
+                devops_helper.TAGDAY_FILE_MD = db_cfg["TAGDAY_FILE_MD"]
+            if "REVISION_FILE_MD" in db_cfg:
+                devops_helper.REVISION_FILE_MD = db_cfg["REVISION_FILE_MD"]
+            if "BUILD_ARTIFACTS_MD" in db_cfg:
+                devops_helper.BUILD_ARTIFACTS_MD = db_cfg["BUILD_ARTIFACTS_MD"]
+            if "BUILD_ARTIFACTS_CSV" in db_cfg:
+                devops_helper.BUILD_ARTIFACTS_CSV = db_cfg["BUILD_ARTIFACTS_CSV"]
+            if "RECENT_DELAY" in db_cfg:
+                try:
+                    devops_helper.RECENT_DELAY = int(db_cfg["RECENT_DELAY"])
+                except Exception:
+                    pass
+            if "FILTER_VERSION_TAGS_FORMAT" in db_cfg:
+                devops_helper.FILTER_VERSION_TAGS_FORMAT = str(db_cfg["FILTER_VERSION_TAGS_FORMAT"]).lower() == "true"
+        except Exception as e:
+            logger.warning(f"Error reading project config from database: {e}")
 
     @Property(str, notify=settingsChanged)
     def dbPath(self):
@@ -462,23 +508,37 @@ class DevOpsBackend(QObject):
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel1List(self):
-        """Returns the sorted unique list of Level 1 (Epic / Sub-System) display names."""
+        """Returns the sorted unique list of Level 1 (Epic / Sub-System) display names, with [<NR>] <Name> complying items first."""
         seen = set()
         for wi in self._work_items:
             disp = wi.get("level1_display") or ""
             if disp and disp != "Ungrouped Sub-System":
                 seen.add(disp)
-        return sorted(seen)
+        
+        def sort_key(s):
+            m = re.match(r'^\[(\d+)\]\s*(.*)', str(s).strip())
+            if m:
+                return (0, int(m.group(1)), m.group(2).lower())
+            return (1, 0, str(s).lower())
+
+        return sorted(seen, key=sort_key)
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel2List(self):
-        """Returns the sorted unique list of Level 2 (Feature / Major Component) display names."""
+        """Returns the sorted unique list of Level 2 (Feature / Major Component) display names, with [<NR>] <Name> complying items first."""
         seen = set()
         for wi in self._work_items:
             disp = wi.get("level2_display") or ""
             if disp and disp != "Ungrouped Component":
                 seen.add(disp)
-        return sorted(seen)
+        
+        def sort_key(s):
+            m = re.match(r'^\[(\d+)\]\s*(.*)', str(s).strip())
+            if m:
+                return (0, int(m.group(1)), m.group(2).lower())
+            return (1, 0, str(s).lower())
+
+        return sorted(seen, key=sort_key)
 
     @Property(list, notify=workItemsChanged)
     def availableSprintList(self):
@@ -572,6 +632,14 @@ class DevOpsBackend(QObject):
                 "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
                 "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
             }
+
+    @Property(list, notify=milestonesChanged)
+    def milestones(self):
+        return self.get_milestones()
+
+    @Property(list, notify=milestoneCategoriesChanged)
+    def milestoneCategories(self):
+        return self.get_milestone_categories()
 
     @Slot(str, str, str, str)
     def _on_incoming_log_record(self, timestamp, level, logger_name, message):
@@ -1307,10 +1375,27 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"File does not exist: {path}")
 
     @Slot(int, result=dict)
-    def getWorkloadMatrix(self, horizon_weeks=4):
+    @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, result="QVariantMap")
+    @Slot(int, str, result="QVariantMap")
+    @Slot(int, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def getWorkloadMatrix(
+        self,
+        horizon_weeks: int = 4,
+        filter_level1: str = "ALL",
+        filter_level2: str = "ALL",
+        prio1_only: bool = False,
+        grouped_only: bool = False,
+        hide_closed: bool = False,
+        search_query: str = "",
+    ):
         """
         Computes the interactive capacity and workload matrix for team members across
-        the given horizon of weekly iterations (4, 8, or 12 weeks).
+        the given horizon of weekly iterations (4, 8, or 12 weeks), filtered by
+        Level 1, Level 2, priority, grouping, completion status, or search query.
         """
         sprint_keys = set()
         for wi in self._work_items:
@@ -1327,16 +1412,41 @@ class DevOpsBackend(QObject):
 
         # Sort sprints chronologically ascending
         sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
-        
+
         # Take the last horizon_weeks sprints
         if horizon_weeks <= 0:
             horizon_weeks = 4
-        target_sprints = sorted_sprints[-horizon_weeks:] if len(sorted_sprints) >= horizon_weeks else sorted_sprints
+        target_sprints = sorted_sprints[-horizon_weeks:] if len(sorted_sprints) > horizon_weeks else sorted_sprints
+
+        # Load configured milestones for sprint header and work item alignment
+        all_milestones = self.get_milestones()
+        milestones_by_date = {m.get("target_date"): m for m in all_milestones if m.get("target_date")}
 
         sprint_columns = []
         for y, w, s_name in target_sprints:
             s_d, e_d, start_str, end_str = utils.get_sprint_date_range(y, w)
             lbl = utils.format_sprint_range_label(y, w)
+            col_milestones = []
+            for m in all_milestones:
+                m_date = (m.get("target_date") or "").strip()
+                in_col = False
+                if start_str and end_str and (start_str <= m_date <= end_str):
+                    in_col = True
+                else:
+                    try:
+                        md_obj = datetime.strptime(m_date.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                        my, mw, _ = md_obj.isocalendar()
+                        if my == y and mw == w:
+                            in_col = True
+                    except Exception:
+                        pass
+                    if not in_col:
+                        my, mw, _ = utils.parse_sprint_week(m_date)
+                        if my == y and mw == w:
+                            in_col = True
+                if in_col:
+                    col_milestones.append(m)
+
             sprint_columns.append({
                 "sprint_name": s_name,
                 "label": lbl,
@@ -1345,6 +1455,8 @@ class DevOpsBackend(QObject):
                 "end_date": end_str,
                 "year": y,
                 "week": w,
+                "milestones": col_milestones,
+                "milestone_count": len(col_milestones),
             })
 
         target_sprint_names = [col["sprint_name"] for col in sprint_columns]
@@ -1359,6 +1471,10 @@ class DevOpsBackend(QObject):
         total_matrix_tasks = 0
         total_matrix_overdue = 0
 
+        f_l1_raw = (filter_level1 or "ALL").strip()
+        f_l2_raw = (filter_level2 or "ALL").strip()
+        sq_raw = (search_query or "").strip().lower()
+
         for wi in self._work_items:
             if wi.get("deleted"):
                 continue
@@ -1369,19 +1485,92 @@ class DevOpsBackend(QObject):
             if not wi_sprint or wi_sprint not in target_sprint_names:
                 continue
 
-            assignee = (wi.get("assigned_to") or "Unassigned").strip()
-            if assignee not in assignees_data:
-                assignees_data[assignee] = {s_name: [] for s_name in target_sprint_names}
-                assignee_stats[assignee] = {
-                    "total": 0, "stories": 0, "bugs": 0, "tasks": 0, "overdue": 0, "completed": 0
-                }
-
             t_lower = (wi.get("type") or "").lower()
             is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
             is_bug = t_lower in ("bug", "defect", "problem")
             is_task = t_lower in ("task",)
             is_overdue = wi.get("urgency_status") == "overdue"
             is_done = wi.get("state", "").lower() in ("closed", "done", "resolved", "completed", "cut")
+
+            # --- Filter Criteria Evaluation ---
+            # 1. Level 1 Filter (Exact, Substring, or Ungrouped / Without [<NR>] Syntax)
+            if f_l1_raw and f_l1_raw.upper() != "ALL":
+                f1_upper = f_l1_raw.upper()
+                if (
+                    f1_upper in ("UNGROUPED", "[ UNGROUPED ]", "WITHOUT [<NR>] SYNTAX", "[ WITHOUT [<NR>] SYNTAX ]", "NO_PBS", "WITHOUT_SYNTAX", "NO PBS", "!PBS", "NO [<NR>]", "!SYNTAX", "NON_PBS")
+                    or "WITHOUT" in f1_upper
+                    or "NO PBS" in f1_upper
+                    or "NO_PBS" in f1_upper
+                    or "!PBS" in f1_upper
+                    or "UNGROUPED" in f1_upper
+                ):
+                    if wi.get("level1_pbs"):
+                        continue
+                else:
+                    l1_target = f_l1_raw.lower()
+                    l1_disp = (wi.get("level1_display") or "").lower()
+                    l1_title = (wi.get("level1_title") or "").lower()
+                    l1_pbs = (wi.get("level1_pbs") or "").lower()
+                    l1_name = (wi.get("level1_name") or "").lower()
+                    if (l1_target not in l1_disp) and (l1_target not in l1_title) and (l1_target not in l1_pbs) and (l1_target not in l1_name):
+                        continue
+
+            # 2. Level 2 Filter (Exact, Substring, or Ungrouped / Without [<NR>] Syntax)
+            if f_l2_raw and f_l2_raw.upper() != "ALL":
+                f2_upper = f_l2_raw.upper()
+                if (
+                    f2_upper in ("UNGROUPED", "[ UNGROUPED ]", "WITHOUT [<NR>] SYNTAX", "[ WITHOUT [<NR>] SYNTAX ]", "NO_PBS", "WITHOUT_SYNTAX", "NO PBS", "!PBS", "NO [<NR>]", "!SYNTAX", "NON_PBS")
+                    or "WITHOUT" in f2_upper
+                    or "NO PBS" in f2_upper
+                    or "NO_PBS" in f2_upper
+                    or "!PBS" in f2_upper
+                    or "UNGROUPED" in f2_upper
+                ):
+                    if wi.get("level2_pbs"):
+                        continue
+                else:
+                    l2_target = f_l2_raw.lower()
+                    l2_disp = (wi.get("level2_display") or "").lower()
+                    l2_title = (wi.get("level2_title") or "").lower()
+                    l2_pbs = (wi.get("level2_pbs") or "").lower()
+                    l2_name = (wi.get("level2_name") or "").lower()
+                    if (l2_target not in l2_disp) and (l2_target not in l2_title) and (l2_target not in l2_pbs) and (l2_target not in l2_name):
+                        continue
+
+            # 3. Prio 1 Focus Filter
+            if prio1_only and not wi.get("is_prio1"):
+                continue
+
+            # 4. PBS Grouped Only Filter
+            if grouped_only and not wi.get("is_grouped"):
+                continue
+
+            # 5. Hide Closed Tasks Filter
+            if hide_closed and is_done:
+                continue
+
+            assignee = (wi.get("assigned_to") or "Unassigned").strip()
+
+            # 6. Search Query Filter
+            if sq_raw:
+                matches_search = (
+                    sq_raw in assignee.lower()
+                    or sq_raw in (wi.get("title") or "").lower()
+                    or sq_raw in str(wi.get("id") or "")
+                    or sq_raw in (wi.get("type") or "").lower()
+                    or sq_raw in (wi.get("prio_tag") or "").lower()
+                )
+                if not matches_search:
+                    continue
+
+            if assignee not in assignees_data:
+                assignees_data[assignee] = {s_name: [] for s_name in target_sprint_names}
+                assignee_stats[assignee] = {
+                    "total": 0, "stories": 0, "bugs": 0, "tasks": 0, "overdue": 0, "completed": 0
+                }
+
+            wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0]
+            matched_m = milestones_by_date.get(wi_deadline)
 
             item_info = {
                 "id": wi.get("id"),
@@ -1391,7 +1580,12 @@ class DevOpsBackend(QObject):
                 "assigned_to": assignee,
                 "parent_id": wi.get("parent_id"),
                 "sprint_name": wi_sprint,
-                "deadline_str": wi.get("deadline_str", ""),
+                "deadline_str": wi.get("deadline_str") or wi.get("target_date") or "",
+                "milestone_name": matched_m.get("name", "") if matched_m else "",
+                "milestone_icon": matched_m.get("category_icon", "") if matched_m else "",
+                "milestone_color": matched_m.get("category_color", "") if matched_m else "",
+                "milestone_bg": matched_m.get("category_bg_color", "") if matched_m else "",
+                "milestone_category": matched_m.get("category_name", "") if matched_m else "",
                 "urgency_status": wi.get("urgency_status", "none"),
                 "urgency_badge": wi.get("urgency_badge", "—"),
                 "urgency_color": wi.get("urgency_color", "#8b949e"),
@@ -1460,7 +1654,7 @@ class DevOpsBackend(QObject):
                 cp_count = sum(1 for it in items if it["is_done"])
 
                 # Group items by parent containers
-                grouped = self._group_items_into_containers(items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode)
+                grouped = self._group_items_into_containers(items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode, milestones_by_date=milestones_by_date)
 
                 cells.append({
                     "assignee": assignee,
@@ -1516,7 +1710,7 @@ class DevOpsBackend(QObject):
             "bug_hierarchy_mode": self._bug_hierarchy_mode,
         }
 
-    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story"):
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None):
         """
         Groups work items in a sprint cell by parent container.
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
@@ -1524,6 +1718,7 @@ class DevOpsBackend(QObject):
         """
         story_types = {"requirement", "user story", "story", "product backlog item", "feature", "epic"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
+        m_map = milestones_by_date or {}
 
         def _is_container_type(t_str):
             t = (t_str or "").lower()
@@ -1551,6 +1746,8 @@ class DevOpsBackend(QObject):
         for c in cell_containers:
             cid = c["id"]
             c_done = _is_item_done(c)
+            c_dl = (c.get("deadline_str") or "").split("T")[0].split(" ")[0]
+            matched_c_m = m_map.get(c_dl)
             container_map[cid] = {
                 "id": cid,
                 "title": c.get("title") or f"#{cid}",
@@ -1561,6 +1758,11 @@ class DevOpsBackend(QObject):
                 "is_external_parent": False,
                 "tfs_url": c.get("tfs_url", ""),
                 "deadline_str": c.get("deadline_str", ""),
+                "milestone_name": matched_c_m.get("name", "") if matched_c_m else "",
+                "milestone_icon": matched_c_m.get("category_icon", "") if matched_c_m else "",
+                "milestone_color": matched_c_m.get("category_color", "") if matched_c_m else "",
+                "milestone_bg": matched_c_m.get("category_bg_color", "") if matched_c_m else "",
+                "milestone_category": matched_c_m.get("category_name", "") if matched_c_m else "",
                 "urgency_status": c.get("urgency_status", "none"),
                 "urgency_badge": c.get("urgency_badge", "—"),
                 "urgency_color": c.get("urgency_color", "#8b949e"),
@@ -1690,7 +1892,13 @@ class DevOpsBackend(QObject):
             c_obj["progress_pct"] = pct
             containers_list.append(c_obj)
 
-        containers_list.sort(key=lambda x: (not x["is_parent_in_cell"], -x["id"]))
+        # Prioritize complying [<NR>] <Name> containers first, then Prio 1 focus items, then cell parents, then ID
+        containers_list.sort(key=lambda x: (
+            0 if x.get("is_grouped") else 1,
+            0 if x.get("is_prio1") else 1,
+            not x.get("is_parent_in_cell", False),
+            -x.get("id", 0)
+        ))
 
         if unparented_children:
             tot_un = len(unparented_children)
@@ -2059,13 +2267,16 @@ class DevOpsBackend(QObject):
             self._cache_db = AzureDevOpsCache(abs_path)
             self._stats["db_path"] = abs_path
 
+            # Load project configuration stored in the database if available
+            self._load_project_config_from_db(self._cache_db)
+
             # Detect project name from database
             with self._cache_db._connection() as conn:
                 p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
                 if p_row and p_row["name"]:
                     devops_helper.AZURE_PROJECT_ID = p_row["name"]
                     self._stats["project_name"] = p_row["name"]
-                else:
+                elif not self._stats.get("project_name"):
                     base_name = os.path.splitext(os.path.basename(abs_path))[0]
                     if base_name.startswith("tfs_cache_"):
                         p_name = base_name.replace("tfs_cache_", "")
@@ -2092,6 +2303,103 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.error(f"Error switching database to {abs_path}: {e}", exc_info=True)
             return False
+
+    @Slot(result="QVariantMap")
+    def get_project_config(self):
+        """Returns all configuration key-values stored in the active project database."""
+        if self._cache_db:
+            return self._cache_db.get_all_config()
+        return {}
+
+    @Slot(str, str, result=bool)
+    def set_project_config(self, key, value):
+        """Updates a configuration key-value in the active project database."""
+        if not self._cache_db or not key:
+            return False
+        try:
+            self._cache_db.set_config(key, value)
+            self._load_project_config_from_db(self._cache_db)
+            self.settingsChanged.emit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting project config '{key}': {e}")
+            return False
+
+    @Slot(result=list)
+    def get_milestones(self):
+        """Returns all configured milestones."""
+        if self._cache_db:
+            return self._cache_db.get_milestones()
+        return []
+
+    @Slot(str, str, str, str, int, result=dict)
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0):
+        """Creates or updates a milestone."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        clean_name = (name or "").strip()
+        clean_date = (target_date or "").strip()
+        if not clean_name:
+            return {"success": False, "error": "Milestone name is required"}
+        if not clean_date:
+            return {"success": False, "error": "Target date is required"}
+
+        try:
+            m_id = self._cache_db.save_milestone(clean_name, clean_date, category_id, description, milestone_id)
+            self.milestonesChanged.emit()
+            self.workloadMatrixChanged.emit()
+            return {"success": True, "id": m_id}
+        except Exception as e:
+            logger.error(f"Error saving milestone: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(int, result=bool)
+    def delete_milestone(self, milestone_id):
+        """Deletes a milestone."""
+        if not self._cache_db:
+            return False
+        res = self._cache_db.delete_milestone(milestone_id)
+        if res:
+            self.milestonesChanged.emit()
+            self.workloadMatrixChanged.emit()
+        return res
+
+    @Slot(result=list)
+    def get_milestone_categories(self):
+        """Returns all milestone categories."""
+        if self._cache_db:
+            return self._cache_db.get_milestone_categories()
+        return []
+
+    @Slot(str, str, str, str, str, int, result=dict)
+    def save_milestone_category(self, cat_id, name, color, bg_color, icon, sort_order=0):
+        """Creates or updates a milestone category."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return {"success": False, "error": "Category name is required"}
+        try:
+            c_id = self._cache_db.save_milestone_category(cat_id, clean_name, color, bg_color, icon, sort_order)
+            self.milestoneCategoriesChanged.emit()
+            self.milestonesChanged.emit()
+            self.workloadMatrixChanged.emit()
+            return {"success": True, "id": c_id}
+        except Exception as e:
+            logger.error(f"Error saving milestone category: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, result=bool)
+    def delete_milestone_category(self, cat_id):
+        """Deletes a milestone category."""
+        if not self._cache_db:
+            return False
+        res = self._cache_db.delete_milestone_category(cat_id)
+        if res:
+            self.milestoneCategoriesChanged.emit()
+            self.milestonesChanged.emit()
+            self.workloadMatrixChanged.emit()
+        return res
 
     @Slot(str, str, str, result=dict)
     def test_tfs_connection(self, url, collection, pat):
@@ -2201,7 +2509,7 @@ class DevOpsBackend(QObject):
             cfg["recent_projects"] = recent_projs[:10]
             _save_user_settings(cfg)
 
-            # 3. Initialize SQLite Cache Database
+            # 3. Initialize SQLite Cache Database and store project & env configuration
             os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
             new_cache = AzureDevOpsCache(abs_db_path)
             with new_cache._connection() as conn:
@@ -2210,6 +2518,37 @@ class DevOpsBackend(QObject):
                 VALUES (?, ?, NULL)
                 ON CONFLICT(id) DO UPDATE SET name = excluded.name
                 """, (clean_pid, clean_pname))
+
+            base_folder = devops_helper.BASE_FOLDER or os.getcwd()
+            deadline_field = self._custom_deadline_field or utils.get_configured_deadline_field() or "Microsoft.VSTS.Scheduling.TargetDate"
+            tagday_md = getattr(devops_helper, "TAGDAY_FILE_MD", "TAGDAY.md") or "TAGDAY.md"
+            revision_md = getattr(devops_helper, "REVISION_FILE_MD", "REVISION.md") or "REVISION.md"
+            artifacts_md = getattr(devops_helper, "BUILD_ARTIFACTS_MD", "BUILD_ARTIFACTS.md") or "BUILD_ARTIFACTS.md"
+            artifacts_csv = getattr(devops_helper, "BUILD_ARTIFACTS_CSV", "BUILD_ARTIFACTS.csv") or "BUILD_ARTIFACTS.csv"
+            ignore_repos = getattr(devops_helper, "IGNORE_REPOS", "") or ""
+            filter_repos = getattr(devops_helper, "FILTER_REPOS", "") or ""
+            recent_delay = str(getattr(devops_helper, "RECENT_DELAY", 1440))
+            filter_version_tags = str(getattr(devops_helper, "FILTER_VERSION_TAGS_FORMAT", False))
+
+            db_config = {
+                "AZURE_BASE_URL": clean_url,
+                "AZURE_COLLECTION": clean_col,
+                "AZURE_PERSONAL_ACCESS_TOKEN": clean_pat if store_pat else "",
+                "AZURE_PROJECT_ID": clean_pid,
+                "PROJECT_NAME": clean_pname,
+                "BASE_FOLDER": base_folder,
+                "WORK_ITEM_DEADLINE_FIELD": deadline_field,
+                "TAGDAY_FILE_MD": tagday_md,
+                "REVISION_FILE_MD": revision_md,
+                "BUILD_ARTIFACTS_MD": artifacts_md,
+                "BUILD_ARTIFACTS_CSV": artifacts_csv,
+                "IGNORE_REPOS": ignore_repos,
+                "FILTER_REPOS": filter_repos,
+                "RECENT_DELAY": recent_delay,
+                "FILTER_VERSION_TAGS_FORMAT": filter_version_tags,
+                "bug_behavior": self._bug_hierarchy_mode,
+            }
+            new_cache.set_many_config(db_config)
 
             # 4. Switch active backend cache
             self._db_path = abs_db_path
@@ -2223,7 +2562,7 @@ class DevOpsBackend(QObject):
             self.settingsChanged.emit()
             self.statsChanged.emit()
 
-            logger.info(f"Project '{clean_pname}' connected and database created successfully: {abs_db_path}")
+            logger.info(f"Project '{clean_pname}' connected, configuration persisted in DB, and database created successfully: {abs_db_path}")
 
             # 6. Kick off background sync if requested
             if start_sync:

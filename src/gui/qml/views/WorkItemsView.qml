@@ -83,9 +83,9 @@ Item {
     function refreshHierarchyLists() {
         if (!backend) return
         var l1 = backend.workItemLevel1List || []
-        level1List = ["ALL", "UNGROUPED"].concat(l1)
+        level1List = ["ALL"].concat(l1).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"])
         var l2 = backend.workItemLevel2List || []
-        level2List = ["ALL", "UNGROUPED"].concat(l2)
+        level2List = ["ALL"].concat(l2).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"])
     }
 
     function resetAllFilters() {
@@ -1455,19 +1455,31 @@ Item {
 
             var matchesLevel1 = true
             if (root.filterLevel1 !== "ALL") {
-                if (root.filterLevel1 === "UNGROUPED" || root.filterLevel1 === "[ UNGROUPED ]") {
-                    matchesLevel1 = !item.level1_id || !item.is_grouped
+                var f1 = (root.filterLevel1 || "").toUpperCase()
+                if (f1 === "UNGROUPED" || f1 === "[ UNGROUPED ]" || f1.indexOf("WITHOUT") !== -1 || f1.indexOf("NO_PBS") !== -1 || f1.indexOf("NO PBS") !== -1 || f1.indexOf("!PBS") !== -1 || f1 === "NON_PBS") {
+                    matchesLevel1 = !item.level1_pbs || item.level1_pbs === "" || !item.level1_id
                 } else {
-                    matchesLevel1 = (item.level1_display || "") === root.filterLevel1
+                    var l1Target = root.filterLevel1.toLowerCase()
+                    var l1Disp = (item.level1_display || "").toLowerCase()
+                    var l1Title = (item.level1_title || "").toLowerCase()
+                    var l1Pbs = (item.level1_pbs || "").toLowerCase()
+                    var l1Name = (item.level1_name || "").toLowerCase()
+                    matchesLevel1 = (l1Disp.indexOf(l1Target) !== -1 || l1Title.indexOf(l1Target) !== -1 || l1Pbs.indexOf(l1Target) !== -1 || l1Name.indexOf(l1Target) !== -1)
                 }
             }
 
             var matchesLevel2 = true
             if (root.filterLevel2 !== "ALL") {
-                if (root.filterLevel2 === "UNGROUPED" || root.filterLevel2 === "[ UNGROUPED ]") {
-                    matchesLevel2 = !item.level2_id || !item.is_grouped
+                var f2 = (root.filterLevel2 || "").toUpperCase()
+                if (f2 === "UNGROUPED" || f2 === "[ UNGROUPED ]" || f2.indexOf("WITHOUT") !== -1 || f2.indexOf("NO_PBS") !== -1 || f2.indexOf("NO PBS") !== -1 || f2.indexOf("!PBS") !== -1 || f2 === "NON_PBS") {
+                    matchesLevel2 = !item.level2_pbs || item.level2_pbs === "" || !item.level2_id
                 } else {
-                    matchesLevel2 = (item.level2_display || "") === root.filterLevel2
+                    var l2Target = root.filterLevel2.toLowerCase()
+                    var l2Disp = (item.level2_display || "").toLowerCase()
+                    var l2Title = (item.level2_title || "").toLowerCase()
+                    var l2Pbs = (item.level2_pbs || "").toLowerCase()
+                    var l2Name = (item.level2_name || "").toLowerCase()
+                    matchesLevel2 = (l2Disp.indexOf(l2Target) !== -1 || l2Title.indexOf(l2Target) !== -1 || l2Pbs.indexOf(l2Target) !== -1 || l2Name.indexOf(l2Target) !== -1)
                 }
             }
 
@@ -1489,6 +1501,19 @@ Item {
                 matched.push(item)
             }
         }
+
+        // Sort items complying with [<NR>] <Name> rule before all other items
+        matched.sort(function(a, b) {
+            var aGrouped = a.is_grouped ? 1 : 0
+            var bGrouped = b.is_grouped ? 1 : 0
+            if (aGrouped !== bGrouped) return bGrouped - aGrouped
+
+            var aPrio = a.is_prio1 ? 1 : 0
+            var bPrio = b.is_prio1 ? 1 : 0
+            if (aPrio !== bPrio) return bPrio - aPrio
+
+            return (b.id || 0) - (a.id || 0)
+        })
 
         root.totalMatchingCount = matched.length
         root.totalPages = Math.ceil(matched.length / root.pageSize) || 1

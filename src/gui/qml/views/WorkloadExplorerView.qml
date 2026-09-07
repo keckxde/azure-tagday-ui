@@ -21,9 +21,9 @@ Item {
     function refreshHierarchyLists() {
         if (!backend) return;
         var l1 = backend.workItemLevel1List || [];
-        level1List = ["ALL", "UNGROUPED"].concat(l1);
+        level1List = ["ALL"].concat(l1).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"]);
         var l2 = backend.workItemLevel2List || [];
-        level2List = ["ALL", "UNGROUPED"].concat(l2);
+        level2List = ["ALL"].concat(l2).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"]);
     }
 
     function getFilteredContainers(containers) {
@@ -34,19 +34,35 @@ Item {
 
             // Level 1 Sub-System filter
             if (root.filterLevel1 !== "ALL") {
-                if (root.filterLevel1 === "UNGROUPED" || root.filterLevel1 === "[ UNGROUPED ]") {
-                    if (c.level1_id || c.is_grouped) continue;
+                var f1 = (root.filterLevel1 || "").toUpperCase();
+                if (f1 === "UNGROUPED" || f1 === "[ UNGROUPED ]" || f1.indexOf("WITHOUT") !== -1 || f1.indexOf("NO_PBS") !== -1 || f1.indexOf("NO PBS") !== -1 || f1.indexOf("!PBS") !== -1 || f1 === "NON_PBS") {
+                    if (c.level1_pbs && c.level1_pbs !== "") continue;
                 } else {
-                    if ((c.level1_display || "") !== root.filterLevel1) continue;
+                    var l1Target = root.filterLevel1.toLowerCase();
+                    var l1Disp = (c.level1_display || "").toLowerCase();
+                    var l1Title = (c.level1_title || "").toLowerCase();
+                    var l1Pbs = (c.level1_pbs || "").toLowerCase();
+                    var l1Name = (c.level1_name || "").toLowerCase();
+                    if (l1Disp.indexOf(l1Target) === -1 && l1Title.indexOf(l1Target) === -1 && l1Pbs.indexOf(l1Target) === -1 && l1Name.indexOf(l1Target) === -1) {
+                        continue;
+                    }
                 }
             }
 
             // Level 2 Component filter
             if (root.filterLevel2 !== "ALL") {
-                if (root.filterLevel2 === "UNGROUPED" || root.filterLevel2 === "[ UNGROUPED ]") {
-                    if (c.level2_id || c.is_grouped) continue;
+                var f2 = (root.filterLevel2 || "").toUpperCase();
+                if (f2 === "UNGROUPED" || f2 === "[ UNGROUPED ]" || f2.indexOf("WITHOUT") !== -1 || f2.indexOf("NO_PBS") !== -1 || f2.indexOf("NO PBS") !== -1 || f2.indexOf("!PBS") !== -1 || f2 === "NON_PBS") {
+                    if (c.level2_pbs && c.level2_pbs !== "") continue;
                 } else {
-                    if ((c.level2_display || "") !== root.filterLevel2) continue;
+                    var l2Target = root.filterLevel2.toLowerCase();
+                    var l2Disp = (c.level2_display || "").toLowerCase();
+                    var l2Title = (c.level2_title || "").toLowerCase();
+                    var l2Pbs = (c.level2_pbs || "").toLowerCase();
+                    var l2Name = (c.level2_name || "").toLowerCase();
+                    if (l2Disp.indexOf(l2Target) === -1 && l2Title.indexOf(l2Target) === -1 && l2Pbs.indexOf(l2Target) === -1 && l2Name.indexOf(l2Target) === -1) {
+                        continue;
+                    }
                 }
             }
 
@@ -67,6 +83,20 @@ Item {
             }
             res.push(c);
         }
+
+        // Sort items complying with [<NR>] <Name> rule before all other items
+        res.sort(function(a, b) {
+            var aGrouped = a.is_grouped ? 1 : 0;
+            var bGrouped = b.is_grouped ? 1 : 0;
+            if (aGrouped !== bGrouped) return bGrouped - aGrouped;
+
+            var aPrio = a.is_prio1 ? 1 : 0;
+            var bPrio = b.is_prio1 ? 1 : 0;
+            if (aPrio !== bPrio) return bPrio - aPrio;
+
+            return (b.id || 0) - (a.id || 0);
+        });
+
         return res;
     }
 
@@ -85,10 +115,36 @@ Item {
     function refreshMatrix() {
         if (!backend) return
         refreshHierarchyLists()
-        matrixData = backend.getWorkloadMatrix(root.selectedHorizon)
+        matrixData = backend.getWorkloadMatrix(
+            root.selectedHorizon,
+            root.filterLevel1 || "ALL",
+            root.filterLevel2 || "ALL",
+            !!root.prio1Only,
+            !!root.groupedOnly,
+            !!root.hideClosedTasks,
+            root.searchQuery || ""
+        )
+    }
+
+    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.searchQuery !== ""
+
+    function resetHierarchyFilters() {
+        root.filterLevel1 = "ALL"
+        root.filterLevel2 = "ALL"
+        root.prio1Only = false
+        root.groupedOnly = false
+        root.hideClosedTasks = false
+        root.searchQuery = ""
+        refreshMatrix()
     }
 
     onSelectedHorizonChanged: refreshMatrix()
+    onFilterLevel1Changed:    refreshMatrix()
+    onFilterLevel2Changed:    refreshMatrix()
+    onPrio1OnlyChanged:       refreshMatrix()
+    onGroupedOnlyChanged:     refreshMatrix()
+    onHideClosedTasksChanged: refreshMatrix()
+    onSearchQueryChanged:     refreshMatrix()
 
     Connections {
         target: backend
@@ -306,31 +362,59 @@ Item {
 
                 ComboBox {
                     id: wlLevel1Combo
-                    implicitWidth: 190
+                    implicitWidth: 200
                     implicitHeight: 28
                     font.pixelSize: 11
+                    editable: true
                     model: root.level1List
-                    currentIndex: {
-                        var idx = root.level1List.indexOf(root.filterLevel1)
-                        return idx >= 0 ? idx : 0
+                    editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterLevel1 = (val === "" ? "ALL" : val);
                     }
-                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Sub-Systems (L1)" : currentText
+
+                    onActivated: function(index) {
+                        var val = root.level1List[index] || "ALL";
+                        root.filterLevel1 = val;
+                        editText = (val === "ALL" ? "" : val);
+                    }
+
                     background: Rectangle {
                         color: "#161b22"
                         radius: 6
                         border.color: wlLevel1Combo.hovered || wlLevel1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
                     }
-                    contentItem: Text {
+
+                    contentItem: TextField {
                         leftPadding: 8
-                        rightPadding: 24
-                        text: wlLevel1Combo.displayText
+                        rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
+                        text: wlLevel1Combo.editText
+                        placeholderText: "Type or select L1..."
+                        placeholderTextColor: "#484f58"
                         font: wlLevel1Combo.font
                         color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
                         verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wlLevel1Combo.editText) {
+                                wlLevel1Combo.editText = text;
+                            }
+                        }
                     }
-                    onActivated: function(index) {
-                        root.filterLevel1 = root.level1List[index] || "ALL"
+                }
+
+                // Clear L1 filter button
+                Button {
+                    visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterLevel1 = "ALL";
+                        wlLevel1Combo.currentIndex = 0;
+                        wlLevel1Combo.editText = "";
                     }
                 }
             }
@@ -350,31 +434,59 @@ Item {
 
                 ComboBox {
                     id: wlLevel2Combo
-                    implicitWidth: 190
+                    implicitWidth: 200
                     implicitHeight: 28
                     font.pixelSize: 11
+                    editable: true
                     model: root.level2List
-                    currentIndex: {
-                        var idx = root.level2List.indexOf(root.filterLevel2)
-                        return idx >= 0 ? idx : 0
+                    editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterLevel2 = (val === "" ? "ALL" : val);
                     }
-                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Components (L2)" : currentText
+
+                    onActivated: function(index) {
+                        var val = root.level2List[index] || "ALL";
+                        root.filterLevel2 = val;
+                        editText = (val === "ALL" ? "" : val);
+                    }
+
                     background: Rectangle {
                         color: "#161b22"
                         radius: 6
                         border.color: wlLevel2Combo.hovered || wlLevel2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
                     }
-                    contentItem: Text {
+
+                    contentItem: TextField {
                         leftPadding: 8
-                        rightPadding: 24
-                        text: wlLevel2Combo.displayText
+                        rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
+                        text: wlLevel2Combo.editText
+                        placeholderText: "Type or select L2..."
+                        placeholderTextColor: "#484f58"
                         font: wlLevel2Combo.font
                         color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
                         verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wlLevel2Combo.editText) {
+                                wlLevel2Combo.editText = text;
+                            }
+                        }
                     }
-                    onActivated: function(index) {
-                        root.filterLevel2 = root.level2List[index] || "ALL"
+                }
+
+                // Clear L2 filter button
+                Button {
+                    visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterLevel2 = "ALL";
+                        wlLevel2Combo.currentIndex = 0;
+                        wlLevel2Combo.editText = "";
                     }
                 }
             }
@@ -435,12 +547,42 @@ Item {
                 onClicked: { root.groupedOnly = !root.groupedOnly }
             }
 
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // 🚩 Manage Milestones Button
+            Button {
+                text: "🚩 Milestones"
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: "Manage Major Milestones (DDQS, QIAV, Scenarios) and Categories"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "#58a6ff"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 105
+                    radius: 6
+                    color: parent.hovered ? "#21262d" : "#161b22"
+                    border.color: "#30363d"
+                }
+                onClicked: {
+                    if (typeof window !== "undefined" && window.openMilestonesManager) {
+                        window.openMilestonesManager();
+                    }
+                }
+            }
+
             Item { Layout.fillWidth: true }
 
             // Reset Hierarchy Filters
             Button {
-                visible: root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.prio1Only || root.groupedOnly
-                text: "✖ Reset"
+                visible: root.hasActiveHierarchyFilters
+                text: "✖ Reset Filters"
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
                 contentItem: Text {
@@ -452,16 +594,17 @@ Item {
                 }
                 background: Rectangle {
                     implicitHeight: 28
-                    implicitWidth: 70
+                    implicitWidth: 100
                     radius: 6
                     color: parent.hovered ? "#3c1e1e" : "#211515"
                     border.color: "#da3633"
                 }
                 onClicked: {
-                    root.filterLevel1 = "ALL"
-                    root.filterLevel2 = "ALL"
-                    root.prio1Only = false
-                    root.groupedOnly = false
+                    wlLevel1Combo.currentIndex = 0;
+                    wlLevel1Combo.editText = "";
+                    wlLevel2Combo.currentIndex = 0;
+                    wlLevel2Combo.editText = "";
+                    root.resetHierarchyFilters();
                 }
             }
         }
@@ -637,7 +780,7 @@ Item {
                     // ---- Matrix Header (Sprint Columns) ----
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 48
+                        height: 58
                         color: "#161b22"
                         border.color: "#30363d"
                         border.width: 1
@@ -680,6 +823,7 @@ Item {
                                     ColumnLayout {
                                         anchors.centerIn: parent
                                         spacing: 2
+
                                         Text {
                                             text: modelData.short_label || modelData.sprint_name
                                             font.family: "Segoe UI, sans-serif"
@@ -687,13 +831,67 @@ Item {
                                             font.weight: Font.Bold
                                             color: "#f0f6fc"
                                             horizontalAlignment: Text.AlignHCenter
+                                            Layout.alignment: Qt.AlignHCenter
                                         }
+
                                         Text {
                                             text: modelData.start_date ? (modelData.start_date.substring(5) + " · " + modelData.end_date.substring(5)) : ""
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 10
                                             color: "#8b949e"
                                             horizontalAlignment: Text.AlignHCenter
+                                            Layout.alignment: Qt.AlignHCenter
+                                        }
+
+                                        // Milestones for this sprint week
+                                        Row {
+                                            visible: modelData.milestones && modelData.milestones.length > 0
+                                            spacing: 3
+                                            Layout.alignment: Qt.AlignHCenter
+
+                                            Repeater {
+                                                model: modelData.milestones || []
+                                                Rectangle {
+                                                    implicitHeight: 16
+                                                    implicitWidth: sMRow.implicitWidth + 8
+                                                    radius: 8
+                                                    color: modelData.category_bg_color || "#0d2344"
+                                                    border.color: modelData.category_color || "#1f6feb"
+                                                    border.width: 1
+
+                                                    Row {
+                                                        id: sMRow
+                                                        anchors.centerIn: parent
+                                                        spacing: 2
+                                                        Text {
+                                                            text: modelData.category_icon || "🚩"
+                                                            font.pixelSize: 8
+                                                        }
+                                                        Text {
+                                                            text: modelData.name
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 8
+                                                            font.weight: Font.DemiBold
+                                                            color: modelData.category_color || "#58a6ff"
+                                                        }
+                                                    }
+
+                                                    ToolTip.visible: sMMa.containsMouse
+                                                    ToolTip.text: modelData.name + " (" + (modelData.category_name || "Milestone") + ")\nDate: " + modelData.target_date + (modelData.description ? ("\n" + modelData.description) : "") + "\n(Click to manage)"
+
+                                                    MouseArea {
+                                                        id: sMMa
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                                                window.openMilestonesManager();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1403,6 +1601,46 @@ Item {
                                 }
                             }
 
+                            // Milestone Pill (if workitem is matched to a major milestone)
+                            Rectangle {
+                                visible: (modelData.milestone_name || "") !== ""
+                                implicitHeight: 22
+                                implicitWidth: cMStoneRow.implicitWidth + 12
+                                radius: 11
+                                color: modelData.milestone_bg || "#16243b"
+                                border.color: modelData.milestone_color || "#1f6feb"
+                                border.width: 1
+
+                                RowLayout {
+                                    id: cMStoneRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: modelData.milestone_icon || "🚩"
+                                        font.pixelSize: 10
+                                    }
+                                    Text {
+                                        text: modelData.milestone_name
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: modelData.milestone_color || "#79c0ff"
+                                    }
+                                }
+                                ToolTip.visible: cMStoneMa.containsMouse
+                                ToolTip.text: "Major Milestone: " + (modelData.milestone_name || "") + " (" + (modelData.milestone_category || "") + ")"
+                                MouseArea {
+                                    id: cMStoneMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                            window.openMilestonesManager();
+                                        }
+                                    }
+                                }
+                            }
+
                             // Hierarchy / PBS Breadcrumb Chip
                             Rectangle {
                                 visible: (modelData.level1_display || "") !== "" && modelData.level1_display !== "Ungrouped Sub-System"
@@ -1639,6 +1877,44 @@ Item {
                                                             modelData.deadline_str,
                                                             root.selectedCell ? root.selectedCell.sprint_name : ""
                                                         );
+                                                    }
+                                                }
+                                            }
+
+                                            // Milestone Pill in Task Row
+                                            Rectangle {
+                                                visible: (modelData.milestone_name || "") !== ""
+                                                implicitHeight: 18
+                                                implicitWidth: tkMStoneRow.implicitWidth + 8
+                                                radius: 9
+                                                color: modelData.milestone_bg || "#16243b"
+                                                border.color: modelData.milestone_color || "#1f6feb"
+                                                Row {
+                                                    id: tkMStoneRow
+                                                    anchors.centerIn: parent
+                                                    spacing: 2
+                                                    Text {
+                                                        text: modelData.milestone_icon || "🚩"
+                                                        font.pixelSize: 8
+                                                    }
+                                                    Text {
+                                                        text: modelData.milestone_name
+                                                        font.pixelSize: 8
+                                                        font.weight: Font.DemiBold
+                                                        color: modelData.milestone_color || "#79c0ff"
+                                                    }
+                                                }
+                                                ToolTip.visible: tkMStoneMa.containsMouse
+                                                ToolTip.text: "Milestone: " + (modelData.milestone_name || "") + " (" + (modelData.milestone_category || "") + ")"
+                                                MouseArea {
+                                                    id: tkMStoneMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                                            window.openMilestonesManager();
+                                                        }
                                                     }
                                                 }
                                             }
