@@ -1,6 +1,8 @@
 import unittest
 from src.utils import (
     parse_pbs_tag,
+    normalize_pbs_number,
+    pbs_sort_key,
     parse_level3_priority,
     get_work_item_level,
     resolve_work_item_hierarchy,
@@ -10,25 +12,62 @@ from src.gui.backend import DevOpsBackend
 
 class TestHierarchyPBSAndPriorities(unittest.TestCase):
     def test_parse_pbs_tag(self):
-        """Test parsing [<PBS Number>] <Name> tag syntax."""
-        # Valid PBS tags
-        self.assertEqual(
-            parse_pbs_tag("[PBS-01] Powertrain Subsystem"),
-            ("PBS-01", "Powertrain Subsystem")
-        )
-        self.assertEqual(
-            parse_pbs_tag("[1.2.3] Engine Control Unit"),
-            ("1.2.3", "Engine Control Unit")
-        )
-        self.assertEqual(
-            parse_pbs_tag("[SYS-A_01] Battery Management"),
-            ("SYS-A_01", "Battery Management")
-        )
+        """Test parsing [<PBS Number>] <Name> tag syntax, now returning 3-tuple (tag, name, sort_key)."""
+        # Valid PBS tags – sort key is a tuple of ints/strings
+        tag, name, sk = parse_pbs_tag("[PBS-01] Powertrain Subsystem")
+        self.assertEqual(tag, "PBS-01")
+        self.assertEqual(name, "Powertrain Subsystem")
+        self.assertEqual(sk, ("pbs", 1))
+
+        tag, name, sk = parse_pbs_tag("[1.2.3] Engine Control Unit")
+        self.assertEqual(tag, "1.2.3")
+        self.assertEqual(name, "Engine Control Unit")
+        self.assertEqual(sk, (1, 2, 3))
+
+        tag, name, sk = parse_pbs_tag("[SYS-A_01] Battery Management")
+        self.assertEqual(tag, "SYS-A_01")
+        self.assertEqual(name, "Battery Management")
+        self.assertEqual(sk, ("sys", "a", 1))
+
+        # x-wildcard: tag preserved, sort key uses 0 for x
+        tag, name, sk = parse_pbs_tag("[10xx] Chassis Sub-System")
+        self.assertEqual(tag, "10xx")          # original preserved for display
+        self.assertEqual(name, "Chassis Sub-System")
+        self.assertEqual(sk, (1000,))          # x→0 for sort
+
+        tag, name, sk = parse_pbs_tag("[1.2.xx] Brake Module")
+        self.assertEqual(tag, "1.2.xx")
+        self.assertEqual(sk, (1, 2, 0))
 
         # Invalid or non-PBS tags
-        self.assertEqual(parse_pbs_tag("Powertrain Subsystem without brackets"), ("", "Powertrain Subsystem without brackets"))
-        self.assertEqual(parse_pbs_tag(""), ("", ""))
-        self.assertEqual(parse_pbs_tag(None), ("", ""))
+        self.assertEqual(parse_pbs_tag("Powertrain Subsystem without brackets"), ("", "Powertrain Subsystem without brackets", ("",)))
+        self.assertEqual(parse_pbs_tag(""), ("", "", ("",)))
+        self.assertEqual(parse_pbs_tag(None), ("", "", ("",)))
+
+    def test_normalize_pbs_number(self):
+        """normalize_pbs_number replaces x/X with 0 only in numeric-token segments."""
+        self.assertEqual(normalize_pbs_number("10xx"), "1000")
+        self.assertEqual(normalize_pbs_number("1.2.xx"), "1.2.00")
+        self.assertEqual(normalize_pbs_number("10XX"), "1000")
+        self.assertEqual(normalize_pbs_number("1.2.3"), "1.2.3")       # no change
+        self.assertEqual(normalize_pbs_number("PBS-01"), "PBS-01")     # alpha prefix unchanged
+        self.assertEqual(normalize_pbs_number("SYS-A_1x"), "SYS-A_10") # only last segment
+        self.assertEqual(normalize_pbs_number("10xx.xx"), "1000.00")
+        self.assertEqual(normalize_pbs_number(""), "")
+        self.assertEqual(normalize_pbs_number(None), None)
+
+    def test_pbs_sort_key(self):
+        """pbs_sort_key produces a comparable tuple, x/X treated as 0."""
+        self.assertEqual(pbs_sort_key("10xx"), (1000,))
+        self.assertEqual(pbs_sort_key("1.2.3"), (1, 2, 3))
+        self.assertEqual(pbs_sort_key("PBS-01"), ("pbs", 1))
+        self.assertEqual(pbs_sort_key("SYS-A_1x"), ("sys", "a", 10))
+        self.assertEqual(pbs_sort_key(""), ("",))
+
+        # Sorting: [10xx] sorts between [1000] and [1099], before [11xx]
+        keys = sorted(["10xx", "1001", "1099", "11xx", "900"], key=pbs_sort_key)
+        self.assertEqual(keys, ["900", "1001", "10xx", "1099", "11xx"])
+
 
     def test_parse_level3_priority_focus_types(self):
         """Test Level 3 priority notation [<Type>_<Number>] Name for OI, MP, SCEN, SPEC, PA, CS, DOC."""

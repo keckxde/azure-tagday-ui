@@ -16,6 +16,7 @@ Item {
     property bool prio1Only: false
     property bool groupedOnly: false
     property real drawerWidth: 420
+    property int historyOffset: 0  // 0 = current window, N = N sprints back into history
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
 
@@ -141,7 +142,8 @@ Item {
             !!root.prio1Only,
             !!root.groupedOnly,
             !!root.hideClosedTasks,
-            root.searchQuery || ""
+            root.searchQuery || "",
+            root.historyOffset
         )
     }
 
@@ -164,6 +166,7 @@ Item {
     onGroupedOnlyChanged:     refreshMatrix()
     onHideClosedTasksChanged: refreshMatrix()
     onSearchQueryChanged:     refreshMatrix()
+    onHistoryOffsetChanged:   refreshMatrix()
 
     Connections {
         target: backend
@@ -360,6 +363,144 @@ Item {
                     border.color: "#30363d"
                 }
                 onClicked: root.refreshMatrix()
+            }
+        }
+
+        // ====================== Time Navigation Bar ======================
+        Rectangle {
+            Layout.fillWidth: true
+            height: 42
+            radius: 8
+            color: root.historyOffset > 0 ? "#1c1a0e" : "#161b22"
+            border.color: root.historyOffset > 0 ? "#d29922" : "#30363d"
+            border.width: 1
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+
+                // ◀ Past button
+                Button {
+                    text: "◀  Past"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#c9d1d9"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 28
+                        implicitWidth: 80
+                        radius: 6
+                        color: parent.hovered ? "#21262d" : "transparent"
+                        border.color: "#30363d"
+                    }
+                    onClicked: root.historyOffset += root.selectedHorizon
+                }
+
+                // Sprint range label
+                RowLayout {
+                    spacing: 8
+                    Layout.fillWidth: true
+
+                    Item { Layout.fillWidth: true }
+
+                    // "Viewing past N weeks" indicator
+                    Rectangle {
+                        visible: root.historyOffset > 0
+                        implicitHeight: 22
+                        implicitWidth: historyBadgeText.implicitWidth + 16
+                        radius: 11
+                        color: "#3d2e00"
+                        border.color: "#d29922"
+                        border.width: 1
+                        Text {
+                            id: historyBadgeText
+                            anchors.centerIn: parent
+                            text: "📅 " + root.historyOffset + " sprint(s) back"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            color: "#f0883e"
+                        }
+                    }
+
+                    // Sprint range display
+                    Text {
+                        text: {
+                            if (!root.matrixData || !root.matrixData.sprint_columns || root.matrixData.sprint_columns.length === 0)
+                                return "No data"
+                            var cols = root.matrixData.sprint_columns
+                            var first = cols[0].label || cols[0].short_label || cols[0].sprint_name
+                            var last = cols[cols.length - 1].label || cols[cols.length - 1].short_label || cols[cols.length - 1].sprint_name
+                            return first + "  →  " + last
+                        }
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: root.historyOffset > 0 ? "#d29922" : "#8b949e"
+                    }
+
+                    // Back to current button (only when viewing history)
+                    Button {
+                        visible: root.historyOffset > 0
+                        text: "🔴  Back to Current"
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#f85149"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 24
+                            implicitWidth: backCurrentText.implicitWidth + 20
+                            radius: 12
+                            color: parent.hovered ? "#3d0c0c" : "#211515"
+                            border.color: "#da3633"
+                            border.width: 1
+                            Text {
+                                id: backCurrentText
+                                text: "🔴  Back to Current"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                visible: false
+                            }
+                        }
+                        onClicked: root.historyOffset = 0
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Future ▶ button
+                Button {
+                    text: "Future  ▶"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    enabled: root.historyOffset > 0
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: root.historyOffset > 0 ? "#c9d1d9" : "#484f58"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 28
+                        implicitWidth: 80
+                        radius: 6
+                        color: parent.hovered && root.historyOffset > 0 ? "#21262d" : "transparent"
+                        border.color: root.historyOffset > 0 ? "#30363d" : "#21262d"
+                    }
+                    onClicked: root.historyOffset = Math.max(0, root.historyOffset - root.selectedHorizon)
+                }
             }
         }
 

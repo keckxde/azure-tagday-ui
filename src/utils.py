@@ -666,26 +666,103 @@ def extract_work_item_deadline(fields_dict, custom_field=None):
     return "", ""
 
 
+def normalize_pbs_number(tag):
+    """
+    Normalizes a PBS tag string for numeric comparison by replacing wildcard 'x' or 'X'
+    characters with '0' within each numeric segment.
+
+    Rules:
+    - Only 'x'/'X' characters that appear inside a numeric token are replaced.
+    - Non-numeric tokens (e.g. 'PBS', 'SYS', 'A') are left unchanged.
+    - Separator characters ('.', '-', '_') are preserved.
+
+    Examples:
+        "10xx"     -> "1000"
+        "1.2.xx"   -> "1.2.00"
+        "PBS-01"   -> "PBS-01"   (non-numeric prefix unchanged)
+        "SYS-A_1x" -> "SYS-A_10"
+        "10xx.xx"  -> "1000.00"
+
+    Args:
+        tag (str): Raw PBS tag string extracted from brackets.
+
+    Returns:
+        str: Normalized tag string with 'x'/'X' replaced by '0' in numeric segments.
+    """
+    if not tag:
+        return tag
+
+    def _normalize_token(tok):
+        # A token is "numeric" if it contains at least one digit alongside optional x/X chars
+        if re.search(r'\d', tok) and re.match(r'^[0-9xX]+$', tok):
+            return tok.replace('x', '0').replace('X', '0')
+        return tok
+
+    # Split by separators but keep them
+    parts = re.split(r'([.\-_])', tag)
+    return "".join(_normalize_token(p) if idx % 2 == 0 else p for idx, p in enumerate(parts))
+
+
+def pbs_sort_key(tag):
+    """
+    Converts a PBS tag string into a comparable sort key tuple.
+    'x'/'X' wildcards are first normalized to '0' via normalize_pbs_number.
+    Each numeric segment becomes an int; non-numeric segments become lowercase strings.
+
+    Examples:
+        "10xx"     -> (1000,)
+        "1.2.3"    -> (1, 2, 3)
+        "PBS-01"   -> ("pbs", 1)
+        "SYS-A_1x" -> ("sys", "a", 10)
+
+    Args:
+        tag (str): Raw or normalized PBS tag string.
+
+    Returns:
+        tuple: Mixed int/str tuple suitable for use as a sort key.
+    """
+    normalized = normalize_pbs_number(tag or "")
+    parts = re.split(r'[.\-_]', normalized)
+    key = []
+    for p in parts:
+        if not p:
+            continue
+        try:
+            key.append(int(p))
+        except ValueError:
+            key.append(p.lower())
+    return tuple(key) if key else ("",)
+
+
 def parse_pbs_tag(title):
     """
     Parses a Product Breakdown Structure (PBS) tag from the start of a title.
     Expected syntax: [<PBS Number>] <Name>
-    Example: "[PBS-01] Powertrain Subsystem" -> ("PBS-01", "Powertrain Subsystem")
-    Example: "[1.2.3] Engine Control" -> ("1.2.3", "Engine Control")
+    Example: "[PBS-01] Powertrain Subsystem" -> ("PBS-01", "Powertrain Subsystem", ("pbs", 1))
+    Example: "[1.2.3] Engine Control"        -> ("1.2.3",  "Engine Control",       (1, 2, 3))
+    Example: "[10xx] Chassis"                -> ("10xx",   "Chassis",              (1000,))
+
+    'x'/'X' wildcards in numeric segments are treated as '0' for the sort key only;
+    the original tag string is preserved unchanged for display purposes.
 
     Args:
         title (str): The work item title string.
 
     Returns:
-        tuple: (pbs_tag, clean_name)
+        tuple: (pbs_tag, clean_name, sort_key)
+               pbs_tag  (str)   – original tag as written in brackets
+               clean_name (str) – title text after the bracket expression
+               sort_key (tuple) – comparable key for sorting; x/X treated as 0
     """
     if not title:
-        return "", ""
+        return "", "", ("",)
     s_title = str(title).strip()
     m = re.match(r"^\s*\[([^\]]+)\]\s*(.*)$", s_title)
     if m:
-        return m.group(1).strip(), m.group(2).strip()
-    return "", s_title
+        tag = m.group(1).strip()
+        name = m.group(2).strip()
+        return tag, name, pbs_sort_key(tag)
+    return "", s_title, ("",)
 
 
 def parse_level3_priority(title):
@@ -813,14 +890,14 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
     l1_item = level_items[1]
     l1_id = l1_item.get("id") if l1_item else None
     l1_title = l1_item.get("title") if l1_item else ""
-    l1_pbs, l1_name = parse_pbs_tag(l1_title) if l1_title else ("", "")
+    l1_pbs, l1_name, l1_sort_key = parse_pbs_tag(l1_title) if l1_title else ("", "", ("",))
     l1_display = f"[{l1_pbs}] {l1_name}" if (l1_pbs and l1_name) else (f"#{l1_id} {l1_title}" if l1_title else "")
 
     # Extract Level 2 info (Feature / Major Component)
     l2_item = level_items[2]
     l2_id = l2_item.get("id") if l2_item else None
     l2_title = l2_item.get("title") if l2_item else ""
-    l2_pbs, l2_name = parse_pbs_tag(l2_title) if l2_title else ("", "")
+    l2_pbs, l2_name, l2_sort_key = parse_pbs_tag(l2_title) if l2_title else ("", "", ("",))
     l2_display = f"[{l2_pbs}] {l2_name}" if (l2_pbs and l2_name) else (f"#{l2_id} {l2_title}" if l2_title else "")
 
     # Extract Level 3 info
@@ -842,11 +919,13 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
         "level1_id": l1_id,
         "level1_title": l1_title,
         "level1_pbs": l1_pbs,
+        "level1_pbs_sort_key": l1_sort_key,
         "level1_name": l1_name,
         "level1_display": l1_display or "Ungrouped Sub-System",
         "level2_id": l2_id,
         "level2_title": l2_title,
         "level2_pbs": l2_pbs,
+        "level2_pbs_sort_key": l2_sort_key,
         "level2_name": l2_name,
         "level2_display": l2_display or "Ungrouped Component",
         "level3_id": l3_id,

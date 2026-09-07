@@ -589,17 +589,24 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=repoCategoriesChanged)
     def categoryColors(self):
         try:
-            cfg, _ = utils.load_repo_categories(cache_db=self._cache_db)
-            return cfg.get("category_colors", {})
+            if self._cache_db:
+                cfg = self._cache_db.get_full_repo_category_config()
+                if cfg and cfg.get("category_colors"):
+                    return cfg["category_colors"]
         except Exception:
-            return {}
+            pass
+        return {}
 
     @Slot(str, result=str)
     def get_category_color(self, category):
         try:
-            return utils.get_category_color(category, cache_db=self._cache_db)
+            if self._cache_db:
+                cfg = self._cache_db.get_full_repo_category_config()
+                colors = cfg.get("category_colors", {}) if cfg else {}
+                return colors.get(category, colors.get("OTHERS", "#6e7681"))
         except Exception:
-            return "#6e7681"
+            pass
+        return "#6e7681"
 
     @Property(list, notify=repoCategoriesChanged)
     def repoCategories(self):
@@ -1404,6 +1411,7 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"File does not exist: {path}")
 
     @Slot(int, result=dict)
+    @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, result="QVariantMap")
@@ -1420,11 +1428,13 @@ class DevOpsBackend(QObject):
         grouped_only: bool = False,
         hide_closed: bool = False,
         search_query: str = "",
+        lookback_weeks: int = 0,
     ):
         """
         Computes the interactive capacity and workload matrix for team members across
         the given horizon of weekly iterations (4, 8, or 12 weeks), filtered by
         Level 1, Level 2, priority, grouping, completion status, or search query.
+        lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
         sprint_keys = set()
         for wi in self._work_items:
@@ -1442,10 +1452,14 @@ class DevOpsBackend(QObject):
         # Sort sprints chronologically ascending
         sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
 
-        # Take the last horizon_weeks sprints
+        # Select the window: take last horizon_weeks sprints, then shift left by lookback_weeks
         if horizon_weeks <= 0:
             horizon_weeks = 4
-        target_sprints = sorted_sprints[-horizon_weeks:] if len(sorted_sprints) > horizon_weeks else sorted_sprints
+        lookback_weeks = max(0, int(lookback_weeks or 0))
+        end_idx = len(sorted_sprints) - lookback_weeks
+        start_idx = max(0, end_idx - horizon_weeks)
+        end_idx = max(start_idx, end_idx)  # guard
+        target_sprints = sorted_sprints[start_idx:end_idx]
 
         # Load configured milestones for sprint header and work item alignment
         all_milestones = self.get_milestones()
@@ -1807,6 +1821,7 @@ class DevOpsBackend(QObject):
             "total_overdue": total_matrix_overdue,
             "assignees_count": len(assignee_rows),
             "bug_hierarchy_mode": self._bug_hierarchy_mode,
+            "lookback_weeks": lookback_weeks,
         }
 
     def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None):
