@@ -6,16 +6,37 @@ import "../components"
 Item {
     id: root
     property string searchQuery: ""
-    property string filterState: "ALL"   // "ALL", "ACTIVE", "DELETED"
-    property string filterType: "ALL"    // "ALL" or specific WI type
+    property string filterState: "ALL"       // "ALL", "ACTIVE", "DELETED", or specific state
+    property string filterType: "ALL"        // "ALL" or specific WI type
+    property string filterAssignee: "ALL"    // "ALL", "UNASSIGNED", or specific user
+    property string filterModified: "ALL"    // "ALL", "7", "14", "30" (days)
+    property string filterIteration: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific iteration name
+    property string filterUrgency: "ALL"     // "ALL", "OVERDUE", "DUE_THIS_WEEK", "DUE_NEXT_WEEK", "FUTURE", "COMPLETED"
     property int currentPage: 1
     property int pageSize: 25
     property int totalPages: 1
     property int totalMatchingCount: 0
 
-    // -- State and Type filter lists, updated dynamically from database cache --
+    // -- Filter lists, updated dynamically from database cache --
     property var typesList: []
     property var statesList: []
+    property var assigneesList: ["ALL"]
+    property var iterationsList: ["ALL"]
+
+    property var urgencyOptions: [
+        { label: "All Deadlines", value: "ALL" },
+        { label: "🚨 Overdue", value: "OVERDUE" },
+        { label: "⏳ Due This Week", value: "DUE_THIS_WEEK" },
+        { label: "📅 Due Next Week", value: "DUE_NEXT_WEEK" },
+        { label: "🔮 Upcoming", value: "FUTURE" }
+    ]
+
+    property var modifiedOptions: [
+        { label: "All Time", value: "ALL" },
+        { label: "Last 7 Days", value: "7" },
+        { label: "Last 14 Days", value: "14" },
+        { label: "Last 30 Days", value: "30" }
+    ]
 
     function refreshTypesList() {
         if (!backend) return
@@ -27,6 +48,46 @@ Item {
         if (!backend) return
         var states = backend.workItemStates || []
         statesList = ["ALL"].concat(states).concat(["DELETED"])
+    }
+
+    function refreshAssigneesList() {
+        if (!backend) return
+        var assignees = backend.workItemAssignees || []
+        assigneesList = ["ALL", "UNASSIGNED"].concat(assignees)
+    }
+
+    function refreshIterationsList() {
+        if (!backend) return
+        var iters = backend.workItemIterations || []
+        iterationsList = ["ALL", "PLANNED", "UNPLANNED"].concat(iters)
+    }
+
+    function resetAllFilters() {
+        root.searchQuery = ""
+        root.filterState = "ALL"
+        root.filterType = "ALL"
+        root.filterAssignee = "ALL"
+        root.filterModified = "ALL"
+        root.filterIteration = "ALL"
+        root.filterUrgency = "ALL"
+        root.currentPage = 1
+        root.updateFilteredModel()
+    }
+
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL"
+
+    function isWithinDays(dateStr, maxDays) {
+        if (!dateStr) return false;
+        var clean = dateStr.replace("Z", "").replace(" ", "T");
+        var d = new Date(clean);
+        if (isNaN(d.getTime())) {
+            d = new Date(dateStr);
+        }
+        if (isNaN(d.getTime())) return false;
+        var now = new Date();
+        var diffMs = now.getTime() - d.getTime();
+        var diffDays = diffMs / (1000 * 60 * 60 * 24);
+        return diffDays <= maxDays && diffDays >= -0.5;
     }
 
     // ========================
@@ -191,7 +252,7 @@ Item {
                 font.weight: Font.DemiBold
                 color: "#8b949e"
                 Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 42
+                Layout.preferredWidth: 54
             }
 
             Flow {
@@ -235,6 +296,307 @@ Item {
             }
         }
 
+        // ====================== Deadline Urgency Filter Row ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Text {
+                text: "Deadline:"
+                font.family: "Segoe UI, sans-serif"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                color: "#8b949e"
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: 54
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Repeater {
+                    model: root.urgencyOptions
+                    Button {
+                        text: modelData.label
+                        checkable: true
+                        checked: root.filterUrgency === modelData.value
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26
+                            implicitWidth: urgLabel.implicitWidth + 20
+                            radius: 13
+                            property color urgC: {
+                                if (modelData.value === "OVERDUE") return "#f85149"
+                                if (modelData.value === "DUE_THIS_WEEK") return "#d29922"
+                                if (modelData.value === "DUE_NEXT_WEEK") return "#388bfd"
+                                if (modelData.value === "FUTURE") return "#58a6ff"
+                                return "#1f6feb"
+                            }
+                            color: parent.checked ? urgC : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? Qt.lighter(urgC, 1.3) : "#30363d"
+                            Text {
+                                id: urgLabel
+                                text: parent.parent.text
+                                visible: false
+                            }
+                        }
+                        onClicked: {
+                            root.filterUrgency = modelData.value
+                            root.currentPage = 1
+                        }
+                    }
+                }
+            }
+        }
+
+        // ====================== Additional Filters Row (Modified, User, Iteration) ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            // Modified Date Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Modified:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                Repeater {
+                    model: root.modifiedOptions
+                    Button {
+                        text: modelData.label
+                        checkable: true
+                        checked: root.filterModified === modelData.value
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26
+                            implicitWidth: modLabel.implicitWidth + 18
+                            radius: 13
+                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? "#388bfd" : "#30363d"
+                            Text { id: modLabel; text: parent.parent.text; visible: false }
+                        }
+                        onClicked: {
+                            root.filterModified = modelData.value
+                            root.currentPage = 1
+                        }
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Assignee / User Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "User:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: assigneeCombo
+                    implicitWidth: 170
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.assigneesList
+                    currentIndex: {
+                        var idx = root.assigneesList.indexOf(root.filterAssignee)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: {
+                        if (currentIndex === 0 || currentText === "ALL") return "All Users"
+                        if (currentIndex === 1 || currentText === "UNASSIGNED") return "Unassigned"
+                        return currentText
+                    }
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: assigneeCombo.hovered || assigneeCombo.activeFocus ? "#58a6ff" : (root.filterAssignee !== "ALL" ? "#1f6feb" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: assigneeCombo.displayText
+                        font: assigneeCombo.font
+                        color: root.filterAssignee !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        var val = root.assigneesList[index] || "ALL"
+                        root.filterAssignee = val
+                        root.currentPage = 1
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Iteration Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Iteration:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                Row {
+                    spacing: 4
+                    Button {
+                        text: "All"
+                        checkable: true
+                        checked: root.filterIteration === "ALL"
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text; font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26; implicitWidth: 38; radius: 13
+                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? "#388bfd" : "#30363d"
+                        }
+                        onClicked: {
+                            root.filterIteration = "ALL"
+                            root.currentPage = 1
+                        }
+                    }
+
+                    Button {
+                        text: "🎯 Planned"
+                        checkable: true
+                        checked: root.filterIteration === "PLANNED"
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text; font: parent.font
+                            color: parent.checked ? "#ffffff" : "#58a6ff"
+                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26; implicitWidth: 80; radius: 13
+                            color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? "#1f6feb" : "#30363d"
+                        }
+                        onClicked: {
+                            root.filterIteration = "PLANNED"
+                            root.currentPage = 1
+                        }
+                    }
+
+                    Button {
+                        text: "📋 Backlog"
+                        checkable: true
+                        checked: root.filterIteration === "UNPLANNED"
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text; font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26; implicitWidth: 78; radius: 13
+                            color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? "#8b949e" : "#30363d"
+                        }
+                        onClicked: {
+                            root.filterIteration = "UNPLANNED"
+                            root.currentPage = 1
+                        }
+                    }
+                }
+
+                ComboBox {
+                    id: iterationCombo
+                    implicitWidth: 175
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.iterationsList
+                    currentIndex: {
+                        var idx = root.iterationsList.indexOf(root.filterIteration)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: {
+                        if (currentIndex === 0 || currentText === "ALL") return "Specific Sprint..."
+                        if (currentIndex === 1 || currentText === "PLANNED") return "🎯 Planned (Any)"
+                        if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 Unplanned (Backlog)"
+                        return "🎯 " + currentText
+                    }
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: iterationCombo.hovered || iterationCombo.activeFocus ? "#58a6ff" : ((root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#1f6feb" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: iterationCombo.displayText
+                        font: iterationCombo.font
+                        color: (root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#58a6ff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        var val = root.iterationsList[index] || "ALL"
+                        root.filterIteration = val
+                        root.currentPage = 1
+                    }
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Clear / Reset filters button
+            Button {
+                visible: root.hasActiveFilters
+                text: "✖ Reset Filters"
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                contentItem: Text {
+                    text: parent.text; font: parent.font
+                    color: "#f85149"
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 26; implicitWidth: 96; radius: 6
+                    color: parent.hovered ? "#3c1e1e" : "#211515"
+                    border.color: "#da3633"
+                }
+                onClicked: root.resetAllFilters()
+            }
+        }
+
         // ====================== Table Header ======================
         Rectangle {
             Layout.fillWidth: true
@@ -250,13 +612,15 @@ Item {
                 anchors.rightMargin: 24
                 spacing: 12
 
-                Text { text: "ID";          Layout.preferredWidth: 72;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TYPE";        Layout.preferredWidth: 110; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ID";          Layout.preferredWidth: 64;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "TYPE";        Layout.preferredWidth: 92;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
                 Text { text: "TITLE";       Layout.fillWidth: true;     font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "STATE";       Layout.preferredWidth: 110; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 140; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "REFS";        Layout.preferredWidth: 100; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "LINK";        Layout.preferredWidth: 50;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "STATE";       Layout.preferredWidth: 88;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ITERATION";   Layout.preferredWidth: 125; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "DEADLINE";    Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "REFS";        Layout.preferredWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "LINK";        Layout.preferredWidth: 45;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
             }
         }
 
@@ -290,7 +654,7 @@ Item {
                 property int expandedHeight: {
                     var prs = model.linked_prs || []
                     var repos = model.linked_repos || []
-                    return Math.max(36, prs.length * 20 + repos.length * 18 + 32)
+                    return Math.max(48, 40 + prs.length * 20 + repos.length * 18 + 32)
                 }
 
                 Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -301,15 +665,35 @@ Item {
                     radius: 6
                     border.color: {
                         if (model.deleted) return "#f85149"
+                        if (model.urgency_status === "overdue") return "#da3633"
                         if (itemMouse.containsMouse) return "#388bfd"
                         return "#21262d"
                     }
                     border.width: 1
                     clip: true
 
+                    // Row click area - follows TFS link when clicking anywhere on the work item row
+                    MouseArea {
+                        id: itemMouse
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        height: 52
+                        hoverEnabled: true
+                        cursorShape: (model.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        ToolTip.visible: containsMouse && (model.tfs_url || "") !== ""
+                        ToolTip.text: "Open in TFS: #" + model.id + " - " + model.title
+                        onClicked: {
+                            if (backend && (model.tfs_url || "") !== "") {
+                                backend.open_url(model.tfs_url)
+                            }
+                        }
+                    }
+
                     // ---- Main Row ----
                     RowLayout {
                         id: mainRow
+                        z: 1
                         width: parent.width
                         height: 52
                         anchors.left: parent.left
@@ -320,7 +704,7 @@ Item {
                         // ID
                         Text {
                             text: "#" + model.id
-                            Layout.preferredWidth: 72
+                            Layout.preferredWidth: 64
                             font.family: "Consolas, monospace"
                             font.pixelSize: 13
                             font.weight: Font.Bold
@@ -329,7 +713,7 @@ Item {
 
                         // Type badge
                         Rectangle {
-                            Layout.preferredWidth: 110
+                            Layout.preferredWidth: 92
                             height: 22
                             radius: 11
                             property color typeC: root.typeColor(model.type)
@@ -360,7 +744,7 @@ Item {
                         // State
                         Text {
                             text: model.state
-                            Layout.preferredWidth: 110
+                            Layout.preferredWidth: 88
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
@@ -368,10 +752,101 @@ Item {
                             elide: Text.ElideRight
                         }
 
+                        // Iteration Pill
+                        Rectangle {
+                            Layout.preferredWidth: 125
+                            height: 24
+                            radius: 12
+                            color: model.is_iteration_planned ? "#0d2344" : "#161b22"
+                            border.color: model.is_iteration_planned ? "#1f6feb" : "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 4
+
+                                Text {
+                                    text: model.is_iteration_planned ? "🎯" : "📋"
+                                    font.pixelSize: 10
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: model.is_iteration_planned ? (model.iteration_name || "Planned") : (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST" ? model.iteration_name : "Unplanned")
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: model.is_iteration_planned ? Font.DemiBold : Font.Normal
+                                    color: model.is_iteration_planned ? "#58a6ff" : "#8b949e"
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            ToolTip.visible: iterMa.containsMouse
+                            ToolTip.text: {
+                                if (model.is_iteration_planned) {
+                                    return "Planned in Iteration: " + (model.iteration_name || "Sprint") + "\nPath: " + (model.iteration_path || model.iteration_name)
+                                } else {
+                                    return "Not planned in an iteration\nPath: " + (model.iteration_path || "Project Root / Backlog")
+                                }
+                            }
+
+                            MouseArea {
+                                id: iterMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                            }
+                        }
+
+                        // Deadline & Urgency Pill
+                        Rectangle {
+                            Layout.preferredWidth: 115
+                            height: 22
+                            radius: 11
+                            property color uColor: model.urgency_color || "#8b949e"
+                            color: Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15)
+                            border.color: Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5)
+                            border.width: 1
+                            visible: (model.deadline_str || "") !== ""
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: model.urgency_badge || model.deadline_str || "—"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: parent.uColor
+                                elide: Text.ElideRight
+                            }
+
+                            ToolTip.visible: deadMa.containsMouse && (model.deadline_str || "") !== ""
+                            ToolTip.text: "Milestone Deadline: " + (model.deadline_str || "N/A") + "\nTarget Date: " + (model.target_date || "N/A")
+
+                            MouseArea {
+                                id: deadMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                            }
+                        }
+
+                        // Placeholder if no deadline
+                        Item {
+                            Layout.preferredWidth: 115
+                            height: 22
+                            visible: (model.deadline_str || "") === ""
+                            Text {
+                                anchors.centerIn: parent
+                                text: "—"
+                                font.pixelSize: 11
+                                color: "#484f58"
+                            }
+                        }
+
                         // Assigned To
                         Text {
                             text: model.assigned_to || "Unassigned"
-                            Layout.preferredWidth: 140
+                            Layout.preferredWidth: 115
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 12
                             color: "#8b949e"
@@ -380,7 +855,7 @@ Item {
 
                         // References pill
                         Item {
-                            Layout.preferredWidth: 100
+                            Layout.preferredWidth: 75
                             height: 22
 
                             Row {
@@ -454,7 +929,7 @@ Item {
 
                         // TFS Link
                         Rectangle {
-                            Layout.preferredWidth: 50
+                            Layout.preferredWidth: 45
                             height: 24
                             radius: 4
                             color: tfsLinkMa.containsMouse && (model.tfs_url || "") !== "" ? "#0d2344" : "transparent"
@@ -507,6 +982,59 @@ Item {
                             anchors.margins: 10
                             spacing: 6
 
+                            // Iteration & Modification metadata bar
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 28
+                                color: "#161b22"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 12
+
+                                    Row {
+                                        spacing: 5
+                                        Text { text: "🎯 Iteration:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: model.is_iteration_planned ? ("Planned (" + (model.iteration_path || model.iteration_name) + ")") : ("Not planned (" + (model.iteration_path || "Backlog") + ")")
+                                            font.pixelSize: 11
+                                            color: model.is_iteration_planned ? "#58a6ff" : "#8b949e"
+                                        }
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Row {
+                                        spacing: 5
+                                        visible: (model.deadline_str || "") !== ""
+                                        Text { text: "⏳ Deadline:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: model.deadline_str + " (" + (model.urgency_badge || "") + ")"
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: model.urgency_color || "#f0f6fc"
+                                        }
+                                    }
+
+                                    Row {
+                                        spacing: 5
+                                        visible: (model.changed_date || "") !== ""
+                                        Text { text: "🕒 Last Changed:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: (model.changed_date || "").replace("T", " ").split(".")[0].replace("Z", "")
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 11
+                                            color: "#c9d1d9"
+                                        }
+                                    }
+                                }
+                            }
+
                             // PR list
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -523,7 +1051,6 @@ Item {
 
                                 Repeater {
                                     model: {
-                                        // Access linked_prs from outer delegate model
                                         var prs = wiListView.model.get(index) ? wiListView.model.get(index).linked_prs : []
                                         return prs || []
                                     }
@@ -591,18 +1118,6 @@ Item {
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: itemMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        propagateComposedEvents: true
-                        onClicked: {
-                            if ((model.linked_pr_count || 0) > 0 || (model.linked_repo_count || 0) > 0) {
-                                expanded = !expanded
                             }
                         }
                     }
@@ -710,7 +1225,9 @@ Item {
                 (item.title || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.assigned_to || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.type || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.state || "").toLowerCase().indexOf(q) !== -1
+                (item.state || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.iteration_name || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.iteration_path || "").toLowerCase().indexOf(q) !== -1
 
             var matchesState = true
             if (st === "ALL") {
@@ -723,7 +1240,49 @@ Item {
 
             var matchesType = (ft === "ALL") || (item.type === ft)
 
-            if (matchesQuery && matchesState && matchesType) {
+            var matchesModified = true
+            if (root.filterModified !== "ALL") {
+                var days = parseInt(root.filterModified)
+                if (!isNaN(days)) {
+                    matchesModified = root.isWithinDays(item.changed_date, days)
+                }
+            }
+
+            var matchesAssignee = true
+            if (root.filterAssignee === "ALL") {
+                matchesAssignee = true
+            } else if (root.filterAssignee === "UNASSIGNED") {
+                matchesAssignee = !item.assigned_to || item.assigned_to === "Unassigned"
+            } else {
+                matchesAssignee = (item.assigned_to || "").toLowerCase() === root.filterAssignee.toLowerCase()
+            }
+
+            var matchesIteration = true
+            if (root.filterIteration === "ALL") {
+                matchesIteration = true
+            } else if (root.filterIteration === "PLANNED") {
+                matchesIteration = !!item.is_iteration_planned
+            } else if (root.filterIteration === "UNPLANNED") {
+                matchesIteration = !item.is_iteration_planned
+            } else {
+                matchesIteration = (item.iteration_name || "").toLowerCase() === root.filterIteration.toLowerCase()
+            }
+
+            var matchesUrgency = true
+            if (root.filterUrgency !== "ALL") {
+                var u_stat = (item.urgency_status || "").toUpperCase()
+                if (root.filterUrgency === "OVERDUE") {
+                    matchesUrgency = u_stat === "OVERDUE"
+                } else if (root.filterUrgency === "DUE_THIS_WEEK") {
+                    matchesUrgency = u_stat === "DUE_THIS_WEEK"
+                } else if (root.filterUrgency === "DUE_NEXT_WEEK") {
+                    matchesUrgency = u_stat === "DUE_NEXT_WEEK"
+                } else if (root.filterUrgency === "FUTURE") {
+                    matchesUrgency = u_stat === "FUTURE"
+                }
+            }
+
+            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency) {
                 matched.push(item)
             }
         }
@@ -736,7 +1295,6 @@ Item {
         var startIdx = (root.currentPage - 1) * root.pageSize
         var endIdx = Math.min(startIdx + root.pageSize, matched.length)
         for (var j = startIdx; j < endIdx; j++) {
-            // QML ListModel needs plain scalars; serialise linked_prs/repos as JSON strings
             var wi = matched[j]
             var entry = {
                 id: wi.id,
@@ -745,6 +1303,16 @@ Item {
                 state: wi.state,
                 assigned_to: wi.assigned_to,
                 changed_date: wi.changed_date,
+                iteration_path: wi.iteration_path || "",
+                iteration_name: wi.iteration_name || "",
+                is_iteration_planned: !!wi.is_iteration_planned,
+                sprint_week_name: wi.sprint_week_name || "",
+                target_date: wi.target_date || "",
+                deadline_str: wi.deadline_str || "",
+                urgency_status: wi.urgency_status || "none",
+                urgency_badge: wi.urgency_badge || "—",
+                urgency_color: wi.urgency_color || "#8b949e",
+                days_diff: wi.days_diff,
                 deleted: wi.deleted,
                 tfs_url: wi.tfs_url || "",
                 linked_pr_count: wi.linked_pr_count || 0,
@@ -761,17 +1329,25 @@ Item {
         function onWorkItemsChanged() {
             root.refreshTypesList()
             root.refreshStatesList()
+            root.refreshAssigneesList()
+            root.refreshIterationsList()
             root.updateFilteredModel()
         }
     }
 
-    onSearchQueryChanged: updateFilteredModel()
-    onFilterStateChanged: updateFilteredModel()
-    onFilterTypeChanged:  updateFilteredModel()
+    onSearchQueryChanged:     updateFilteredModel()
+    onFilterStateChanged:     updateFilteredModel()
+    onFilterTypeChanged:      updateFilteredModel()
+    onFilterAssigneeChanged:  updateFilteredModel()
+    onFilterModifiedChanged:  updateFilteredModel()
+    onFilterIterationChanged: updateFilteredModel()
+    onFilterUrgencyChanged:   updateFilteredModel()
 
     Component.onCompleted: {
         refreshTypesList()
         refreshStatesList()
+        refreshAssigneesList()
+        refreshIterationsList()
         updateFilteredModel()
     }
 }

@@ -24,7 +24,7 @@ ApplicationWindow {
     property int currentTabIndex: 0
 
     function navigateToTagDayRepo(repoName) {
-        window.currentTabIndex = 4;
+        window.currentTabIndex = 5;
         if (reportsView) {
             reportsView.openTagDayRepo(repoName);
         }
@@ -165,17 +165,24 @@ ApplicationWindow {
                     }
 
                     NavItem {
-                        iconText: "📈"
-                        label: "Reports & Analytics"
+                        iconText: "👥"
+                        label: "Workload Explorer"
                         active: window.currentTabIndex === 4
                         onClicked: window.currentTabIndex = 4
                     }
 
                     NavItem {
-                        iconText: "⚙️"
-                        label: "Settings"
+                        iconText: "📈"
+                        label: "Reports & Analytics"
                         active: window.currentTabIndex === 5
                         onClicked: window.currentTabIndex = 5
+                    }
+
+                    NavItem {
+                        iconText: "⚙️"
+                        label: "Settings"
+                        active: window.currentTabIndex === 6
+                        onClicked: window.currentTabIndex = 6
                     }
                 }
 
@@ -419,6 +426,9 @@ ApplicationWindow {
                     }
                     WorkItemsView {
                         id: workItemsView
+                    }
+                    WorkloadExplorerView {
+                        id: workloadExplorerView
                     }
                     ReportsView {
                         id: reportsView

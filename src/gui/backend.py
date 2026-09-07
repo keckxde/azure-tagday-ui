@@ -168,6 +168,8 @@ class DevOpsBackend(QObject):
     pullRequestsChanged = Signal()
     tagDayDataChanged = Signal()
     storageDataChanged = Signal()
+    sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
+    workloadMatrixChanged = Signal()
     logRecord = Signal(str, str, str, str)  # timestamp, level, logger_name, message
     logMessage = Signal(str)                # legacy formatted string signal
     syncLogsChanged = Signal()
@@ -369,6 +371,32 @@ class DevOpsBackend(QObject):
             if a and a != "Unassigned":
                 seen.add(a)
         return sorted(seen)
+
+    @Property(list, notify=workItemsChanged)
+    def workItemIterations(self):
+        """Returns the sorted unique list of planned iteration names currently in cache."""
+        seen = set()
+        for wi in self._work_items:
+            if wi.get("is_iteration_planned") and wi.get("iteration_name"):
+                seen.add(wi.get("iteration_name"))
+        return sorted(seen)
+
+    @Property(list, notify=workItemsChanged)
+    def availableSprintList(self):
+        """Returns the chronologically sorted list of all week-YYWW sprint names in cache."""
+        seen = set()
+        for wi in self._work_items:
+            s_name = wi.get("sprint_week_name")
+            if s_name and "week-" in s_name.lower():
+                seen.add(s_name)
+            else:
+                y, w, b_name = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
+                if b_name:
+                    seen.add(b_name)
+        def sort_key(s):
+            y, w, _ = utils.parse_sprint_week(s)
+            return (y or 0, w or 0)
+        return sorted(seen, key=sort_key, reverse=True)
 
     @Property(list, notify=pullRequestsChanged)
     def pullRequests(self):
@@ -639,6 +667,31 @@ class DevOpsBackend(QObject):
             tfs_wi_url_base = f"{tfs_base}/{tfs_col}/{tfs_proj}/_workitems/edit/" if (tfs_base and tfs_col and tfs_proj) else ""
 
             raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
+
+            # Determine iteration hierarchy to identify planned sprint iterations vs root / backlog containers
+            all_iter_paths = set()
+            for wi in raw_wis:
+                ipath = wi.get("iteration_path") or ""
+                if not ipath:
+                    raw_s = wi.get("raw_json")
+                    if raw_s and isinstance(raw_s, str):
+                        try:
+                            raw_data = json.loads(raw_s)
+                            ipath = raw_data.get("fields", {}).get("System.IterationPath") or ""
+                        except Exception:
+                            pass
+                if ipath:
+                    all_iter_paths.add(ipath)
+
+            # Normalize paths with forward slash to check parent container relationships
+            norm_iter_paths = {p.replace("\\", "/").strip("/"): p for p in all_iter_paths}
+            parent_iter_paths = set()
+            for np in norm_iter_paths:
+                for other in norm_iter_paths:
+                    if other != np and other.startswith(np + "/"):
+                        parent_iter_paths.add(np)
+                        break
+
             wi_list = []
             deleted_count = 0
             active_wi_count = 0
@@ -673,6 +726,59 @@ class DevOpsBackend(QObject):
                     else:
                         active_wi_count += 1
 
+                # Iteration and Deadline parsing
+                iter_path = wi.get("iteration_path") or ""
+                target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
+                raw_fields = {}
+                raw_s = wi.get("raw_json")
+                if raw_s and isinstance(raw_s, str):
+                    try:
+                        raw_data = json.loads(raw_s)
+                        raw_fields = raw_data.get("fields", {})
+                        if not iter_path:
+                            iter_path = raw_fields.get("System.IterationPath") or ""
+                        if not target_date:
+                            target_date = (
+                                raw_fields.get("Microsoft.VSTS.Scheduling.TargetDate")
+                                or raw_fields.get("Microsoft.VSTS.Scheduling.FinishDate")
+                                or raw_fields.get("Microsoft.VSTS.Scheduling.DueDate")
+                                or ""
+                            )
+                    except Exception:
+                        pass
+
+                norm_ip = iter_path.replace("\\", "/").strip("/") if iter_path else ""
+                ip_parts = [p for p in norm_ip.split("/") if p]
+
+                # An item is considered planned in an iteration if:
+                # 1. It has an iteration path beyond the single project root
+                # 2. It is not a parent container (e.g. project root or team area root)
+                # 3. Its leaf does not contain 'backlog'
+                is_planned = False
+                iter_name = ""
+                if ip_parts and len(ip_parts) > 1 and norm_ip not in parent_iter_paths:
+                    leaf = ip_parts[-1]
+                    if "backlog" not in leaf.lower():
+                        is_planned = True
+                        iter_name = leaf
+                    else:
+                        iter_name = leaf
+                elif ip_parts and len(ip_parts) > 1:
+                    iter_name = ip_parts[-1]
+                elif ip_parts:
+                    iter_name = ip_parts[0]
+
+                # Sprint week date resolution
+                sprint_y, sprint_w, base_sprint_name = utils.parse_sprint_week(iter_name or iter_path)
+                sprint_end_str = ""
+                if sprint_y and sprint_w:
+                    _, _, _, sprint_end_str = utils.get_sprint_date_range(sprint_y, sprint_w)
+                    if not target_date:
+                        target_date = sprint_end_str
+
+                is_done = s_lower in ("closed", "done", "resolved", "completed", "removed", "cut")
+                urgency = utils.calculate_deadline_urgency(target_date, is_completed=is_done)
+
                 wi_list.append({
                     "id": wi_id,
                     "title": wi.get("title") or f"Work Item #{wi_id}",
@@ -680,6 +786,16 @@ class DevOpsBackend(QObject):
                     "state": state_val,
                     "assigned_to": assigned_val,
                     "changed_date": wi.get("changed_date") or "",
+                    "iteration_path": iter_path,
+                    "iteration_name": iter_name,
+                    "is_iteration_planned": is_planned,
+                    "sprint_week_name": base_sprint_name or (iter_name if is_planned else ""),
+                    "target_date": target_date,
+                    "deadline_str": urgency.get("deadline_str", ""),
+                    "urgency_status": urgency.get("status", "none"),
+                    "urgency_badge": urgency.get("badge_text", "—"),
+                    "urgency_color": urgency.get("badge_color", "#8b949e"),
+                    "days_diff": urgency.get("days_diff"),
                     "deleted": is_del,
                     "tfs_url": html_link,
                     "linked_pr_count": len(linked_prs),
@@ -990,6 +1106,231 @@ class DevOpsBackend(QObject):
             path = os.path.join(devops_helper.BASE_FOLDER, "doc", "04_Development", "test_report.md")
         if not os.path.exists(path):
             path = os.path.join(devops_helper.BASE_FOLDER, "test_report.md")
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(int, result=dict)
+    def getWorkloadMatrix(self, horizon_weeks=4):
+        """
+        Computes the interactive capacity and workload matrix for team members across
+        the given horizon of weekly iterations (4, 8, or 12 weeks).
+        """
+        sprint_keys = set()
+        for wi in self._work_items:
+            s_name = wi.get("sprint_week_name")
+            if s_name:
+                y, w, b_name = utils.parse_sprint_week(s_name)
+                if y and w and b_name:
+                    sprint_keys.add((y, w, b_name))
+            else:
+                iter_n = wi.get("iteration_name") or wi.get("iteration_path") or ""
+                y, w, b_name = utils.parse_sprint_week(iter_n)
+                if y and w and b_name:
+                    sprint_keys.add((y, w, b_name))
+
+        # Sort sprints chronologically ascending
+        sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
+        
+        # Take the last horizon_weeks sprints
+        if horizon_weeks <= 0:
+            horizon_weeks = 4
+        target_sprints = sorted_sprints[-horizon_weeks:] if len(sorted_sprints) >= horizon_weeks else sorted_sprints
+
+        sprint_columns = []
+        for y, w, s_name in target_sprints:
+            s_d, e_d, start_str, end_str = utils.get_sprint_date_range(y, w)
+            lbl = utils.format_sprint_range_label(y, w)
+            sprint_columns.append({
+                "sprint_name": s_name,
+                "label": lbl,
+                "short_label": f"W{w:02d}",
+                "start_date": start_str,
+                "end_date": end_str,
+                "year": y,
+                "week": w,
+            })
+
+        target_sprint_names = [col["sprint_name"] for col in sprint_columns]
+
+        # Group work items by assignee and sprint
+        assignees_data = {}
+        assignee_stats = {}
+
+        total_matrix_items = 0
+        total_matrix_stories = 0
+        total_matrix_bugs = 0
+        total_matrix_tasks = 0
+        total_matrix_overdue = 0
+
+        for wi in self._work_items:
+            if wi.get("deleted"):
+                continue
+            wi_sprint = wi.get("sprint_week_name")
+            if not wi_sprint:
+                _, _, wi_sprint = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
+
+            if not wi_sprint or wi_sprint not in target_sprint_names:
+                continue
+
+            assignee = (wi.get("assigned_to") or "Unassigned").strip()
+            if assignee not in assignees_data:
+                assignees_data[assignee] = {s_name: [] for s_name in target_sprint_names}
+                assignee_stats[assignee] = {
+                    "total": 0, "stories": 0, "bugs": 0, "tasks": 0, "overdue": 0, "completed": 0
+                }
+
+            t_lower = (wi.get("type") or "").lower()
+            is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
+            is_bug = t_lower in ("bug", "defect", "problem")
+            is_task = t_lower in ("task",)
+            is_overdue = wi.get("urgency_status") == "overdue"
+            is_done = wi.get("state", "").lower() in ("closed", "done", "resolved", "completed", "cut")
+
+            item_info = {
+                "id": wi.get("id"),
+                "title": wi.get("title") or f"#{wi.get('id')}",
+                "type": wi.get("type") or "Task",
+                "state": wi.get("state") or "Active",
+                "assigned_to": assignee,
+                "sprint_name": wi_sprint,
+                "deadline_str": wi.get("deadline_str", ""),
+                "urgency_status": wi.get("urgency_status", "none"),
+                "urgency_badge": wi.get("urgency_badge", "—"),
+                "urgency_color": wi.get("urgency_color", "#8b949e"),
+                "tfs_url": wi.get("tfs_url", ""),
+                "is_done": is_done,
+                "is_story": is_story,
+                "is_bug": is_bug,
+                "is_task": is_task,
+            }
+
+            assignees_data[assignee][wi_sprint].append(item_info)
+            assignee_stats[assignee]["total"] += 1
+            if is_story:
+                assignee_stats[assignee]["stories"] += 1
+                total_matrix_stories += 1
+            elif is_bug:
+                assignee_stats[assignee]["bugs"] += 1
+                total_matrix_bugs += 1
+            elif is_task:
+                assignee_stats[assignee]["tasks"] += 1
+                total_matrix_tasks += 1
+
+            if is_overdue:
+                assignee_stats[assignee]["overdue"] += 1
+                total_matrix_overdue += 1
+            if is_done:
+                assignee_stats[assignee]["completed"] += 1
+
+            total_matrix_items += 1
+
+        assignee_rows = []
+        for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
+            cells = []
+            for col in sprint_columns:
+                s_name = col["sprint_name"]
+                items = sprints_map.get(s_name, [])
+                st_count = sum(1 for it in items if it["is_story"])
+                bg_count = sum(1 for it in items if it["is_bug"])
+                tk_count = sum(1 for it in items if it["is_task"])
+                od_count = sum(1 for it in items if it["urgency_status"] == "overdue")
+                cp_count = sum(1 for it in items if it["is_done"])
+                cells.append({
+                    "sprint_name": s_name,
+                    "total_count": len(items),
+                    "stories_count": st_count,
+                    "bugs_count": bg_count,
+                    "tasks_count": tk_count,
+                    "overdue_count": od_count,
+                    "completed_count": cp_count,
+                    "items": sorted(items, key=lambda x: x["id"], reverse=True),
+                })
+
+            parts = [p for p in assignee.replace(".", " ").replace("_", " ").split() if p]
+            initials = "".join([p[0].upper() for p in parts[:2]]) if parts else "U"
+
+            assignee_rows.append({
+                "assignee": assignee,
+                "initials": initials,
+                "stats": assignee_stats[assignee],
+                "cells": cells,
+            })
+
+        column_totals = []
+        for col in sprint_columns:
+            s_name = col["sprint_name"]
+            c_items = []
+            for a_name, s_map in assignees_data.items():
+                c_items.extend(s_map.get(s_name, []))
+            column_totals.append({
+                "sprint_name": s_name,
+                "total_count": len(c_items),
+                "stories_count": sum(1 for it in c_items if it["is_story"]),
+                "bugs_count": sum(1 for it in c_items if it["is_bug"]),
+                "tasks_count": sum(1 for it in c_items if it["is_task"]),
+                "overdue_count": sum(1 for it in c_items if it["urgency_status"] == "overdue"),
+                "completed_count": sum(1 for it in c_items if it["is_done"]),
+            })
+
+        return {
+            "horizon_weeks": horizon_weeks,
+            "sprint_columns": sprint_columns,
+            "column_totals": column_totals,
+            "assignee_rows": assignee_rows,
+            "total_items": total_matrix_items,
+            "total_stories": total_matrix_stories,
+            "total_bugs": total_matrix_bugs,
+            "total_tasks": total_matrix_tasks,
+            "total_overdue": total_matrix_overdue,
+            "assignees_count": len(assignee_rows),
+        }
+
+    @Slot(str, result=dict)
+    def get_sprint_report_data(self, sprint_name):
+        """Returns structured sprint analysis dictionary for real-time GUI preview."""
+        if not self._cache_db:
+            return {}
+        try:
+            import generate_sprint_report
+            return generate_sprint_report.generate_sprint_report_data(self._cache_db, sprint_name=sprint_name)
+        except Exception as e:
+            logger.error(f"Error generating sprint report data: {e}", exc_info=True)
+            return {"error": str(e)}
+
+    @Slot(str, str, str)
+    def generate_sprint_report_async(self, sprint_name, md_path="", csv_path=""):
+        """Generates Sprint Markdown and CSV report in the background."""
+        if self._is_busy:
+            return
+
+        clean_sprint = (sprint_name or "latest").strip()
+        if not md_path:
+            md_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
+        if not csv_path:
+            csv_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.csv")
+
+        def _work(worker):
+            worker.log_message.emit(f"Generating Sprint Report for '{clean_sprint}'...")
+            import generate_sprint_report
+            data, md_text = generate_sprint_report.generate_sprint_report(
+                self._cache_db,
+                sprint_name=clean_sprint,
+                output_md=md_path,
+                output_csv=csv_path
+            )
+            self.sprintReportGenerated.emit(data, md_text)
+            worker.log_message.emit(f"Sprint report saved: {md_path} and {csv_path}")
+            return f"Sprint report for {clean_sprint} generated successfully"
+
+        self._run_worker(_work, f"Generating Sprint Report ({clean_sprint})...")
+
+    @Slot(str)
+    def open_sprint_report_file(self, sprint_name=""):
+        """Opens generated sprint report markdown in default editor."""
+        clean_sprint = (sprint_name or "latest").strip()
+        path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:

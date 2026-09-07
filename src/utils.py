@@ -384,3 +384,193 @@ def sort_categories_for_report(active_categories, known_order=None):
     elif not ordered:
         ordered = ["OTHERS"]
     return ordered
+
+
+def parse_sprint_week(iteration_str):
+    """
+    Parses a sprint name or path matching 'week-YYWW' (e.g. 'week-2633', 'week-2615-stable').
+
+    Args:
+        iteration_str (str): The iteration name or path.
+
+    Returns:
+        tuple: (year (int), week (int), base_name (str)) or (None, None, None) if not matched.
+    """
+    if not iteration_str or not isinstance(iteration_str, str):
+        return None, None, None
+
+    # Match 4-digit year: 'sprint-2026-W30' or 'week-2026-33'
+    m_full = re.search(r'\b(?:week|sprint)[-_]?(\d{4})[-_]?[wW]?(\d{1,2})\b', iteration_str, re.IGNORECASE)
+    if m_full:
+        yyyy = int(m_full.group(1))
+        ww = int(m_full.group(2))
+        if 2000 <= yyyy <= 2099 and 1 <= ww <= 53:
+            return yyyy, ww, f"week-{str(yyyy)[-2:]}{ww:02d}"
+
+    # Match 'week-YYWW' or 'week_YYWW' or 'Sprint-YYWW'
+    m = re.search(r'\b(?:week|sprint)[-_]?(\d{2})(\d{2})\b', iteration_str, re.IGNORECASE)
+    if m:
+        yy = int(m.group(1))
+        ww = int(m.group(2))
+        year = 2000 + yy if yy < 100 else yy
+        if 1 <= ww <= 53:
+            return year, ww, f"week-{yy:02d}{ww:02d}"
+
+    # Also match 4-digit '2633' if surrounded by word boundaries
+    m2 = re.search(r'\b(\d{2})(\d{2})\b', iteration_str)
+    if m2:
+        yy = int(m2.group(1))
+        ww = int(m2.group(2))
+        if 20 <= yy <= 50 and 1 <= ww <= 53:
+            year = 2000 + yy
+            return year, ww, f"week-{yy:02d}{ww:02d}"
+
+    return None, None, None
+
+
+def get_sprint_date_range(year, week):
+    """
+    Calculates start (Monday) and end (Friday) dates for an ISO calendar sprint week.
+
+    Args:
+        year (int): Calendar year (e.g. 2026).
+        week (int): Calendar week (1-53).
+
+    Returns:
+        tuple: (start_date (date), end_date (date), start_str (YYYY-MM-DD), end_str (YYYY-MM-DD))
+    """
+    try:
+        from datetime import date
+        start_d = date.fromisocalendar(year, week, 1)  # Monday
+        end_d = date.fromisocalendar(year, week, 5)    # Friday
+        return start_d, end_d, start_d.strftime("%Y-%m-%d"), end_d.strftime("%Y-%m-%d")
+    except Exception:
+        return None, None, "", ""
+
+
+def format_sprint_range_label(year, week):
+    """
+    Formats a user-friendly label for a weekly sprint (e.g. 'week-2633 (Aug 10 – Aug 14)').
+    """
+    start_d, end_d, _, _ = get_sprint_date_range(year, week)
+    if not start_d or not end_d:
+        return f"week-{str(year)[-2:]}{week:02d}"
+    
+    start_fmt = start_d.strftime("%b %d")
+    end_fmt = end_d.strftime("%b %d") if start_d.month == end_d.month else end_d.strftime("%b %d")
+    return f"week-{str(year)[-2:]}{week:02d} ({start_fmt} – {end_fmt})"
+
+
+def calculate_deadline_urgency(deadline_val, is_completed=False, now_dt=None):
+    """
+    Calculates urgency status, badge text, and color for a work item deadline.
+
+    Args:
+        deadline_val (str/datetime/date): The target deadline date.
+        is_completed (bool): Whether the work item is resolved/closed.
+        now_dt (datetime/date, optional): Reference date. Defaults to current date.
+
+    Returns:
+        dict: {
+            "status": "completed"|"overdue"|"due_this_week"|"due_next_week"|"future"|"none",
+            "days_diff": int or None,
+            "badge_text": str,
+            "badge_color": str,
+            "deadline_str": str
+        }
+    """
+    if is_completed:
+        d_str = ""
+        if deadline_val:
+            if isinstance(deadline_val, str):
+                d_str = deadline_val.split("T")[0].split(" ")[0]
+            elif hasattr(deadline_val, "strftime"):
+                d_str = deadline_val.strftime("%Y-%m-%d")
+        return {
+            "status": "completed",
+            "days_diff": None,
+            "badge_text": "✓ Closed",
+            "badge_color": "#3fb950",
+            "deadline_str": d_str
+        }
+
+    if not deadline_val:
+        return {
+            "status": "none",
+            "days_diff": None,
+            "badge_text": "—",
+            "badge_color": "#8b949e",
+            "deadline_str": ""
+        }
+
+    from datetime import date, datetime
+    target_d = None
+    if isinstance(deadline_val, date) and not isinstance(deadline_val, datetime):
+        target_d = deadline_val
+    elif isinstance(deadline_val, datetime):
+        target_d = deadline_val.date()
+    elif isinstance(deadline_val, str):
+        dt = parse_iso_datetime(deadline_val)
+        if dt:
+            target_d = dt.date()
+        else:
+            try:
+                target_d = datetime.strptime(deadline_val.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+            except Exception:
+                target_d = None
+
+    if not target_d:
+        return {
+            "status": "none",
+            "days_diff": None,
+            "badge_text": "—",
+            "badge_color": "#8b949e",
+            "deadline_str": str(deadline_val)
+        }
+
+    ref_d = now_dt.date() if isinstance(now_dt, datetime) else (now_dt or date.today())
+    days_diff = (target_d - ref_d).days
+    deadline_str = target_d.strftime("%Y-%m-%d")
+
+    if days_diff < 0:
+        overdue_days = abs(days_diff)
+        return {
+            "status": "overdue",
+            "days_diff": days_diff,
+            "badge_text": f"🚨 {overdue_days}d Overdue" if overdue_days < 99 else "🚨 Overdue",
+            "badge_color": "#f85149",
+            "deadline_str": deadline_str
+        }
+    elif days_diff == 0:
+        return {
+            "status": "due_this_week",
+            "days_diff": 0,
+            "badge_text": "⚡ Due Today",
+            "badge_color": "#d29922",
+            "deadline_str": deadline_str
+        }
+    elif days_diff <= 7:
+        return {
+            "status": "due_this_week",
+            "days_diff": days_diff,
+            "badge_text": f"⏳ {days_diff}d left",
+            "badge_color": "#d29922",
+            "deadline_str": deadline_str
+        }
+    elif days_diff <= 14:
+        return {
+            "status": "due_next_week",
+            "days_diff": days_diff,
+            "badge_text": f"📅 Next Wk ({target_d.strftime('%b %d')})",
+            "badge_color": "#388bfd",
+            "deadline_str": deadline_str
+        }
+    else:
+        return {
+            "status": "future",
+            "days_diff": days_diff,
+            "badge_text": f"📅 {target_d.strftime('%b %d')}",
+            "badge_color": "#8b949e",
+            "deadline_str": deadline_str
+        }
+
