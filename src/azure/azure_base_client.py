@@ -201,6 +201,7 @@ class AzureBaseClient:
     def query_work_item_ids_wiql(self, project_id=None, query=None):
         """
         Queries work item IDs directly using WIQL without needing to know task IDs in advance.
+        Supports both flat work item queries (FROM WorkItems) and hierarchical link queries (FROM WorkItemLinks).
 
         Args:
             project_id (str, optional): Target project ID or name. Defaults to None.
@@ -218,8 +219,62 @@ class AzureBaseClient:
 
         data = {"query": query}
         res, _ = self._request("POST", path, params={"api-version": "6.0"}, data=data)
-        work_items = res.get("workItems", []) if isinstance(res, dict) else []
-        return [item["id"] for item in work_items if "id" in item]
+        if not isinstance(res, dict):
+            return []
+
+        ids = []
+        seen = set()
+
+        # Flat query results
+        for item in res.get("workItems", []):
+            if isinstance(item, dict) and "id" in item:
+                iid = item["id"]
+                if iid not in seen:
+                    seen.add(iid)
+                    ids.append(iid)
+
+        # Hierarchical / Link query results (Tree & OneHop)
+        for rel in res.get("workItemRelations", []):
+            if isinstance(rel, dict):
+                for key in ("target", "source"):
+                    node = rel.get(key)
+                    if node and isinstance(node, dict) and "id" in node:
+                        iid = node["id"]
+                        if iid not in seen:
+                            seen.add(iid)
+                            ids.append(iid)
+
+        return ids
+
+    def query_work_item_hierarchy_wiql(self, project_id=None, query=None):
+        """
+        Executes a hierarchical Tree / Links WIQL query and returns relations structure.
+
+        Args:
+            project_id (str, optional): Target project ID or name.
+            query (str, optional): Custom hierarchical WIQL query.
+
+        Returns:
+            list: List of workItemRelations dicts with 'source', 'target', and 'rel'.
+        """
+        path = f"{project_id}/_apis/wit/wiql" if project_id else "_apis/wit/wiql"
+        if not query:
+            if project_id:
+                query = (
+                    f"SELECT [System.Id] FROM WorkItemLinks "
+                    f"WHERE ([Source].[System.TeamProject] = '{project_id}') "
+                    f"AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward') "
+                    f"MODE (MustContain)"
+                )
+            else:
+                query = (
+                    "SELECT [System.Id] FROM WorkItemLinks "
+                    "WHERE [System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward' "
+                    "MODE (MustContain)"
+                )
+        data = {"query": query}
+        res, _ = self._request("POST", path, params={"api-version": "6.0"}, data=data)
+        return res.get("workItemRelations", []) if isinstance(res, dict) else []
 
     def get_all_work_items_from_api(self, project_id=None, fields=None, expand=None, chunk_size=200):
         """

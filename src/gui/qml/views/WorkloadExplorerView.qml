@@ -15,8 +15,26 @@ Item {
     property string filterLevel2: "ALL"
     property bool prio1Only: false
     property bool groupedOnly: false
+    property real drawerWidth: 540
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
+
+    // Horizontal Matrix Scrolling Properties
+    property real matrixContentX: 0
+    property int matrixSprintCount: root.matrixData && root.matrixData.sprint_columns ? root.matrixData.sprint_columns.length : 0
+    property real minSprintColWidth: 155
+    property real teamMemberColWidth: 220
+    property real totalColWidth: 100
+    property real sprintViewportWidth: Math.max(100, (matrixTableContainer.width - root.teamMemberColWidth - root.totalColWidth))
+    property real sprintColWidth: Math.max(root.minSprintColWidth, root.matrixSprintCount > 0 ? (root.sprintViewportWidth / root.matrixSprintCount) : root.minSprintColWidth)
+    property real totalSprintContentWidth: root.matrixSprintCount * root.sprintColWidth
+    property real maxMatrixScrollX: Math.max(0, root.totalSprintContentWidth - root.sprintViewportWidth)
+
+    onMaxMatrixScrollXChanged: {
+        if (matrixContentX > maxMatrixScrollX) {
+            matrixContentX = maxMatrixScrollX;
+        }
+    }
 
     function refreshHierarchyLists() {
         if (!backend) return;
@@ -718,13 +736,38 @@ Item {
                     Text { text: "🛠️"; font.pixelSize: 24 }
                     ColumnLayout {
                         spacing: 2
-                        Text { text: "TASKS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
-                        Text {
-                            text: root.matrixData ? (root.matrixData.total_tasks || 0).toString() : "0"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 18
-                            font.weight: Font.Bold
-                            color: "#d29922"
+                        Text { text: "TASKS (STATUS RATIO)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
+                        RowLayout {
+                            spacing: 8
+                            Text {
+                                text: root.matrixData ? (root.matrixData.total_tasks || 0).toString() : "0"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 18
+                                font.weight: Font.Bold
+                                color: "#d29922"
+                            }
+                            RowLayout {
+                                spacing: 6
+                                visible: root.matrixData && root.matrixData.total_tasks > 0
+                                Text {
+                                    text: "⏳ " + (root.matrixData ? (root.matrixData.total_tasks_not_started || 0) : 0)
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#8b949e"
+                                }
+                                Text {
+                                    text: "⚡ " + (root.matrixData ? (root.matrixData.total_tasks_active || 0) : 0)
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#58a6ff"
+                                }
+                                Text {
+                                    text: "✅ " + (root.matrixData ? (root.matrixData.total_tasks_closed_percent !== undefined ? root.matrixData.total_tasks_closed_percent : Math.round(((root.matrixData.total_tasks_closed || 0) / Math.max(1, root.matrixData.total_tasks || 1)) * 100)) : 0) + "%"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#3fb950"
+                                }
+                            }
                         }
                     }
                 }
@@ -1035,26 +1078,60 @@ Item {
                                             border.width: 1
 
                                             // Cell content
-                                            RowLayout {
+                                            ColumnLayout {
                                                 anchors.centerIn: parent
-                                                spacing: 6
+                                                spacing: 2
                                                 visible: hasItems
 
-                                                // Total items pill
-                                                Text {
-                                                    text: modelData.total_count.toString()
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 13
-                                                    font.weight: Font.Bold
-                                                    color: hasOverdue ? "#ff7b72" : (isSelected ? "#ffffff" : "#f0f6fc")
+                                                RowLayout {
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                    spacing: 5
+
+                                                    // Total items pill
+                                                    Text {
+                                                        text: modelData.total_count.toString()
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 13
+                                                        font.weight: Font.Bold
+                                                        color: hasOverdue ? "#ff7b72" : (isSelected ? "#ffffff" : "#f0f6fc")
+                                                    }
+
+                                                    // Type tags breakdown
+                                                    Row {
+                                                        spacing: 3
+                                                        Text { text: "🎯" + modelData.stories_count; font.pixelSize: 10; visible: modelData.stories_count > 0 }
+                                                        Text { text: "🐛" + modelData.bugs_count; font.pixelSize: 10; visible: modelData.bugs_count > 0 }
+                                                        Text { text: "🛠️" + modelData.tasks_count; font.pixelSize: 10; visible: modelData.tasks_count > 0 }
+                                                        Text { text: "🚨" + modelData.overdue_count; font.pixelSize: 10; visible: modelData.overdue_count > 0 }
+                                                    }
                                                 }
 
-                                                // Type tags breakdown
+                                                // Task Status Relation Breakdown (Not Started ⏳, Active ⚡, Closed ✅)
                                                 Row {
-                                                    spacing: 3
-                                                    Text { text: "🎯" + modelData.stories_count; font.pixelSize: 10; visible: modelData.stories_count > 0 }
-                                                    Text { text: "🐛" + modelData.bugs_count; font.pixelSize: 10; visible: modelData.bugs_count > 0 }
-                                                    Text { text: "🚨" + modelData.overdue_count; font.pixelSize: 10; visible: modelData.overdue_count > 0 }
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                    spacing: 4
+                                                    visible: (modelData.tasks_count || 0) > 0
+                                                    Text {
+                                                        text: "⏳" + (modelData.tasks_not_started_count || 0)
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: "#8b949e"
+                                                        visible: (modelData.tasks_not_started_count || 0) > 0
+                                                    }
+                                                    Text {
+                                                        text: "⚡" + (modelData.tasks_active_count || 0)
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: "#58a6ff"
+                                                        visible: (modelData.tasks_active_count || 0) > 0
+                                                    }
+                                                    Text {
+                                                        text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: "#3fb950"
+                                                        visible: (modelData.tasks_closed_count || 0) > 0
+                                                    }
                                                 }
                                             }
 
@@ -1080,6 +1157,12 @@ Item {
                                                             stories_count: modelData.stories_count || 0,
                                                             bugs_count: modelData.bugs_count || 0,
                                                             tasks_count: modelData.tasks_count || 0,
+                                                            tasks_not_started_count: modelData.tasks_not_started_count || 0,
+                                                            tasks_active_count: modelData.tasks_active_count || 0,
+                                                            tasks_closed_count: modelData.tasks_closed_count || 0,
+                                                            tasks_closed_percent: modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100),
+                                                            not_started_count: modelData.not_started_count || 0,
+                                                            active_count: modelData.active_count || 0,
                                                             overdue_count: modelData.overdue_count || 0,
                                                             completed_count: modelData.completed_count || 0,
                                                             grouped_containers: modelData.grouped_containers || [],
@@ -1092,7 +1175,8 @@ Item {
                                             ToolTip.visible: cellMa.containsMouse && hasItems
                                             ToolTip.text: (modelData.assignee || "") + " @ " + (modelData.sprint_name || "") + "\n" +
                                                           "Total: " + modelData.total_count + " items\n" +
-                                                          "Stories: " + modelData.stories_count + " | Bugs: " + modelData.bugs_count + " | Tasks: " + modelData.tasks_count +
+                                                          "Stories: " + modelData.stories_count + " | Bugs: " + modelData.bugs_count + " | Tasks: " + modelData.tasks_count + "\n" +
+                                                          "Tasks Breakdown: ⏳ " + (modelData.tasks_not_started_count || 0) + " Not Started | ⚡ " + (modelData.tasks_active_count || 0) + " Active | ✅ " + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "% Closed (" + (modelData.tasks_closed_count || 0) + "/" + (modelData.tasks_count || 0) + ")" +
                                                           (hasOverdue ? ("\n🚨 Overdue: " + modelData.overdue_count) : "")
                                         }
 
@@ -1111,20 +1195,34 @@ Item {
                                     Layout.preferredWidth: 100
                                     Layout.fillHeight: true
 
-                                    Rectangle {
+                                    ColumnLayout {
                                         anchors.centerIn: parent
-                                        width: 60
-                                        height: 24
-                                        radius: 12
-                                        color: "#161b22"
-                                        border.color: "#30363d"
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.stats ? modelData.stats.total.toString() : "0"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#58a6ff"
+                                        spacing: 2
+
+                                        Rectangle {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            width: 54
+                                            height: 20
+                                            radius: 10
+                                            color: "#161b22"
+                                            border.color: "#30363d"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.stats ? modelData.stats.total.toString() : "0"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
+                                        }
+
+                                        Row {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 3
+                                            visible: modelData.stats && modelData.stats.tasks > 0
+                                            Text { text: "⏳" + (modelData.stats.tasks_not_started || 0); font.pixelSize: 8; font.weight: Font.DemiBold; color: "#8b949e" }
+                                            Text { text: "⚡" + (modelData.stats.tasks_active || 0); font.pixelSize: 8; font.weight: Font.DemiBold; color: "#58a6ff" }
+                                            Text { text: "✅" + (modelData.stats ? (modelData.stats.tasks_closed_percent !== undefined ? modelData.stats.tasks_closed_percent : Math.round(((modelData.stats.tasks_closed || 0) / Math.max(1, modelData.stats.tasks || 1)) * 100)) : 0) + "%"; font.pixelSize: 8; font.weight: Font.DemiBold; color: "#3fb950" }
                                         }
                                     }
                                 }
@@ -1135,7 +1233,7 @@ Item {
                     // ---- Matrix Column Totals Footer ----
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 40
+                        height: 42
                         color: "#161b22"
                         border.color: "#30363d"
                         border.width: 1
@@ -1165,13 +1263,25 @@ Item {
                                 Item {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    Text {
+                                    ColumnLayout {
                                         anchors.centerIn: parent
-                                        text: (modelData.total_count || 0) + " items"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        font.weight: Font.Bold
-                                        color: "#58a6ff"
+                                        spacing: 1
+                                        Text {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            text: (modelData.total_count || 0) + " items"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: "#58a6ff"
+                                        }
+                                        Row {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 4
+                                            visible: (modelData.tasks_count || 0) > 0
+                                            Text { text: "⏳" + (modelData.tasks_not_started_count || 0); font.pixelSize: 9; color: "#8b949e" }
+                                            Text { text: "⚡" + (modelData.tasks_active_count || 0); font.pixelSize: 9; color: "#58a6ff" }
+                                            Text { text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"; font.pixelSize: 9; color: "#3fb950" }
+                                        }
                                     }
                                     Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
                                 }
@@ -1202,18 +1312,66 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        width: 480
+        width: Math.max(380, Math.min(root.width - 80, root.drawerWidth))
         visible: root.selectedCell !== null
         color: "#161b22"
         border.color: "#30363d"
         border.width: 1
 
-        // Slide animation
-        Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        // Left Edge Resizer Handle / Splitter
+        Rectangle {
+            id: drawerResizer
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 6
+            z: 100
+            color: drawerResizerMa.containsMouse || drawerResizerMa.pressed ? "#58a6ff" : "transparent"
+
+            // Central Grip Indicator
+            Column {
+                anchors.centerIn: parent
+                spacing: 3
+                visible: drawerResizerMa.containsMouse || drawerResizerMa.pressed
+                Rectangle { width: 2; height: 8; radius: 1; color: "#ffffff" }
+                Rectangle { width: 2; height: 8; radius: 1; color: "#ffffff" }
+                Rectangle { width: 2; height: 8; radius: 1; color: "#ffffff" }
+            }
+
+            MouseArea {
+                id: drawerResizerMa
+                anchors.fill: parent
+                anchors.margins: -4
+                hoverEnabled: true
+                cursorShape: Qt.SizeHorCursor
+                preventStealing: true
+
+                property real startMouseX: 0
+                property real startWidth: 0
+
+                onPressed: function(mouse) {
+                    startMouseX = mouse.x;
+                    startWidth = detailDrawer.width;
+                }
+
+                onPositionChanged: function(mouse) {
+                    if (pressed) {
+                        var diff = mouse.x - startMouseX;
+                        var newWidth = detailDrawer.width - diff;
+                        var minW = 380;
+                        var maxW = Math.max(minW, root.width - 80);
+                        root.drawerWidth = Math.max(minW, Math.min(maxW, newWidth));
+                    }
+                }
+            }
+        }
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
+            anchors.leftMargin: 18
+            anchors.rightMargin: 16
+            anchors.topMargin: 16
+            anchors.bottomMargin: 16
             spacing: 12
 
             // Drawer Header
@@ -1248,6 +1406,34 @@ Item {
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 11
                             color: "#8b949e"
+                        }
+                    }
+
+                    // Task status relation pill
+                    RowLayout {
+                        spacing: 6
+                        visible: root.selectedCell && (root.selectedCell.tasks_count || 0) > 0
+
+                        Text {
+                            text: "🛠️ " + (root.selectedCell ? root.selectedCell.tasks_count : 0) + " tasks:"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+                        Text {
+                            text: "⏳ " + (root.selectedCell ? (root.selectedCell.tasks_not_started_count || 0) : 0) + " Not Started"
+                            font.pixelSize: 10
+                            color: "#8b949e"
+                        }
+                        Text {
+                            text: "⚡ " + (root.selectedCell ? (root.selectedCell.tasks_active_count || 0) : 0) + " Active"
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                        }
+                        Text {
+                            text: "✅ " + (root.selectedCell ? (root.selectedCell.tasks_closed_percent !== undefined ? root.selectedCell.tasks_closed_percent : Math.round(((root.selectedCell.tasks_closed_count || 0) / Math.max(1, root.selectedCell.tasks_count || 1)) * 100)) : 0) + "% Closed (" + (root.selectedCell ? (root.selectedCell.tasks_closed_count || 0) : 0) + "/" + (root.selectedCell ? (root.selectedCell.tasks_count || 0) : 0) + ")"
+                            font.pixelSize: 10
+                            color: "#3fb950"
                         }
                     }
                 }
@@ -1377,7 +1563,7 @@ Item {
                         anchors.margins: 12
                         spacing: 10
 
-                        // ==================== Parent Information (Line 1: Type, ID, Title, Owner, State) ====================
+                        // ==================== Parent Header Line (Line 1: Type, ID, Badges, Owner, State) ====================
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
@@ -1435,6 +1621,23 @@ Item {
                                 }
                             }
 
+                            // External Parent Indicator Badge
+                            Rectangle {
+                                visible: !!modelData.is_external_parent
+                                implicitHeight: 20
+                                implicitWidth: cExtLabel.implicitWidth + 10
+                                radius: 10
+                                color: "#16243b"
+                                border.color: "#1f6feb"
+                                Text {
+                                    id: cExtLabel
+                                    anchors.centerIn: parent
+                                    text: "🌐 External Parent"
+                                    font.pixelSize: 9
+                                    color: "#58a6ff"
+                                }
+                            }
+
                             // Prio 1 Strategic Focus Badge
                             Rectangle {
                                 visible: !!modelData.is_prio1
@@ -1454,31 +1657,7 @@ Item {
                                 }
                             }
 
-                            // Parent Title (primary and bold)
-                            Text {
-                                Layout.fillWidth: true
-                                text: modelData.title || ""
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 13
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                                elide: Text.ElideRight
-
-                                ToolTip.visible: cardTitleMa.containsMouse && (modelData.title || "").length > 35
-                                ToolTip.text: (modelData.title || "") + "\n(Click to open in TFS)"
-
-                                MouseArea {
-                                    id: cardTitleMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                    onClicked: {
-                                        if (backend && (modelData.tfs_url || "") !== "") {
-                                            backend.open_url(modelData.tfs_url)
-                                        }
-                                    }
-                                }
-                            }
+                            Item { Layout.fillWidth: true }
 
                             // Owner / Assignee pill
                             Rectangle {
@@ -1511,6 +1690,32 @@ Item {
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
                                     color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#58a6ff")
+                                }
+                            }
+                        }
+
+                        // ==================== Parent Title (Line 2: Prominent & Full-Width) ====================
+                        Text {
+                            Layout.fillWidth: true
+                            text: modelData.title || (modelData.id > 0 ? ("Work Item #" + modelData.id) : "Direct Tasks / Standalone Items")
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 13
+                            font.weight: Font.Bold
+                            color: cardTitleMa.containsMouse && (modelData.tfs_url || "") !== "" ? "#58a6ff" : "#f0f6fc"
+                            wrapMode: Text.Wrap
+
+                            ToolTip.visible: cardTitleMa.containsMouse
+                            ToolTip.text: (modelData.title || "") + ((modelData.tfs_url || "") !== "" ? "\n(Click to open in TFS)" : "")
+
+                            MouseArea {
+                                id: cardTitleMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: {
+                                    if (backend && (modelData.tfs_url || "") !== "") {
+                                        backend.open_url(modelData.tfs_url)
+                                    }
                                 }
                             }
                         }
@@ -1680,16 +1885,42 @@ Item {
 
                             Item { Layout.fillWidth: true }
 
-                            // Tasks summary count
-                            Text {
+                            // Tasks summary count & relation pill
+                            RowLayout {
                                 visible: (modelData.total_tasks_count || 0) > 0
-                                text: (modelData.completed_tasks_count || 0) + " / " + (modelData.total_tasks_count || 0) + " tasks done (" + (modelData.progress_percent || 0) + "%)"
-                                font.pixelSize: 10
-                                color: modelData.progress_percent === 100 ? "#3fb950" : "#8b949e"
+                                spacing: 8
+
+                                Row {
+                                    spacing: 4
+                                    Text {
+                                        text: "⏳" + (modelData.tasks_not_started_count || 0)
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                        visible: (modelData.tasks_not_started_count || 0) > 0
+                                    }
+                                    Text {
+                                        text: "⚡" + (modelData.tasks_active_count || 0)
+                                        font.pixelSize: 10
+                                        color: "#58a6ff"
+                                        visible: (modelData.tasks_active_count || 0) > 0
+                                    }
+                                    Text {
+                                        text: "✅" + (modelData.progress_percent !== undefined ? modelData.progress_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.total_tasks_count || 1)) * 100)) + "%"
+                                        font.pixelSize: 10
+                                        color: "#3fb950"
+                                        visible: (modelData.tasks_closed_count || 0) > 0
+                                    }
+                                }
+
+                                Text {
+                                    text: "(" + (modelData.completed_tasks_count || 0) + "/" + (modelData.total_tasks_count || 0) + " done · " + (modelData.progress_percent || 0) + "%)"
+                                    font.pixelSize: 10
+                                    color: modelData.progress_percent === 100 ? "#3fb950" : "#8b949e"
+                                }
                             }
                         }
 
-                        // Tasks Progress Bar (if container has child tasks)
+                        // Tasks Progress Bar (3-segment: Closed ✅ Green, Active ⚡ Blue, Not Started ⏳ Slate)
                         ColumnLayout {
                             Layout.fillWidth: true
                             visible: (modelData.total_tasks_count || 0) > 0
@@ -1698,14 +1929,14 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text {
-                                    text: (modelData.completed_tasks_count || 0) + " / " + (modelData.total_tasks_count || 0) + " tasks completed"
-                                    font.pixelSize: 11
+                                    text: (modelData.tasks_not_started_count || 0) + " not started · " + (modelData.tasks_active_count || 0) + " active · " + (modelData.tasks_closed_count || 0) + " closed"
+                                    font.pixelSize: 10
                                     color: "#8b949e"
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
-                                    text: (modelData.progress_percent || 0) + "%"
-                                    font.pixelSize: 11
+                                    text: (modelData.progress_percent || 0) + "% done"
+                                    font.pixelSize: 10
                                     font.weight: Font.Bold
                                     color: modelData.progress_percent === 100 ? "#3fb950" : "#58a6ff"
                                 }
@@ -1713,14 +1944,32 @@ Item {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                height: 5
-                                radius: 2.5
+                                height: 6
+                                radius: 3
                                 color: "#21262d"
-                                Rectangle {
-                                    width: parent.width * ((modelData.progress_percent || 0) / 100)
-                                    height: parent.height
-                                    radius: 2.5
-                                    color: modelData.progress_percent === 100 ? "#3fb950" : "#1f6feb"
+                                clip: true
+
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+
+                                    Rectangle {
+                                        width: parent.width * ((modelData.tasks_closed_count || 0) / Math.max(1, (modelData.total_tasks_count || 1)))
+                                        height: parent.height
+                                        color: "#3fb950"
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width * ((modelData.tasks_active_count || 0) / Math.max(1, (modelData.total_tasks_count || 1)))
+                                        height: parent.height
+                                        color: "#1f6feb"
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width * ((modelData.tasks_not_started_count || 0) / Math.max(1, (modelData.total_tasks_count || 1)))
+                                        height: parent.height
+                                        color: "#30363d"
+                                    }
                                 }
                             }
                         }
@@ -1779,11 +2028,13 @@ Item {
                                             // Task Title
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: modelData.title || ""
+                                                text: modelData.title || (modelData.id > 0 ? ("Task #" + modelData.id) : "")
                                                 font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 11
                                                 color: modelData.is_done ? "#8b949e" : "#e6edf3"
                                                 elide: Text.ElideRight
+                                                ToolTip.visible: taskMa.containsMouse && (modelData.title || "").length > 30
+                                                ToolTip.text: modelData.title || ""
                                             }
 
                                             // Type Pill (Task vs Bug)

@@ -248,17 +248,26 @@ def load_status_icons(section=None, custom_path=None):
     return config
 
 
-def load_repo_categories(custom_path=None):
+def load_repo_categories(cache_db=None, custom_path=None):
     """
-    Locates and loads repository category mappings from YAML configuration.
-    Falls back to safe default prefix rules if file is not found.
+    Locates and loads repository category mappings from the database cache or YAML configuration.
+    Falls back to safe default prefix rules if database or file is not found.
 
     Args:
+        cache_db (AzureDevOpsCache, optional): Database instance containing repo category tables.
         custom_path (str, optional): Explicit file path to repo_categories.yaml.
 
     Returns:
         tuple: (config_dict, resolved_file_path)
     """
+    if cache_db and hasattr(cache_db, "get_full_repo_category_config"):
+        try:
+            db_cfg = cache_db.get_full_repo_category_config()
+            if db_cfg and db_cfg.get("category_colors"):
+                return db_cfg, "database"
+        except Exception:
+            pass
+
     default_config = {
         "default_category": "OTHERS",
         "prefix_rules": {
@@ -320,20 +329,21 @@ def load_repo_categories(custom_path=None):
     return config, resolved_path
 
 
-def get_category_color(category, config=None, config_path=None):
+def get_category_color(category, config=None, cache_db=None, config_path=None):
     """
-    Returns the hex color code for a repository category from configuration.
+    Returns the hex color code for a repository category from database configuration or YAML.
 
     Args:
         category (str): Category name (e.g. 'CORE', 'GENERIC', 'OTHERS').
         config (dict, optional): Parsed repo_categories configuration.
+        cache_db (AzureDevOpsCache, optional): Cache database instance.
         config_path (str, optional): Custom path to repo_categories.yaml.
 
     Returns:
         str: Hex color code (e.g. '#1f6feb'). Defaults to '#6e7681' (gray).
     """
     if config is None:
-        config, _ = load_repo_categories(custom_path=config_path)
+        config, _ = load_repo_categories(cache_db=cache_db, custom_path=config_path)
 
     colors = config.get("category_colors", {}) if isinstance(config, dict) else {}
     if category in colors:
@@ -364,8 +374,8 @@ def save_repo_categories(config, file_path):
         return False
 
 
-def categorize_repository(repo_name, config=None, config_path=None):
-    """Categorizes repository using the repo_categories configuration file.
+def categorize_repository(repo_name, config=None, cache_db=None, config_path=None):
+    """Categorizes repository using the database configuration or repo_categories configuration file.
 
     Evaluation order:
     1. Explicit repository mapping (`repositories: { <repo_name>: <category> }`).
@@ -373,7 +383,7 @@ def categorize_repository(repo_name, config=None, config_path=None):
     3. Default category fallback (`default_category`, defaults to 'OTHERS').
     """
     if config is None:
-        config, _ = load_repo_categories(custom_path=config_path)
+        config, _ = load_repo_categories(cache_db=cache_db, custom_path=config_path)
 
     default_cat = config.get("default_category", "OTHERS")
     repo_map = config.get("repositories", {})

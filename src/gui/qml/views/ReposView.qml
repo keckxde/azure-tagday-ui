@@ -65,7 +65,17 @@ Item {
             Row {
                 spacing: 6
                 Repeater {
-                    model: ["⚠️ PENDING", "ALL", "GENERIC", "3RDPARTY", "OTHERS"]
+                    model: {
+                        var base = ["⚠️ PENDING", "ALL"];
+                        if (backend && backend.repoCategories) {
+                            for (var i = 0; i < backend.repoCategories.length; i++) {
+                                base.push(backend.repoCategories[i].name);
+                            }
+                        } else {
+                            base.push("GENERIC", "3RDPARTY", "OTHERS");
+                        }
+                        return base;
+                    }
                     Button {
                         text: modelData === "⚠️ PENDING" ? ("⚠️ PENDING (" + root.pendingCount + ")") : modelData
                         checkable: true
@@ -85,7 +95,7 @@ Item {
                             radius: 14
                             color: {
                                 if (parent.checked) {
-                                    return modelData === "⚠️ PENDING" ? "#d29922" : "#1f6feb";
+                                    return modelData === "⚠️ PENDING" ? "#d29922" : (backend ? backend.get_category_color(modelData) : "#1f6feb");
                                 }
                                 return parent.hovered ? "#21262d" : "#161b22";
                             }
@@ -99,6 +109,24 @@ Item {
                         onClicked: root.selectedCategory = modelData
                     }
                 }
+            }
+
+            Button {
+                text: "🏷️ Category Settings"
+                font.pixelSize: 11
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "#bc8cff"
+                }
+                background: Rectangle {
+                    implicitHeight: 32
+                    implicitWidth: 145
+                    radius: 6
+                    color: parent.hovered ? "#21262d" : "#161b22"
+                    border.color: "#30363d"
+                }
+                onClicked: repoCategoriesDialog.openDialog()
             }
 
             Button {
@@ -286,6 +314,12 @@ Item {
                             StatusBadge {
                                 text: model.category || "OTHERS"
                                 badgeColor: backend ? backend.get_category_color(model.category || "OTHERS") : "#6e7681"
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: repoCategoriesDialog.openDialog()
+                                }
                             }
                         }
                     }
@@ -727,6 +761,9 @@ Item {
         function onRepositoriesChanged() {
             root.updateFilteredModel();
         }
+        function onRepoCategoriesChanged() {
+            root.updateFilteredModel();
+        }
     }
 
     onSearchQueryChanged: {
@@ -738,4 +775,8 @@ Item {
         root.updateFilteredModel();
     }
     Component.onCompleted: root.updateFilteredModel()
+
+    RepoCategoriesDialog {
+        id: repoCategoriesDialog
+    }
 }

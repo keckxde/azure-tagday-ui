@@ -172,6 +172,7 @@ class DevOpsBackend(QObject):
     workloadMatrixChanged = Signal()
     milestonesChanged = Signal()
     milestoneCategoriesChanged = Signal()
+    repoCategoriesChanged = Signal()
     iterationShiftsChanged = Signal()
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
@@ -585,10 +586,10 @@ class DevOpsBackend(QObject):
     def syncLogs(self):
         return self._sync_logs
 
-    @Property(dict, notify=settingsChanged)
+    @Property(dict, notify=repoCategoriesChanged)
     def categoryColors(self):
         try:
-            cfg, _ = utils.load_repo_categories()
+            cfg, _ = utils.load_repo_categories(cache_db=self._cache_db)
             return cfg.get("category_colors", {})
         except Exception:
             return {}
@@ -596,9 +597,37 @@ class DevOpsBackend(QObject):
     @Slot(str, result=str)
     def get_category_color(self, category):
         try:
-            return utils.get_category_color(category)
+            return utils.get_category_color(category, cache_db=self._cache_db)
         except Exception:
             return "#6e7681"
+
+    @Property(list, notify=repoCategoriesChanged)
+    def repoCategories(self):
+        if not self._cache_db:
+            return []
+        try:
+            return self._cache_db.get_repo_categories()
+        except Exception:
+            return []
+
+    @Property(list, notify=repoCategoriesChanged)
+    def repoPrefixRules(self):
+        if not self._cache_db:
+            return []
+        try:
+            return self._cache_db.get_repo_prefix_rules()
+        except Exception:
+            return []
+
+    @Property(list, notify=repoCategoriesChanged)
+    def repoCategoryOverrides(self):
+        if not self._cache_db:
+            return []
+        try:
+            overrides = self._cache_db.get_repo_category_overrides()
+            return [{"repo_name": k, "category": v} for k, v in overrides.items()]
+        except Exception:
+            return []
 
     @Property(dict, notify=syncLogsChanged)
     def logCounts(self):
@@ -776,7 +805,7 @@ class DevOpsBackend(QObject):
                         unstable_tags_map[rname] = tname
 
             repos_dict = self._cache_db.get_all_cached_repositories(devops_helper.AZURE_PROJECT_ID)
-            devops_helper.addCategoriesToRepos(repos_dict, auto_save_missing=True)
+            devops_helper.addCategoriesToRepos(repos_dict, cache_db=self._cache_db, auto_save_missing=True)
 
             repo_list = []
             for r_id, r in repos_dict.items():
@@ -1563,10 +1592,23 @@ class DevOpsBackend(QObject):
                 if not matches_search:
                     continue
 
+            def _categorize_state(st_str):
+                s = (st_str or "").lower().strip()
+                if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
+                    return "closed"
+                elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
+                    return "active"
+                else:
+                    return "not_started"
+
+            state_cat = _categorize_state(wi.get("state"))
+
             if assignee not in assignees_data:
                 assignees_data[assignee] = {s_name: [] for s_name in target_sprint_names}
                 assignee_stats[assignee] = {
-                    "total": 0, "stories": 0, "bugs": 0, "tasks": 0, "overdue": 0, "completed": 0
+                    "total": 0, "stories": 0, "bugs": 0, "tasks": 0, "overdue": 0, "completed": 0,
+                    "tasks_not_started": 0, "tasks_active": 0, "tasks_closed": 0,
+                    "total_not_started": 0, "total_active": 0, "total_closed": 0
                 }
 
             wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0]
@@ -1577,6 +1619,7 @@ class DevOpsBackend(QObject):
                 "title": wi.get("title") or f"#{wi.get('id')}",
                 "type": wi.get("type") or "Task",
                 "state": wi.get("state") or "Active",
+                "state_category": state_cat,
                 "assigned_to": assignee,
                 "parent_id": wi.get("parent_id"),
                 "sprint_name": wi_sprint,
@@ -1621,6 +1664,13 @@ class DevOpsBackend(QObject):
 
             assignees_data[assignee][wi_sprint].append(item_info)
             assignee_stats[assignee]["total"] += 1
+            if state_cat == "closed":
+                assignee_stats[assignee]["total_closed"] += 1
+            elif state_cat == "active":
+                assignee_stats[assignee]["total_active"] += 1
+            else:
+                assignee_stats[assignee]["total_not_started"] += 1
+
             if is_story:
                 assignee_stats[assignee]["stories"] += 1
                 total_matrix_stories += 1
@@ -1630,6 +1680,12 @@ class DevOpsBackend(QObject):
             elif is_task:
                 assignee_stats[assignee]["tasks"] += 1
                 total_matrix_tasks += 1
+                if state_cat == "closed":
+                    assignee_stats[assignee]["tasks_closed"] += 1
+                elif state_cat == "active":
+                    assignee_stats[assignee]["tasks_active"] += 1
+                else:
+                    assignee_stats[assignee]["tasks_not_started"] += 1
 
             if is_overdue:
                 assignee_stats[assignee]["overdue"] += 1
@@ -1640,6 +1696,13 @@ class DevOpsBackend(QObject):
             total_matrix_items += 1
 
         all_wis_by_id = {wi["id"]: wi for wi in self._work_items if not wi.get("deleted")}
+
+        total_tasks_not_started = sum(s["tasks_not_started"] for s in assignee_stats.values())
+        total_tasks_active = sum(s["tasks_active"] for s in assignee_stats.values())
+        total_tasks_closed = sum(s["tasks_closed"] for s in assignee_stats.values())
+        total_not_started = sum(s["total_not_started"] for s in assignee_stats.values())
+        total_active = sum(s["total_active"] for s in assignee_stats.values())
+        total_completed = sum(s["total_closed"] for s in assignee_stats.values())
 
         assignee_rows = []
         for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
@@ -1653,8 +1716,17 @@ class DevOpsBackend(QObject):
                 od_count = sum(1 for it in items if it["urgency_status"] == "overdue")
                 cp_count = sum(1 for it in items if it["is_done"])
 
+                tk_not_started = sum(1 for it in items if it["is_task"] and it.get("state_category") == "not_started")
+                tk_active = sum(1 for it in items if it["is_task"] and it.get("state_category") == "active")
+                tk_closed = sum(1 for it in items if it["is_task"] and it.get("state_category") == "closed")
+
+                all_not_started = sum(1 for it in items if it.get("state_category") == "not_started")
+                all_active = sum(1 for it in items if it.get("state_category") == "active")
+
                 # Group items by parent containers
                 grouped = self._group_items_into_containers(items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode, milestones_by_date=milestones_by_date)
+
+                tk_closed_percent = round((tk_closed / max(1, tk_count)) * 100) if tk_count > 0 else 0
 
                 cells.append({
                     "assignee": assignee,
@@ -1663,6 +1735,12 @@ class DevOpsBackend(QObject):
                     "stories_count": st_count,
                     "bugs_count": bg_count,
                     "tasks_count": tk_count,
+                    "tasks_not_started_count": tk_not_started,
+                    "tasks_active_count": tk_active,
+                    "tasks_closed_count": tk_closed,
+                    "tasks_closed_percent": tk_closed_percent,
+                    "not_started_count": all_not_started,
+                    "active_count": all_active,
                     "overdue_count": od_count,
                     "completed_count": cp_count,
                     "items": sorted(items, key=lambda x: x["id"], reverse=True),
@@ -1673,10 +1751,13 @@ class DevOpsBackend(QObject):
             parts = [p for p in assignee.replace(".", " ").replace("_", " ").split() if p]
             initials = "".join([p[0].upper() for p in parts[:2]]) if parts else "U"
 
+            st = assignee_stats[assignee]
+            st["tasks_closed_percent"] = round((st["tasks_closed"] / max(1, st["tasks"])) * 100) if st["tasks"] > 0 else 0
+
             assignee_rows.append({
                 "assignee": assignee,
                 "initials": initials,
-                "stats": assignee_stats[assignee],
+                "stats": st,
                 "cells": cells,
             })
 
@@ -1686,15 +1767,26 @@ class DevOpsBackend(QObject):
             c_items = []
             for a_name, s_map in assignees_data.items():
                 c_items.extend(s_map.get(s_name, []))
+            c_tk_count = sum(1 for it in c_items if it["is_task"])
+            c_tk_closed = sum(1 for it in c_items if it["is_task"] and it.get("state_category") == "closed")
+            c_tk_closed_pct = round((c_tk_closed / max(1, c_tk_count)) * 100) if c_tk_count > 0 else 0
             column_totals.append({
                 "sprint_name": s_name,
                 "total_count": len(c_items),
                 "stories_count": sum(1 for it in c_items if it["is_story"]),
                 "bugs_count": sum(1 for it in c_items if it["is_bug"]),
-                "tasks_count": sum(1 for it in c_items if it["is_task"]),
+                "tasks_count": c_tk_count,
+                "tasks_not_started_count": sum(1 for it in c_items if it["is_task"] and it.get("state_category") == "not_started"),
+                "tasks_active_count": sum(1 for it in c_items if it["is_task"] and it.get("state_category") == "active"),
+                "tasks_closed_count": c_tk_closed,
+                "tasks_closed_percent": c_tk_closed_pct,
+                "not_started_count": sum(1 for it in c_items if it.get("state_category") == "not_started"),
+                "active_count": sum(1 for it in c_items if it.get("state_category") == "active"),
                 "overdue_count": sum(1 for it in c_items if it["urgency_status"] == "overdue"),
                 "completed_count": sum(1 for it in c_items if it["is_done"]),
             })
+
+        total_tasks_closed_pct = round((total_tasks_closed / max(1, total_matrix_tasks)) * 100) if total_matrix_tasks > 0 else 0
 
         return {
             "horizon_weeks": horizon_weeks,
@@ -1705,6 +1797,13 @@ class DevOpsBackend(QObject):
             "total_stories": total_matrix_stories,
             "total_bugs": total_matrix_bugs,
             "total_tasks": total_matrix_tasks,
+            "total_tasks_not_started": total_tasks_not_started,
+            "total_tasks_active": total_tasks_active,
+            "total_tasks_closed": total_tasks_closed,
+            "total_tasks_closed_percent": total_tasks_closed_pct,
+            "total_not_started": total_not_started,
+            "total_active": total_active,
+            "total_completed": total_completed,
             "total_overdue": total_matrix_overdue,
             "assignees_count": len(assignee_rows),
             "bug_hierarchy_mode": self._bug_hierarchy_mode,
@@ -1880,6 +1979,15 @@ class DevOpsBackend(QObject):
             else:
                 unparented_children.append(ch)
 
+        def _get_state_category(st_str):
+            s = (st_str or "").lower().strip()
+            if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
+                return "closed"
+            elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
+                return "active"
+            else:
+                return "not_started"
+
         containers_list = []
         for cid, c_obj in container_map.items():
             tsks = c_obj["tasks"]
@@ -1888,6 +1996,10 @@ class DevOpsBackend(QObject):
             pct = round((comp / tot * 100)) if tot > 0 else (100 if c_obj["is_done"] else 0)
             c_obj["total_tasks_count"] = tot
             c_obj["completed_tasks_count"] = comp
+            c_obj["tasks_not_started_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "not_started")
+            c_obj["tasks_active_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "active")
+            c_obj["tasks_closed_count"] = comp
+            c_obj["state_category"] = _get_state_category(c_obj.get("state"))
             c_obj["progress_percent"] = pct
             c_obj["progress_pct"] = pct
             containers_list.append(c_obj)
@@ -1904,11 +2016,15 @@ class DevOpsBackend(QObject):
             tot_un = len(unparented_children)
             comp_un = sum(1 for t in unparented_children if _is_item_done(t))
             pct_un = round((comp_un / tot_un * 100)) if tot_un > 0 else 0
+            un_not_started = sum(1 for t in unparented_children if _get_state_category(t.get("state")) == "not_started")
+            un_active = sum(1 for t in unparented_children if _get_state_category(t.get("state")) == "active")
+
             containers_list.append({
                 "id": 0,
                 "title": "Direct Tasks / Standalone Items",
                 "type": "Standalone",
                 "state": "Active",
+                "state_category": "active",
                 "assigned_to": items_in_cell[0]["assigned_to"] if items_in_cell else "Unassigned",
                 "is_parent_in_cell": True,
                 "is_external_parent": False,
@@ -1921,6 +2037,14 @@ class DevOpsBackend(QObject):
                 "is_done": False,
                 "shift_count": 0,
                 "total_delayed_weeks": 0,
+                "shift_badge": "",
+                "total_tasks_count": tot_un,
+                "completed_tasks_count": comp_un,
+                "tasks_not_started_count": un_not_started,
+                "tasks_active_count": un_active,
+                "tasks_closed_count": comp_un,
+                "progress_percent": pct_un,
+                "progress_pct": pct_un,
                 "shift_badge": "",
                 "level": 4,
                 "level1_id": None,
@@ -2137,6 +2261,128 @@ class DevOpsBackend(QObject):
             "api_synced": api_synced,
             "message": msg
         }
+
+    @Slot(int)
+    @Slot(str)
+    def open_work_item_in_browser(self, work_item_id):
+        """
+        Opens a work item in the system web browser pointing to Azure DevOps / TFS.
+        """
+        try:
+            clean_id = int(str(work_item_id).lstrip("#"))
+        except (ValueError, TypeError):
+            self.logMessage.emit(f"Invalid work item ID: {work_item_id}")
+            return
+
+        url = ""
+        # Try to find cached work item URL
+        if self._cache_db:
+            try:
+                wi = self._cache_db.get_work_item(clean_id)
+                if wi and isinstance(wi, dict):
+                    raw_s = wi.get("raw_json")
+                    if raw_s:
+                        raw = json.loads(raw_s)
+                        url = raw.get("_links", {}).get("html", {}).get("href", "")
+            except Exception:
+                pass
+
+        if not url:
+            # Construct standard ADO/TFS work item URL
+            base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
+            col = (getattr(devops_helper, "DEFAULT_COLLECTION", "") or "").strip("/")
+            proj = (getattr(devops_helper, "DEFAULT_PROJECT", "") or "").strip("/")
+            if base_url:
+                parts = [base_url]
+                if col:
+                    parts.append(col)
+                if proj:
+                    parts.append(proj)
+                parts.append(f"_workitems/edit/{clean_id}")
+                url = "/".join(parts)
+
+        if url:
+            self.open_url(url)
+        else:
+            self.logMessage.emit(f"Could not construct Azure DevOps URL for Work Item #{clean_id}")
+
+    @Slot(int, str, result=bool)
+    @Slot(int, result=bool)
+    def set_shift_review_status(self, shift_id, status="accepted"):
+        """Updates the review policy status of a single shift event."""
+        if not self._cache_db:
+            return False
+        ok = self._cache_db.update_shift_review_status(shift_id, status=status)
+        if ok:
+            self.iterationShiftsChanged.emit()
+            self.logMessage.emit(f"Shift #{shift_id} marked as {status}.")
+        return ok
+
+    @Slot(int, str, result=bool)
+    @Slot(int, result=bool)
+    def set_work_item_shifts_review_status(self, work_item_id, status="accepted"):
+        """Updates review status for all shift events of a work item."""
+        if not self._cache_db:
+            return False
+        ok = self._cache_db.update_work_item_shifts_review_status(work_item_id, status=status)
+        if ok:
+            self.iterationShiftsChanged.emit()
+            self.logMessage.emit(f"All shifts for Work Item #{work_item_id} marked as {status}.")
+        return ok
+
+    @Slot(str, result=int)
+    @Slot(result=int)
+    def bulk_set_all_shifts_review_status(self, status="accepted"):
+        """Bulk updates all shifts to the specified review status."""
+        if not self._cache_db:
+            return 0
+        count = self._cache_db.update_all_shifts_review_status(status=status)
+        self.iterationShiftsChanged.emit()
+        self.logMessage.emit(f"Bulk updated {count} shift(s) to '{status}'.")
+        return count
+
+    @Slot()
+    @Slot(str)
+    def generate_rescheduling_report_async(self, review_filter=""):
+        """Generates Sprint Rescheduling and Moved Items Markdown & CSV report asynchronously."""
+        if self._is_busy:
+            return
+
+        r_stat = None if review_filter in ("", "all") else review_filter.strip().lower()
+        md_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
+        csv_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+
+        def _work(worker):
+            worker.log_message.emit("Generating Sprint Rescheduling & Moved Items Report...")
+            import generate_rescheduling_report
+            res = generate_rescheduling_report.generate_rescheduling_report(
+                self._cache_db,
+                output_md=md_path,
+                output_csv=csv_path,
+                review_status=r_stat
+            )
+            worker.log_message.emit(f"Rescheduling Report saved: {md_path} and {csv_path}")
+            return f"Rescheduling report generated successfully ({res['total_moved_items']} moved items)"
+
+        self._run_worker(_work, "Generating Rescheduling Report...")
+
+    @Slot()
+    def open_rescheduling_report_markdown(self):
+        """Opens generated rescheduling report markdown file."""
+        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"Report file does not exist: {path}. Please generate it first.")
+
+    @Slot()
+    def open_rescheduling_report_csv(self):
+        """Opens generated rescheduling report CSV file."""
+        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"Report file does not exist: {path}. Please generate it first.")
 
     def _run_worker(self, task_func, busy_msg):
         logger.info(f"Starting background task: {busy_msg}")
@@ -2400,6 +2646,125 @@ class DevOpsBackend(QObject):
             self.milestonesChanged.emit()
             self.workloadMatrixChanged.emit()
         return res
+
+    @Slot(result=list)
+    def get_repo_categories(self):
+        """Returns all repo categories from database."""
+        if self._cache_db:
+            return self._cache_db.get_repo_categories()
+        return []
+
+    @Slot(str, str, str, int, bool, result=dict)
+    def save_repo_category(self, name, color, bg_color="", sort_order=0, is_default=False):
+        """Creates or updates a repository category in the database."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return {"success": False, "error": "Category name is required"}
+        try:
+            res = self._cache_db.save_repo_category(clean_name, color, bg_color, sort_order, is_default)
+            if res:
+                self.repoCategoriesChanged.emit()
+                self._recalculate_repo_categories()
+                return {"success": True, "name": clean_name}
+            return {"success": False, "error": "Failed to save category"}
+        except Exception as e:
+            logger.error(f"Error saving repo category: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, result=bool)
+    def delete_repo_category(self, name):
+        """Deletes a repository category from database."""
+        if not self._cache_db:
+            return False
+        res = self._cache_db.delete_repo_category(name)
+        if res:
+            self.repoCategoriesChanged.emit()
+            self._recalculate_repo_categories()
+        return res
+
+    @Slot(result=list)
+    def get_repo_prefix_rules(self):
+        """Returns all repo prefix rules."""
+        if self._cache_db:
+            return self._cache_db.get_repo_prefix_rules()
+        return []
+
+    @Slot(str, str, result=dict)
+    def save_repo_prefix_rule(self, prefix, category):
+        """Creates or updates a repository prefix rule."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        clean_prefix = (prefix or "").strip()
+        clean_cat = (category or "").strip()
+        if not clean_prefix or not clean_cat:
+            return {"success": False, "error": "Prefix and Category are required"}
+        try:
+            res = self._cache_db.save_repo_prefix_rule(clean_prefix, clean_cat)
+            if res:
+                self.repoCategoriesChanged.emit()
+                self._recalculate_repo_categories()
+                return {"success": True}
+            return {"success": False, "error": "Failed to save prefix rule"}
+        except Exception as e:
+            logger.error(f"Error saving prefix rule: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, result=bool)
+    def delete_repo_prefix_rule(self, prefix):
+        """Deletes a repository prefix rule."""
+        if not self._cache_db:
+            return False
+        res = self._cache_db.delete_repo_prefix_rule(prefix)
+        if res:
+            self.repoCategoriesChanged.emit()
+            self._recalculate_repo_categories()
+        return res
+
+    @Slot(result=list)
+    def get_repo_category_overrides(self):
+        """Returns all explicit repo category overrides."""
+        if self._cache_db:
+            overrides = self._cache_db.get_repo_category_overrides()
+            return [{"repo_name": k, "category": v} for k, v in overrides.items()]
+        return []
+
+    @Slot(str, str, result=bool)
+    def set_repo_category(self, repo_name, category):
+        """Sets or updates the category of a specific repository."""
+        if not self._cache_db or not repo_name or not category:
+            return False
+        res = self._cache_db.save_repo_category_override(repo_name, category)
+        if res:
+            for r in self._repositories:
+                if r.get("name") == repo_name:
+                    r["category"] = category
+            self.repositoriesChanged.emit()
+            self.repoCategoriesChanged.emit()
+        return res
+
+    @Slot(str, result=bool)
+    def delete_repo_category_override(self, repo_name):
+        """Removes the explicit category assignment of a repository."""
+        if not self._cache_db or not repo_name:
+            return False
+        res = self._cache_db.delete_repo_category_override(repo_name)
+        if res:
+            self._recalculate_repo_categories()
+            self.repositoriesChanged.emit()
+            self.repoCategoriesChanged.emit()
+        return res
+
+    def _recalculate_repo_categories(self):
+        """Recalculates category property on all cached repositories in memory."""
+        if not self._repositories or not self._cache_db:
+            return
+        cfg = self._cache_db.get_full_repo_category_config()
+        for r in self._repositories:
+            rname = r.get("name", "")
+            r["category"] = utils.categorize_repository(rname, config=cfg, cache_db=self._cache_db)
+        self.repositoriesChanged.emit()
 
     @Slot(str, str, str, result=dict)
     def test_tfs_connection(self, url, collection, pat):

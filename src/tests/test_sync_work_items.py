@@ -223,6 +223,78 @@ class TestSyncWorkItems(unittest.TestCase):
         self.assertTrue(wi_302["deleted"])
         self.assertEqual(wi_302["Title"], "Old Title 302")
 
+    def test_query_work_item_ids_wiql_tree_links(self):
+        mock_tree_response = {
+            "queryType": "tree",
+            "queryResultType": "workItemLink",
+            "workItemRelations": [
+                {"rel": None, "source": None, "target": {"id": 100, "url": "https://.../100"}},
+                {"rel": "System.LinkTypes.Hierarchy-Forward", "source": {"id": 100, "url": "https://.../100"}, "target": {"id": 200, "url": "https://.../200"}},
+                {"rel": "System.LinkTypes.Hierarchy-Forward", "source": {"id": 200, "url": "https://.../200"}, "target": {"id": 300, "url": "https://.../300"}},
+            ]
+        }
+        self.handler._request = MagicMock(return_value=(mock_tree_response, 200))
+
+        ids = self.handler.query_work_item_ids_wiql("TEST_PROJECT", query="SELECT [System.Id] FROM WorkItemLinks")
+        self.assertEqual(sorted(ids), [100, 200, 300])
+
+    def test_query_work_item_hierarchy_wiql(self):
+        mock_tree_response = {
+            "queryType": "tree",
+            "queryResultType": "workItemLink",
+            "workItemRelations": [
+                {"rel": "System.LinkTypes.Hierarchy-Forward", "source": {"id": 10, "url": "https://.../10"}, "target": {"id": 20, "url": "https://.../20"}},
+            ]
+        }
+        self.handler._request = MagicMock(return_value=(mock_tree_response, 200))
+
+        relations = self.handler.query_work_item_hierarchy_wiql("TEST_PROJECT")
+        self.assertEqual(len(relations), 1)
+        self.assertEqual(relations[0]["source"]["id"], 10)
+        self.assertEqual(relations[0]["target"]["id"], 20)
+
+    def test_sync_work_items_auto_fetches_missing_parents(self):
+        # Child Task 600 references Parent Story 500 via System.Parent
+        # Story 500 references Epic 400 via Hierarchy-Reverse relation
+        # Initial query only returns Child Task 600
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[600])
+
+        def batch_side_effect(chunk, expand=None, chunk_size=200):
+            res = []
+            for cid in chunk:
+                if cid == 600:
+                    res.append({
+                        "id": 600,
+                        "fields": {"System.Title": "Child Task 600", "System.WorkItemType": "Task", "System.State": "Active", "System.Parent": 500},
+                        "relations": [{"rel": "System.LinkTypes.Hierarchy-Reverse", "url": "https://.../500"}]
+                    })
+                elif cid == 500:
+                    res.append({
+                        "id": 500,
+                        "fields": {"System.Title": "Parent Story 500", "System.WorkItemType": "User Story", "System.State": "Active"},
+                        "relations": [{"rel": "System.LinkTypes.Hierarchy-Reverse", "url": "https://.../400"}]
+                    })
+                elif cid == 400:
+                    res.append({
+                        "id": 400,
+                        "fields": {"System.Title": "Grandparent Epic 400", "System.WorkItemType": "Epic", "System.State": "Active"},
+                        "relations": []
+                    })
+            return res
+
+        self.handler.get_work_items_batch = MagicMock(side_effect=batch_side_effect)
+
+        summary = self.handler.sync_work_items(self.cache, project_id="TEST_PROJECT")
+
+        # All 3 (600, 500, 400) should be synced
+        self.assertEqual(summary["synced"], 3)
+        self.assertIsNotNone(self.cache.get_work_item(600))
+        self.assertIsNotNone(self.cache.get_work_item(500))
+        self.assertIsNotNone(self.cache.get_work_item(400))
+        self.assertEqual(self.cache.get_work_item(500)["Title"], "Parent Story 500")
+        self.assertEqual(self.cache.get_work_item(400)["Title"], "Grandparent Epic 400")
+
 
 if __name__ == "__main__":
     unittest.main()
+

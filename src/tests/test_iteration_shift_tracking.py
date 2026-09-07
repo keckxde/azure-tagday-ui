@@ -107,6 +107,54 @@ class TestIterationShiftTracking(unittest.TestCase):
         self.assertEqual(metrics["most_delayed_item"]["shift_count"], 2)
         self.assertEqual(len(metrics["top_delayed_items"]), 2)
 
+    def test_is_scheduled_sprint(self):
+        from src.azure.azure_db import _is_scheduled_sprint
+        self.assertTrue(_is_scheduled_sprint("Project\\week-2631"))
+        self.assertTrue(_is_scheduled_sprint("Sprint 2026-31"))
+        self.assertTrue(_is_scheduled_sprint("Iteration 4"))
+        self.assertTrue(_is_scheduled_sprint("week-2633"))
+        self.assertFalse(_is_scheduled_sprint("Project\\Backlog"))
+        self.assertFalse(_is_scheduled_sprint("Backlog"))
+        self.assertFalse(_is_scheduled_sprint("Unassigned"))
+        self.assertFalse(_is_scheduled_sprint(""))
+        self.assertFalse(_is_scheduled_sprint(None))
+
+    def test_review_status_lifecycle_and_filters(self):
+        self._save_wi(3001, "Story X", "User Story", "Active", "Carol", "P\\week-2630")
+        self.db.update_work_item_iteration(3001, "P\\week-2632", source="user_gui")
+        self.db.update_work_item_iteration(3001, "P\\week-2634", source="user_gui")
+
+        shifts = self.db.get_iteration_shifts(work_item_id=3001)
+        self.assertEqual(len(shifts), 2)
+        # Default status is pending
+        self.assertEqual(shifts[0]["review_status"], "pending")
+        self.assertEqual(shifts[1]["review_status"], "pending")
+
+        # Accept first shift by ID
+        shift_id = shifts[0]["id"]
+        ok = self.db.update_shift_review_status(shift_id, status="accepted", reviewed_by="Lead")
+        self.assertTrue(ok)
+
+        # Query filtered by accepted
+        acc_shifts = self.db.get_iteration_shifts(work_item_id=3001, review_status="accepted")
+        self.assertEqual(len(acc_shifts), 1)
+        self.assertEqual(acc_shifts[0]["id"], shift_id)
+        self.assertEqual(acc_shifts[0]["reviewed_by"], "Lead")
+
+        # Query filtered by pending
+        pend_shifts = self.db.get_iteration_shifts(work_item_id=3001, review_status="pending")
+        self.assertEqual(len(pend_shifts), 1)
+
+        # Accept all shifts for work item 3001
+        self.db.update_work_item_shifts_review_status(3001, status="accepted")
+        acc_all = self.db.get_iteration_shifts(work_item_id=3001, review_status="accepted")
+        self.assertEqual(len(acc_all), 2)
+
+        # Metrics reflects pending/accepted
+        m = self.db.get_shift_metrics()
+        self.assertEqual(m["accepted_shifts_count"], 2)
+        self.assertEqual(m["pending_shifts_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

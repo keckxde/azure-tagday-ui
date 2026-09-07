@@ -54,6 +54,34 @@ def _calculate_sprint_delta_weeks(old_iter, new_iter):
     return 0
 
 
+def _is_scheduled_sprint(iteration_str):
+    """
+    Determines if an iteration path represents an already scheduled sprint/iteration
+    (e.g., 'week-2631', 'Sprint 2026-31', 'Iteration 4') rather than unassigned backlog or project root.
+    """
+    if not iteration_str:
+        return False
+    clean = str(iteration_str).strip().replace("\\", "/").strip("/")
+    if not clean:
+        return False
+    leaf = clean.split("/")[-1].strip()
+    leaf_lower = leaf.lower()
+    if leaf_lower in ("", "backlog", "unassigned", "none", "root", "future"):
+        return False
+
+    import re
+    # Check if leaf contains sprint/week/iteration indicators or year/week numbers
+    if re.search(r'(?:sprint|week|iteration|\bw\d{1,2}\b|\b20\d{2}[_\-\s]w?\d{1,2}\b|\b\d{2}\d{2}\b)', leaf, re.IGNORECASE):
+        return True
+
+    # If path has sub-iteration components (more than 1 segment and leaf isn't backlog/root)
+    parts = [p for p in clean.split("/") if p.strip()]
+    if len(parts) > 1 and leaf_lower not in ("backlog", "unassigned", "none"):
+        return True
+
+    return False
+
+
 class AzureDevOpsCache:
     """
     Manages caching of Azure DevOps (TFS) data inside an SQLite database.
@@ -262,8 +290,25 @@ class AzureDevOpsCache:
                 new_sprint TEXT,
                 delta_weeks INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'tfs_sync',
-                recorded_at TEXT NOT NULL
+                recorded_at TEXT NOT NULL,
+                review_status TEXT DEFAULT 'pending',
+                reviewed_at TEXT,
+                reviewed_by TEXT
             )""")
+
+            # Schema migrations for iteration_shifts
+            try:
+                conn.execute("ALTER TABLE iteration_shifts ADD COLUMN review_status TEXT DEFAULT 'pending'")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE iteration_shifts ADD COLUMN reviewed_at TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE iteration_shifts ADD COLUMN reviewed_by TEXT")
+            except Exception:
+                pass
 
             # Table: project_config (stores environment & project configuration previously kept in .env)
             conn.execute("""
@@ -312,6 +357,88 @@ class AzureDevOpsCache:
                     INSERT INTO milestone_categories (id, name, color, bg_color, icon, sort_order)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """, default_cats)
+            except Exception:
+                pass
+
+            # Table: repo_categories
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS repo_categories (
+                name TEXT PRIMARY KEY,
+                color TEXT NOT NULL,
+                bg_color TEXT,
+                sort_order INTEGER DEFAULT 0,
+                is_default INTEGER DEFAULT 0
+            )""")
+
+            # Table: repo_prefix_rules
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS repo_prefix_rules (
+                prefix TEXT PRIMARY KEY,
+                category TEXT NOT NULL
+            )""")
+
+            # Table: repo_category_overrides
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS repo_category_overrides (
+                repo_name TEXT PRIMARY KEY,
+                category TEXT NOT NULL
+            )""")
+
+            # Populate default repo categories if none exist
+            try:
+                rc_count = conn.execute("SELECT COUNT(*) AS c FROM repo_categories").fetchone()["c"]
+                if rc_count == 0:
+                    default_repo_cats = [
+                        ("CORE", "#1f6feb", "#0d2344", 1, 0),
+                        ("CORE APPS", "#238636", "#162b20", 2, 0),
+                        ("GENERIC", "#6e40c9", "#261b4d", 3, 0),
+                        ("3RDPARTY", "#d29922", "#3d2800", 4, 0),
+                        ("OTHERS", "#6e7681", "#21262d", 5, 1),
+                    ]
+                    conn.executemany("""
+                    INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, default_repo_cats)
+
+                    default_rules = [
+                        ("generic-", "GENERIC"),
+                        ("3rdparty-", "3RDPARTY"),
+                    ]
+                    conn.executemany("""
+                    INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
+                    VALUES (?, ?)
+                    """, default_rules)
+
+                    # Merge any additional categories or rules from existing YAML file
+                    try:
+                        import utils
+                        cfg, _ = utils.load_repo_categories()
+                        if cfg and isinstance(cfg, dict):
+                            colors = cfg.get("category_colors", {})
+                            prefix_rules = cfg.get("prefix_rules", {})
+                            repos_map = cfg.get("repositories", {})
+
+                            order = 10
+                            for cname, col in colors.items():
+                                conn.execute("""
+                                INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                                VALUES (?, ?, ?, ?, 0)
+                                """, (cname, col, "", order))
+                                order += 1
+
+                            for pfx, cname in prefix_rules.items():
+                                conn.execute("""
+                                INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
+                                VALUES (?, ?)
+                                """, (pfx, cname))
+
+                            for rname, cname in repos_map.items():
+                                conn.execute("""
+                                INSERT OR IGNORE INTO repo_category_overrides (repo_name, category)
+                                VALUES (?, ?)
+                                """, (rname, cname))
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -617,6 +744,187 @@ class AzureDevOpsCache:
         except Exception:
             return False
 
+    def get_repo_categories(self):
+        """Returns all repository categories sorted by sort_order ascending."""
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("""
+                SELECT name, color, bg_color, sort_order, is_default
+                FROM repo_categories
+                ORDER BY sort_order ASC, name ASC
+                """).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def save_repo_category(self, name, color, bg_color="", sort_order=0, is_default=False):
+        """Creates or updates a repository category."""
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return False
+        clean_color = (color or "#6e7681").strip()
+        clean_bg = (bg_color or "").strip()
+        is_def_val = 1 if is_default else 0
+
+        with self._connection() as conn:
+            if is_def_val:
+                conn.execute("UPDATE repo_categories SET is_default = 0")
+            conn.execute("""
+            INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                color = excluded.color,
+                bg_color = excluded.bg_color,
+                sort_order = excluded.sort_order,
+                is_default = excluded.is_default
+            """, (clean_name, clean_color, clean_bg, int(sort_order or 0), is_def_val))
+        return True
+
+    def delete_repo_category(self, name):
+        """Deletes a repository category and cleans up rules referencing it."""
+        try:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM repo_prefix_rules WHERE category = ?", (str(name),))
+                conn.execute("DELETE FROM repo_category_overrides WHERE category = ?", (str(name),))
+                conn.execute("DELETE FROM repo_categories WHERE name = ?", (str(name),))
+            return True
+        except Exception:
+            return False
+
+    def get_repo_prefix_rules(self):
+        """Returns all repository prefix rules."""
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("""
+                SELECT prefix, category
+                FROM repo_prefix_rules
+                ORDER BY prefix ASC
+                """).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def save_repo_prefix_rule(self, prefix, category):
+        """Creates or updates a repository prefix rule."""
+        clean_prefix = (prefix or "").strip().lower()
+        clean_cat = (category or "").strip()
+        if not clean_prefix or not clean_cat:
+            return False
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO repo_prefix_rules (prefix, category)
+            VALUES (?, ?)
+            ON CONFLICT(prefix) DO UPDATE SET
+                category = excluded.category
+            """, (clean_prefix, clean_cat))
+        return True
+
+    def delete_repo_prefix_rule(self, prefix):
+        """Deletes a repository prefix rule."""
+        try:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM repo_prefix_rules WHERE prefix = ?", (str(prefix),))
+            return True
+        except Exception:
+            return False
+
+    def get_repo_category_overrides(self):
+        """Returns explicit repository category mappings as a dictionary {repo_name: category}."""
+        try:
+            with self._connection() as conn:
+                rows = conn.execute("SELECT repo_name, category FROM repo_category_overrides").fetchall()
+                return {r["repo_name"]: r["category"] for r in rows}
+        except Exception:
+            return {}
+
+    def save_repo_category_override(self, repo_name, category):
+        """Saves an explicit category assignment for a repository."""
+        clean_name = (repo_name or "").strip()
+        clean_cat = (category or "").strip()
+        if not clean_name or not clean_cat:
+            return False
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO repo_category_overrides (repo_name, category)
+            VALUES (?, ?)
+            ON CONFLICT(repo_name) DO UPDATE SET
+                category = excluded.category
+            """, (clean_name, clean_cat))
+        return True
+
+    def delete_repo_category_override(self, repo_name):
+        """Removes explicit category assignment for a repository."""
+        try:
+            with self._connection() as conn:
+                conn.execute("DELETE FROM repo_category_overrides WHERE repo_name = ?", (str(repo_name),))
+            return True
+        except Exception:
+            return False
+
+    def get_full_repo_category_config(self):
+        """Returns the full repository category configuration dictionary compatible with utils.categorize_repository."""
+        cats = self.get_repo_categories()
+        rules = self.get_repo_prefix_rules()
+        overrides = self.get_repo_category_overrides()
+
+        default_cat = "OTHERS"
+        colors = {}
+        for c in cats:
+            cname = c["name"]
+            colors[cname] = c["color"]
+            if c.get("is_default"):
+                default_cat = cname
+
+        prefix_rules = {r["prefix"]: r["category"] for r in rules}
+
+        return {
+            "default_category": default_cat,
+            "category_colors": colors,
+            "prefix_rules": prefix_rules,
+            "repositories": overrides,
+        }
+
+    def save_full_repo_category_config(self, config_dict):
+        """Persists a complete repository categories configuration dictionary into the database."""
+        if not config_dict or not isinstance(config_dict, dict):
+            return False
+        default_cat = config_dict.get("default_category", "OTHERS")
+        colors = config_dict.get("category_colors", {})
+        prefix_rules = config_dict.get("prefix_rules", {})
+        repos_map = config_dict.get("repositories", {})
+
+        with self._connection() as conn:
+            conn.execute("DELETE FROM repo_categories")
+            conn.execute("DELETE FROM repo_prefix_rules")
+            conn.execute("DELETE FROM repo_category_overrides")
+
+            order = 1
+            all_cat_names = list(colors.keys())
+            if default_cat not in all_cat_names:
+                all_cat_names.append(default_cat)
+
+            for cname in all_cat_names:
+                col = colors.get(cname, "#6e7681")
+                is_def = 1 if cname == default_cat else 0
+                conn.execute("""
+                INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                VALUES (?, ?, ?, ?, ?)
+                """, (cname, col, "", order, is_def))
+                order += 1
+
+            for pfx, cname in prefix_rules.items():
+                conn.execute("""
+                INSERT INTO repo_prefix_rules (prefix, category)
+                VALUES (?, ?)
+                """, (pfx, cname))
+
+            for rname, cname in repos_map.items():
+                conn.execute("""
+                INSERT INTO repo_category_overrides (repo_name, category)
+                VALUES (?, ?)
+                """, (rname, cname))
+        return True
+
     def get_last_push_id(self, repo_id):
         """
         Gets the cached push ID of a repository.
@@ -857,9 +1165,9 @@ class AzureDevOpsCache:
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("""
-        INSERT INTO iteration_shifts (work_item_id, title, type, assigned_to, old_iteration, new_iteration, old_sprint, new_sprint, delta_weeks, source, recorded_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (wi_id, title or "", type_str or "", assigned_to or "", old_iter, new_iter, s1 or old_iter, s2 or new_iter, delta, source, now_str))
+        INSERT INTO iteration_shifts (work_item_id, title, type, assigned_to, old_iteration, new_iteration, old_sprint, new_sprint, delta_weeks, source, recorded_at, review_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (wi_id, title or "", type_str or "", assigned_to or "", old_iter, new_iter, s1 or old_iter, s2 or new_iter, delta, source, now_str, "pending"))
 
     def save_work_item(self, wi_id, title, type_str, state, assigned_to, changed_date, raw_json_obj, deleted=0):
         """
@@ -957,45 +1265,116 @@ class AzureDevOpsCache:
             conn.execute("UPDATE work_items SET raw_json = ? WHERE id = ?", (updated_raw, wi_int))
             return True
 
-    def get_iteration_shifts(self, limit=200, work_item_id=None):
+    def update_shift_review_status(self, shift_id, status="accepted", reviewed_by="User"):
+        """
+        Updates the review status of an individual iteration shift event.
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connection() as conn:
+            cur = conn.execute("""
+                UPDATE iteration_shifts 
+                SET review_status = ?, reviewed_at = ?, reviewed_by = ?
+                WHERE id = ?
+            """, (status, now_str if status == "accepted" else None, reviewed_by if status == "accepted" else None, int(shift_id)))
+            return cur.rowcount > 0
+
+    def update_work_item_shifts_review_status(self, work_item_id, status="accepted", reviewed_by="User"):
+        """
+        Updates the review status of all iteration shift events for a specific work item.
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        wi_int = int(str(work_item_id).lstrip("#"))
+        with self._connection() as conn:
+            cur = conn.execute("""
+                UPDATE iteration_shifts 
+                SET review_status = ?, reviewed_at = ?, reviewed_by = ?
+                WHERE work_item_id = ?
+            """, (status, now_str if status == "accepted" else None, reviewed_by if status == "accepted" else None, wi_int))
+            return cur.rowcount > 0
+
+    def update_all_shifts_review_status(self, status="accepted", reviewed_by="User"):
+        """
+        Bulk updates review status for all shift records.
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connection() as conn:
+            cur = conn.execute("""
+                UPDATE iteration_shifts 
+                SET review_status = ?, reviewed_at = ?, reviewed_by = ?
+            """, (status, now_str if status == "accepted" else None, reviewed_by if status == "accepted" else None))
+            return cur.rowcount
+
+    def get_iteration_shifts(self, limit=200, work_item_id=None, review_status=None, sprint_to_sprint_only=False):
         """
         Retrieves recorded iteration shift events ordered by most recent first.
         """
-        query = "SELECT * FROM iteration_shifts"
+        query = "SELECT * FROM iteration_shifts WHERE 1=1"
         params = []
         if work_item_id:
-            query += " WHERE work_item_id = ?"
+            query += " AND work_item_id = ?"
             params.append(int(str(work_item_id).lstrip("#")))
+        if review_status and review_status.lower() in ("pending", "accepted"):
+            query += " AND review_status = ?"
+            params.append(review_status.lower())
         query += " ORDER BY id DESC LIMIT ?"
         params.append(int(limit))
 
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            results = [dict(r) for r in rows]
+            if sprint_to_sprint_only:
+                results = [r for r in results if _is_scheduled_sprint(r.get("old_iteration"))]
+            return results
+
+    def get_sprint_to_sprint_shifts(self, limit=500, review_status=None):
+        """
+        Retrieves iteration shifts where the item was already scheduled to a sprint prior to moving.
+        Filters out initial moves from Backlog to a sprint.
+        """
+        all_shifts = self.get_iteration_shifts(limit=limit, review_status=review_status)
+        return [s for s in all_shifts if _is_scheduled_sprint(s.get("old_iteration"))]
 
     def get_shift_metrics(self):
         """
-        Calculates aggregate iteration shift & postponement statistics.
+        Calculates aggregate iteration shift & postponement statistics, including review policy breakdown.
         """
         with self._connection() as conn:
             shifts = conn.execute("SELECT * FROM iteration_shifts ORDER BY id DESC").fetchall()
-            total_shifts = len(shifts)
-            postponed = sum(1 for s in shifts if (s["delta_weeks"] or 0) > 0)
-            accelerated = sum(1 for s in shifts if (s["delta_weeks"] or 0) < 0)
-            net_delta = sum((s["delta_weeks"] or 0) for s in shifts)
-            affected_wis = len(set(s["work_item_id"] for s in shifts))
+            shift_dicts = [dict(s) for s in shifts]
+            total_shifts = len(shift_dicts)
+            postponed = sum(1 for s in shift_dicts if (s.get("delta_weeks") or 0) > 0)
+            accelerated = sum(1 for s in shift_dicts if (s.get("delta_weeks") or 0) < 0)
+            net_delta = sum((s.get("delta_weeks") or 0) for s in shift_dicts)
+            affected_wis = len(set(s["work_item_id"] for s in shift_dicts))
+
+            pending_count = sum(1 for s in shift_dicts if (s.get("review_status") or "pending") == "pending")
+            accepted_count = sum(1 for s in shift_dicts if (s.get("review_status") or "pending") == "accepted")
+
+            # Sprint-to-sprint stats
+            sprint_to_sprint_shifts = [s for s in shift_dicts if _is_scheduled_sprint(s.get("old_iteration"))]
+            sprint_to_sprint_count = len(sprint_to_sprint_shifts)
+            sprint_to_sprint_delayed_weeks = sum((s.get("delta_weeks") or 0) for s in sprint_to_sprint_shifts)
 
             top_rows = conn.execute("""
                 SELECT work_item_id as id, work_item_id, title, type, assigned_to, 
                        old_sprint, new_sprint, SUM(delta_weeks) as total_delayed_weeks,
-                       COUNT(*) as shift_count, MAX(recorded_at) as last_shift_at
+                       COUNT(*) as shift_count, MAX(recorded_at) as last_shift_at,
+                       SUM(CASE WHEN review_status = 'pending' OR review_status IS NULL THEN 1 ELSE 0 END) as pending_count,
+                       SUM(CASE WHEN review_status = 'accepted' THEN 1 ELSE 0 END) as accepted_count
                 FROM iteration_shifts
                 WHERE delta_weeks > 0
                 GROUP BY work_item_id
                 ORDER BY total_delayed_weeks DESC, shift_count DESC
-                LIMIT 10
+                LIMIT 15
             """).fetchall()
-            top_list = [dict(r) for r in top_rows]
+
+            top_list = []
+            for r in top_rows:
+                rd = dict(r)
+                rd["review_status"] = "accepted" if (rd.get("pending_count") or 0) == 0 else "pending"
+                rd["is_reviewed"] = (rd.get("pending_count") or 0) == 0
+                top_list.append(rd)
+
             most_delayed = top_list[0] if top_list else None
 
             return {
@@ -1006,6 +1385,10 @@ class AzureDevOpsCache:
                 "total_accelerated": accelerated,
                 "net_delay_weeks": net_delta,
                 "net_delayed_weeks": net_delta,
+                "pending_shifts_count": pending_count,
+                "accepted_shifts_count": accepted_count,
+                "sprint_to_sprint_count": sprint_to_sprint_count,
+                "sprint_to_sprint_delayed_weeks": sprint_to_sprint_delayed_weeks,
                 "top_delayed_items": top_list,
                 "top_postponed": top_list,
                 "most_delayed_item": most_delayed

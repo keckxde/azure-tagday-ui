@@ -241,6 +241,28 @@ class AzureInfoHandler(AzureBaseClient):
             return summary
 
         found_ids = set()
+        all_parent_ids = set()
+
+        def _extract_parent_id(wi_data):
+            if not wi_data or not isinstance(wi_data, dict):
+                return None
+            f_map = wi_data.get("fields", {})
+            p_val = f_map.get("System.Parent")
+            if p_val is not None:
+                try:
+                    return int(str(p_val).lstrip("#"))
+                except (ValueError, TypeError):
+                    pass
+            for rel in wi_data.get("relations") or []:
+                rel_name = rel.get("rel") or ""
+                if "Hierarchy-Reverse" in rel_name or rel_name == "Parent" or (rel.get("attributes") or {}).get("name") == "Parent":
+                    url = rel.get("url", "")
+                    if url:
+                        try:
+                            return int(url.rstrip("/").split("/")[-1])
+                        except (ValueError, TypeError):
+                            pass
+            return None
 
         for i in range(0, len(clean_ids), chunk_size):
             chunk = clean_ids[i:i + chunk_size]
@@ -264,6 +286,9 @@ class AzureInfoHandler(AzureBaseClient):
                             deleted=0
                         )
                         summary["synced"] += 1
+                        pid = _extract_parent_id(wi)
+                        if pid:
+                            all_parent_ids.add(pid)
 
                 for tid in chunk:
                     if tid not in found_ids:
@@ -292,6 +317,9 @@ class AzureInfoHandler(AzureBaseClient):
                                 deleted=0
                             )
                             summary["synced"] += 1
+                            pid = _extract_parent_id(wi)
+                            if pid:
+                                all_parent_ids.add(pid)
                         else:
                             logger.warning(" - sync_work_items: #%s not found via API. Marking as deleted.", task_id)
                             cache_db.mark_work_item_deleted(task_id)
@@ -313,6 +341,43 @@ class AzureInfoHandler(AzureBaseClient):
                         else:
                             logger.error(" - sync_work_items: #%s error %s", task_id, e)
                             summary["errors"] += 1
+
+        # Recursively retrieve missing parent / ancestor work items so full hierarchy is stored in database
+        active_db_ids = set(cache_db.get_all_work_item_ids(include_deleted=False)) if hasattr(cache_db, "get_all_work_item_ids") else set()
+        missing_parents = (all_parent_ids - found_ids) - active_db_ids
+        depth = 0
+        while missing_parents and depth < 5:
+            depth += 1
+            p_chunk = list(missing_parents)[:chunk_size]
+            next_level_parents = set()
+            try:
+                p_items = self.get_work_items_batch(p_chunk, expand="all", chunk_size=chunk_size)
+                for p_wi in p_items:
+                    if p_wi and isinstance(p_wi, dict) and "id" in p_wi:
+                        p_id = p_wi["id"]
+                        found_ids.add(p_id)
+                        active_db_ids.add(p_id)
+                        p_fields = p_wi.get("fields", {})
+                        p_assigned = p_fields.get("System.AssignedTo", {})
+                        p_assigned_name = p_assigned.get("displayName", "") if isinstance(p_assigned, dict) else str(p_assigned or "")
+                        cache_db.save_work_item(
+                            p_id,
+                            p_fields.get("System.Title"),
+                            p_fields.get("System.WorkItemType"),
+                            p_fields.get("System.State"),
+                            p_assigned_name,
+                            p_fields.get("System.ChangedDate"),
+                            p_wi,
+                            deleted=0
+                        )
+                        summary["synced"] += 1
+                        grandparent_id = _extract_parent_id(p_wi)
+                        if grandparent_id:
+                            next_level_parents.add(grandparent_id)
+            except Exception as p_err:
+                logger.warning(" - sync_work_items: error fetching missing parent items %s: %s", p_chunk, p_err)
+                break
+            missing_parents = (next_level_parents - found_ids) - active_db_ids
 
         return summary
 

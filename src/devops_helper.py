@@ -161,18 +161,19 @@ def exportReposToMarkdown(aRepos, templateFile, exportFile):
     except Exception as err:
         logger.error(f"Could not Render Template {resolved_template} -> {exportFile}: {err}")
 
-def addCategoriesToRepos(repos, config_path=None, auto_save_missing=True):
+def addCategoriesToRepos(repos, config_path=None, cache_db=None, auto_save_missing=True):
     """
-    Assigns category tags to repositories based on a YAML configuration file.
+    Classifies all repositories in the provided repository dictionary and assigns a `category` attribute
+    to each repository using repository categories stored in the database or `repo_categories.yaml`.
 
     Evaluation order:
-    1. Explicit repository mapping defined in the configuration file (`repositories: { <repo_name>: <category> }`).
+    1. Explicit mapping in `repositories` (e.g. `repo1` -> `Group1`).
     2. Prefix rules defined in `prefix_rules` (e.g. `prefix1-` -> `Group1`, `prefix2-` -> `Group2`).
     3. Default category fallback (`default_category`, defaults to "OTHERS").
 
-    If a repository is not listed in `repositories` in the configuration file, it is automatically
-    classified and added to the configuration mapping. If `auto_save_missing` is True and a writable
-    config file path is found, the configuration file is updated with the new entries.
+    If a repository is not listed in `repositories` in the configuration, it is automatically
+    classified and added to the configuration mapping. If `auto_save_missing` is True, newly discovered
+    entries are saved to the database (if cache_db is provided) or the configuration file.
 
     Args:
         repos (dict): Dictionary of repositories keyed by repository ID or name.
@@ -180,13 +181,14 @@ def addCategoriesToRepos(repos, config_path=None, auto_save_missing=True):
                       or have a "name" attribute directly.
         config_path (str, optional): Explicit path to `repo_categories.yaml`. If None,
                                      searches standard configuration locations.
+        cache_db (AzureDevOpsCache, optional): Cache database instance.
         auto_save_missing (bool, optional): If True, automatically persists newly discovered
-                                            repositories to the configuration file. Defaults to True.
+                                            repositories to database / config. Defaults to True.
 
     Returns:
         dict: The updated `repos` dictionary with the "category" attribute populated for each repository.
     """
-    config, resolved_path = utils.load_repo_categories(custom_path=config_path)
+    config, resolved_path = utils.load_repo_categories(cache_db=cache_db, custom_path=config_path)
     default_cat = config.get("default_category", "OTHERS")
     prefix_rules = config.get("prefix_rules", {})
     repo_map = config.get("repositories", {})
@@ -208,7 +210,7 @@ def addCategoriesToRepos(repos, config_path=None, auto_save_missing=True):
         if repo_name in repo_map:
             category = repo_map[repo_name]
         else:
-            category = utils.categorize_repository(repo_name, config=config)
+            category = utils.categorize_repository(repo_name, config=config, cache_db=cache_db)
             repo_map[repo_name] = category
             missing_added = True
             logger.info(f"Assigned default category '{category}' for missing repo '{repo_name}' in config")
@@ -216,9 +218,13 @@ def addCategoriesToRepos(repos, config_path=None, auto_save_missing=True):
         repos[key]["category"] = category
 
     # Persist updated configuration if missing repositories were added
-    if missing_added and auto_save_missing and resolved_path:
-        config["repositories"] = repo_map
-        utils.save_repo_categories(config, resolved_path)
+    if missing_added and auto_save_missing:
+        if cache_db and hasattr(cache_db, "save_repo_category_override"):
+            for rname, cat in repo_map.items():
+                cache_db.save_repo_category_override(rname, cat)
+        elif resolved_path and resolved_path != "database":
+            config["repositories"] = repo_map
+            utils.save_repo_categories(config, resolved_path)
 
     return repos
 

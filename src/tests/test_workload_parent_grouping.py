@@ -252,5 +252,86 @@ class TestWorkloadParentGrouping(unittest.TestCase):
                     self.assertEqual(data.get("bug_behavior"), "like_user_story")
 
 
+    def test_task_state_relations_and_distribution(self):
+        """Test calculation of not started, active, and closed tasks across matrix and containers."""
+        all_wis_by_id = {
+            100: {
+                "id": 100,
+                "type": "User Story",
+                "title": "Core Feature",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "parent_id": None,
+                "iteration_path": "Project\\week-2636",
+                "sprint_week_name": "week-2636",
+            },
+            101: {
+                "id": 101,
+                "type": "Task",
+                "title": "Task 1 (New)",
+                "state": "New",
+                "assigned_to": "Alice",
+                "parent_id": 100,
+                "iteration_path": "Project\\week-2636",
+                "sprint_week_name": "week-2636",
+            },
+            102: {
+                "id": 102,
+                "type": "Task",
+                "title": "Task 2 (In Progress)",
+                "state": "In Progress",
+                "assigned_to": "Alice",
+                "parent_id": 100,
+                "iteration_path": "Project\\week-2636",
+                "sprint_week_name": "week-2636",
+            },
+            103: {
+                "id": 103,
+                "type": "Task",
+                "title": "Task 3 (Done)",
+                "state": "Done",
+                "assigned_to": "Alice",
+                "parent_id": 100,
+                "iteration_path": "Project\\week-2636",
+                "sprint_week_name": "week-2636",
+            },
+        }
+
+        items_in_cell = [all_wis_by_id[100], all_wis_by_id[101], all_wis_by_id[102], all_wis_by_id[103]]
+        containers = self.backend._group_items_into_containers(
+            items_in_cell, all_wis_by_id, bug_mode="like_user_story"
+        )
+
+        self.assertEqual(len(containers), 1)
+        c100 = containers[0]
+        self.assertEqual(c100["total_tasks_count"], 3)
+        self.assertEqual(c100["tasks_not_started_count"], 1)
+        self.assertEqual(c100["tasks_active_count"], 1)
+        self.assertEqual(c100["tasks_closed_count"], 1)
+        self.assertEqual(c100["progress_percent"], 33)
+
+        # Test matrix overall computation
+        self.backend._work_items = list(all_wis_by_id.values())
+        matrix = self.backend.getWorkloadMatrix(horizon_weeks=4)
+
+        self.assertEqual(matrix["total_tasks"], 3)
+        self.assertEqual(matrix["total_tasks_not_started"], 1)
+        self.assertEqual(matrix["total_tasks_active"], 1)
+        self.assertEqual(matrix["total_tasks_closed"], 1)
+
+        # Check assignee row
+        alice_row = next(r for r in matrix["assignee_rows"] if r["assignee"] == "Alice")
+        self.assertEqual(alice_row["stats"]["tasks_not_started"], 1)
+        self.assertEqual(alice_row["stats"]["tasks_active"], 1)
+        self.assertEqual(alice_row["stats"]["tasks_closed"], 1)
+
+        # Check cell
+        cell_w36 = next(c for c in alice_row["cells"] if "2636" in c["sprint_name"])
+        self.assertEqual(cell_w36["tasks_not_started_count"], 1)
+        self.assertEqual(cell_w36["tasks_active_count"], 1)
+        self.assertEqual(cell_w36["tasks_closed_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
+

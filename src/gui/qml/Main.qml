@@ -67,7 +67,11 @@ ApplicationWindow {
 
     function openMilestonesManager() {
         if (milestonesManagerDialog) {
-            milestonesManagerDialog.openDialog();
+            if (typeof milestonesManagerDialog.openDialog === "function") {
+                milestonesManagerDialog.openDialog();
+            } else if (typeof milestonesManagerDialog.open === "function") {
+                milestonesManagerDialog.open();
+            }
         }
     }
 
