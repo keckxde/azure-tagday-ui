@@ -964,9 +964,16 @@ class DevOpsBackend(QObject):
             return
 
         def _work(worker):
-            worker.log_message.emit("Starting full Azure DevOps sync...")
+            worker.log_message.emit("Checking Azure DevOps / TFS credentials...")
+            azHandler = devops_helper._getHandler()
+            if not azHandler:
+                raise RuntimeError(
+                    "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID. "
+                    "Please check your .env file or Settings view."
+                )
+            worker.log_message.emit("Starting full Azure DevOps sync (repositories, work items, pull requests)...")
             devops_helper.sync(force_sync=True)
-            return "Full synchronization finished"
+            return "Full synchronization finished successfully"
 
         self._run_worker(_work, "Running full sync...")
 

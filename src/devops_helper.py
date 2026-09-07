@@ -284,14 +284,24 @@ def isFileRecent(filePath):
     return False
 
 def _getHandler():
-    if not AZURE_BASE_URL or not AZURE_PERSONAL_ACCESS_TOKEN or not AZURE_PROJECT_ID:
-            logger.warning("ignore this project - no parameters given")
-            return
+    global AZURE_BASE_URL, AZURE_COLLECTION, AZURE_PERSONAL_ACCESS_TOKEN, AZURE_PROJECT_ID
+    base_url = AZURE_BASE_URL or os.getenv('AZURE_BASE_URL', '')
+    collection = AZURE_COLLECTION or os.getenv('AZURE_COLLECTION', 'DefaultCollection')
+    pat = AZURE_PERSONAL_ACCESS_TOKEN or os.getenv('AZURE_PERSONAL_ACCESS_TOKEN', '')
+    project_id = AZURE_PROJECT_ID or os.getenv('AZURE_PROJECT_ID', '')
+
+    if not base_url or not pat or not project_id:
+        missing = []
+        if not base_url: missing.append("AZURE_BASE_URL / TFS URL")
+        if not pat: missing.append("AZURE_PERSONAL_ACCESS_TOKEN / PAT")
+        if not project_id: missing.append("AZURE_PROJECT_ID / Project")
+        logger.warning(f"Azure DevOps / TFS client cannot be created - missing parameters: {', '.join(missing)}")
+        return None
             
-    logger.info(f"get additional information from TFS {AZURE_BASE_URL}/{AZURE_COLLECTION} {AZURE_PROJECT_ID}")
+    logger.info(f"get additional information from TFS {base_url}/{collection} {project_id}")
     
-    azure_url = f"{AZURE_BASE_URL}/{AZURE_COLLECTION}"
-    return AzureInfoHandler(azure_url, AZURE_PERSONAL_ACCESS_TOKEN)
+    azure_url = f"{base_url}/{collection}" if collection else base_url
+    return AzureInfoHandler(azure_url, pat)
     
 def _getDBCacheHandler() -> Tuple[str, AzureDevOpsCache]:
     """
@@ -300,7 +310,9 @@ def _getDBCacheHandler() -> Tuple[str, AzureDevOpsCache]:
     Returns:
         Tuple[str, AzureDevOpsCache]: Database file path and connected cache client.
     """
-    db_path = os.path.join(BASE_FOLDER, f"tfs_cache_{AZURE_PROJECT_ID}.db")
+    global AZURE_PROJECT_ID
+    project_id = AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "default")
+    db_path = os.path.join(BASE_FOLDER, f"tfs_cache_{project_id}.db")
     return db_path, AzureDevOpsCache(db_path)
 
 
@@ -574,9 +586,18 @@ def sync(force_sync: bool = False, run_templates_flag: bool = False) -> None:
         run_templates_flag (bool): If True, render Tag Day templates after sync. Defaults to False.
     """
     azHandler = _getHandler()
+    if not azHandler:
+        error_msg = (
+            "Cannot perform Azure DevOps / TFS synchronization: Azure/TFS client could not be initialized. "
+            "Please configure AZURE_BASE_URL, AZURE_COLLECTION, AZURE_PERSONAL_ACCESS_TOKEN, "
+            "and AZURE_PROJECT_ID in your .env file or Settings."
+        )
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
     repos_all = {}
     
-    db_path,cache_db =_getDBCacheHandler()
+    db_path, cache_db = _getDBCacheHandler()
     if not force_sync and isFileRecent(db_path):
         logger.info(f"Read Repo Details from SQLite Database Cache {db_path}")
         try:

@@ -112,6 +112,12 @@ class TestSyncWorkItems(unittest.TestCase):
         # Verify sync_work_items was called with project_id
         mock_handler.sync_work_items.assert_called_once_with(mock_db, project_id=devops_helper.AZURE_PROJECT_ID)
 
+    @patch("devops_helper._getHandler", return_value=None)
+    def test_devops_helper_sync_missing_handler_raises_runtime_error(self, mock_get_handler):
+        with self.assertRaises(RuntimeError) as ctx:
+            devops_helper.sync(force_sync=True)
+        self.assertIn("Azure/TFS client could not be initialized", str(ctx.exception))
+
     def test_query_work_item_ids_wiql(self):
         mock_response = {
             "workItems": [
