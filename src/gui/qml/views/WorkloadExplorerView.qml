@@ -11,18 +11,61 @@ Item {
     property var matrixData: null
     property var selectedCell: null // { assignee: "...", sprint_name: "...", items: [...] }
     property bool hideClosedTasks: false
+    property string filterLevel1: "ALL"
+    property string filterLevel2: "ALL"
+    property bool prio1Only: false
+    property bool groupedOnly: false
+    property var level1List: ["ALL"]
+    property var level2List: ["ALL"]
+
+    function refreshHierarchyLists() {
+        if (!backend) return;
+        var l1 = backend.workItemLevel1List || [];
+        level1List = ["ALL", "UNGROUPED"].concat(l1);
+        var l2 = backend.workItemLevel2List || [];
+        level2List = ["ALL", "UNGROUPED"].concat(l2);
+    }
 
     function getFilteredContainers(containers) {
         if (!containers) return [];
-        if (!root.hideClosedTasks) return containers;
         var res = [];
         for (var i = 0; i < containers.length; i++) {
             var c = containers[i];
+
+            // Level 1 Sub-System filter
+            if (root.filterLevel1 !== "ALL") {
+                if (root.filterLevel1 === "UNGROUPED" || root.filterLevel1 === "[ UNGROUPED ]") {
+                    if (c.level1_id || c.is_grouped) continue;
+                } else {
+                    if ((c.level1_display || "") !== root.filterLevel1) continue;
+                }
+            }
+
+            // Level 2 Component filter
+            if (root.filterLevel2 !== "ALL") {
+                if (root.filterLevel2 === "UNGROUPED" || root.filterLevel2 === "[ UNGROUPED ]") {
+                    if (c.level2_id || c.is_grouped) continue;
+                } else {
+                    if ((c.level2_display || "") !== root.filterLevel2) continue;
+                }
+            }
+
+            // Prio 1 Focus filter
+            if (root.prio1Only && !c.is_prio1) {
+                continue;
+            }
+
+            // Grouped (PBS) filter
+            if (root.groupedOnly && !c.is_grouped) {
+                continue;
+            }
+
             var openTasks = getFilteredTasks(c.tasks || []);
             // Keep container if it has open child tasks, or if the parent container itself is not done/closed
-            if (openTasks.length > 0 || !c.is_done) {
-                res.push(c);
+            if (root.hideClosedTasks) {
+                if (openTasks.length === 0 && c.is_done) continue;
             }
+            res.push(c);
         }
         return res;
     }
@@ -41,6 +84,7 @@ Item {
 
     function refreshMatrix() {
         if (!backend) return
+        refreshHierarchyLists()
         matrixData = backend.getWorkloadMatrix(root.selectedHorizon)
     }
 
@@ -241,6 +285,184 @@ Item {
                     border.color: "#30363d"
                 }
                 onClicked: root.refreshMatrix()
+            }
+        }
+
+        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Priority Filter Bar ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            // Level 1: Sub-Systems (Epics)
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Sub-System (L1):"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wlLevel1Combo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.level1List
+                    currentIndex: {
+                        var idx = root.level1List.indexOf(root.filterLevel1)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Sub-Systems (L1)" : currentText
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wlLevel1Combo.hovered || wlLevel1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: wlLevel1Combo.displayText
+                        font: wlLevel1Combo.font
+                        color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        root.filterLevel1 = root.level1List[index] || "ALL"
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Level 2: Components (Features)
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Component (L2):"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wlLevel2Combo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.level2List
+                    currentIndex: {
+                        var idx = root.level2List.indexOf(root.filterLevel2)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Components (L2)" : currentText
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wlLevel2Combo.hovered || wlLevel2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: wlLevel2Combo.displayText
+                        font: wlLevel2Combo.font
+                        color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        root.filterLevel2 = root.level2List[index] || "ALL"
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // ⭐ Prio 1 Focus Only Toggle
+            Button {
+                text: root.prio1Only ? "⭐ Prio 1 Focus Only" : "⭐ All Priorities"
+                checkable: true
+                checked: root.prio1Only
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.prio1Only ? "Showing strategic focus Prio 1 items only (OI, MP, SCEN, SPEC, PA, CS, DOC)." : "Click to filter to strategic focus Prio 1 items only."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#f0883e" : "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 135
+                    radius: 6
+                    color: parent.checked ? "#3d2800" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#d29922" : "#30363d"
+                }
+                onClicked: { root.prio1Only = !root.prio1Only }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // 🏷️ Grouped (PBS) Only Toggle
+            Button {
+                text: root.groupedOnly ? "🏷️ Grouped (PBS) Only" : "🏷️ All Groupings"
+                checkable: true
+                checked: root.groupedOnly
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.groupedOnly ? "Showing work items properly grouped with Level 1 & 2 PBS numbers." : "Click to filter to properly grouped PBS items only."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#58a6ff" : "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 145
+                    radius: 6
+                    color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#1f6feb" : "#30363d"
+                }
+                onClicked: { root.groupedOnly = !root.groupedOnly }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Reset Hierarchy Filters
+            Button {
+                visible: root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.prio1Only || root.groupedOnly
+                text: "✖ Reset"
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "#f85149"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 70
+                    radius: 6
+                    color: parent.hovered ? "#3c1e1e" : "#211515"
+                    border.color: "#da3633"
+                }
+                onClicked: {
+                    root.filterLevel1 = "ALL"
+                    root.filterLevel2 = "ALL"
+                    root.prio1Only = false
+                    root.groupedOnly = false
+                }
             }
         }
 
@@ -656,11 +878,13 @@ Item {
                                                         root.selectedCell = {
                                                             assignee: modelData.assignee || "Team Member",
                                                             sprint_name: modelData.sprint_name,
-                                                            total_count: modelData.total_count,
-                                                            stories_count: modelData.stories_count,
-                                                            bugs_count: modelData.bugs_count,
-                                                            tasks_count: modelData.tasks_count,
-                                                            overdue_count: modelData.overdue_count,
+                                                            total_count: modelData.total_count || 0,
+                                                            stories_count: modelData.stories_count || 0,
+                                                            bugs_count: modelData.bugs_count || 0,
+                                                            tasks_count: modelData.tasks_count || 0,
+                                                            overdue_count: modelData.overdue_count || 0,
+                                                            completed_count: modelData.completed_count || 0,
+                                                            grouped_containers: modelData.grouped_containers || [],
                                                             items: modelData.items || []
                                                         }
                                                     }
@@ -917,8 +1141,8 @@ Item {
                     Item { Layout.fillWidth: true }
 
                     Text {
-                        visible: root.hideClosedTasks && root.selectedCell && root.selectedCell.completed_count > 0
-                        text: "✓ " + root.selectedCell.completed_count + " closed hidden"
+                        visible: root.hideClosedTasks && root.selectedCell && (root.selectedCell.completed_count || 0) > 0
+                        text: "✓ " + (root.selectedCell ? (root.selectedCell.completed_count || 0) : 0) + " closed hidden"
                         font.pixelSize: 10
                         color: "#3fb950"
                     }
@@ -955,7 +1179,7 @@ Item {
                         anchors.margins: 12
                         spacing: 10
 
-                        // Container Card Top Header (User Story / Bug / Requirement / Standalone)
+                        // ==================== Parent Information (Line 1: Type, ID, Title, Owner, State) ====================
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
@@ -967,17 +1191,19 @@ Item {
                                     text: {
                                         var t = (modelData.type || "").toLowerCase();
                                         if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "🐛";
+                                        if (t.indexOf("feature") !== -1) return "🎯";
+                                        if (t.indexOf("epic") !== -1) return "👑";
                                         if (t.indexOf("req") !== -1) return "📋";
-                                        if (t.indexOf("standalone") !== -1) return "🛠️";
-                                        return "🎯";
+                                        if (t.indexOf("standalone") !== -1 || modelData.id === 0) return "🛠️";
+                                        return "📘";
                                     }
-                                    font.pixelSize: 15
+                                    font.pixelSize: 14
                                 }
 
                                 Text {
                                     text: modelData.id > 0 ? ("#" + modelData.id) : "Direct"
                                     font.family: "Consolas, monospace"
-                                    font.pixelSize: 13
+                                    font.pixelSize: 12
                                     font.weight: Font.Bold
                                     color: modelData.id > 0 ? "#58a6ff" : "#8b949e"
 
@@ -1011,53 +1237,98 @@ Item {
                                 }
                             }
 
+                            // Prio 1 Strategic Focus Badge
+                            Rectangle {
+                                visible: !!modelData.is_prio1
+                                implicitHeight: 20
+                                implicitWidth: cPrioText.implicitWidth + 10
+                                radius: 4
+                                color: "#3d2800"
+                                border.color: "#d29922"
+                                border.width: 1
+                                Text {
+                                    id: cPrioText
+                                    anchors.centerIn: parent
+                                    text: modelData.prio_badge || "⭐ Prio 1"
+                                    font.pixelSize: 9
+                                    font.weight: Font.Bold
+                                    color: "#f0883e"
+                                }
+                            }
+
+                            // Parent Title (primary and bold)
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.title || ""
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 13
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                                elide: Text.ElideRight
+
+                                ToolTip.visible: cardTitleMa.containsMouse && (modelData.title || "").length > 35
+                                ToolTip.text: (modelData.title || "") + "\n(Click to open in TFS)"
+
+                                MouseArea {
+                                    id: cardTitleMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: {
+                                        if (backend && (modelData.tfs_url || "") !== "") {
+                                            backend.open_url(modelData.tfs_url)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Owner / Assignee pill
+                            Rectangle {
+                                implicitHeight: 20
+                                implicitWidth: cOwnerText.implicitWidth + 12
+                                radius: 10
+                                color: "#161b22"
+                                border.color: "#30363d"
+                                Text {
+                                    id: cOwnerText
+                                    anchors.centerIn: parent
+                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                    font.pixelSize: 10
+                                    color: "#c9d1d9"
+                                }
+                            }
+
                             // State badge
                             Rectangle {
                                 visible: modelData.id > 0
                                 implicitHeight: 20
-                                implicitWidth: cStateLabel.implicitWidth + 10
+                                implicitWidth: cStateLabel.implicitWidth + 12
                                 radius: 10
-                                color: modelData.is_done ? "#0d3525" : "#161b22"
-                                border.color: modelData.is_done ? "#3fb950" : "#30363d"
+                                color: modelData.is_done ? "#0d3525" : (modelData.state === "Proposed" ? "#2d2006" : "#161b22")
+                                border.color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#30363d")
                                 Text {
                                     id: cStateLabel
                                     anchors.centerIn: parent
                                     text: modelData.state || "Active"
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
-                                    color: modelData.is_done ? "#3fb950" : "#d29922"
+                                    color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#58a6ff")
                                 }
                             }
+                        }
 
-                            // External Parent Indicator if assigned to someone else
-                            Rectangle {
-                                visible: !modelData.is_parent_in_cell && modelData.id > 0
-                                implicitHeight: 20
-                                implicitWidth: extParentText.implicitWidth + 10
-                                radius: 10
-                                color: "#1a1e24"
-                                border.color: "#30363d"
-                                Text {
-                                    id: extParentText
-                                    anchors.centerIn: parent
-                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
-                                    font.pixelSize: 9
-                                    color: "#8b949e"
-                                }
-                                ToolTip.visible: extMa.containsMouse
-                                ToolTip.text: "Parent Story is assigned to " + modelData.assigned_to
-                                MouseArea { id: extMa; anchors.fill: parent; hoverEnabled: true }
-                            }
+                        // ==================== Metadata & Schedule (Line 2: Iteration, Deadline, PBS Breadcrumbs) ====================
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
-                            Item { Layout.fillWidth: true }
-
-                            // Move Sprint Pill (for parent story/bug)
+                            // Move / Planned Iteration Pill
                             Rectangle {
                                 visible: modelData.id > 0
                                 implicitHeight: 22
                                 implicitWidth: cSprintRow.implicitWidth + 12
                                 radius: 11
-                                color: "#21262d"
+                                color: "#161b22"
                                 border.color: cEditSprintMa.containsMouse ? "#58a6ff" : "#30363d"
                                 border.width: 1
 
@@ -1065,15 +1336,16 @@ Item {
                                     id: cSprintRow
                                     anchors.centerIn: parent
                                     spacing: 4
+                                    Text { text: "🔄"; font.pixelSize: 10 }
                                     Text {
-                                        text: "🔄 " + (modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : (root.selectedCell ? root.selectedCell.sprint_name : "Sprint"))
+                                        text: modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : (root.selectedCell ? root.selectedCell.sprint_name : "Sprint")
                                         font.pixelSize: 10
                                         font.weight: Font.DemiBold
                                         color: "#58a6ff"
                                     }
                                 }
                                 ToolTip.visible: cEditSprintMa.containsMouse
-                                ToolTip.text: "Reschedule Parent Story / Container to another sprint"
+                                ToolTip.text: "Planned Iteration: " + (modelData.iteration_path || "Sprint") + "\n(Click to reschedule)"
 
                                 MouseArea {
                                     id: cEditSprintMa
@@ -1090,7 +1362,7 @@ Item {
                                 }
                             }
 
-                            // Deadline Pill (for parent story/bug)
+                            // Deadline Pill
                             Rectangle {
                                 visible: modelData.id > 0
                                 implicitHeight: 22
@@ -1106,7 +1378,7 @@ Item {
                                     anchors.centerIn: parent
                                     spacing: 4
                                     Text {
-                                        text: parent.parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "➕ Date"
+                                        text: parent.parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "➕ Set Date"
                                         font.pixelSize: 10
                                         font.weight: Font.DemiBold
                                         color: modelData.urgency_color || "#8b949e"
@@ -1130,28 +1402,52 @@ Item {
                                     }
                                 }
                             }
-                        }
 
-                        // Container Title
-                        Text {
-                            Layout.fillWidth: true
-                            text: modelData.title || ""
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 13
-                            font.weight: Font.Bold
-                            color: "#f0f6fc"
-                            wrapMode: Text.WordWrap
-
-                            MouseArea {
-                                id: cardHeaderMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                onClicked: {
-                                    if (backend && (modelData.tfs_url || "") !== "") {
-                                        backend.open_url(modelData.tfs_url)
-                                    }
+                            // Hierarchy / PBS Breadcrumb Chip
+                            Rectangle {
+                                visible: (modelData.level1_display || "") !== "" && modelData.level1_display !== "Ungrouped Sub-System"
+                                implicitHeight: 20
+                                implicitWidth: cHierarchyText.implicitWidth + 10
+                                radius: 4
+                                color: "#161b22"
+                                border.color: modelData.is_grouped ? "#30363d" : "#da3633"
+                                border.width: 1
+                                Text {
+                                    id: cHierarchyText
+                                    anchors.centerIn: parent
+                                    text: "🏷️ " + (modelData.level1_display || "") + ((modelData.level2_display && modelData.level2_display !== "Ungrouped Component") ? (" › " + modelData.level2_display) : "")
+                                    font.pixelSize: 9
+                                    color: modelData.is_grouped ? "#8b949e" : "#f85149"
+                                    elide: Text.ElideRight
                                 }
+                            }
+
+                            // Ungrouped Warning Chip
+                            Rectangle {
+                                visible: modelData.id > 0 && !modelData.is_grouped && ((modelData.level1_display || "") === "" || modelData.level1_display === "Ungrouped Sub-System")
+                                implicitHeight: 20
+                                implicitWidth: cUngroupedText.implicitWidth + 8
+                                radius: 4
+                                color: "#2d1515"
+                                border.color: "#da3633"
+                                border.width: 1
+                                Text {
+                                    id: cUngroupedText
+                                    anchors.centerIn: parent
+                                    text: "⚠️ Ungrouped (No PBS)"
+                                    font.pixelSize: 9
+                                    color: "#f85149"
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            // Tasks summary count
+                            Text {
+                                visible: (modelData.total_tasks_count || 0) > 0
+                                text: (modelData.completed_tasks_count || 0) + " / " + (modelData.total_tasks_count || 0) + " tasks done (" + (modelData.progress_percent || 0) + "%)"
+                                font.pixelSize: 10
+                                color: modelData.progress_percent === 100 ? "#3fb950" : "#8b949e"
                             }
                         }
 

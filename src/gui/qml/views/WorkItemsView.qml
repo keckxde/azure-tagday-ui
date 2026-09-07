@@ -12,6 +12,10 @@ Item {
     property string filterModified: "ALL"    // "ALL", "7", "14", "30" (days)
     property string filterIteration: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific iteration name
     property string filterUrgency: "ALL"     // "ALL", "OVERDUE", "DUE_THIS_WEEK", "DUE_NEXT_WEEK", "FUTURE", "COMPLETED"
+    property string filterLevel1: "ALL"      // "ALL", "UNGROUPED", or specific Level 1 (Epic) display name
+    property string filterLevel2: "ALL"      // "ALL", "UNGROUPED", or specific Level 2 (Feature) display name
+    property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
+    property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
     property int currentPage: 1
     property int pageSize: 25
     property int totalPages: 1
@@ -22,6 +26,20 @@ Item {
     property var statesList: []
     property var assigneesList: ["ALL"]
     property var iterationsList: ["ALL"]
+    property var level1List: ["ALL"]
+    property var level2List: ["ALL"]
+
+    property var priorityOptions: [
+        { label: "All Priorities", value: "ALL" },
+        { label: "⭐ Prio 1 Focus Only", value: "PRIO1" },
+        { label: "Standard Items", value: "STANDARD" }
+    ]
+
+    property var groupingOptions: [
+        { label: "All Groupings", value: "ALL" },
+        { label: "🏷️ Grouped (PBS)", value: "GROUPED" },
+        { label: "⚠️ Ungrouped", value: "UNGROUPED" }
+    ]
 
     property var urgencyOptions: [
         { label: "All Deadlines", value: "ALL" },
@@ -62,6 +80,14 @@ Item {
         iterationsList = ["ALL", "PLANNED", "UNPLANNED"].concat(iters)
     }
 
+    function refreshHierarchyLists() {
+        if (!backend) return
+        var l1 = backend.workItemLevel1List || []
+        level1List = ["ALL", "UNGROUPED"].concat(l1)
+        var l2 = backend.workItemLevel2List || []
+        level2List = ["ALL", "UNGROUPED"].concat(l2)
+    }
+
     function resetAllFilters() {
         root.searchQuery = ""
         root.filterState = "ALL"
@@ -70,11 +96,15 @@ Item {
         root.filterModified = "ALL"
         root.filterIteration = "ALL"
         root.filterUrgency = "ALL"
+        root.filterLevel1 = "ALL"
+        root.filterLevel2 = "ALL"
+        root.filterPriority = "ALL"
+        root.filterGrouping = "ALL"
         root.currentPage = 1
         root.updateFilteredModel()
     }
 
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL"
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -597,6 +627,186 @@ Item {
             }
         }
 
+        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Priority Filter Row ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            // Level 1: Sub-Systems (Epics)
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Sub-System (L1):"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: level1Combo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.level1List
+                    currentIndex: {
+                        var idx = root.level1List.indexOf(root.filterLevel1)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Sub-Systems (L1)" : currentText
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: level1Combo.displayText
+                        font: level1Combo.font
+                        color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        root.filterLevel1 = root.level1List[index] || "ALL"
+                        root.currentPage = 1
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Level 2: Components (Features)
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Component (L2):"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: level2Combo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.level2List
+                    currentIndex: {
+                        var idx = root.level2List.indexOf(root.filterLevel2)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Components (L2)" : currentText
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 24
+                        text: level2Combo.displayText
+                        font: level2Combo.font
+                        color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    onActivated: function(index) {
+                        root.filterLevel2 = root.level2List[index] || "ALL"
+                        root.currentPage = 1
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Priority Focus Filter (OI, MP, SCEN, SPEC, PA, CS, DOC)
+            RowLayout {
+                spacing: 4
+                Text {
+                    text: "Priority:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+                Repeater {
+                    model: root.priorityOptions
+                    Button {
+                        text: modelData.label
+                        checkable: true
+                        checked: root.filterPriority === modelData.value
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? (modelData.value === "PRIO1" ? "#f0883e" : "#ffffff") : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26
+                            implicitWidth: pLabel.implicitWidth + 18
+                            radius: 13
+                            color: parent.checked ? (modelData.value === "PRIO1" ? "#3d2800" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? (modelData.value === "PRIO1" ? "#d29922" : "#388bfd") : "#30363d"
+                            Text { id: pLabel; text: parent.parent.text; visible: false }
+                        }
+                        onClicked: {
+                            root.filterPriority = modelData.value
+                            root.currentPage = 1
+                        }
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // PBS Grouping Filter
+            RowLayout {
+                spacing: 4
+                Text {
+                    text: "PBS:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+                Repeater {
+                    model: root.groupingOptions
+                    Button {
+                        text: modelData.label
+                        checkable: true
+                        checked: root.filterGrouping === modelData.value
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 26
+                            implicitWidth: gLabel.implicitWidth + 18
+                            radius: 13
+                            color: parent.checked ? (modelData.value === "UNGROUPED" ? "#3c1e1e" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? (modelData.value === "UNGROUPED" ? "#da3633" : "#388bfd") : "#30363d"
+                            Text { id: gLabel; text: parent.parent.text; visible: false }
+                        }
+                        onClicked: {
+                            root.filterGrouping = modelData.value
+                            root.currentPage = 1
+                        }
+                    }
+                }
+            }
+        }
+
         // ====================== Table Header ======================
         Rectangle {
             Layout.fillWidth: true
@@ -730,10 +940,50 @@ Item {
                             }
                         }
 
-                        // Title & Shift Badge
+                        // Title, Hierarchy Path & Badges
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 6
+
+                            // Prio 1 Strategic Focus Badge
+                            Rectangle {
+                                implicitHeight: 18
+                                implicitWidth: prioBadgeText.implicitWidth + 8
+                                radius: 4
+                                visible: !!model.is_prio1
+                                color: "#3d2800"
+                                border.color: "#d29922"
+                                border.width: 1
+
+                                Text {
+                                    id: prioBadgeText
+                                    anchors.centerIn: parent
+                                    text: model.prio_badge || "⭐ Prio 1"
+                                    font.pixelSize: 9
+                                    font.weight: Font.Bold
+                                    color: "#f0883e"
+                                }
+                            }
+
+                            // Hierarchy (L1 / L2 PBS) Breadcrumb Chip
+                            Rectangle {
+                                implicitHeight: 18
+                                implicitWidth: hBadgeText.implicitWidth + 8
+                                radius: 4
+                                visible: (model.level1_display || "") !== "" && model.level1_display !== "Ungrouped Sub-System"
+                                color: "#161b22"
+                                border.color: model.is_grouped ? "#30363d" : "#da3633"
+                                border.width: 1
+
+                                Text {
+                                    id: hBadgeText
+                                    anchors.centerIn: parent
+                                    text: (model.level1_display || "") + ((model.level2_display && model.level2_display !== "Ungrouped Component") ? (" › " + model.level2_display) : "")
+                                    font.pixelSize: 9
+                                    color: model.is_grouped ? "#8b949e" : "#f85149"
+                                    elide: Text.ElideRight
+                                }
+                            }
 
                             Text {
                                 Layout.fillWidth: true
@@ -743,39 +993,6 @@ Item {
                                 color: model.deleted ? "#8b949e" : "#f0f6fc"
                                 font.strikeout: model.deleted
                                 elide: Text.ElideRight
-                            }
-
-                            // Shift / Delay indicator badge
-                            Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: sBadgeText.implicitWidth + 10
-                                radius: 9
-                                visible: (model.shift_badge || "") !== ""
-                                color: "#3c1e1e"
-                                border.color: "#da3633"
-                                border.width: 1
-
-                                Text {
-                                    id: sBadgeText
-                                    anchors.centerIn: parent
-                                    text: model.shift_badge || ""
-                                    font.pixelSize: 9
-                                    font.weight: Font.Bold
-                                    color: "#f85149"
-                                }
-
-                                ToolTip.visible: sBadgeMa.containsMouse
-                                ToolTip.text: "Iteration Shift History:\nThis item has been postponed or moved " + (model.shift_count || 1) + " time(s).\nTotal Delay: +" + (model.total_delayed_weeks || 0) + " week(s)."
-
-                                MouseArea {
-                                    id: sBadgeMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        iterationModal.openForWorkItem(model.id, model.title, model.iteration_name);
-                                    }
-                                }
                             }
                         }
 
@@ -790,7 +1007,7 @@ Item {
                             elide: Text.ElideRight
                         }
 
-                        // Iteration Pill (Clickable / Reschedule)
+                        // Iteration Pill
                         Rectangle {
                             Layout.preferredWidth: 125
                             height: 24
@@ -798,18 +1015,12 @@ Item {
                             color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : "#21262d") : (model.is_iteration_planned ? "#0d2344" : "#161b22")
                             border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : "#30363d")
                             border.width: 1
-
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 8
                                 anchors.rightMargin: 8
                                 spacing: 4
-
-                                Text {
-                                    text: model.is_iteration_planned ? "🎯" : "📋"
-                                    font.pixelSize: 10
-                                }
-
+                                Text { text: model.is_iteration_planned ? "🎯" : "📋"; font.pixelSize: 10 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: model.is_iteration_planned ? (model.iteration_name || "Planned") : (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST" ? model.iteration_name : "Unplanned")
@@ -819,37 +1030,11 @@ Item {
                                     color: model.is_iteration_planned ? "#58a6ff" : "#8b949e"
                                     elide: Text.ElideRight
                                 }
-
-                                Text {
-                                    visible: iterMa.containsMouse
-                                    text: "✏️"
-                                    font.pixelSize: 9
-                                }
                             }
-
-                            ToolTip.visible: iterMa.containsMouse
-                            ToolTip.text: {
-                                var txt = "";
-                                if (model.is_iteration_planned) {
-                                    txt = "Planned Iteration: " + (model.iteration_name || "Sprint") + "\nPath: " + (model.iteration_path || model.iteration_name);
-                                } else {
-                                    txt = "Not planned in an iteration\nPath: " + (model.iteration_path || "Project Root / Backlog");
-                                }
-                                return txt + "\n(Click to reschedule / move sprint)";
-                            }
-
-                            MouseArea {
-                                id: iterMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    iterationModal.openForWorkItem(model.id, model.title, model.iteration_name);
-                                }
-                            }
+                            MouseArea { id: iterMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: iterationModal.openForWorkItem(model.id, model.title, model.iteration_name); }
                         }
 
-                        // Deadline & Urgency Pill (Clickable / Editable)
+                        // Deadline Pill
                         Rectangle {
                             Layout.preferredWidth: 115
                             height: 22
@@ -859,39 +1044,10 @@ Item {
                             color: deadMa.containsMouse ? (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.25) : "#21262d") : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15) : "#161b22")
                             border.color: deadMa.containsMouse ? "#58a6ff" : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5) : "#30363d")
                             border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 4
-
-                                Text {
-                                    text: parent.parent.hasDeadline ? (model.urgency_badge || model.deadline_str || "—") : "➕ Set Date"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 10
-                                    font.weight: parent.parent.hasDeadline ? Font.DemiBold : Font.Normal
-                                    color: parent.parent.hasDeadline ? parent.parent.uColor : (deadMa.containsMouse ? "#58a6ff" : "#8b949e")
-                                    elide: Text.ElideRight
-                                }
-
-                                Text {
-                                    visible: deadMa.containsMouse && parent.parent.hasDeadline
-                                    text: "✏️"
-                                    font.pixelSize: 9
-                                }
+                            RowLayout { anchors.centerIn: parent; spacing: 4
+                                Text { text: parent.parent.hasDeadline ? (model.urgency_badge || model.deadline_str || "—") : "➕ Set Date"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; color: parent.parent.hasDeadline ? parent.parent.uColor : "#8b949e"; elide: Text.ElideRight }
                             }
-
-                            ToolTip.visible: deadMa.containsMouse
-                            ToolTip.text: parent.hasDeadline ? ("Milestone Deadline: " + model.deadline_str + "\nTarget Date: " + (model.target_date || "N/A") + "\n(Click to change or clear)") : "No deadline set (Click to set deadline)"
-
-                            MouseArea {
-                                id: deadMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, "");
-                                }
-                            }
+                            MouseArea { id: deadMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, ""); }
                         }
 
                         // Assigned To
@@ -908,85 +1064,46 @@ Item {
                         Item {
                             Layout.preferredWidth: 75
                             height: 22
-
                             Row {
                                 spacing: 5
                                 anchors.verticalCenter: parent.verticalCenter
-
-                                // PR count pill
                                 Rectangle {
                                     width: prRefText.implicitWidth + 12
                                     height: 20
                                     radius: 10
+                                    color: (model.linked_pr_count || 0) > 0 ? "#1f6feb" : "#21262d"
                                     visible: (model.linked_pr_count || 0) > 0
-                                    color: "#0d2344"
-                                    border.color: "#1f6feb"
-                                    border.width: 1
-                                    Text {
-                                        id: prRefText
-                                        anchors.centerIn: parent
-                                        text: "🔀 " + (model.linked_pr_count || 0)
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        font.weight: Font.DemiBold
-                                        color: "#58a6ff"
-                                    }
-                                    ToolTip.visible: prRefMa.containsMouse && (model.linked_pr_count || 0) > 0
-                                    ToolTip.text: (model.linked_pr_count || 0) + " PR(s) reference this work item"
-                                    MouseArea {
-                                        id: prRefMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: { expanded = !expanded }
-                                    }
+                                    Text { id: prRefText; anchors.centerIn: parent; text: "PR: " + (model.linked_pr_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    MouseArea { id: prRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
-
-                                // Repo count pill
                                 Rectangle {
                                     width: repoRefText.implicitWidth + 12
                                     height: 20
                                     radius: 10
+                                    color: (model.linked_repo_count || 0) > 0 ? "#238636" : "#21262d"
                                     visible: (model.linked_repo_count || 0) > 0
-                                    color: "#0a1f2e"
-                                    border.color: "#30363d"
-                                    border.width: 1
-                                    Text {
-                                        id: repoRefText
-                                        anchors.centerIn: parent
-                                        text: "📦 " + (model.linked_repo_count || 0)
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        color: "#8b949e"
-                                    }
-                                    ToolTip.visible: repoRefMa.containsMouse && (model.linked_repo_count || 0) > 0
-                                    ToolTip.text: (model.linked_repo_count || 0) + " repository(s) have PRs referencing this item"
-                                    MouseArea {
-                                        id: repoRefMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: { expanded = !expanded }
-                                    }
+                                    Text { id: repoRefText; anchors.centerIn: parent; text: "Repo: " + (model.linked_repo_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    MouseArea { id: repoRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
-
-                                // No refs label
                                 Text {
-                                    visible: (model.linked_pr_count || 0) === 0
                                     text: "—"
                                     font.pixelSize: 12
                                     color: "#484f58"
+                                    visible: (model.linked_pr_count || 0) === 0 && (model.linked_repo_count || 0) === 0
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
                             }
                         }
 
-                        // TFS Link
+                        // TFS Link Button
                         Rectangle {
                             Layout.preferredWidth: 45
                             height: 24
                             radius: 4
-                            color: tfsLinkMa.containsMouse && (model.tfs_url || "") !== "" ? "#0d2344" : "transparent"
-                            border.color: tfsLinkMa.containsMouse && (model.tfs_url || "") !== "" ? "#1f6feb" : "transparent"
-                            border.width: 1
                             visible: (model.tfs_url || "") !== ""
+                            color: tfsLinkMa.containsMouse ? "#0d2344" : "transparent"
+                            border.color: tfsLinkMa.containsMouse ? "#1f6feb" : "transparent"
+                            border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
@@ -1278,7 +1395,10 @@ Item {
                 (item.type || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.state || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.iteration_name || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.iteration_path || "").toLowerCase().indexOf(q) !== -1
+                (item.iteration_path || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.level1_display || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.level2_display || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.prio_tag || "").toLowerCase().indexOf(q) !== -1
 
             var matchesState = true
             if (st === "ALL") {
@@ -1333,7 +1453,39 @@ Item {
                 }
             }
 
-            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency) {
+            var matchesLevel1 = true
+            if (root.filterLevel1 !== "ALL") {
+                if (root.filterLevel1 === "UNGROUPED" || root.filterLevel1 === "[ UNGROUPED ]") {
+                    matchesLevel1 = !item.level1_id || !item.is_grouped
+                } else {
+                    matchesLevel1 = (item.level1_display || "") === root.filterLevel1
+                }
+            }
+
+            var matchesLevel2 = true
+            if (root.filterLevel2 !== "ALL") {
+                if (root.filterLevel2 === "UNGROUPED" || root.filterLevel2 === "[ UNGROUPED ]") {
+                    matchesLevel2 = !item.level2_id || !item.is_grouped
+                } else {
+                    matchesLevel2 = (item.level2_display || "") === root.filterLevel2
+                }
+            }
+
+            var matchesPriority = true
+            if (root.filterPriority === "PRIO1") {
+                matchesPriority = !!item.is_prio1
+            } else if (root.filterPriority === "STANDARD") {
+                matchesPriority = !item.is_prio1
+            }
+
+            var matchesGrouping = true
+            if (root.filterGrouping === "GROUPED") {
+                matchesGrouping = !!item.is_grouped
+            } else if (root.filterGrouping === "UNGROUPED") {
+                matchesGrouping = !item.is_grouped
+            }
+
+            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping) {
                 matched.push(item)
             }
         }
@@ -1366,6 +1518,18 @@ Item {
                 days_diff: wi.days_diff,
                 deleted: wi.deleted,
                 tfs_url: wi.tfs_url || "",
+                level: wi.level || 4,
+                level1_id: wi.level1_id,
+                level1_display: wi.level1_display || "",
+                level2_id: wi.level2_id,
+                level2_display: wi.level2_display || "",
+                is_grouped: !!wi.is_grouped,
+                grouping_status: wi.grouping_status || "ungrouped",
+                is_prio1: !!wi.is_prio1,
+                prio_category: wi.prio_category || "standard",
+                prio_type: wi.prio_type || "",
+                prio_tag: wi.prio_tag || "",
+                prio_badge: wi.prio_badge || "",
                 linked_pr_count: wi.linked_pr_count || 0,
                 linked_repo_count: wi.linked_repo_count || 0,
                 linked_prs: wi.linked_prs || [],
@@ -1382,6 +1546,7 @@ Item {
             root.refreshStatesList()
             root.refreshAssigneesList()
             root.refreshIterationsList()
+            root.refreshHierarchyLists()
             root.updateFilteredModel()
         }
     }
@@ -1393,6 +1558,10 @@ Item {
     onFilterModifiedChanged:  updateFilteredModel()
     onFilterIterationChanged: updateFilteredModel()
     onFilterUrgencyChanged:   updateFilteredModel()
+    onFilterLevel1Changed:    updateFilteredModel()
+    onFilterLevel2Changed:    updateFilteredModel()
+    onFilterPriorityChanged:  updateFilteredModel()
+    onFilterGroupingChanged:  updateFilteredModel()
 
     DeadlineEditorDialog {
         id: deadlineDialog
@@ -1413,6 +1582,7 @@ Item {
         refreshStatesList()
         refreshAssigneesList()
         refreshIterationsList()
+        refreshHierarchyLists()
         updateFilteredModel()
     }
 }

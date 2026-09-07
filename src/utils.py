@@ -622,3 +622,200 @@ def extract_work_item_deadline(fields_dict, custom_field=None):
 
     return "", ""
 
+
+def parse_pbs_tag(title):
+    """
+    Parses a Product Breakdown Structure (PBS) tag from the start of a title.
+    Expected syntax: [<PBS Number>] <Name>
+    Example: "[PBS-01] Powertrain Subsystem" -> ("PBS-01", "Powertrain Subsystem")
+    Example: "[1.2.3] Engine Control" -> ("1.2.3", "Engine Control")
+
+    Args:
+        title (str): The work item title string.
+
+    Returns:
+        tuple: (pbs_tag, clean_name)
+    """
+    if not title:
+        return "", ""
+    s_title = str(title).strip()
+    m = re.match(r"^\s*\[([^\]]+)\]\s*(.*)$", s_title)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return "", s_title
+
+
+def parse_level3_priority(title):
+    """
+    Parses Level 3 (User Story / Requirement / Bug) strategic focus prioritization notation.
+    Syntax: [<Type>_<Number>] <Name>
+    Supported focus types: OI, MP, SCEN, SPEC, PA, CS, DOC.
+    These are classified as Prio 1 Focus items.
+
+    Args:
+        title (str): The work item title string.
+
+    Returns:
+        dict: Priority classification metadata.
+    """
+    if not title:
+        return {
+            "is_prio1": False,
+            "prio_category": "standard",
+            "prio_type": "",
+            "prio_number": "",
+            "prio_tag": "",
+            "prio_badge": "",
+            "clean_title": ""
+        }
+
+    s_title = str(title).strip()
+    pattern = r"^\s*\[(OI|MP|SCEN|SPEC|PA|CS|DOC)_([^\]]+)\]\s*(.*)$"
+    m = re.match(pattern, s_title, re.IGNORECASE)
+    if m:
+        p_type = m.group(1).upper()
+        p_num = m.group(2).strip()
+        p_tag = f"[{p_type}_{p_num}]"
+        clean = m.group(3).strip()
+        return {
+            "is_prio1": True,
+            "prio_category": "prio1",
+            "prio_type": p_type,
+            "prio_number": p_num,
+            "prio_tag": p_tag,
+            "prio_badge": f"⭐ Prio 1 {p_tag}",
+            "clean_title": clean
+        }
+
+    return {
+        "is_prio1": False,
+        "prio_category": "standard",
+        "prio_type": "",
+        "prio_number": "",
+        "prio_tag": "",
+        "prio_badge": "",
+        "clean_title": s_title
+    }
+
+
+def get_work_item_level(wi_type, bug_hierarchy_mode="like_user_story"):
+    """
+    Determines the Backlog hierarchy level (1 to 4) of a work item type:
+    Level 1: Epic (Sub-Systems)
+    Level 2: Feature (Major Components)
+    Level 3: User Story / Requirement / Product Backlog Item / Bug (if bug is story)
+    Level 4: Task / Bug (if bug is task)
+
+    Args:
+        wi_type (str): The Work Item Type string.
+        bug_hierarchy_mode (str): 'like_user_story' or 'like_task'.
+
+    Returns:
+        int: Level (1, 2, 3, or 4).
+    """
+    t = (wi_type or "").strip().lower()
+    if t == "epic":
+        return 1
+    if t == "feature":
+        return 2
+    if t in ("user story", "requirement", "product backlog item", "story"):
+        return 3
+    if t in ("bug", "defect", "problem"):
+        return 3 if bug_hierarchy_mode == "like_user_story" else 4
+    if t in ("task",):
+        return 4
+    return 3
+
+
+def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user_story", max_depth=10):
+    """
+    Walks up the parent_id chain of a work item to resolve Level 1 (Epic), Level 2 (Feature),
+    Level 3 (Story/Requirement/Bug), PBS tags, grouping status, and Prio 1 focus priority.
+
+    Args:
+        wi (dict): The target work item dict (must contain 'id', 'type', 'title', 'parent_id').
+        all_wis_by_id (dict): Lookup map of work items by integer ID.
+        bug_hierarchy_mode (str): 'like_user_story' or 'like_task'.
+        max_depth (int): Max hierarchy walk depth to prevent circular link hangs.
+
+    Returns:
+        dict: Resolved hierarchy and priority metadata.
+    """
+    curr_id = wi.get("id")
+    curr_type = wi.get("type") or "Task"
+    curr_title = wi.get("title") or f"#{curr_id}"
+    curr_level = get_work_item_level(curr_type, bug_hierarchy_mode=bug_hierarchy_mode)
+
+    # Initialize hierarchy tracking
+    level_items = {1: None, 2: None, 3: None, 4: None}
+    level_items[curr_level] = wi
+
+    # Walk upwards
+    visited = {curr_id}
+    parent_id = wi.get("parent_id")
+    depth = 0
+
+    while parent_id and depth < max_depth:
+        p_item = all_wis_by_id.get(parent_id)
+        if not p_item or p_item.get("id") in visited:
+            break
+        visited.add(p_item.get("id"))
+        p_level = get_work_item_level(p_item.get("type"), bug_hierarchy_mode=bug_hierarchy_mode)
+        if p_level < curr_level and not level_items[p_level]:
+            level_items[p_level] = p_item
+        parent_id = p_item.get("parent_id")
+        depth += 1
+
+    # Extract Level 1 info (Epic / Sub-System)
+    l1_item = level_items[1]
+    l1_id = l1_item.get("id") if l1_item else None
+    l1_title = l1_item.get("title") if l1_item else ""
+    l1_pbs, l1_name = parse_pbs_tag(l1_title) if l1_title else ("", "")
+    l1_display = f"[{l1_pbs}] {l1_name}" if (l1_pbs and l1_name) else (f"#{l1_id} {l1_title}" if l1_title else "")
+
+    # Extract Level 2 info (Feature / Major Component)
+    l2_item = level_items[2]
+    l2_id = l2_item.get("id") if l2_item else None
+    l2_title = l2_item.get("title") if l2_item else ""
+    l2_pbs, l2_name = parse_pbs_tag(l2_title) if l2_title else ("", "")
+    l2_display = f"[{l2_pbs}] {l2_name}" if (l2_pbs and l2_name) else (f"#{l2_id} {l2_title}" if l2_title else "")
+
+    # Extract Level 3 info
+    l3_item = level_items[3]
+    l3_id = l3_item.get("id") if l3_item else (curr_id if curr_level == 3 else None)
+    l3_title = l3_item.get("title") if l3_item else (curr_title if curr_level == 3 else "")
+
+    # Check Grouping Rule:
+    # A work item is Grouped if Level 1 and Level 2 parents exist AND both have valid PBS syntax [<PBS Number>] <Name>
+    is_grouped = bool(l1_pbs and l2_pbs)
+    grouping_status = "grouped" if is_grouped else "ungrouped"
+
+    # Check Level 3 Prioritization:
+    # Evaluate Level 3 title for [<Type>_<Number>] (OI, MP, SCEN, SPEC, PA, CS, DOC)
+    prio_info = parse_level3_priority(l3_title if l3_title else curr_title)
+
+    return {
+        "level": curr_level,
+        "level1_id": l1_id,
+        "level1_title": l1_title,
+        "level1_pbs": l1_pbs,
+        "level1_name": l1_name,
+        "level1_display": l1_display or "Ungrouped Sub-System",
+        "level2_id": l2_id,
+        "level2_title": l2_title,
+        "level2_pbs": l2_pbs,
+        "level2_name": l2_name,
+        "level2_display": l2_display or "Ungrouped Component",
+        "level3_id": l3_id,
+        "level3_title": l3_title,
+        "is_grouped": is_grouped,
+        "grouping_status": grouping_status,
+        "is_prio1": prio_info["is_prio1"],
+        "prio_category": prio_info["prio_category"],
+        "prio_type": prio_info["prio_type"],
+        "prio_number": prio_info["prio_number"],
+        "prio_tag": prio_info["prio_tag"],
+        "prio_badge": prio_info["prio_badge"],
+        "clean_title": prio_info["clean_title"],
+    }
+

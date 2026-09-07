@@ -461,6 +461,26 @@ class DevOpsBackend(QObject):
         return sorted(seen)
 
     @Property(list, notify=workItemsChanged)
+    def workItemLevel1List(self):
+        """Returns the sorted unique list of Level 1 (Epic / Sub-System) display names."""
+        seen = set()
+        for wi in self._work_items:
+            disp = wi.get("level1_display") or ""
+            if disp and disp != "Ungrouped Sub-System":
+                seen.add(disp)
+        return sorted(seen)
+
+    @Property(list, notify=workItemsChanged)
+    def workItemLevel2List(self):
+        """Returns the sorted unique list of Level 2 (Feature / Major Component) display names."""
+        seen = set()
+        for wi in self._work_items:
+            disp = wi.get("level2_display") or ""
+            if disp and disp != "Ungrouped Component":
+                seen.add(disp)
+        return sorted(seen)
+
+    @Property(list, notify=workItemsChanged)
     def availableSprintList(self):
         """Returns the chronologically sorted list of all week-YYWW sprint names in cache."""
         seen = set()
@@ -962,6 +982,15 @@ class DevOpsBackend(QObject):
                     "linked_repos": linked_repos[:8],
                     "linked_repo_count": len(linked_repos),
                 })
+
+            # Resolve Backlog Hierarchy (Level 1-4), PBS Syntax Grouping, and Level 3 Prio 1 Priorities
+            all_wis_map = {w["id"]: w for w in wi_list}
+            for item in wi_list:
+                h_info = utils.resolve_work_item_hierarchy(
+                    item, all_wis_map, bug_hierarchy_mode=self._bug_hierarchy_mode
+                )
+                item.update(h_info)
+
             self._work_items = sorted(wi_list, key=lambda x: x["id"], reverse=True)
             self.workItemsChanged.emit()
 
@@ -1371,6 +1400,25 @@ class DevOpsBackend(QObject):
                 "shift_count": wi.get("shift_count", 0),
                 "total_delayed_weeks": wi.get("total_delayed_weeks", 0),
                 "shift_badge": wi.get("shift_badge", ""),
+                "level": wi.get("level", 4),
+                "level1_id": wi.get("level1_id"),
+                "level1_title": wi.get("level1_title", ""),
+                "level1_pbs": wi.get("level1_pbs", ""),
+                "level1_name": wi.get("level1_name", ""),
+                "level1_display": wi.get("level1_display", ""),
+                "level2_id": wi.get("level2_id"),
+                "level2_title": wi.get("level2_title", ""),
+                "level2_pbs": wi.get("level2_pbs", ""),
+                "level2_name": wi.get("level2_name", ""),
+                "level2_display": wi.get("level2_display", ""),
+                "is_grouped": wi.get("is_grouped", False),
+                "grouping_status": wi.get("grouping_status", "ungrouped"),
+                "is_prio1": wi.get("is_prio1", False),
+                "prio_category": wi.get("prio_category", "standard"),
+                "prio_type": wi.get("prio_type", ""),
+                "prio_number": wi.get("prio_number", ""),
+                "prio_tag": wi.get("prio_tag", ""),
+                "prio_badge": wi.get("prio_badge", ""),
                 "is_done": is_done,
                 "is_story": is_story,
                 "is_bug": is_bug,
@@ -1521,6 +1569,25 @@ class DevOpsBackend(QObject):
                 "shift_count": c.get("shift_count", 0),
                 "total_delayed_weeks": c.get("total_delayed_weeks", 0),
                 "shift_badge": c.get("shift_badge", ""),
+                "level": c.get("level", 3),
+                "level1_id": c.get("level1_id"),
+                "level1_title": c.get("level1_title", ""),
+                "level1_pbs": c.get("level1_pbs", ""),
+                "level1_name": c.get("level1_name", ""),
+                "level1_display": c.get("level1_display", ""),
+                "level2_id": c.get("level2_id"),
+                "level2_title": c.get("level2_title", ""),
+                "level2_pbs": c.get("level2_pbs", ""),
+                "level2_name": c.get("level2_name", ""),
+                "level2_display": c.get("level2_display", ""),
+                "is_grouped": c.get("is_grouped", False),
+                "grouping_status": c.get("grouping_status", "ungrouped"),
+                "is_prio1": c.get("is_prio1", False),
+                "prio_category": c.get("prio_category", "standard"),
+                "prio_type": c.get("prio_type", ""),
+                "prio_number": c.get("prio_number", ""),
+                "prio_tag": c.get("prio_tag", ""),
+                "prio_badge": c.get("prio_badge", ""),
                 "tasks": [],
             }
 
@@ -1561,6 +1628,11 @@ class DevOpsBackend(QObject):
                         "is_done": False,
                     }
 
+                # Ensure hierarchy info on parent
+                if "level1_display" not in p_wi:
+                    p_h = utils.resolve_work_item_hierarchy(p_wi, all_wis_by_id, bug_hierarchy_mode=bug_mode)
+                    p_wi.update(p_h)
+
                 if pid not in container_map:
                     p_done = _is_item_done(p_wi)
                     container_map[pid] = {
@@ -1581,6 +1653,25 @@ class DevOpsBackend(QObject):
                         "shift_count": p_wi.get("shift_count", 0),
                         "total_delayed_weeks": p_wi.get("total_delayed_weeks", 0),
                         "shift_badge": p_wi.get("shift_badge", ""),
+                        "level": p_wi.get("level", 3),
+                        "level1_id": p_wi.get("level1_id"),
+                        "level1_title": p_wi.get("level1_title", ""),
+                        "level1_pbs": p_wi.get("level1_pbs", ""),
+                        "level1_name": p_wi.get("level1_name", ""),
+                        "level1_display": p_wi.get("level1_display", ""),
+                        "level2_id": p_wi.get("level2_id"),
+                        "level2_title": p_wi.get("level2_title", ""),
+                        "level2_pbs": p_wi.get("level2_pbs", ""),
+                        "level2_name": p_wi.get("level2_name", ""),
+                        "level2_display": p_wi.get("level2_display", ""),
+                        "is_grouped": p_wi.get("is_grouped", False),
+                        "grouping_status": p_wi.get("grouping_status", "ungrouped"),
+                        "is_prio1": p_wi.get("is_prio1", False),
+                        "prio_category": p_wi.get("prio_category", "standard"),
+                        "prio_type": p_wi.get("prio_type", ""),
+                        "prio_number": p_wi.get("prio_number", ""),
+                        "prio_tag": p_wi.get("prio_tag", ""),
+                        "prio_badge": p_wi.get("prio_badge", ""),
                         "tasks": [],
                     }
                 container_map[pid]["tasks"].append(ch)
@@ -1623,6 +1714,25 @@ class DevOpsBackend(QObject):
                 "shift_count": 0,
                 "total_delayed_weeks": 0,
                 "shift_badge": "",
+                "level": 4,
+                "level1_id": None,
+                "level1_title": "",
+                "level1_pbs": "",
+                "level1_name": "",
+                "level1_display": "Ungrouped Sub-System",
+                "level2_id": None,
+                "level2_title": "",
+                "level2_pbs": "",
+                "level2_name": "",
+                "level2_display": "Ungrouped Component",
+                "is_grouped": False,
+                "grouping_status": "ungrouped",
+                "is_prio1": False,
+                "prio_category": "standard",
+                "prio_type": "",
+                "prio_number": "",
+                "prio_tag": "",
+                "prio_badge": "",
                 "tasks": unparented_children,
                 "total_tasks_count": tot_un,
                 "completed_tasks_count": comp_un,
