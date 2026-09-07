@@ -170,6 +170,9 @@ class DevOpsBackend(QObject):
     storageDataChanged = Signal()
     sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
     workloadMatrixChanged = Signal()
+    iterationShiftsChanged = Signal()
+    fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
+    bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
     logRecord = Signal(str, str, str, str)  # timestamp, level, logger_name, message
     logMessage = Signal(str)                # legacy formatted string signal
     syncLogsChanged = Signal()
@@ -177,12 +180,29 @@ class DevOpsBackend(QObject):
     statusMessageChanged = Signal()
     progressChanged = Signal(int)
 
+    @staticmethod
+    def _scale_for_font_mode(mode):
+        m = (mode or "medium").lower()
+        if m == "small":
+            return 0.90
+        elif m == "large":
+            return 1.15
+        elif m in ("xlarge", "xl", "extra_large"):
+            return 1.30
+        return 1.0
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._is_busy = False
         self._status_message = "Ready"
         self._progress = 0
         self._worker = None
+
+        # Font size & UI Scaling
+        user_cfg = _load_user_settings()
+        self._font_size_mode = user_cfg.get("font_size_mode", "medium")
+        self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
+        self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
 
         # Sync Logs storage & logger bridge
         self._sync_logs = []
@@ -233,6 +253,7 @@ class DevOpsBackend(QObject):
         self._pr_repositories = []
         self._tagday_data = {}
         self._storage_data = {}
+        self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
 
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
@@ -240,6 +261,8 @@ class DevOpsBackend(QObject):
     def _init_cache(self):
         try:
             cfg = _load_user_settings()
+            if cfg.get("custom_deadline_field"):
+                self._custom_deadline_field = cfg["custom_deadline_field"]
             custom_db = cfg.get("db_path")
             if custom_db and os.path.exists(custom_db):
                 self._db_path = os.path.abspath(custom_db)
@@ -299,6 +322,62 @@ class DevOpsBackend(QObject):
     @Property(str, notify=settingsChanged)
     def tfsPat(self):
         return devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+
+    @Property(str, notify=settingsChanged)
+    def customDeadlineField(self):
+        return self._custom_deadline_field or ""
+
+    @Slot(str)
+    def setCustomDeadlineField(self, field_name):
+        val = (field_name or "").strip()
+        if self._custom_deadline_field != val:
+            self._custom_deadline_field = val
+            cfg = _load_user_settings()
+            cfg["custom_deadline_field"] = val
+            _save_user_settings(cfg)
+            self.settingsChanged.emit()
+            self.refresh_all_data()
+
+    @Property(str, notify=fontSizeModeChanged)
+    def fontSizeMode(self):
+        return self._font_size_mode or "medium"
+
+    @Property(float, notify=fontSizeModeChanged)
+    def uiScale(self):
+        return self._ui_scale or 1.0
+
+    @Slot(str)
+    def setFontSizeMode(self, mode):
+        mode_str = (mode or "medium").lower()
+        if mode_str not in ("small", "medium", "large", "xlarge"):
+            mode_str = "medium"
+        self._font_size_mode = mode_str
+        self._ui_scale = self._scale_for_font_mode(mode_str)
+
+        cfg = _load_user_settings()
+        cfg["font_size_mode"] = self._font_size_mode
+        cfg["ui_scale"] = self._ui_scale
+        _save_user_settings(cfg)
+
+        self.fontSizeModeChanged.emit(self._font_size_mode, self._ui_scale)
+        self.settingsChanged.emit()
+
+    @Property(str, notify=bugHierarchyModeChanged)
+    def bugHierarchyMode(self):
+        return self._bug_hierarchy_mode or "like_user_story"
+
+    @Slot(str)
+    def setBugHierarchyMode(self, mode):
+        mode_str = (mode or "like_user_story").lower()
+        if mode_str not in ("like_user_story", "like_task"):
+            mode_str = "like_user_story"
+        self._bug_hierarchy_mode = mode_str
+        cfg = _load_user_settings()
+        cfg["bug_behavior"] = self._bug_hierarchy_mode
+        _save_user_settings(cfg)
+        self.bugHierarchyModeChanged.emit(self._bug_hierarchy_mode)
+        self.workloadMatrixChanged.emit()
+        self.settingsChanged.emit()
 
     @Property(list, notify=settingsChanged)
     def availableDatabases(self):
@@ -449,6 +528,30 @@ class DevOpsBackend(QObject):
             "warning": self._warning_count,
             "error": self._error_count
         }
+
+    @Property(list, notify=iterationShiftsChanged)
+    def iterationShifts(self):
+        if not self._cache_db:
+            return []
+        try:
+            return self._cache_db.get_iteration_shifts(limit=200)
+        except Exception:
+            return []
+
+    @Property(dict, notify=iterationShiftsChanged)
+    def shiftImpactMetrics(self):
+        if not self._cache_db:
+            return {
+                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
+                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
+            }
+        try:
+            return self._cache_db.get_shift_metrics()
+        except Exception:
+            return {
+                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
+                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
+            }
 
     @Slot(str, str, str, str)
     def _on_incoming_log_record(self, timestamp, level, logger_name, message):
@@ -665,6 +768,7 @@ class DevOpsBackend(QObject):
             tfs_proj = devops_helper.AZURE_PROJECT_ID or ""
             # Web URL format: {base}/{collection}/{project}/_workitems/edit/{id}
             tfs_wi_url_base = f"{tfs_base}/{tfs_col}/{tfs_proj}/_workitems/edit/" if (tfs_base and tfs_col and tfs_proj) else ""
+            self._tfs_wi_url_base = tfs_wi_url_base
 
             raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
 
@@ -691,6 +795,29 @@ class DevOpsBackend(QObject):
                     if other != np and other.startswith(np + "/"):
                         parent_iter_paths.add(np)
                         break
+
+            # Query iteration shifts summary per work item
+            self._shift_summary_map = {}
+            if self._cache_db:
+                try:
+                    with self._cache_db._connection() as conn:
+                        shift_rows = conn.execute("""
+                            SELECT work_item_id, COUNT(*) as shift_count, 
+                                   SUM(CASE WHEN delta_weeks > 0 THEN delta_weeks ELSE 0 END) as total_delayed_weeks,
+                                   SUM(delta_weeks) as net_delta_weeks,
+                                   MAX(recorded_at) as last_shift_at
+                            FROM iteration_shifts
+                            GROUP BY work_item_id
+                        """).fetchall()
+                        for s_row in shift_rows:
+                            self._shift_summary_map[s_row["work_item_id"]] = {
+                                "shift_count": s_row["shift_count"],
+                                "total_delayed_weeks": s_row["total_delayed_weeks"] or 0,
+                                "net_delta_weeks": s_row["net_delta_weeks"] or 0,
+                                "last_shift_at": s_row["last_shift_at"] or ""
+                            }
+                except Exception as e:
+                    logger.debug(f"Could not query iteration shifts summary: {e}")
 
             wi_list = []
             deleted_count = 0
@@ -728,7 +855,7 @@ class DevOpsBackend(QObject):
 
                 # Iteration and Deadline parsing
                 iter_path = wi.get("iteration_path") or ""
-                target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
+                target_date = ""
                 raw_fields = {}
                 raw_s = wi.get("raw_json")
                 if raw_s and isinstance(raw_s, str):
@@ -737,15 +864,32 @@ class DevOpsBackend(QObject):
                         raw_fields = raw_data.get("fields", {})
                         if not iter_path:
                             iter_path = raw_fields.get("System.IterationPath") or ""
-                        if not target_date:
-                            target_date = (
-                                raw_fields.get("Microsoft.VSTS.Scheduling.TargetDate")
-                                or raw_fields.get("Microsoft.VSTS.Scheduling.FinishDate")
-                                or raw_fields.get("Microsoft.VSTS.Scheduling.DueDate")
-                                or ""
-                            )
                     except Exception:
                         pass
+
+                target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=self._custom_deadline_field)
+                if not target_date:
+                    target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
+
+                # Parent ID extraction
+                parent_id = None
+                p_val = raw_fields.get("System.Parent")
+                if p_val is not None:
+                    try:
+                        parent_id = int(str(p_val).lstrip("#"))
+                    except (ValueError, TypeError):
+                        parent_id = None
+                elif raw_data and isinstance(raw_data, dict) and "relations" in raw_data:
+                    for rel in raw_data.get("relations") or []:
+                        rel_name = rel.get("rel") or ""
+                        if "Hierarchy-Reverse" in rel_name or rel_name == "Parent" or (rel.get("attributes") or {}).get("name") == "Parent":
+                            url = rel.get("url", "")
+                            if url:
+                                try:
+                                    parent_id = int(url.rstrip("/").split("/")[-1])
+                                    break
+                                except (ValueError, TypeError):
+                                    pass
 
                 norm_ip = iter_path.replace("\\", "/").strip("/") if iter_path else ""
                 ip_parts = [p for p in norm_ip.split("/") if p]
@@ -779,12 +923,24 @@ class DevOpsBackend(QObject):
                 is_done = s_lower in ("closed", "done", "resolved", "completed", "removed", "cut")
                 urgency = utils.calculate_deadline_urgency(target_date, is_completed=is_done)
 
+                # Query shift metrics for this item
+                shift_summary_map = getattr(self, "_shift_summary_map", {})
+                s_info = shift_summary_map.get(wi_id, {})
+                s_count = s_info.get("shift_count", 0)
+                d_weeks = s_info.get("total_delayed_weeks", 0)
+                s_badge = ""
+                if d_weeks > 0:
+                    s_badge = f"⚠️ Shifted +{d_weeks}w"
+                elif s_count > 0:
+                    s_badge = f"🔄 Shifted ({s_count}x)"
+
                 wi_list.append({
                     "id": wi_id,
                     "title": wi.get("title") or f"Work Item #{wi_id}",
                     "type": wi.get("type") or wi.get("WorkItemType") or "Task",
                     "state": state_val,
                     "assigned_to": assigned_val,
+                    "parent_id": parent_id,
                     "changed_date": wi.get("changed_date") or "",
                     "iteration_path": iter_path,
                     "iteration_name": iter_name,
@@ -796,6 +952,9 @@ class DevOpsBackend(QObject):
                     "urgency_badge": urgency.get("badge_text", "—"),
                     "urgency_color": urgency.get("badge_color", "#8b949e"),
                     "days_diff": urgency.get("days_diff"),
+                    "shift_count": s_count,
+                    "total_delayed_weeks": d_weeks,
+                    "shift_badge": s_badge,
                     "deleted": is_del,
                     "tfs_url": html_link,
                     "linked_pr_count": len(linked_prs),
@@ -1201,12 +1360,17 @@ class DevOpsBackend(QObject):
                 "type": wi.get("type") or "Task",
                 "state": wi.get("state") or "Active",
                 "assigned_to": assignee,
+                "parent_id": wi.get("parent_id"),
                 "sprint_name": wi_sprint,
                 "deadline_str": wi.get("deadline_str", ""),
                 "urgency_status": wi.get("urgency_status", "none"),
                 "urgency_badge": wi.get("urgency_badge", "—"),
                 "urgency_color": wi.get("urgency_color", "#8b949e"),
                 "tfs_url": wi.get("tfs_url", ""),
+                "iteration_path": wi.get("iteration_path", ""),
+                "shift_count": wi.get("shift_count", 0),
+                "total_delayed_weeks": wi.get("total_delayed_weeks", 0),
+                "shift_badge": wi.get("shift_badge", ""),
                 "is_done": is_done,
                 "is_story": is_story,
                 "is_bug": is_bug,
@@ -1233,6 +1397,8 @@ class DevOpsBackend(QObject):
 
             total_matrix_items += 1
 
+        all_wis_by_id = {wi["id"]: wi for wi in self._work_items if not wi.get("deleted")}
+
         assignee_rows = []
         for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
             cells = []
@@ -1244,7 +1410,12 @@ class DevOpsBackend(QObject):
                 tk_count = sum(1 for it in items if it["is_task"])
                 od_count = sum(1 for it in items if it["urgency_status"] == "overdue")
                 cp_count = sum(1 for it in items if it["is_done"])
+
+                # Group items by parent containers
+                grouped = self._group_items_into_containers(items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode)
+
                 cells.append({
+                    "assignee": assignee,
                     "sprint_name": s_name,
                     "total_count": len(items),
                     "stories_count": st_count,
@@ -1253,6 +1424,8 @@ class DevOpsBackend(QObject):
                     "overdue_count": od_count,
                     "completed_count": cp_count,
                     "items": sorted(items, key=lambda x: x["id"], reverse=True),
+                    "grouped_containers": grouped,
+                    "container_count": len(grouped),
                 })
 
             parts = [p for p in assignee.replace(".", " ").replace("_", " ").split() if p]
@@ -1292,10 +1465,176 @@ class DevOpsBackend(QObject):
             "total_tasks": total_matrix_tasks,
             "total_overdue": total_matrix_overdue,
             "assignees_count": len(assignee_rows),
+            "bug_hierarchy_mode": self._bug_hierarchy_mode,
         }
 
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story"):
+        """
+        Groups work items in a sprint cell by parent container.
+        - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
+        - If bug_mode == 'like_task': Bugs are child tasks grouped under parent User Stories / Requirements.
+        """
+        story_types = {"requirement", "user story", "story", "product backlog item", "feature", "epic"}
+        done_states = {"closed", "done", "resolved", "completed", "cut"}
+
+        def _is_container_type(t_str):
+            t = (t_str or "").lower()
+            if t in story_types:
+                return True
+            if bug_mode == "like_user_story" and t in ("bug", "defect", "problem"):
+                return True
+            return False
+
+        def _is_item_done(item_dict):
+            if "is_done" in item_dict:
+                return bool(item_dict["is_done"])
+            st = (item_dict.get("state") or "").lower()
+            return st in done_states
+
+        cell_containers = []
+        cell_children = []
+        for it in items_in_cell:
+            if _is_container_type(it.get("type")):
+                cell_containers.append(it)
+            else:
+                cell_children.append(it)
+
+        container_map = {}
+        for c in cell_containers:
+            cid = c["id"]
+            c_done = _is_item_done(c)
+            container_map[cid] = {
+                "id": cid,
+                "title": c.get("title") or f"#{cid}",
+                "type": c.get("type") or "Story",
+                "state": c.get("state") or "Active",
+                "assigned_to": c.get("assigned_to") or "Unassigned",
+                "is_parent_in_cell": True,
+                "is_external_parent": False,
+                "tfs_url": c.get("tfs_url", ""),
+                "deadline_str": c.get("deadline_str", ""),
+                "urgency_status": c.get("urgency_status", "none"),
+                "urgency_badge": c.get("urgency_badge", "—"),
+                "urgency_color": c.get("urgency_color", "#8b949e"),
+                "iteration_path": c.get("iteration_path", ""),
+                "is_done": c_done,
+                "shift_count": c.get("shift_count", 0),
+                "total_delayed_weeks": c.get("total_delayed_weeks", 0),
+                "shift_badge": c.get("shift_badge", ""),
+                "tasks": [],
+            }
+
+        unparented_children = []
+        for ch in cell_children:
+            pid = ch.get("parent_id")
+            if pid and pid in container_map:
+                container_map[pid]["tasks"].append(ch)
+            elif pid:
+                p_wi = all_wis_by_id.get(pid)
+                if not p_wi and self._cache_db:
+                    try:
+                        db_row = self._cache_db.get_work_item(pid)
+                        if db_row:
+                            p_wi = {
+                                "id": pid,
+                                "title": db_row.get("title") or f"Parent #{pid}",
+                                "type": db_row.get("type") or "User Story",
+                                "state": db_row.get("state") or "Active",
+                                "assigned_to": db_row.get("assigned_to") or "Unassigned",
+                                "tfs_url": getattr(self, "_tfs_wi_url_base", "") + str(pid) if getattr(self, "_tfs_wi_url_base", "") else "",
+                                "iteration_path": "",
+                                "is_done": _is_item_done(db_row),
+                            }
+                    except Exception:
+                        p_wi = None
+
+                if not p_wi:
+                    # Synthetic parent container so child tasks are not lost from their parent
+                    p_wi = {
+                        "id": pid,
+                        "title": f"Parent Work Item #{pid}",
+                        "type": "User Story",
+                        "state": "Active",
+                        "assigned_to": "External / Unassigned",
+                        "tfs_url": getattr(self, "_tfs_wi_url_base", "") + str(pid) if getattr(self, "_tfs_wi_url_base", "") else "",
+                        "iteration_path": "",
+                        "is_done": False,
+                    }
+
+                if pid not in container_map:
+                    p_done = _is_item_done(p_wi)
+                    container_map[pid] = {
+                        "id": pid,
+                        "title": p_wi.get("title") or f"#{pid}",
+                        "type": p_wi.get("type") or "User Story",
+                        "state": p_wi.get("state") or "Active",
+                        "assigned_to": p_wi.get("assigned_to") or "Unassigned",
+                        "is_parent_in_cell": False,
+                        "is_external_parent": True,
+                        "tfs_url": p_wi.get("tfs_url", ""),
+                        "deadline_str": p_wi.get("deadline_str", ""),
+                        "urgency_status": p_wi.get("urgency_status", "none"),
+                        "urgency_badge": p_wi.get("urgency_badge", "—"),
+                        "urgency_color": p_wi.get("urgency_color", "#8b949e"),
+                        "iteration_path": p_wi.get("iteration_path", ""),
+                        "is_done": p_done,
+                        "shift_count": p_wi.get("shift_count", 0),
+                        "total_delayed_weeks": p_wi.get("total_delayed_weeks", 0),
+                        "shift_badge": p_wi.get("shift_badge", ""),
+                        "tasks": [],
+                    }
+                container_map[pid]["tasks"].append(ch)
+            else:
+                unparented_children.append(ch)
+
+        containers_list = []
+        for cid, c_obj in container_map.items():
+            tsks = c_obj["tasks"]
+            tot = len(tsks)
+            comp = sum(1 for t in tsks if _is_item_done(t))
+            pct = round((comp / tot * 100)) if tot > 0 else (100 if c_obj["is_done"] else 0)
+            c_obj["total_tasks_count"] = tot
+            c_obj["completed_tasks_count"] = comp
+            c_obj["progress_percent"] = pct
+            c_obj["progress_pct"] = pct
+            containers_list.append(c_obj)
+
+        containers_list.sort(key=lambda x: (not x["is_parent_in_cell"], -x["id"]))
+
+        if unparented_children:
+            tot_un = len(unparented_children)
+            comp_un = sum(1 for t in unparented_children if _is_item_done(t))
+            pct_un = round((comp_un / tot_un * 100)) if tot_un > 0 else 0
+            containers_list.append({
+                "id": 0,
+                "title": "Direct Tasks / Standalone Items",
+                "type": "Standalone",
+                "state": "Active",
+                "assigned_to": items_in_cell[0]["assigned_to"] if items_in_cell else "Unassigned",
+                "is_parent_in_cell": True,
+                "is_external_parent": False,
+                "tfs_url": "",
+                "deadline_str": "",
+                "urgency_status": "none",
+                "urgency_badge": "—",
+                "urgency_color": "#8b949e",
+                "iteration_path": "",
+                "is_done": False,
+                "shift_count": 0,
+                "total_delayed_weeks": 0,
+                "shift_badge": "",
+                "tasks": unparented_children,
+                "total_tasks_count": tot_un,
+                "completed_tasks_count": comp_un,
+                "progress_percent": pct_un,
+                "progress_pct": pct_un,
+            })
+
+        return containers_list
+
+    @Slot()
     @Slot(str, result=dict)
-    def get_sprint_report_data(self, sprint_name):
+    def get_sprint_report_data(self, sprint_name=""):
         """Returns structured sprint analysis dictionary for real-time GUI preview."""
         if not self._cache_db:
             return {}
@@ -1306,8 +1645,11 @@ class DevOpsBackend(QObject):
             logger.error(f"Error generating sprint report data: {e}", exc_info=True)
             return {"error": str(e)}
 
+    @Slot()
+    @Slot(str)
+    @Slot(str, str)
     @Slot(str, str, str)
-    def generate_sprint_report_async(self, sprint_name, md_path="", csv_path=""):
+    def generate_sprint_report_async(self, sprint_name="", md_path="", csv_path=""):
         """Generates Sprint Markdown and CSV report in the background."""
         if self._is_busy:
             return
@@ -1333,6 +1675,7 @@ class DevOpsBackend(QObject):
 
         self._run_worker(_work, f"Generating Sprint Report ({clean_sprint})...")
 
+    @Slot()
     @Slot(str)
     def open_sprint_report_file(self, sprint_name=""):
         """Opens generated sprint report markdown in default editor."""
@@ -1342,6 +1685,140 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(int, str, result=dict)
+    def update_work_item_deadline(self, work_item_id, new_date_str):
+        """
+        Updates the target deadline for a work item both in local SQLite cache and via TFS REST Web API.
+
+        Args:
+            work_item_id (int): Work item ID.
+            new_date_str (str): Target date (YYYY-MM-DD or empty string to clear).
+
+        Returns:
+            dict: {"success": bool, "message": str, "deadline": str, "urgency_badge": str, "urgency_color": str, "api_synced": bool}
+        """
+        try:
+            clean_id = int(work_item_id)
+        except (ValueError, TypeError):
+            return {"success": False, "error": "Invalid work item ID"}
+
+        clean_date = (new_date_str or "").strip()
+        field_to_update = self._custom_deadline_field or "Microsoft.VSTS.Scheduling.TargetDate"
+
+        logger.info(f"Updating deadline for Work Item #{clean_id} -> '{clean_date}' (Field: {field_to_update})")
+
+        # 1. Update local SQLite DB cache
+        db_ok = False
+        if self._cache_db:
+            db_ok = self._cache_db.update_work_item_deadline(clean_id, clean_date, field_name=field_to_update)
+
+        # 2. Synchronize to Azure DevOps / TFS Web API (if handler available)
+        api_synced = False
+        api_err = None
+        try:
+            azHandler = devops_helper._getHandler()
+            if azHandler and hasattr(azHandler, "update_work_item_field"):
+                val_to_send = f"{clean_date}T17:00:00Z" if clean_date and "T" not in clean_date else (clean_date or None)
+                azHandler.update_work_item_field(clean_id, field_to_update, val_to_send, project_id=devops_helper.AZURE_PROJECT_ID)
+                api_synced = True
+                logger.info(f"Work item #{clean_id} deadline successfully synchronized with TFS API.")
+        except Exception as e:
+            api_err = str(e)
+            logger.warning(f"Could not push deadline update for #{clean_id} to TFS API: {e}")
+
+        # 3. Recalculate and refresh memory cache
+        self.refresh_all_data()
+
+        # Find updated work item to return fresh urgency badge
+        updated_wi = next((w for w in self._work_items if w["id"] == clean_id), None)
+        badge = updated_wi.get("urgency_badge", "—") if updated_wi else "—"
+        color = updated_wi.get("urgency_color", "#8b949e") if updated_wi else "#8b949e"
+
+        msg = f"Deadline set to {clean_date or 'Cleared'}"
+        if api_synced:
+            msg += " (Synchronized with TFS Web API)"
+        elif api_err:
+            msg += f" (Cached locally; TFS API: {api_err})"
+        else:
+            msg += " (Cached in local SQLite database)"
+
+        self.logMessage.emit(f"[Work Item #{clean_id}] {msg}")
+        return {
+            "success": True,
+            "work_item_id": clean_id,
+            "deadline": clean_date,
+            "urgency_badge": badge,
+            "urgency_color": color,
+            "api_synced": api_synced,
+            "message": msg
+        }
+
+    @Slot(int, str, result=dict)
+    def update_work_item_iteration(self, work_item_id, new_iteration):
+        """
+        Updates the iteration path of a work item, logs the shift event, and syncs to TFS via REST API.
+
+        Args:
+            work_item_id (int): Work item ID.
+            new_iteration (str): Target sprint name (e.g. 'week-2634') or full iteration path.
+
+        Returns:
+            dict: {"success": bool, "message": str, "iteration": str, "api_synced": bool}
+        """
+        try:
+            clean_id = int(work_item_id)
+        except (ValueError, TypeError):
+            return {"success": False, "error": "Invalid work item ID"}
+
+        clean_iter = (new_iteration or "").strip()
+        full_path = clean_iter
+        if clean_iter and "\\" not in clean_iter and "/" not in clean_iter:
+            p_name = devops_helper.AZURE_PROJECT_ID or ""
+            full_path = f"{p_name}\\{clean_iter}" if p_name else clean_iter
+
+        logger.info(f"Rescheduling Work Item #{clean_id} -> Iteration '{full_path}'")
+
+        # 1. Update SQLite DB & log shift event
+        db_ok = False
+        if self._cache_db:
+            db_ok = self._cache_db.update_work_item_iteration(clean_id, full_path, source="gui_manual")
+
+        # 2. Sync to TFS / Azure DevOps API
+        api_synced = False
+        api_err = None
+        try:
+            azHandler = devops_helper._getHandler()
+            if azHandler and hasattr(azHandler, "update_work_item_field"):
+                azHandler.update_work_item_field(clean_id, "System.IterationPath", full_path, project_id=devops_helper.AZURE_PROJECT_ID)
+                api_synced = True
+                logger.info(f"Work item #{clean_id} iteration successfully synced to TFS API.")
+        except Exception as e:
+            api_err = str(e)
+            logger.warning(f"Could not push iteration update for #{clean_id} to TFS API: {e}")
+
+        # 3. Refresh UI & models
+        self.refresh_all_data()
+        self.iterationShiftsChanged.emit()
+        self.workloadMatrixChanged.emit()
+
+        msg = f"Iteration moved to '{clean_iter or 'Unplanned'}'"
+        if api_synced:
+            msg += " (Synchronized with TFS Web API)"
+        elif api_err:
+            msg += f" (Cached locally; TFS API: {api_err})"
+        else:
+            msg += " (Cached in local SQLite database)"
+
+        self.logMessage.emit(f"[Work Item #{clean_id}] {msg}")
+        return {
+            "success": True,
+            "work_item_id": clean_id,
+            "iteration": clean_iter,
+            "full_path": full_path,
+            "api_synced": api_synced,
+            "message": msg
+        }
 
     def _run_worker(self, task_func, busy_msg):
         logger.info(f"Starting background task: {busy_msg}")

@@ -12,7 +12,47 @@ class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
-        return super().default(obj)
+def _calculate_sprint_delta_weeks(old_iter, new_iter):
+    """
+    Calculates the difference in weeks between two sprint/iteration path strings.
+    Positive delta means shifted to a later sprint (postponed / delayed).
+    Negative delta means moved to an earlier sprint (pulled forward).
+    """
+    if not old_iter or not new_iter or old_iter == new_iter:
+        return 0
+
+    import re
+    from datetime import date
+
+    def _parse_sprint(s):
+        clean = str(s or "").replace("\\", "/").strip("/")
+        leaf = clean.split("/")[-1]
+        # 4-digit year format: e.g. "Sprint 2026-31", "2026-W31", "week-2026-31"
+        m1 = re.search(r'(?:sprint|week)?\s*(20\d{2})[_\-\s]+w?(\d{1,2})', leaf, re.IGNORECASE)
+        if m1:
+            year = int(m1.group(1))
+            week = int(m1.group(2))
+            return year, week, f"week-{str(year)[-2:]}{week:02d}"
+        # 2-digit year format: e.g. "week-2631", "sprint-2631", "week_2631"
+        m2 = re.search(r'(?:sprint|week)[_\-\s]*(\d{2})(\d{2})', leaf, re.IGNORECASE)
+        if m2:
+            yy = int(m2.group(1))
+            ww = int(m2.group(2))
+            return 2000 + yy, ww, f"week-{yy:02d}{ww:02d}"
+        return None, None, leaf
+
+    y1, w1, s1 = _parse_sprint(old_iter)
+    y2, w2, s2 = _parse_sprint(new_iter)
+
+    if y1 and w1 and y2 and w2:
+        try:
+            d1 = date.fromisocalendar(y1, w1, 1)
+            d2 = date.fromisocalendar(y2, w2, 1)
+            return (d2 - d1).days // 7
+        except Exception:
+            return (y2 - y1) * 52 + (w2 - w1)
+    return 0
+
 
 class AzureDevOpsCache:
     """
@@ -208,6 +248,23 @@ class AzureDevOpsCache:
             except Exception:
                 pass
 
+            # Table: iteration_shifts
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS iteration_shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_item_id INTEGER NOT NULL,
+                title TEXT,
+                type TEXT,
+                assigned_to TEXT,
+                old_iteration TEXT,
+                new_iteration TEXT,
+                old_sprint TEXT,
+                new_sprint TEXT,
+                delta_weeks INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'tfs_sync',
+                recorded_at TEXT NOT NULL
+            )""")
+
             # Indexes for faster joins and queries
             conn.execute("CREATE INDEX IF NOT EXISTS idx_repos_project ON repositories(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_id)")
@@ -219,6 +276,8 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_builds_repo ON builds(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_builds_pipeline ON builds(pipeline_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_build ON artifacts(build_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_wi ON iteration_shifts(work_item_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_date ON iteration_shifts(recorded_at)")
 
             # View: v_branches
             conn.execute("""
@@ -569,17 +628,175 @@ class AzureDevOpsCache:
                 }
         return result
 
+    def _record_shift_in_conn(self, conn, wi_id, old_iter, new_iter, source="tfs_sync", title="", type_str="", assigned_to=""):
+        """Internal helper to record an iteration shift event in SQLite."""
+        if not old_iter or not new_iter or old_iter == new_iter:
+            return
+
+        import re
+        def _get_leaf(s):
+            clean = str(s or "").replace("\\", "/").strip("/")
+            return clean.split("/")[-1]
+
+        s1 = _get_leaf(old_iter)
+        s2 = _get_leaf(new_iter)
+        delta = _calculate_sprint_delta_weeks(old_iter, new_iter)
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("""
+        INSERT INTO iteration_shifts (work_item_id, title, type, assigned_to, old_iteration, new_iteration, old_sprint, new_sprint, delta_weeks, source, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (wi_id, title or "", type_str or "", assigned_to or "", old_iter, new_iter, s1 or old_iter, s2 or new_iter, delta, source, now_str))
+
     def save_work_item(self, wi_id, title, type_str, state, assigned_to, changed_date, raw_json_obj, deleted=0):
         """
-        Saves a work item definition to the cache database.
+        Saves a work item definition to the cache database and tracks iteration changes.
         """
+        try:
+            wi_int = int(str(wi_id).lstrip("#"))
+        except (ValueError, TypeError):
+            wi_int = wi_id
+
         raw_json = json.dumps(raw_json_obj, cls=DateTimeEncoder, ensure_ascii=False)
         deleted_val = 1 if deleted else 0
+
+        new_fields = raw_json_obj.get("fields", {}) if isinstance(raw_json_obj, dict) else {}
+        new_iter = new_fields.get("System.IterationPath") or ""
+
         with self._connection() as conn:
+            if new_iter:
+                old_row = conn.execute("SELECT raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+                if old_row and old_row["raw_json"]:
+                    try:
+                        old_raw = json.loads(old_row["raw_json"])
+                        old_fields = old_raw.get("fields", {}) if isinstance(old_raw, dict) else {}
+                        old_iter = old_fields.get("System.IterationPath") or ""
+                        if old_iter and old_iter != new_iter:
+                            self._record_shift_in_conn(
+                                conn,
+                                wi_int,
+                                old_iter,
+                                new_iter,
+                                source="tfs_sync",
+                                title=title,
+                                type_str=type_str,
+                                assigned_to=assigned_to
+                            )
+                    except Exception:
+                        pass
+
             conn.execute("""
             INSERT OR REPLACE INTO work_items (id, title, type, state, assigned_to, changed_date, deleted, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (wi_id, title, type_str, state, assigned_to, changed_date, deleted_val, raw_json))
+            """, (wi_int, title, type_str, state, assigned_to, changed_date, deleted_val, raw_json))
+
+    def update_work_item_iteration(self, wi_id, new_iteration_path, source="gui_manual"):
+        """
+        Updates the System.IterationPath of a cached work item in SQLite and records the shift event.
+
+        Args:
+            wi_id (int/str): Work item ID.
+            new_iteration_path (str): Target iteration path.
+            source (str): 'gui_manual' or 'tfs_sync'.
+
+        Returns:
+            bool: True if updated, False otherwise.
+        """
+        try:
+            wi_int = int(str(wi_id).lstrip("#"))
+        except (ValueError, TypeError):
+            return False
+
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if not row:
+                return False
+
+            raw_s = row["raw_json"]
+            raw_obj = {}
+            if raw_s:
+                try:
+                    raw_obj = json.loads(raw_s)
+                except Exception:
+                    raw_obj = {}
+
+            if not isinstance(raw_obj, dict):
+                raw_obj = {}
+            if "fields" not in raw_obj or not isinstance(raw_obj["fields"], dict):
+                raw_obj["fields"] = {}
+
+            old_iter = raw_obj["fields"].get("System.IterationPath") or ""
+            raw_obj["fields"]["System.IterationPath"] = new_iteration_path
+
+            if old_iter != new_iteration_path:
+                self._record_shift_in_conn(
+                    conn,
+                    wi_int,
+                    old_iter,
+                    new_iteration_path,
+                    source=source,
+                    title=row["title"],
+                    type_str=row["type"],
+                    assigned_to=row["assigned_to"]
+                )
+
+            updated_raw = json.dumps(raw_obj, cls=DateTimeEncoder, ensure_ascii=False)
+            conn.execute("UPDATE work_items SET raw_json = ? WHERE id = ?", (updated_raw, wi_int))
+            return True
+
+    def get_iteration_shifts(self, limit=200, work_item_id=None):
+        """
+        Retrieves recorded iteration shift events ordered by most recent first.
+        """
+        query = "SELECT * FROM iteration_shifts"
+        params = []
+        if work_item_id:
+            query += " WHERE work_item_id = ?"
+            params.append(int(str(work_item_id).lstrip("#")))
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_shift_metrics(self):
+        """
+        Calculates aggregate iteration shift & postponement statistics.
+        """
+        with self._connection() as conn:
+            shifts = conn.execute("SELECT * FROM iteration_shifts ORDER BY id DESC").fetchall()
+            total_shifts = len(shifts)
+            postponed = sum(1 for s in shifts if (s["delta_weeks"] or 0) > 0)
+            accelerated = sum(1 for s in shifts if (s["delta_weeks"] or 0) < 0)
+            net_delta = sum((s["delta_weeks"] or 0) for s in shifts)
+            affected_wis = len(set(s["work_item_id"] for s in shifts))
+
+            top_rows = conn.execute("""
+                SELECT work_item_id as id, work_item_id, title, type, assigned_to, 
+                       old_sprint, new_sprint, SUM(delta_weeks) as total_delayed_weeks,
+                       COUNT(*) as shift_count, MAX(recorded_at) as last_shift_at
+                FROM iteration_shifts
+                WHERE delta_weeks > 0
+                GROUP BY work_item_id
+                ORDER BY total_delayed_weeks DESC, shift_count DESC
+                LIMIT 10
+            """).fetchall()
+            top_list = [dict(r) for r in top_rows]
+            most_delayed = top_list[0] if top_list else None
+
+            return {
+                "total_shifts": total_shifts,
+                "total_shifted_items": affected_wis,
+                "affected_work_items": affected_wis,
+                "total_postponed": postponed,
+                "total_accelerated": accelerated,
+                "net_delay_weeks": net_delta,
+                "net_delayed_weeks": net_delta,
+                "top_delayed_items": top_list,
+                "top_postponed": top_list,
+                "most_delayed_item": most_delayed
+            }
 
     def mark_work_item_deleted(self, wi_id):
         """
@@ -599,6 +816,67 @@ class AzureDevOpsCache:
                 """, (wi_int,))
                 return 1
             return cur.rowcount
+
+    def update_work_item_deadline(self, wi_id, deadline_str, field_name="Microsoft.VSTS.Scheduling.TargetDate"):
+        """
+        Updates the target deadline field inside raw_json of a cached work item in SQLite.
+
+        Args:
+            wi_id (int/str): Work item ID.
+            deadline_str (str): Target deadline (YYYY-MM-DD or ISO string, or empty string to clear).
+            field_name (str): The field reference name to update.
+
+        Returns:
+            bool: True if record was found and updated, False otherwise.
+        """
+        try:
+            wi_int = int(str(wi_id).lstrip("#"))
+        except (ValueError, TypeError):
+            return False
+
+        with self._connection() as conn:
+            row = conn.execute("SELECT raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if not row:
+                return False
+
+            raw_s = row["raw_json"]
+            raw_obj = {}
+            if raw_s:
+                try:
+                    raw_obj = json.loads(raw_s)
+                except Exception:
+                    raw_obj = {}
+
+            if not isinstance(raw_obj, dict):
+                raw_obj = {}
+            if "fields" not in raw_obj or not isinstance(raw_obj["fields"], dict):
+                raw_obj["fields"] = {}
+
+            target_field = field_name or "Microsoft.VSTS.Scheduling.TargetDate"
+            if deadline_str:
+                raw_obj["fields"][target_field] = deadline_str
+            else:
+                if target_field:
+                    raw_obj["fields"].pop(target_field, None)
+                for k in list(raw_obj["fields"].keys()):
+                    if (
+                        k in (
+                            "Microsoft.VSTS.Scheduling.TargetDate",
+                            "Microsoft.VSTS.Scheduling.DueDate",
+                            "Microsoft.VSTS.Scheduling.FinishDate",
+                            "Custom.Deadline",
+                            "Custom.TargetDate",
+                            "Custom.Milestone",
+                            "Custom.MilestoneDeadline"
+                        )
+                        or k.lower().endswith("deadline")
+                        or k.lower().endswith("targetdate")
+                    ):
+                        raw_obj["fields"].pop(k, None)
+
+            updated_raw = json.dumps(raw_obj, cls=DateTimeEncoder, ensure_ascii=False)
+            conn.execute("UPDATE work_items SET raw_json = ? WHERE id = ?", (updated_raw, wi_int))
+            return True
 
     def get_all_work_item_ids(self, include_deleted=True):
         """

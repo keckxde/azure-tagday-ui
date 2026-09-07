@@ -245,7 +245,7 @@ class AzureInfoHandler(AzureBaseClient):
         for i in range(0, len(clean_ids), chunk_size):
             chunk = clean_ids[i:i + chunk_size]
             try:
-                batch_items = self.get_work_items_batch(chunk, chunk_size=chunk_size)
+                batch_items = self.get_work_items_batch(chunk, expand="all", chunk_size=chunk_size)
                 for wi in batch_items:
                     if wi and isinstance(wi, dict) and "id" in wi:
                         wi_id = wi["id"]

@@ -3,6 +3,14 @@ import QtQuick 2.15
 pragma Singleton
 
 QtObject {
+    // Dynamic Font Scaling & UI Scale
+    readonly property real fontScale: (typeof backend !== "undefined" && backend && backend.uiScale) ? backend.uiScale : 1.0
+    readonly property string fontSizeMode: (typeof backend !== "undefined" && backend && backend.fontSizeMode) ? backend.fontSizeMode : "medium"
+
+    function fontSize(baseSize) {
+        return Math.round(baseSize * fontScale);
+    }
+
     // Palette - Modern Dark Theme
     readonly property color bgDark: "#0d1117"
     readonly property color bgSidebar: "#161b22"

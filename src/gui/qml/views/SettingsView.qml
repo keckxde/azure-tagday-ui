@@ -641,6 +641,249 @@ Item {
             }
 
             // ==========================================
+            // Agile & Deadline Attribute Configuration Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: deadlineCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: deadlineCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 12
+
+                    RowLayout {
+                        spacing: 8
+                        Text { text: "🎯"; font.pixelSize: 16 }
+                        Text {
+                            text: "Work Item Deadline Attribute Configuration"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                            color: "#f0f6fc"
+                        }
+                    }
+
+                    Text {
+                        text: "Specify a custom TFS / Azure DevOps field reference name used for milestone deadlines (e.g. Custom.MilestoneDeadline). If left empty, the application automatically inspects Microsoft.VSTS.Scheduling.TargetDate, DueDate, FinishDate, or weekly sprint milestone dates."
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        color: "#8b949e"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        TextField {
+                            id: deadlineFieldInput
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            font.family: "Consolas, monospace"
+                            font.pixelSize: 12
+                            text: (backend && backend.customDeadlineField) ? backend.customDeadlineField : ""
+                            placeholderText: "e.g. Microsoft.VSTS.Scheduling.TargetDate or Custom.MilestoneDeadline"
+                            placeholderTextColor: "#484f58"
+                            color: "#f0f6fc"
+                            background: Rectangle {
+                                color: "#0d1117"
+                                radius: 6
+                                border.color: deadlineFieldInput.activeFocus ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                        }
+
+                        Button {
+                            text: "💾 Save Attribute"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 130; radius: 6
+                                color: parent.hovered ? "#1f6feb" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setCustomDeadlineField(deadlineFieldInput.text);
+                                    root.bannerMsg = "Custom deadline field updated to: " + (deadlineFieldInput.text.trim() || "Default (TargetDate / DueDate)");
+                                    root.bannerType = "success";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Bug Hierarchy & Container Grouping Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: bugHierarchyCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: bugHierarchyCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 14
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text { text: "🪲"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Bug Hierarchy & Workload Container Grouping"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Configure how Bugs are structured and grouped in the Workload Explorer & Agile views"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 10
+
+                        Repeater {
+                            model: [
+                                {
+                                    mode: "like_user_story",
+                                    title: "Bugs as Stories (Containers)",
+                                    desc: "Bugs are top-level backlog items that contain individual tasks. Recommended for Scrum / Agile projects where bugs are tracked like User Stories.",
+                                    badge: "Top-Level Container"
+                                },
+                                {
+                                    mode: "like_task",
+                                    title: "Bugs as Tasks (Child Items)",
+                                    desc: "Bugs are child work items contained within parent User Stories or Requirements. Recommended for projects where bugs belong directly to stories.",
+                                    badge: "Child Task Item"
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 80
+                                radius: 6
+                                property bool isSelected: backend && backend.bugHierarchyMode === modelData.mode
+                                color: isSelected ? "#0d2344" : (bugOptMa.containsMouse ? "#21262d" : "#0d1117")
+                                border.color: isSelected ? "#1f6feb" : (bugOptMa.containsMouse ? "#388bfd" : "#30363d")
+                                border.width: isSelected ? 2 : 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 12
+
+                                    // Radio Indicator
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        color: parent.parent.isSelected ? "#1f6feb" : "#161b22"
+                                        border.color: parent.parent.isSelected ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 8
+                                            height: 8
+                                            radius: 4
+                                            color: "#ffffff"
+                                            visible: parent.parent.parent.isSelected
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 3
+
+                                        RowLayout {
+                                            spacing: 8
+                                            Text {
+                                                text: modelData.title
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Bold
+                                                color: parent.parent.parent.parent.isSelected ? "#f0f6fc" : "#e6edf3"
+                                            }
+
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: bugBadgeLabel.implicitWidth + 8
+                                                radius: 8
+                                                color: parent.parent.parent.parent.isSelected ? "#1f6feb" : "#21262d"
+                                                Text {
+                                                    id: bugBadgeLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData.badge
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
+                                                    color: parent.parent.parent.parent.parent.isSelected ? "#ffffff" : "#8b949e"
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: modelData.desc
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: bugOptMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.setBugHierarchyMode(modelData.mode);
+                                            root.bannerMsg = "Bug hierarchy mode updated to: " + modelData.title;
+                                            root.bannerType = "success";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Recent Projects History Card (if any)
             // ==========================================
             Rectangle {
@@ -741,6 +984,174 @@ Item {
                                 hoverEnabled: true
                                 propagateComposedEvents: true
                                 cursorShape: Qt.ArrowCursor
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Display & Typography Sizing Card
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: fontSettingCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: fontSettingCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 14
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text { text: "🔤"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Display & Typography Scaling"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Adjust font size and interface scaling for high-DPI (2K/4K) monitors or compact viewing"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 10
+
+                        Repeater {
+                            model: [
+                                {
+                                    mode: "small",
+                                    title: "Small (90%)",
+                                    desc: "Compact view for dense data tables and smaller screens",
+                                    badge: "Compact"
+                                },
+                                {
+                                    mode: "medium",
+                                    title: "Medium (100% - Default)",
+                                    desc: "Standard balanced scale for regular 1080p monitors",
+                                    badge: "Standard"
+                                },
+                                {
+                                    mode: "large",
+                                    title: "Large (115%)",
+                                    desc: "Enhanced readability for larger displays and text clarity",
+                                    badge: "Enhanced"
+                                },
+                                {
+                                    mode: "xlarge",
+                                    title: "Extra Large (130%)",
+                                    desc: "High-DPI / 4K monitors and high-accessibility viewing",
+                                    badge: "4K / HiDPI"
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 68
+                                radius: 6
+                                property bool isSelected: backend && backend.fontSizeMode === modelData.mode
+                                color: isSelected ? "#0d2344" : (optMa.containsMouse ? "#21262d" : "#0d1117")
+                                border.color: isSelected ? "#1f6feb" : (optMa.containsMouse ? "#388bfd" : "#30363d")
+                                border.width: isSelected ? 2 : 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 12
+
+                                    // Radio Indicator
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        color: parent.parent.isSelected ? "#1f6feb" : "#161b22"
+                                        border.color: parent.parent.isSelected ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 8
+                                            height: 8
+                                            radius: 4
+                                            color: "#ffffff"
+                                            visible: parent.parent.parent.isSelected
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            spacing: 8
+                                            Text {
+                                                text: modelData.title
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Bold
+                                                color: parent.parent.parent.parent.isSelected ? "#f0f6fc" : "#e6edf3"
+                                            }
+
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: bLabel.implicitWidth + 8
+                                                radius: 8
+                                                color: parent.parent.parent.parent.isSelected ? "#1f6feb" : "#21262d"
+                                                Text {
+                                                    id: bLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData.badge
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
+                                                    color: parent.parent.parent.parent.parent.isSelected ? "#ffffff" : "#8b949e"
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: modelData.desc
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                            Layout.fillWidth: true
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: optMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.setFontSizeMode(modelData.mode);
+                                            root.bannerMsg = "Font size updated to " + modelData.title;
+                                            root.bannerType = "success";
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

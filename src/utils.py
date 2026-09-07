@@ -574,3 +574,51 @@ def calculate_deadline_urgency(deadline_val, is_completed=False, now_dt=None):
             "deadline_str": deadline_str
         }
 
+
+def get_configured_deadline_field():
+    """
+    Returns custom configured TFS deadline field name from environment, or default empty string.
+    """
+    return os.getenv("WORK_ITEM_DEADLINE_FIELD", "").strip()
+
+
+def extract_work_item_deadline(fields_dict, custom_field=None):
+    """
+    Extracts deadline/target date from a TFS work item fields dictionary.
+
+    Prioritizes:
+    1. Explicitly configured custom_field or WORK_ITEM_DEADLINE_FIELD (if set).
+    2. Microsoft.VSTS.Scheduling.TargetDate
+    3. Microsoft.VSTS.Scheduling.DueDate
+    4. Microsoft.VSTS.Scheduling.FinishDate
+
+    Args:
+        fields_dict (dict): The work item fields map.
+        custom_field (str, optional): Custom field attribute name to check first.
+
+    Returns:
+        tuple: (deadline_date_str, matched_field_name)
+    """
+    if not isinstance(fields_dict, dict):
+        return "", ""
+
+    cfg_field = (custom_field or get_configured_deadline_field()).strip()
+    if cfg_field and fields_dict.get(cfg_field):
+        return str(fields_dict[cfg_field]).strip(), cfg_field
+
+    standard_fields = [
+        "Microsoft.VSTS.Scheduling.TargetDate",
+        "Microsoft.VSTS.Scheduling.DueDate",
+        "Microsoft.VSTS.Scheduling.FinishDate",
+        "Custom.Deadline",
+        "Custom.TargetDate",
+        "Custom.MilestoneDeadline"
+    ]
+
+    for f_name in standard_fields:
+        val = fields_dict.get(f_name)
+        if val:
+            return str(val).strip(), f_name
+
+    return "", ""
+

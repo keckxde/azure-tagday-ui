@@ -730,15 +730,53 @@ Item {
                             }
                         }
 
-                        // Title
-                        Text {
+                        // Title & Shift Badge
+                        RowLayout {
                             Layout.fillWidth: true
-                            text: model.title
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 13
-                            color: model.deleted ? "#8b949e" : "#f0f6fc"
-                            font.strikeout: model.deleted
-                            elide: Text.ElideRight
+                            spacing: 6
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: model.title
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 13
+                                color: model.deleted ? "#8b949e" : "#f0f6fc"
+                                font.strikeout: model.deleted
+                                elide: Text.ElideRight
+                            }
+
+                            // Shift / Delay indicator badge
+                            Rectangle {
+                                implicitHeight: 18
+                                implicitWidth: sBadgeText.implicitWidth + 10
+                                radius: 9
+                                visible: (model.shift_badge || "") !== ""
+                                color: "#3c1e1e"
+                                border.color: "#da3633"
+                                border.width: 1
+
+                                Text {
+                                    id: sBadgeText
+                                    anchors.centerIn: parent
+                                    text: model.shift_badge || ""
+                                    font.pixelSize: 9
+                                    font.weight: Font.Bold
+                                    color: "#f85149"
+                                }
+
+                                ToolTip.visible: sBadgeMa.containsMouse
+                                ToolTip.text: "Iteration Shift History:\nThis item has been postponed or moved " + (model.shift_count || 1) + " time(s).\nTotal Delay: +" + (model.total_delayed_weeks || 0) + " week(s)."
+
+                                MouseArea {
+                                    id: sBadgeMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        iterationModal.openForWorkItem(model.id, model.title, model.iteration_name);
+                                    }
+                                }
+                            }
                         }
 
                         // State
@@ -752,13 +790,13 @@ Item {
                             elide: Text.ElideRight
                         }
 
-                        // Iteration Pill
+                        // Iteration Pill (Clickable / Reschedule)
                         Rectangle {
                             Layout.preferredWidth: 125
                             height: 24
                             radius: 12
-                            color: model.is_iteration_planned ? "#0d2344" : "#161b22"
-                            border.color: model.is_iteration_planned ? "#1f6feb" : "#30363d"
+                            color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : "#21262d") : (model.is_iteration_planned ? "#0d2344" : "#161b22")
+                            border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : "#30363d")
                             border.width: 1
 
                             RowLayout {
@@ -781,65 +819,78 @@ Item {
                                     color: model.is_iteration_planned ? "#58a6ff" : "#8b949e"
                                     elide: Text.ElideRight
                                 }
+
+                                Text {
+                                    visible: iterMa.containsMouse
+                                    text: "✏️"
+                                    font.pixelSize: 9
+                                }
                             }
 
                             ToolTip.visible: iterMa.containsMouse
                             ToolTip.text: {
+                                var txt = "";
                                 if (model.is_iteration_planned) {
-                                    return "Planned in Iteration: " + (model.iteration_name || "Sprint") + "\nPath: " + (model.iteration_path || model.iteration_name)
+                                    txt = "Planned Iteration: " + (model.iteration_name || "Sprint") + "\nPath: " + (model.iteration_path || model.iteration_name);
                                 } else {
-                                    return "Not planned in an iteration\nPath: " + (model.iteration_path || "Project Root / Backlog")
+                                    txt = "Not planned in an iteration\nPath: " + (model.iteration_path || "Project Root / Backlog");
                                 }
+                                return txt + "\n(Click to reschedule / move sprint)";
                             }
 
                             MouseArea {
                                 id: iterMa
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    iterationModal.openForWorkItem(model.id, model.title, model.iteration_name);
+                                }
                             }
                         }
 
-                        // Deadline & Urgency Pill
+                        // Deadline & Urgency Pill (Clickable / Editable)
                         Rectangle {
                             Layout.preferredWidth: 115
                             height: 22
                             radius: 11
+                            property bool hasDeadline: (model.deadline_str || "") !== ""
                             property color uColor: model.urgency_color || "#8b949e"
-                            color: Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15)
-                            border.color: Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5)
+                            color: deadMa.containsMouse ? (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.25) : "#21262d") : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15) : "#161b22")
+                            border.color: deadMa.containsMouse ? "#58a6ff" : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5) : "#30363d")
                             border.width: 1
-                            visible: (model.deadline_str || "") !== ""
 
-                            Text {
+                            RowLayout {
                                 anchors.centerIn: parent
-                                text: model.urgency_badge || model.deadline_str || "—"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 10
-                                font.weight: Font.DemiBold
-                                color: parent.uColor
-                                elide: Text.ElideRight
+                                spacing: 4
+
+                                Text {
+                                    text: parent.parent.hasDeadline ? (model.urgency_badge || model.deadline_str || "—") : "➕ Set Date"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: parent.parent.hasDeadline ? Font.DemiBold : Font.Normal
+                                    color: parent.parent.hasDeadline ? parent.parent.uColor : (deadMa.containsMouse ? "#58a6ff" : "#8b949e")
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    visible: deadMa.containsMouse && parent.parent.hasDeadline
+                                    text: "✏️"
+                                    font.pixelSize: 9
+                                }
                             }
 
-                            ToolTip.visible: deadMa.containsMouse && (model.deadline_str || "") !== ""
-                            ToolTip.text: "Milestone Deadline: " + (model.deadline_str || "N/A") + "\nTarget Date: " + (model.target_date || "N/A")
+                            ToolTip.visible: deadMa.containsMouse
+                            ToolTip.text: parent.hasDeadline ? ("Milestone Deadline: " + model.deadline_str + "\nTarget Date: " + (model.target_date || "N/A") + "\n(Click to change or clear)") : "No deadline set (Click to set deadline)"
 
                             MouseArea {
                                 id: deadMa
                                 anchors.fill: parent
                                 hoverEnabled: true
-                            }
-                        }
-
-                        // Placeholder if no deadline
-                        Item {
-                            Layout.preferredWidth: 115
-                            height: 22
-                            visible: (model.deadline_str || "") === ""
-                            Text {
-                                anchors.centerIn: parent
-                                text: "—"
-                                font.pixelSize: 11
-                                color: "#484f58"
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, "");
+                                }
                             }
                         }
 
@@ -1343,6 +1394,20 @@ Item {
     onFilterIterationChanged: updateFilteredModel()
     onFilterUrgencyChanged:   updateFilteredModel()
 
+    DeadlineEditorDialog {
+        id: deadlineDialog
+        onDeadlineUpdated: function(id, newDate, result) {
+            root.updateFilteredModel()
+        }
+    }
+
+    IterationPickerModal {
+        id: iterationModal
+        onIterationUpdated: function(id, newIteration, result) {
+            root.updateFilteredModel()
+        }
+    }
+
     Component.onCompleted: {
         refreshTypesList()
         refreshStatesList()
@@ -1351,3 +1416,4 @@ Item {
         updateFilteredModel()
     }
 }
+

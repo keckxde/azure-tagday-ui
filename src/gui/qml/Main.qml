@@ -65,13 +65,29 @@ ApplicationWindow {
         window.isSyncLogDrawerOpen = !window.isSyncLogDrawerOpen;
     }
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
+    // ==========================================
+    // Scalable Root Container for Typography & High-DPI Zoom
+    // ==========================================
+    Item {
+        id: rootScaleContainer
+        anchors.left: parent.left
+        anchors.top: parent.top
+        transform: Scale {
+            origin.x: 0
+            origin.y: 0
+            xScale: (backend && backend.uiScale) ? backend.uiScale : 1.0
+            yScale: (backend && backend.uiScale) ? backend.uiScale : 1.0
+        }
+        width: (backend && backend.uiScale && backend.uiScale !== 0) ? (window.width / backend.uiScale) : window.width
+        height: (backend && backend.uiScale && backend.uiScale !== 0) ? (window.height / backend.uiScale) : window.height
 
-        // ==========================================
-        // Sidebar Navigation
-        // ==========================================
+        RowLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            // ==========================================
+            // Sidebar Navigation
+            // ==========================================
         Rectangle {
             Layout.preferredWidth: 240
             Layout.fillHeight: true
@@ -188,6 +204,80 @@ ApplicationWindow {
 
                 Item {
                     Layout.fillHeight: true
+                }
+
+                // ==========================================
+                // Quick Font Size / Scaling Switcher
+                // ==========================================
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.rightMargin: 12
+                    Layout.bottomMargin: 8
+                    implicitHeight: 36
+                    radius: 6
+                    color: "#0d1117"
+                    border.color: "#30363d"
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 6
+                        spacing: 4
+
+                        Text {
+                            text: "🔤 Font:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Repeater {
+                            model: [
+                                { label: "S", mode: "small", tip: "Small (90%) - Compact" },
+                                { label: "M", mode: "medium", tip: "Medium (100%) - Default" },
+                                { label: "L", mode: "large", tip: "Large (115%) - Enhanced" },
+                                { label: "XL", mode: "xlarge", tip: "Extra Large (130%) - 4K/HiDPI" }
+                            ]
+
+                            Rectangle {
+                                property bool isCur: backend && backend.fontSizeMode === modelData.mode
+                                implicitWidth: 26
+                                implicitHeight: 26
+                                radius: 4
+                                color: isCur ? "#1f6feb" : (btnMa.containsMouse ? "#21262d" : "transparent")
+                                border.color: isCur ? "#388bfd" : (btnMa.containsMouse ? "#30363d" : "transparent")
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: parent.isCur ? Font.Bold : Font.Normal
+                                    color: parent.isCur ? "#ffffff" : "#8b949e"
+                                }
+
+                                ToolTip.visible: btnMa.containsMouse
+                                ToolTip.text: modelData.tip
+
+                                MouseArea {
+                                    id: btnMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.setFontSizeMode(modelData.mode);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // ==========================================
@@ -594,4 +684,5 @@ ApplicationWindow {
             }
         }
     }
+}
 }

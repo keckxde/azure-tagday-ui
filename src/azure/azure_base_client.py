@@ -31,16 +31,17 @@ class AzureBaseClient:
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
 
-    def _request(self, method, path, params=None, data=None, raw_text=False):
+    def _request(self, method, path, params=None, data=None, raw_text=False, content_type=None):
         """
         Sends an HTTP request to the Azure DevOps API.
 
         Args:
-            method (str): The HTTP method (e.g., 'GET', 'POST').
+            method (str): The HTTP method (e.g., 'GET', 'POST', 'PATCH').
             path (str): The API endpoint path.
             params (dict, optional): URL query parameters. Defaults to None.
-            data (dict, optional): Request JSON body. Defaults to None.
+            data (dict/list, optional): Request JSON body. Defaults to None.
             raw_text (bool, optional): If True, returns decoded text response instead of JSON. Defaults to False.
+            content_type (str, optional): Custom content-type header (e.g. 'application/json-patch+json').
 
         Returns:
             tuple: A tuple containing the response content (dict/str) and status code (int).
@@ -54,7 +55,11 @@ class AzureBaseClient:
             query_str = urllib.parse.urlencode(params, doseq=True)
             full_url = f"{full_url}?{query_str}"
             
-        req = urllib.request.Request(full_url, headers=self.headers, method=method)
+        req_headers = dict(self.headers)
+        if content_type:
+            req_headers["Content-Type"] = content_type
+
+        req = urllib.request.Request(full_url, headers=req_headers, method=method)
         if data is not None:
             req.data = json.dumps(data).encode('utf-8')
             
@@ -88,7 +93,7 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/pipelines", params={"api-version": "6.0-preview.1"})
         return res.get("value", [])
 
-    def get_work_item(self, task_id):
+    def get_work_item(self, task_id, expand="all"):
         """
         Retrieves details of a specific work item by ID.
 
@@ -98,8 +103,59 @@ class AzureBaseClient:
         Returns:
             dict: The work item details dictionary.
         """
-        res, _ = self._request("GET", f"_apis/wit/workitems/{task_id}", params={"api-version": "6.0"})
+        clean_id = str(task_id).lstrip("#")
+        params = {"api-version": "6.0"}
+        if expand:
+            params["$expand"] = expand
+        res, _ = self._request("GET", f"_apis/wit/workitems/{clean_id}", params=params)
         return res
+
+    def update_work_item_field(self, task_id, field_name, value, project_id=None):
+        """
+        Updates or clears a field on a TFS/Azure DevOps work item using JSON-Patch (application/json-patch+json).
+
+        Args:
+            task_id (int/str): Work item ID.
+            field_name (str): Reference name of the field (e.g. 'Microsoft.VSTS.Scheduling.TargetDate' or 'Custom.Deadline').
+            value (Any): Value to set (e.g. ISO date string). If None or empty string, field is removed or set empty.
+            project_id (str, optional): Project name or ID.
+
+        Returns:
+            dict: Updated work item dictionary returned by the API.
+        """
+        clean_id = int(str(task_id).lstrip("#"))
+        path = f"{project_id}/_apis/wit/workitems/{clean_id}" if project_id else f"_apis/wit/workitems/{clean_id}"
+
+        if value is None or value == "":
+            patch_data = [
+                {
+                    "op": "remove",
+                    "path": f"/fields/{field_name}"
+                }
+            ]
+        else:
+            patch_data = [
+                {
+                    "op": "add",
+                    "path": f"/fields/{field_name}",
+                    "value": value
+                }
+            ]
+
+        try:
+            res, _ = self._request(
+                "PATCH",
+                path,
+                params={"api-version": "6.0"},
+                data=patch_data,
+                content_type="application/json-patch+json"
+            )
+            return res
+        except urllib.error.HTTPError as err:
+            # If removing a non-existent field returns 400, consider it cleared
+            if (value is None or value == "") and err.code == 400:
+                return {"id": clean_id, "status": "cleared"}
+            raise
 
     def get_work_items_batch(self, task_ids, fields=None, expand=None, chunk_size=200):
         """

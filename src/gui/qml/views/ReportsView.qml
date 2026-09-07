@@ -5,11 +5,13 @@ import "../components"
 
 Item {
     id: root
-    property int activeReportTab: 0 // 0: Overview & Triggers, 1: Tag Day Interactive, 2: Storage & Artifacts Interactive, 3: Release Notes, 4: Sprint Report
+    property int activeReportTab: 0 // 0: Overview & Triggers, 1: Tag Day Interactive, 2: Storage & Artifacts Interactive, 3: Release Notes, 4: Sprint Report, 5: Iteration Shifts
     property string selectedRepoName: ""
     property string selectedSprintReport: ""
     property var sprintReportData: null
     property int sprintFilterType: 0 // 0: All, 1: Stories, 2: Bugs, 3: Tasks, 4: Assignees
+    property string shiftSearchQuery: ""
+    property string shiftSourceFilter: "all" // "all", "user_gui", "tfs_sync"
 
     readonly property var selectedRepo: {
         if (!selectedRepoName || !backend || !backend.tagDayData || !backend.tagDayData.repos_summary)
@@ -93,12 +95,12 @@ Item {
             Row {
                 spacing: 6
                 Repeater {
-                    model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report"]
+                    model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts"]
                     Button {
                         text: modelData
                         checkable: true
                         checked: root.activeReportTab === index
-                        font.pixelSize: 12
+                        font.pixelSize: 11
                         font.weight: checked ? Font.DemiBold : Font.Normal
                         contentItem: Text {
                             text: parent.text
@@ -109,7 +111,7 @@ Item {
                         }
                         background: Rectangle {
                             implicitHeight: 32
-                            implicitWidth: index === 4 ? 140 : 150
+                            implicitWidth: 135
                             radius: 6
                             color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
                             border.color: parent.checked ? "#388bfd" : "#30363d"
@@ -3769,19 +3771,20 @@ Item {
 
                                     // Deadline Badge
                                     Rectangle {
+                                        id: rptDlBadge
                                         Layout.preferredWidth: 110
                                         height: 20
                                         radius: 10
-                                        property var urg: modelData.urgency || {}
-                                        visible: (modelData.deadline_str || "") !== ""
+                                        property var urg: (modelData && modelData.urgency) ? modelData.urgency : {}
+                                        visible: (modelData && modelData.deadline_str || "") !== ""
                                         color: Qt.rgba(139 / 255, 148 / 255, 158 / 255, 0.15)
-                                        border.color: urg.badge_color || "#30363d"
+                                        border.color: (rptDlBadge.urg && rptDlBadge.urg.badge_color) ? rptDlBadge.urg.badge_color : "#30363d"
                                         Text {
                                             anchors.centerIn: parent
-                                            text: urg.badge_text || modelData.deadline_str || "—"
+                                            text: (rptDlBadge.urg && rptDlBadge.urg.badge_text) ? rptDlBadge.urg.badge_text : (modelData.deadline_str || "—")
                                             font.pixelSize: 10
                                             font.weight: Font.DemiBold
-                                            color: urg.badge_color || "#8b949e"
+                                            color: (rptDlBadge.urg && rptDlBadge.urg.badge_color) ? rptDlBadge.urg.badge_color : "#8b949e"
                                         }
                                     }
 
@@ -3924,6 +3927,540 @@ Item {
                                                 height: parent.height
                                                 radius: 3
                                                 color: "#3fb950"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Tab 5: Iteration Shifts & Impact Analysis
+            // ==========================================
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 14
+
+                    // Subheader & Filters
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Sprint Rescheduling & Postponement Impact"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 16
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Audit log of work item iteration changes (manual moves & TFS sync shifts) with delay metrics"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Source Filter (All / Manual / TFS Sync)
+                        Row {
+                            spacing: 4
+                            Repeater {
+                                model: [
+                                    { label: "All Events", value: "all" },
+                                    { label: "🖥️ GUI Moves", value: "user_gui" },
+                                    { label: "🔄 TFS Sync", value: "tfs_sync" }
+                                ]
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.shiftSourceFilter === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 28
+                                        implicitWidth: 100
+                                        radius: 6
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.shiftSourceFilter = modelData.value;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Search Filter
+                        SearchBar {
+                            placeholder: "Search item, title, sprint..."
+                            onSearchUpdated: function(query) {
+                                root.shiftSearchQuery = (query || "").toLowerCase();
+                            }
+                        }
+                    }
+
+                    // KPI Metrics Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        // Total Shift Events
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 65
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Text { text: "🔄"; font.pixelSize: 22 }
+                                ColumnLayout {
+                                    spacing: 2
+                                    Text { text: "TOTAL SHIFT EVENTS"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
+                                    Text {
+                                        text: backend && backend.shiftImpactMetrics ? (backend.shiftImpactMetrics.total_shifts || 0).toString() : "0"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 16
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Rescheduled Work Items
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 65
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Text { text: "📋"; font.pixelSize: 22 }
+                                ColumnLayout {
+                                    spacing: 2
+                                    Text { text: "RESCHEDULED ITEMS"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
+                                    Text {
+                                        text: backend && backend.shiftImpactMetrics ? (backend.shiftImpactMetrics.total_shifted_items || 0).toString() : "0"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 16
+                                        font.weight: Font.Bold
+                                        color: "#58a6ff"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Net Delay Weeks
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 65
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Text { text: "⏳"; font.pixelSize: 22 }
+                                ColumnLayout {
+                                    spacing: 2
+                                    Text { text: "NET DELAY / POSTPONED"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
+                                    Text {
+                                        property int netDelay: backend && backend.shiftImpactMetrics ? (backend.shiftImpactMetrics.net_delay_weeks || 0) : 0
+                                        text: (netDelay > 0 ? ("+" + netDelay) : netDelay.toString()) + " Weeks"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 16
+                                        font.weight: Font.Bold
+                                        color: netDelay > 0 ? "#f85149" : "#3fb950"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Most Delayed Item
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 65
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Text { text: "⚠️"; font.pixelSize: 22 }
+                                ColumnLayout {
+                                    spacing: 2
+                                    Text { text: "MOST POSTPONED ITEM"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
+                                    Text {
+                                        property var mdi: backend && backend.shiftImpactMetrics ? backend.shiftImpactMetrics.most_delayed_item : null
+                                        text: mdi ? ("#" + mdi.id + " (+" + mdi.total_delayed_weeks + "w)") : "None"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        color: "#d29922"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Main Content Split: Top Delayed Items (Left) + Shift Events Audit Log (Right)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 14
+
+                        // Left Box: Top Rescheduled & Postponed Work Items
+                        Rectangle {
+                            Layout.preferredWidth: 420
+                            Layout.fillHeight: true
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 10
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "🎯 Postponed User Stories & Bugs"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: "Sorted by delay"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+
+                                Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                                ListView {
+                                    id: topShiftedList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: 6
+
+                                    readonly property var filteredItems: {
+                                        if (!backend || !backend.shiftImpactMetrics || !backend.shiftImpactMetrics.top_delayed_items)
+                                            return [];
+                                        var list = backend.shiftImpactMetrics.top_delayed_items;
+                                        if (!root.shiftSearchQuery) return list;
+                                        return list.filter(function(it) {
+                                            var q = root.shiftSearchQuery;
+                                            return (it.id && it.id.toString().indexOf(q) !== -1) ||
+                                                   (it.title && it.title.toLowerCase().indexOf(q) !== -1) ||
+                                                   (it.assigned_to && it.assigned_to.toLowerCase().indexOf(q) !== -1) ||
+                                                   (it.type && it.type.toLowerCase().indexOf(q) !== -1);
+                                        });
+                                    }
+
+                                    model: filteredItems
+
+                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                                    delegate: Rectangle {
+                                        width: topShiftedList.width - 6
+                                        height: delayedItemCol.implicitHeight + 14
+                                        radius: 6
+                                        color: "#0d1117"
+                                        border.color: "#30363d"
+                                        border.width: 1
+
+                                        ColumnLayout {
+                                            id: delayedItemCol
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 4
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Text {
+                                                    text: "#" + modelData.id
+                                                    font.family: "Consolas, monospace"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    color: "#58a6ff"
+                                                }
+
+                                                Rectangle {
+                                                    implicitHeight: 16
+                                                    implicitWidth: dTypeLabel.implicitWidth + 8
+                                                    radius: 8
+                                                    color: "#161b22"
+                                                    border.color: "#30363d"
+                                                    Text {
+                                                        id: dTypeLabel
+                                                        anchors.centerIn: parent
+                                                        text: modelData.type || "Story"
+                                                        font.pixelSize: 9
+                                                        color: "#8b949e"
+                                                    }
+                                                }
+
+                                                Item { Layout.fillWidth: true }
+
+                                                // Delay Badge
+                                                Rectangle {
+                                                    implicitHeight: 18
+                                                    implicitWidth: delayPillText.implicitWidth + 10
+                                                    radius: 9
+                                                    color: modelData.total_delayed_weeks > 0 ? "#3d2200" : "#0d3525"
+                                                    border.color: modelData.total_delayed_weeks > 0 ? "#d29922" : "#3fb950"
+                                                    border.width: 1
+                                                    Text {
+                                                        id: delayPillText
+                                                        anchors.centerIn: parent
+                                                        text: (modelData.total_delayed_weeks > 0 ? ("+" + modelData.total_delayed_weeks + "w") : (modelData.total_delayed_weeks + "w")) + " (" + modelData.shift_count + " moves)"
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.Bold
+                                                        color: modelData.total_delayed_weeks > 0 ? "#f2cc60" : "#3fb950"
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.title || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                color: "#f0f6fc"
+                                                elide: Text.ElideRight
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Text {
+                                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                                    font.pixelSize: 10
+                                                    color: "#8b949e"
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                                Text {
+                                                    text: "Current: " + (modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : "None")
+                                                    font.pixelSize: 10
+                                                    color: "#58a6ff"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right Box: Chronological Shift Event Stream
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            color: "#161b22"
+                            radius: 8
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 10
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "📜 Rescheduling Audit Log"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: "Latest events first"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+
+                                Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                                ListView {
+                                    id: shiftEventsList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: 6
+
+                                    readonly property var filteredEvents: {
+                                        if (!backend || !backend.iterationShifts) return [];
+                                        var list = backend.iterationShifts;
+                                        if (root.shiftSourceFilter !== "all") {
+                                            list = list.filter(function(ev) {
+                                                return ev.source === root.shiftSourceFilter;
+                                            });
+                                        }
+                                        if (!root.shiftSearchQuery) return list;
+                                        return list.filter(function(ev) {
+                                            var q = root.shiftSearchQuery;
+                                            return (ev.work_item_id && ev.work_item_id.toString().indexOf(q) !== -1) ||
+                                                   (ev.title && ev.title.toLowerCase().indexOf(q) !== -1) ||
+                                                   (ev.old_sprint && ev.old_sprint.toLowerCase().indexOf(q) !== -1) ||
+                                                   (ev.new_sprint && ev.new_sprint.toLowerCase().indexOf(q) !== -1) ||
+                                                   (ev.assigned_to && ev.assigned_to.toLowerCase().indexOf(q) !== -1);
+                                        });
+                                    }
+
+                                    model: filteredEvents
+
+                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                                    delegate: Rectangle {
+                                        width: shiftEventsList.width - 6
+                                        height: eventCol.implicitHeight + 14
+                                        radius: 6
+                                        color: "#0d1117"
+                                        border.color: "#30363d"
+                                        border.width: 1
+
+                                        ColumnLayout {
+                                            id: eventCol
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 4
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "#" + modelData.work_item_id
+                                                    font.family: "Consolas, monospace"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    color: "#58a6ff"
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: modelData.title || ""
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    color: "#f0f6fc"
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                // Source Badge
+                                                Rectangle {
+                                                    implicitHeight: 18
+                                                    implicitWidth: srcText.implicitWidth + 8
+                                                    radius: 9
+                                                    color: modelData.source === "user_gui" ? "#0d2344" : "#21262d"
+                                                    border.color: modelData.source === "user_gui" ? "#1f6feb" : "#30363d"
+                                                    Text {
+                                                        id: srcText
+                                                        anchors.centerIn: parent
+                                                        text: modelData.source === "user_gui" ? "🖥️ GUI" : "🔄 Sync"
+                                                        font.pixelSize: 9
+                                                        color: modelData.source === "user_gui" ? "#58a6ff" : "#8b949e"
+                                                    }
+                                                }
+
+                                                // Delta Badge
+                                                Rectangle {
+                                                    implicitHeight: 18
+                                                    implicitWidth: evDeltaText.implicitWidth + 8
+                                                    radius: 9
+                                                    color: modelData.delta_weeks > 0 ? "#3d2200" : (modelData.delta_weeks < 0 ? "#0d3525" : "#21262d")
+                                                    border.color: modelData.delta_weeks > 0 ? "#d29922" : (modelData.delta_weeks < 0 ? "#3fb950" : "#30363d")
+                                                    border.width: 1
+                                                    Text {
+                                                        id: evDeltaText
+                                                        anchors.centerIn: parent
+                                                        text: modelData.delta_weeks > 0 ? ("+" + modelData.delta_weeks + "w") : (modelData.delta_weeks + "w")
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.Bold
+                                                        color: modelData.delta_weeks > 0 ? "#f2cc60" : (modelData.delta_weeks < 0 ? "#3fb950" : "#8b949e")
+                                                    }
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Text {
+                                                    text: "Sprint: " + (modelData.old_sprint || "None") + "  ➔  " + (modelData.new_sprint || "None")
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    color: "#58a6ff"
+                                                }
+
+                                                Item { Layout.fillWidth: true }
+
+                                                Text {
+                                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                                    font.pixelSize: 10
+                                                    color: "#8b949e"
+                                                }
+
+                                                Text {
+                                                    text: "•"
+                                                    font.pixelSize: 10
+                                                    color: "#30363d"
+                                                }
+
+                                                Text {
+                                                    text: (modelData.recorded_at || "").replace("T", " ").substring(0, 19)
+                                                    font.pixelSize: 9
+                                                    color: "#8b949e"
+                                                }
                                             }
                                         }
                                     }

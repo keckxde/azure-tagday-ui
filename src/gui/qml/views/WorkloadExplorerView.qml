@@ -10,6 +10,34 @@ Item {
     property string searchQuery: ""
     property var matrixData: null
     property var selectedCell: null // { assignee: "...", sprint_name: "...", items: [...] }
+    property bool hideClosedTasks: false
+
+    function getFilteredContainers(containers) {
+        if (!containers) return [];
+        if (!root.hideClosedTasks) return containers;
+        var res = [];
+        for (var i = 0; i < containers.length; i++) {
+            var c = containers[i];
+            var openTasks = getFilteredTasks(c.tasks || []);
+            // Keep container if it has open child tasks, or if the parent container itself is not done/closed
+            if (openTasks.length > 0 || !c.is_done) {
+                res.push(c);
+            }
+        }
+        return res;
+    }
+
+    function getFilteredTasks(tasksList) {
+        if (!tasksList) return [];
+        if (!root.hideClosedTasks) return tasksList;
+        var res = [];
+        for (var i = 0; i < tasksList.length; i++) {
+            if (!tasksList[i].is_done) {
+                res.push(tasksList[i]);
+            }
+        }
+        return res;
+    }
 
     function refreshMatrix() {
         if (!backend) return
@@ -106,7 +134,84 @@ Item {
                 }
             }
 
-            Item { width: 8 }
+            Item { width: 4 }
+
+            // Bug Hierarchy Mode Switcher
+            Row {
+                spacing: 4
+                Text {
+                    text: "🪲 Bugs:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Repeater {
+                    model: [
+                        { label: "As Stories", value: "like_user_story", tip: "Bugs are top-level containers that can contain tasks" },
+                        { label: "As Tasks", value: "like_task", tip: "Bugs are child tasks nested inside parent stories" }
+                    ]
+                    Button {
+                        text: modelData.label
+                        checkable: true
+                        checked: backend && backend.bugHierarchyMode === modelData.value
+                        font.pixelSize: 10
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.tip
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 30
+                            implicitWidth: 86
+                            radius: 6
+                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                            border.color: parent.checked ? "#388bfd" : "#30363d"
+                        }
+                        onClicked: {
+                            if (backend) {
+                                backend.setBugHierarchyMode(modelData.value);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Item { width: 4 }
+
+            // Hide Closed Tasks Toggle in Top Header
+            Button {
+                text: root.hideClosedTasks ? "⚡ Active Only" : "📋 All Tasks"
+                checkable: true
+                checked: root.hideClosedTasks
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.hideClosedTasks ? "Showing active/open tasks only. Click to show closed items." : "Showing all tasks (active & closed). Click to hide completed tasks."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#3fb950" : "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 30
+                    implicitWidth: 105
+                    radius: 6
+                    color: parent.checked ? "#0d3525" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#238636" : "#30363d"
+                }
+                onClicked: { root.hideClosedTasks = !root.hideClosedTasks }
+            }
+
+            Item { width: 4 }
 
             // Search Bar
             SearchBar {
@@ -707,11 +812,21 @@ Item {
                         elide: Text.ElideRight
                     }
 
-                    Text {
-                        text: "Sprint: " + (root.selectedCell ? root.selectedCell.sprint_name : "") + " (" + (root.selectedCell ? root.selectedCell.total_count : 0) + " items)"
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        color: "#58a6ff"
+                    RowLayout {
+                        spacing: 8
+                        Text {
+                            text: "Sprint: " + (root.selectedCell ? root.selectedCell.sprint_name : "") + " (" + (root.selectedCell ? root.selectedCell.total_count : 0) + " items)"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            color: "#58a6ff"
+                        }
+
+                        Text {
+                            text: "• Grouped by Parent Container"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                        }
                     }
                 }
 
@@ -727,124 +842,564 @@ Item {
 
             Rectangle { Layout.fillWidth: true; height: 1; color: "#30363d" }
 
-            // Items List
+            // Filter Bar in Drawer
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 34
+                radius: 6
+                color: "#161b22"
+                border.color: "#30363d"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
+
+                    Text {
+                        text: "Filter:"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 11
+                        color: "#8b949e"
+                    }
+
+                    // Show All Button
+                    Rectangle {
+                        implicitHeight: 22
+                        implicitWidth: allBtnText.implicitWidth + 14
+                        radius: 11
+                        color: !root.hideClosedTasks ? "#1f6feb" : "#21262d"
+                        border.color: !root.hideClosedTasks ? "#388bfd" : "#30363d"
+                        Text {
+                            id: allBtnText
+                            anchors.centerIn: parent
+                            text: "Show All (" + (root.selectedCell ? root.selectedCell.total_count : 0) + ")"
+                            font.pixelSize: 10
+                            font.weight: !root.hideClosedTasks ? Font.Bold : Font.Normal
+                            color: !root.hideClosedTasks ? "#ffffff" : "#8b949e"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: { root.hideClosedTasks = false }
+                        }
+                    }
+
+                    // Hide Closed Button
+                    Rectangle {
+                        implicitHeight: 22
+                        implicitWidth: actBtnText.implicitWidth + 14
+                        radius: 11
+                        color: root.hideClosedTasks ? "#238636" : "#21262d"
+                        border.color: root.hideClosedTasks ? "#3fb950" : "#30363d"
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text {
+                                text: "⚡"
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                id: actBtnText
+                                text: "Hide Closed (" + (root.selectedCell ? (root.selectedCell.total_count - root.selectedCell.completed_count) : 0) + " open)"
+                                font.pixelSize: 10
+                                font.weight: root.hideClosedTasks ? Font.Bold : Font.Normal
+                                color: root.hideClosedTasks ? "#ffffff" : "#8b949e"
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: { root.hideClosedTasks = true }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        visible: root.hideClosedTasks && root.selectedCell && root.selectedCell.completed_count > 0
+                        text: "✓ " + root.selectedCell.completed_count + " closed hidden"
+                        font.pixelSize: 10
+                        color: "#3fb950"
+                    }
+                }
+            }
+
+            // Parent Container Cards List
             ListView {
                 id: drawerItemsList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                spacing: 8
+                spacing: 12
 
-                model: root.selectedCell ? (root.selectedCell.items || []) : []
+                model: root.getFilteredContainers(root.selectedCell ? (root.selectedCell.grouped_containers || root.selectedCell.items || []) : [])
 
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 delegate: Rectangle {
                     width: drawerItemsList.width - 6
-                    height: itemCol.implicitHeight + 16
-                    radius: 6
-                    color: itemBoxMa.containsMouse ? "#21262d" : "#0d1117"
+                    implicitHeight: containerCol.implicitHeight + 18
+                    radius: 8
+                    color: "#0d1117"
                     border.color: {
                         if (modelData.urgency_status === "overdue") return "#f85149"
-                        if (itemBoxMa.containsMouse) return "#388bfd"
+                        if (cardHeaderMa.containsMouse) return "#388bfd"
                         return "#30363d"
                     }
                     border.width: 1
 
-                    MouseArea {
-                        id: itemBoxMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: {
-                            if (backend && (modelData.tfs_url || "") !== "") {
-                                backend.open_url(modelData.tfs_url)
-                            }
-                        }
-                    }
-
                     ColumnLayout {
-                        id: itemCol
+                        id: containerCol
                         anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
+                        anchors.margins: 12
+                        spacing: 10
 
+                        // Container Card Top Header (User Story / Bug / Requirement / Standalone)
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
 
-                            Text {
-                                text: "#" + modelData.id
-                                font.family: "Consolas, monospace"
-                                font.pixelSize: 12
-                                font.weight: Font.Bold
-                                color: "#58a6ff"
+                            // Container Type Icon & ID
+                            RowLayout {
+                                spacing: 4
+                                Text {
+                                    text: {
+                                        var t = (modelData.type || "").toLowerCase();
+                                        if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "🐛";
+                                        if (t.indexOf("req") !== -1) return "📋";
+                                        if (t.indexOf("standalone") !== -1) return "🛠️";
+                                        return "🎯";
+                                    }
+                                    font.pixelSize: 15
+                                }
+
+                                Text {
+                                    text: modelData.id > 0 ? ("#" + modelData.id) : "Direct"
+                                    font.family: "Consolas, monospace"
+                                    font.pixelSize: 13
+                                    font.weight: Font.Bold
+                                    color: modelData.id > 0 ? "#58a6ff" : "#8b949e"
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        onClicked: {
+                                            if (backend && (modelData.tfs_url || "") !== "") {
+                                                backend.open_url(modelData.tfs_url)
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             // Type badge
                             Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: dtLabel.implicitWidth + 12
-                                radius: 9
+                                implicitHeight: 20
+                                implicitWidth: cTypeLabel.implicitWidth + 10
+                                radius: 10
                                 color: "#161b22"
                                 border.color: "#30363d"
                                 Text {
-                                    id: dtLabel
+                                    id: cTypeLabel
                                     anchors.centerIn: parent
-                                    text: modelData.type || "Task"
+                                    text: modelData.type || "Story"
                                     font.pixelSize: 10
-                                    color: "#8b949e"
+                                    font.weight: Font.DemiBold
+                                    color: "#c9d1d9"
                                 }
                             }
 
                             // State badge
                             Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: dsLabel.implicitWidth + 12
-                                radius: 9
+                                visible: modelData.id > 0
+                                implicitHeight: 20
+                                implicitWidth: cStateLabel.implicitWidth + 10
+                                radius: 10
                                 color: modelData.is_done ? "#0d3525" : "#161b22"
                                 border.color: modelData.is_done ? "#3fb950" : "#30363d"
                                 Text {
-                                    id: dsLabel
+                                    id: cStateLabel
                                     anchors.centerIn: parent
                                     text: modelData.state || "Active"
                                     font.pixelSize: 10
+                                    font.weight: Font.DemiBold
                                     color: modelData.is_done ? "#3fb950" : "#d29922"
                                 }
                             }
 
+                            // External Parent Indicator if assigned to someone else
+                            Rectangle {
+                                visible: !modelData.is_parent_in_cell && modelData.id > 0
+                                implicitHeight: 20
+                                implicitWidth: extParentText.implicitWidth + 10
+                                radius: 10
+                                color: "#1a1e24"
+                                border.color: "#30363d"
+                                Text {
+                                    id: extParentText
+                                    anchors.centerIn: parent
+                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                    font.pixelSize: 9
+                                    color: "#8b949e"
+                                }
+                                ToolTip.visible: extMa.containsMouse
+                                ToolTip.text: "Parent Story is assigned to " + modelData.assigned_to
+                                MouseArea { id: extMa; anchors.fill: parent; hoverEnabled: true }
+                            }
+
                             Item { Layout.fillWidth: true }
 
-                            // Deadline Pill
+                            // Move Sprint Pill (for parent story/bug)
                             Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: ddLabel.implicitWidth + 12
-                                radius: 9
-                                visible: (modelData.deadline_str || "") !== ""
-                                color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.15)
-                                border.color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.5)
-                                Text {
-                                    id: ddLabel
+                                visible: modelData.id > 0
+                                implicitHeight: 22
+                                implicitWidth: cSprintRow.implicitWidth + 12
+                                radius: 11
+                                color: "#21262d"
+                                border.color: cEditSprintMa.containsMouse ? "#58a6ff" : "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    id: cSprintRow
                                     anchors.centerIn: parent
-                                    text: modelData.urgency_badge || modelData.deadline_str
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    color: modelData.urgency_color || "#8b949e"
+                                    spacing: 4
+                                    Text {
+                                        text: "🔄 " + (modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : (root.selectedCell ? root.selectedCell.sprint_name : "Sprint"))
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: "#58a6ff"
+                                    }
+                                }
+                                ToolTip.visible: cEditSprintMa.containsMouse
+                                ToolTip.text: "Reschedule Parent Story / Container to another sprint"
+
+                                MouseArea {
+                                    id: cEditSprintMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        workloadIterationPickerModal.openForWorkItem(
+                                            modelData.id,
+                                            modelData.title,
+                                            modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "")
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Deadline Pill (for parent story/bug)
+                            Rectangle {
+                                visible: modelData.id > 0
+                                implicitHeight: 22
+                                implicitWidth: cDdRow.implicitWidth + 12
+                                radius: 11
+                                property bool hasDate: (modelData.deadline_str || "") !== ""
+                                color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.15)
+                                border.color: cEditDlMa.containsMouse ? "#58a6ff" : Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.5)
+                                border.width: 1
+
+                                RowLayout {
+                                    id: cDdRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: parent.parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "➕ Date"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: modelData.urgency_color || "#8b949e"
+                                    }
+                                }
+                                ToolTip.visible: cEditDlMa.containsMouse
+                                ToolTip.text: "Deadline: " + (modelData.deadline_str || "None") + "\n(Click to edit)"
+
+                                MouseArea {
+                                    id: cEditDlMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        workloadDeadlineDialog.openForWorkItem(
+                                            modelData.id,
+                                            modelData.title,
+                                            modelData.deadline_str,
+                                            root.selectedCell ? root.selectedCell.sprint_name : ""
+                                        );
+                                    }
                                 }
                             }
                         }
 
+                        // Container Title
                         Text {
                             Layout.fillWidth: true
                             text: modelData.title || ""
                             font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
+                            font.pixelSize: 13
+                            font.weight: Font.Bold
                             color: "#f0f6fc"
                             wrapMode: Text.WordWrap
+
+                            MouseArea {
+                                id: cardHeaderMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: {
+                                    if (backend && (modelData.tfs_url || "") !== "") {
+                                        backend.open_url(modelData.tfs_url)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tasks Progress Bar (if container has child tasks)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: (modelData.total_tasks_count || 0) > 0
+                            spacing: 4
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: (modelData.completed_tasks_count || 0) + " / " + (modelData.total_tasks_count || 0) + " tasks completed"
+                                    font.pixelSize: 11
+                                    color: "#8b949e"
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: (modelData.progress_percent || 0) + "%"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: modelData.progress_percent === 100 ? "#3fb950" : "#58a6ff"
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 5
+                                radius: 2.5
+                                color: "#21262d"
+                                Rectangle {
+                                    width: parent.width * ((modelData.progress_percent || 0) / 100)
+                                    height: parent.height
+                                    radius: 2.5
+                                    color: modelData.progress_percent === 100 ? "#3fb950" : "#1f6feb"
+                                }
+                            }
+                        }
+
+                        // Nested Child Tasks Area (Recessed Container Box)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: childTasksCol.implicitHeight + 14
+                            radius: 6
+                            color: "#161b22"
+                            border.color: "#21262d"
+                            border.width: 1
+                            visible: (modelData.tasks && modelData.tasks.length > 0) || modelData.id === 0
+
+                            ColumnLayout {
+                                id: childTasksCol
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 5
+
+                                Repeater {
+                                    model: root.getFilteredTasks(modelData.tasks || [])
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: taskRow.implicitHeight + 10
+                                        radius: 4
+                                        color: taskMa.containsMouse ? "#21262d" : "#0d1117"
+                                        border.color: taskMa.containsMouse ? "#388bfd" : "#30363d"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: taskRow
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            spacing: 8
+
+                                            // Status Icon
+                                            Text {
+                                                text: modelData.is_done ? "✓" : "○"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Bold
+                                                color: modelData.is_done ? "#3fb950" : "#58a6ff"
+                                            }
+
+                                            // Task ID
+                                            Text {
+                                                text: "#" + modelData.id
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 11
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
+
+                                            // Task Title
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.title || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                color: modelData.is_done ? "#8b949e" : "#e6edf3"
+                                                elide: Text.ElideRight
+                                            }
+
+                                            // Type Pill (Task vs Bug)
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: tkTypeLabel.implicitWidth + 8
+                                                radius: 8
+                                                color: (modelData.type || "").toLowerCase().indexOf("bug") !== -1 ? "#3d1417" : "#161b22"
+                                                border.color: (modelData.type || "").toLowerCase().indexOf("bug") !== -1 ? "#f85149" : "#30363d"
+                                                Text {
+                                                    id: tkTypeLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData.type || "Task"
+                                                    font.pixelSize: 9
+                                                    color: (modelData.type || "").toLowerCase().indexOf("bug") !== -1 ? "#ff7b72" : "#8b949e"
+                                                }
+                                            }
+
+                                            // State Pill
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: tkStateLabel.implicitWidth + 8
+                                                radius: 8
+                                                color: modelData.is_done ? "#0d3525" : "#161b22"
+                                                border.color: modelData.is_done ? "#3fb950" : "#30363d"
+                                                Text {
+                                                    id: tkStateLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData.state || "Active"
+                                                    font.pixelSize: 9
+                                                    color: modelData.is_done ? "#3fb950" : "#d29922"
+                                                }
+                                            }
+
+                                            // Task Sprint Move
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkSprintText.implicitWidth + 8
+                                                radius: 9
+                                                color: "#21262d"
+                                                border.color: tkMoveMa.containsMouse ? "#58a6ff" : "#30363d"
+                                                Text {
+                                                    id: tkSprintText
+                                                    anchors.centerIn: parent
+                                                    text: "🔄"
+                                                    font.pixelSize: 9
+                                                }
+                                                ToolTip.visible: tkMoveMa.containsMouse
+                                                ToolTip.text: "Reschedule task #" + modelData.id
+                                                MouseArea {
+                                                    id: tkMoveMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        workloadIterationPickerModal.openForWorkItem(
+                                                            modelData.id,
+                                                            modelData.title,
+                                                            modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "")
+                                                        );
+                                                    }
+                                                }
+                                            }
+
+                                            // Task Deadline
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkDlText.implicitWidth + 8
+                                                radius: 9
+                                                property bool hasDate: (modelData.deadline_str || "") !== ""
+                                                color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.15)
+                                                border.color: tkDlMa.containsMouse ? "#58a6ff" : Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.4)
+                                                Text {
+                                                    id: tkDlText
+                                                    anchors.centerIn: parent
+                                                    text: parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "📅"
+                                                    font.pixelSize: 9
+                                                    color: modelData.urgency_color || "#8b949e"
+                                                }
+                                                ToolTip.visible: tkDlMa.containsMouse
+                                                ToolTip.text: "Deadline: " + (modelData.deadline_str || "None") + "\n(Click to edit)"
+                                                MouseArea {
+                                                    id: tkDlMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        workloadDeadlineDialog.openForWorkItem(
+                                                            modelData.id,
+                                                            modelData.title,
+                                                            modelData.deadline_str,
+                                                            root.selectedCell ? root.selectedCell.sprint_name : ""
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: taskMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: {
+                                                if (backend && (modelData.tfs_url || "") !== "") {
+                                                    backend.open_url(modelData.tfs_url)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Indicator when closed tasks in this container are hidden
+                                Text {
+                                    visible: root.hideClosedTasks && (modelData.completed_tasks_count || 0) > 0
+                                    text: "✓ " + modelData.completed_tasks_count + " closed task(s) hidden in this story"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    color: "#3fb950"
+                                }
+
+                                // Placeholder if no tasks exist
+                                Text {
+                                    visible: (!modelData.tasks || modelData.tasks.length === 0)
+                                    text: modelData.id > 0 ? "ℹ️ Direct Story Item (No subtasks)" : "No tasks"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.italic: true
+                                    color: "#6e7681"
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    DeadlineEditorDialog {
+        id: workloadDeadlineDialog
+        onDeadlineUpdated: function(id, newDate, result) {
+            root.refreshMatrix();
+        }
+    }
+
+    IterationPickerModal {
+        id: workloadIterationPickerModal
+        onIterationUpdated: function(id, newIteration, result) {
+            root.refreshMatrix();
+        }
+    }
 }
+

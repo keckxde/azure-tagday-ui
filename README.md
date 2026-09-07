@@ -119,7 +119,9 @@ Accessible from the sidebar navigation (**👥 Workload Explorer**):
 - **Interactive Drill-Down**: Click on any cell to open a slideout drawer displaying the full list of assigned work items with status badges, countdown urgency pills, and direct TFS links.
 
 ### 4. Deadlines & Urgency Visualizer
-- Automatically resolves work item deadlines from `TargetDate`, `FinishDate`, `DueDate`, or falls back to the sprint Friday milestone date.
+- Automatically resolves work item deadlines from configurable custom attributes (e.g. `Custom.TargetMilestone`, `Microsoft.VSTS.Scheduling.TargetDate`, `DueDate`, or `FinishDate`), falling back to sprint Friday milestone dates.
+- **In-App Deadline Editor**: Click any deadline badge in **Work Items** or **Workload Explorer** to set a custom date or one-click preset (*"Sprint End"*, *"Today"*, *"+1 Week"*, *"+2 Weeks"*, *"Clear"*). Writes back directly to TFS via JSON-Patch REST API and updates local cache.
+- **Custom Attribute Configuration**: Set your team's custom deadline attribute in **Settings ➔ Work Item Deadline Attribute** or `config/user_settings.yaml`.
 - **Dynamic Urgency Badges**:
   - `🚨 <N>d Overdue`: Highlighted in red when the milestone is in the past.
   - `⏳ <N>d left` / `⚡ Due Today`: Highlighted in amber when due within 7 days.
@@ -127,6 +129,41 @@ Accessible from the sidebar navigation (**👥 Workload Explorer**):
   - `🔮 Mmm DD`: Neutral indicator for future deadlines.
   - `✓ Closed`: Green completed badge.
 - **Table Filters**: Filter by `🚨 Overdue`, `⏳ Due This Week`, `📅 Due Next Week`, and `🔮 Upcoming` in **Work Items**.
+
+### 5. Sprint Rescheduling & TFS Web API Writeback
+- **Interactive Sprint Rescheduling**: Reschedule any User Story or Bug directly in the GUI:
+  - In **Work Items**: Click the Iteration column badge or context action.
+  - In **Workload Explorer**: Click the `🔄 Sprint` pill on any story card in the drawer.
+- **Sprint Picker Modal**: Select from chronological sprint lists or quick presets (*"+1 Sprint"*, *"+2 Sprints"*, *"Move to Backlog"*). Automatically writes `System.IterationPath` back to TFS via Web API with immediate local cache update.
+
+### 6. Iteration Shift & Postponement Impact Analysis
+- **Automatic Shift Tracking**: Automatically logs iteration changes whenever a work item moves to a different sprint—both from **manual GUI moves** and during **TFS synchronization**.
+- **Delay & Postponement Metrics**: Computes exact calendar week deltas between sprints (e.g. `week-2631` ➔ `week-2633` = `+2` weeks delay).
+- **Impact Analysis Dashboard**: Dedicated tab under **Reports & Analytics ➔ ⏱️ Iteration Shifts**:
+  - **KPIs**: Total Shift Events, Rescheduled Items, Net Delay / Postponed Weeks, and Most Postponed Item.
+  - **Postponed Stories & Bugs Table**: Identifies the most frequently delayed stories and cumulative postponement weeks.
+  - **Rescheduling Audit Log**: Chronological stream of all sprint shifts with source badges (`🖥️ GUI` vs `🔄 Sync`) and delta pills.
+  - **Visual Warnings**: Work items in tables and cards display shift badges (e.g. `⚠️ Shifted +2w`).
+
+### 7. Typography Sizing & High-DPI Display Scaling
+- **Customizable Font Sizes**: Easily switch text and UI scaling to match your monitor resolution:
+  - **Small (90%)**: Compact layout for dense information and small screens.
+  - **Medium (100% - Default)**: Balanced standard scale for 1080p monitors.
+  - **Large (115%)**: Enhanced readability and enlarged typography.
+  - **Extra Large (130%)**: High-DPI / 4K monitors and high-accessibility viewing.
+- **Quick Switcher**: Click `🔤 Font: S | M | L | XL` directly in the sidebar navigation without leaving your current view.
+- **Settings Card**: Full configuration with visual descriptions under **Settings ➔ Display & Typography Scaling**.
+- **Persistent Preferences**: Saves automatically in `config/user_settings.yaml` across application restarts.
+
+### 8. Workload Parent Grouping & Configurable Bug Hierarchy
+In the **Workload Explorer**, selecting a team member's cell groups tasks cleanly by parent container card rather than listing disjointed tasks:
+- **Parent Container Cards**: Each User Story, Requirement, or Bug card shows title, status, deadline urgency badge, rescheduling action, and a nested list of child tasks with completion checkboxes and progress bars (`X / Y tasks completed (Z%)`).
+- **External Parent Resolution**: When a child task is assigned to an engineer but its parent User Story is assigned to an architect/lead or scheduled in a different sprint, the parent card displays an `External Parent` badge with the parent's assignee.
+- **Standalone Tasks**: Direct tasks with no parent link appear grouped under a clean `Direct Tasks / Standalone Items` container card.
+- **Configurable Bug Hierarchy Mode** (Project & Global Settings):
+  - **`Bugs as Stories` (`like_user_story`)**: Bugs act as top-level backlog items that can contain individual tasks (standard Scrum/Agile workflow).
+  - **`Bugs as Tasks` (`like_task`)**: Bugs are child work items contained inside parent User Stories or Requirements.
+  - **Quick Toggle**: Switch dynamically in the Workload Explorer header (`🪲 Bugs: As Stories | As Tasks`) or configure under **Settings ➔ Bug Hierarchy & Workload Container Grouping** (persisted in `config/user_settings.yaml`).
 
 ---
 
