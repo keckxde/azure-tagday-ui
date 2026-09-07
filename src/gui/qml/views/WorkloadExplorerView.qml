@@ -15,16 +15,17 @@ Item {
     property string filterLevel2: "ALL"
     property bool prio1Only: false
     property bool groupedOnly: false
-    property real drawerWidth: 540
+    property real drawerWidth: 420
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
 
     // Horizontal Matrix Scrolling Properties
     property real matrixContentX: 0
     property int matrixSprintCount: root.matrixData && root.matrixData.sprint_columns ? root.matrixData.sprint_columns.length : 0
-    property real minSprintColWidth: 155
-    property real teamMemberColWidth: 220
-    property real totalColWidth: 100
+    property real minSprintColWidth: 120
+    property real teamMemberColWidth: 180
+    property real totalColWidth: 80
+    property int matrixRowHeight: 72
     property real sprintViewportWidth: Math.max(100, (matrixTableContainer.width - root.teamMemberColWidth - root.totalColWidth))
     property real sprintColWidth: Math.max(root.minSprintColWidth, root.matrixSprintCount > 0 ? (root.sprintViewportWidth / root.matrixSprintCount) : root.minSprintColWidth)
     property real totalSprintContentWidth: root.matrixSprintCount * root.sprintColWidth
@@ -805,6 +806,7 @@ Item {
 
         // ====================== Main Workload Heatmap Matrix ======================
         Item {
+            id: matrixTableContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
 
@@ -823,7 +825,7 @@ Item {
                     // ---- Matrix Header (Sprint Columns) ----
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 58
+                        height: 68
                         color: "#161b22"
                         border.color: "#30363d"
                         border.width: 1
@@ -832,9 +834,9 @@ Item {
                             anchors.fill: parent
                             spacing: 0
 
-                            // Assignee Header Column
+                            // Assignee Header Column (Pinned Left)
                             Item {
-                                Layout.preferredWidth: 220
+                                Layout.preferredWidth: root.teamMemberColWidth
                                 Layout.fillHeight: true
                                 RowLayout {
                                     anchors.fill: parent
@@ -856,101 +858,114 @@ Item {
                                 }
                             }
 
-                            // Sprint Column Headers
-                            Repeater {
-                                model: root.matrixData ? (root.matrixData.sprint_columns || []) : []
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
+                            // Scrollable Sprint Column Headers Area
+                            Item {
+                                id: sprintHeaderArea
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
 
-                                    ColumnLayout {
-                                        anchors.centerIn: parent
-                                        spacing: 2
+                                Row {
+                                    id: sprintHeaderRow
+                                    x: -root.matrixContentX
+                                    height: parent.height
 
-                                        Text {
-                                            text: modelData.short_label || modelData.sprint_name
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#f0f6fc"
-                                            horizontalAlignment: Text.AlignHCenter
-                                            Layout.alignment: Qt.AlignHCenter
-                                        }
+                                    Repeater {
+                                        model: root.matrixData ? (root.matrixData.sprint_columns || []) : []
+                                        Item {
+                                            width: root.sprintColWidth
+                                            height: sprintHeaderRow.height
 
-                                        Text {
-                                            text: modelData.start_date ? (modelData.start_date.substring(5) + " · " + modelData.end_date.substring(5)) : ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                            horizontalAlignment: Text.AlignHCenter
-                                            Layout.alignment: Qt.AlignHCenter
-                                        }
+                                            ColumnLayout {
+                                                anchors.centerIn: parent
+                                                spacing: 2
 
-                                        // Milestones for this sprint week
-                                        Row {
-                                            visible: modelData.milestones && modelData.milestones.length > 0
-                                            spacing: 3
-                                            Layout.alignment: Qt.AlignHCenter
+                                                Text {
+                                                    text: modelData.short_label || modelData.sprint_name
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 12
+                                                    font.weight: Font.Bold
+                                                    color: "#f0f6fc"
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                }
 
-                                            Repeater {
-                                                model: modelData.milestones || []
-                                                Rectangle {
-                                                    implicitHeight: 16
-                                                    implicitWidth: sMRow.implicitWidth + 8
-                                                    radius: 8
-                                                    color: modelData.category_bg_color || "#0d2344"
-                                                    border.color: modelData.category_color || "#1f6feb"
-                                                    border.width: 1
+                                                Text {
+                                                    text: modelData.start_date ? (modelData.start_date.substring(5) + " · " + modelData.end_date.substring(5)) : ""
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    color: "#8b949e"
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                }
 
-                                                    Row {
-                                                        id: sMRow
-                                                        anchors.centerIn: parent
-                                                        spacing: 2
-                                                        Text {
-                                                            text: modelData.category_icon || "🚩"
-                                                            font.pixelSize: 8
-                                                        }
-                                                        Text {
-                                                            text: modelData.name
-                                                            font.family: "Segoe UI, sans-serif"
-                                                            font.pixelSize: 8
-                                                            font.weight: Font.DemiBold
-                                                            color: modelData.category_color || "#58a6ff"
-                                                        }
-                                                    }
+                                                // Milestones for this sprint week
+                                                Row {
+                                                    visible: modelData.milestones && modelData.milestones.length > 0
+                                                    spacing: 3
+                                                    Layout.alignment: Qt.AlignHCenter
 
-                                                    ToolTip.visible: sMMa.containsMouse
-                                                    ToolTip.text: modelData.name + " (" + (modelData.category_name || "Milestone") + ")\nDate: " + modelData.target_date + (modelData.description ? ("\n" + modelData.description) : "") + "\n(Click to manage)"
+                                                    Repeater {
+                                                        model: modelData.milestones || []
+                                                        Rectangle {
+                                                            implicitHeight: 16
+                                                            implicitWidth: sMRow.implicitWidth + 8
+                                                            radius: 8
+                                                            color: modelData.category_bg_color || "#0d2344"
+                                                            border.color: modelData.category_color || "#1f6feb"
+                                                            border.width: 1
 
-                                                    MouseArea {
-                                                        id: sMMa
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: {
-                                                            if (typeof window !== "undefined" && window.openMilestonesManager) {
-                                                                window.openMilestonesManager();
+                                                            Row {
+                                                                id: sMRow
+                                                                anchors.centerIn: parent
+                                                                spacing: 2
+                                                                Text {
+                                                                    text: modelData.category_icon || "🚩"
+                                                                    font.pixelSize: 8
+                                                                }
+                                                                Text {
+                                                                    text: modelData.name
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 8
+                                                                    font.weight: Font.DemiBold
+                                                                    color: modelData.category_color || "#58a6ff"
+                                                                }
+                                                            }
+
+                                                            ToolTip.visible: sMMa.containsMouse
+                                                            ToolTip.text: modelData.name + " (" + (modelData.category_name || "Milestone") + ")\nDate: " + modelData.target_date + (modelData.description ? ("\n" + modelData.description) : "") + "\n(Click to manage)"
+
+                                                            MouseArea {
+                                                                id: sMMa
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: {
+                                                                    if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                                                        window.openMilestonesManager();
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    Rectangle {
-                                        anchors.right: parent.right
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        width: 1
-                                        color: "#30363d"
+                                            Rectangle {
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                width: 1
+                                                color: "#30363d"
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            // Total column header
+                            // Total column header (Pinned Right)
                             Item {
-                                Layout.preferredWidth: 100
+                                Layout.preferredWidth: root.totalColWidth
                                 Layout.fillHeight: true
                                 Text {
                                     anchors.centerIn: parent
@@ -972,6 +987,8 @@ Item {
                         clip: true
                         spacing: 1
 
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
                         model: {
                             if (!root.matrixData || !root.matrixData.assignee_rows) return []
                             var rows = root.matrixData.assignee_rows || []
@@ -983,7 +1000,7 @@ Item {
 
                         delegate: Rectangle {
                             width: matrixListView.width
-                            height: 48
+                            height: root.matrixRowHeight
                             color: rowMa.containsMouse ? "#1c2128" : "#0d1117"
                             border.color: "#21262d"
                             border.width: 1
@@ -992,15 +1009,27 @@ Item {
                                 id: rowMa
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                propagateComposedEvents: true
+                                onWheel: function(wheel) {
+                                    if (wheel.angleDelta.x !== 0) {
+                                        root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.x));
+                                        wheel.accepted = true;
+                                    } else if (wheel.modifiers & Qt.ShiftModifier) {
+                                        root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.y));
+                                        wheel.accepted = true;
+                                    } else {
+                                        wheel.accepted = false;
+                                    }
+                                }
                             }
 
                             RowLayout {
                                 anchors.fill: parent
                                 spacing: 0
 
-                                // Assignee Info Column
+                                // Assignee Info Column (Pinned Left)
                                 Item {
-                                    Layout.preferredWidth: 220
+                                    Layout.preferredWidth: root.teamMemberColWidth
                                     Layout.fillHeight: true
 
                                     RowLayout {
@@ -1009,30 +1038,67 @@ Item {
                                         anchors.rightMargin: 8
                                         spacing: 10
 
-                                        // Avatar pill
+                                        // Avatar circle
                                         Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 14
+                                            width: 34
+                                            height: 34
+                                            radius: 17
                                             color: modelData.assignee === "Unassigned" ? "#30363d" : "#1f6feb"
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.initials || "U"
                                                 font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
+                                                font.pixelSize: 12
                                                 font.weight: Font.Bold
                                                 color: "#ffffff"
                                             }
                                         }
 
-                                        Text {
+                                        // Name + stats sub-line
+                                        ColumnLayout {
                                             Layout.fillWidth: true
-                                            text: modelData.assignee
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.DemiBold
-                                            color: modelData.assignee === "Unassigned" ? "#8b949e" : "#f0f6fc"
-                                            elide: Text.ElideRight
+                                            spacing: 3
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.assignee
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: Font.DemiBold
+                                                color: modelData.assignee === "Unassigned" ? "#8b949e" : "#f0f6fc"
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Row {
+                                                spacing: 6
+                                                visible: modelData.stats && modelData.stats.total > 0
+
+                                                Text {
+                                                    text: modelData.stats ? modelData.stats.total + " items" : ""
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    color: "#8b949e"
+                                                }
+
+                                                // Overdue pill
+                                                Rectangle {
+                                                    visible: modelData.stats && (modelData.stats.overdue || 0) > 0
+                                                    implicitHeight: 14
+                                                    implicitWidth: assigneeOverdueText.implicitWidth + 8
+                                                    radius: 7
+                                                    color: "#3d0c0c"
+                                                    border.color: "#f85149"
+                                                    border.width: 1
+                                                    Text {
+                                                        id: assigneeOverdueText
+                                                        anchors.centerIn: parent
+                                                        text: "🚨 " + (modelData.stats ? (modelData.stats.overdue || 0) : 0)
+                                                        font.pixelSize: 8
+                                                        font.weight: Font.Bold
+                                                        color: "#ff7b72"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1045,154 +1111,204 @@ Item {
                                     }
                                 }
 
-                                // Sprint Cells
-                                Repeater {
-                                    model: modelData.cells || []
-                                    Item {
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
+                                // Scrollable Sprint Cells Area
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
 
-                                        property bool hasItems: modelData.total_count > 0
-                                        property bool hasOverdue: modelData.overdue_count > 0
-                                        property bool isSelected: root.selectedCell && root.selectedCell.assignee === modelData.assignee && root.selectedCell.sprint_name === modelData.sprint_name
+                                    Row {
+                                        x: -root.matrixContentX
+                                        height: parent.height
 
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            anchors.margins: 4
-                                            radius: 6
-                                            color: {
-                                                if (isSelected) return "#1f6feb"
-                                                if (cellMa.containsMouse) return "#262c36"
-                                                if (!hasItems) return "transparent"
-                                                if (hasOverdue) return "#381e1e"
-                                                if (modelData.total_count >= 8) return "#0d3525"
-                                                if (modelData.total_count >= 4) return "#0d2344"
-                                                return "#161b22"
-                                            }
-                                            border.color: {
-                                                if (isSelected) return "#58a6ff"
-                                                if (hasOverdue) return "#f85149"
-                                                if (hasItems) return "#30363d"
-                                                return "transparent"
-                                            }
-                                            border.width: 1
+                                        Repeater {
+                                            model: modelData.cells || []
+                                            Item {
+                                                width: root.sprintColWidth
+                                                height: parent.height
 
-                                            // Cell content
-                                            ColumnLayout {
-                                                anchors.centerIn: parent
-                                                spacing: 2
-                                                visible: hasItems
+                                                property bool hasItems: modelData.total_count > 0
+                                                property bool hasOverdue: modelData.overdue_count > 0
+                                                property bool isSelected: root.selectedCell && root.selectedCell.assignee === modelData.assignee && root.selectedCell.sprint_name === modelData.sprint_name
 
-                                                RowLayout {
-                                                    Layout.alignment: Qt.AlignHCenter
-                                                    spacing: 5
-
-                                                    // Total items pill
-                                                    Text {
-                                                        text: modelData.total_count.toString()
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 13
-                                                        font.weight: Font.Bold
-                                                        color: hasOverdue ? "#ff7b72" : (isSelected ? "#ffffff" : "#f0f6fc")
+                                                Rectangle {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 4
+                                                    radius: 6
+                                                    color: {
+                                                        if (isSelected) return "#1f6feb"
+                                                        if (cellMa.containsMouse) return "#262c36"
+                                                        if (!hasItems) return "transparent"
+                                                        if (hasOverdue) return "#381e1e"
+                                                        if (modelData.total_count >= 8) return "#0d3525"
+                                                        if (modelData.total_count >= 4) return "#0d2344"
+                                                        return "#161b22"
                                                     }
-
-                                                    // Type tags breakdown
-                                                    Row {
-                                                        spacing: 3
-                                                        Text { text: "🎯" + modelData.stories_count; font.pixelSize: 10; visible: modelData.stories_count > 0 }
-                                                        Text { text: "🐛" + modelData.bugs_count; font.pixelSize: 10; visible: modelData.bugs_count > 0 }
-                                                        Text { text: "🛠️" + modelData.tasks_count; font.pixelSize: 10; visible: modelData.tasks_count > 0 }
-                                                        Text { text: "🚨" + modelData.overdue_count; font.pixelSize: 10; visible: modelData.overdue_count > 0 }
+                                                    border.color: {
+                                                        if (isSelected) return "#58a6ff"
+                                                        if (hasOverdue) return "#f85149"
+                                                        if (hasItems) return "#30363d"
+                                                        return "transparent"
                                                     }
-                                                }
+                                                    border.width: 1
 
-                                                // Task Status Relation Breakdown (Not Started ⏳, Active ⚡, Closed ✅)
-                                                Row {
-                                                    Layout.alignment: Qt.AlignHCenter
-                                                    spacing: 4
-                                                    visible: (modelData.tasks_count || 0) > 0
-                                                    Text {
-                                                        text: "⏳" + (modelData.tasks_not_started_count || 0)
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.DemiBold
-                                                        color: "#8b949e"
-                                                        visible: (modelData.tasks_not_started_count || 0) > 0
-                                                    }
-                                                    Text {
-                                                        text: "⚡" + (modelData.tasks_active_count || 0)
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.DemiBold
-                                                        color: "#58a6ff"
-                                                        visible: (modelData.tasks_active_count || 0) > 0
-                                                    }
-                                                    Text {
-                                                        text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.DemiBold
-                                                        color: "#3fb950"
-                                                        visible: (modelData.tasks_closed_count || 0) > 0
-                                                    }
-                                                }
-                                            }
+                                                    // Cell content
+                                                    ColumnLayout {
+                                                        anchors.centerIn: parent
+                                                        spacing: 2
+                                                        visible: hasItems
 
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: "—"
-                                                font.pixelSize: 12
-                                                color: "#30363d"
-                                                visible: !hasItems
-                                            }
+                                                        RowLayout {
+                                                            Layout.alignment: Qt.AlignHCenter
+                                                            spacing: 5
 
-                                            MouseArea {
-                                                id: cellMa
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: hasItems ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                onClicked: {
-                                                    if (hasItems) {
-                                                        root.selectedCell = {
-                                                            assignee: modelData.assignee || "Team Member",
-                                                            sprint_name: modelData.sprint_name,
-                                                            total_count: modelData.total_count || 0,
-                                                            stories_count: modelData.stories_count || 0,
-                                                            bugs_count: modelData.bugs_count || 0,
-                                                            tasks_count: modelData.tasks_count || 0,
-                                                            tasks_not_started_count: modelData.tasks_not_started_count || 0,
-                                                            tasks_active_count: modelData.tasks_active_count || 0,
-                                                            tasks_closed_count: modelData.tasks_closed_count || 0,
-                                                            tasks_closed_percent: modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100),
-                                                            not_started_count: modelData.not_started_count || 0,
-                                                            active_count: modelData.active_count || 0,
-                                                            overdue_count: modelData.overdue_count || 0,
-                                                            completed_count: modelData.completed_count || 0,
-                                                            grouped_containers: modelData.grouped_containers || [],
-                                                            items: modelData.items || []
+                                                            // Total items pill
+                                                            Text {
+                                                                text: modelData.total_count.toString()
+                                                                font.family: "Segoe UI, sans-serif"
+                                                                font.pixelSize: 13
+                                                                font.weight: Font.Bold
+                                                                color: hasOverdue ? "#ff7b72" : (isSelected ? "#ffffff" : "#f0f6fc")
+                                                            }
+
+                                                            // Overdue warning badge
+                                                            Rectangle {
+                                                                visible: hasOverdue
+                                                                implicitHeight: 14
+                                                                implicitWidth: overdueLabel.implicitWidth + 6
+                                                                radius: 7
+                                                                color: "#f85149"
+                                                                Text {
+                                                                    id: overdueLabel
+                                                                    anchors.centerIn: parent
+                                                                    text: "!"
+                                                                    font.pixelSize: 9
+                                                                    font.weight: Font.ExtraBold
+                                                                    color: "#ffffff"
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // Stories / Bugs / Tasks micro breakdown
+                                                        Row {
+                                                            Layout.alignment: Qt.AlignHCenter
+                                                            spacing: 4
+                                                            visible: hasItems
+
+                                                            // Stories count
+                                                            Text {
+                                                                text: "📖" + (modelData.stories_count || 0)
+                                                                font.pixelSize: 9
+                                                                color: isSelected ? "#e6edf3" : "#8b949e"
+                                                                visible: (modelData.stories_count || 0) > 0
+                                                            }
+
+                                                            // Bugs count
+                                                            Text {
+                                                                text: "🐛" + (modelData.bugs_count || 0)
+                                                                font.pixelSize: 9
+                                                                color: "#f85149"
+                                                                visible: (modelData.bugs_count || 0) > 0
+                                                            }
+
+                                                            // Tasks count
+                                                            Text {
+                                                                text: "🛠️" + (modelData.tasks_count || 0)
+                                                                font.pixelSize: 9
+                                                                color: isSelected ? "#e6edf3" : "#8b949e"
+                                                                visible: (modelData.tasks_count || 0) > 0
+                                                            }
+                                                        }
+
+                                                        // Task Status Relation Breakdown (Not Started ⏳, Active ⚡, Closed ✅)
+                                                        Row {
+                                                            Layout.alignment: Qt.AlignHCenter
+                                                            spacing: 4
+                                                            visible: (modelData.tasks_count || 0) > 0
+                                                            Text {
+                                                                text: "⏳" + (modelData.tasks_not_started_count || 0)
+                                                                font.pixelSize: 9
+                                                                font.weight: Font.DemiBold
+                                                                color: "#8b949e"
+                                                                visible: (modelData.tasks_not_started_count || 0) > 0
+                                                            }
+                                                            Text {
+                                                                text: "⚡" + (modelData.tasks_active_count || 0)
+                                                                font.pixelSize: 9
+                                                                font.weight: Font.DemiBold
+                                                                color: "#58a6ff"
+                                                                visible: (modelData.tasks_active_count || 0) > 0
+                                                            }
+                                                            Text {
+                                                                text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"
+                                                                font.pixelSize: 9
+                                                                font.weight: Font.DemiBold
+                                                                color: "#3fb950"
+                                                                visible: (modelData.tasks_closed_count || 0) > 0
+                                                            }
                                                         }
                                                     }
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "—"
+                                                        font.pixelSize: 12
+                                                        color: "#30363d"
+                                                        visible: !hasItems
+                                                    }
+
+                                                    MouseArea {
+                                                        id: cellMa
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: hasItems ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                        onClicked: {
+                                                            if (hasItems) {
+                                                                root.selectedCell = {
+                                                                    assignee: modelData.assignee || "Team Member",
+                                                                    sprint_name: modelData.sprint_name,
+                                                                    total_count: modelData.total_count || 0,
+                                                                    stories_count: modelData.stories_count || 0,
+                                                                    bugs_count: modelData.bugs_count || 0,
+                                                                    tasks_count: modelData.tasks_count || 0,
+                                                                    tasks_not_started_count: modelData.tasks_not_started_count || 0,
+                                                                    tasks_active_count: modelData.tasks_active_count || 0,
+                                                                    tasks_closed_count: modelData.tasks_closed_count || 0,
+                                                                    tasks_closed_percent: modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100),
+                                                                    not_started_count: modelData.not_started_count || 0,
+                                                                    active_count: modelData.active_count || 0,
+                                                                    overdue_count: modelData.overdue_count || 0,
+                                                                    completed_count: modelData.completed_count || 0,
+                                                                    grouped_containers: modelData.grouped_containers || [],
+                                                                    items: modelData.items || []
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    ToolTip.visible: cellMa.containsMouse && hasItems
+                                                    ToolTip.text: (modelData.assignee || "") + " @ " + (modelData.sprint_name || "") + "\n" +
+                                                                  "Total: " + modelData.total_count + " items\n" +
+                                                                  "Stories: " + modelData.stories_count + " | Bugs: " + modelData.bugs_count + " | Tasks: " + modelData.tasks_count + "\n" +
+                                                                  "Tasks Breakdown: ⏳ " + (modelData.tasks_not_started_count || 0) + " Not Started | ⚡ " + (modelData.tasks_active_count || 0) + " Active | ✅ " + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "% Closed (" + (modelData.tasks_closed_count || 0) + "/" + (modelData.tasks_count || 0) + ")" +
+                                                                  (hasOverdue ? ("\n🚨 Overdue: " + modelData.overdue_count) : "")
+                                                }
+
+                                                Rectangle {
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    anchors.bottom: parent.bottom
+                                                    width: 1
+                                                    color: "#21262d"
                                                 }
                                             }
-
-                                            ToolTip.visible: cellMa.containsMouse && hasItems
-                                            ToolTip.text: (modelData.assignee || "") + " @ " + (modelData.sprint_name || "") + "\n" +
-                                                          "Total: " + modelData.total_count + " items\n" +
-                                                          "Stories: " + modelData.stories_count + " | Bugs: " + modelData.bugs_count + " | Tasks: " + modelData.tasks_count + "\n" +
-                                                          "Tasks Breakdown: ⏳ " + (modelData.tasks_not_started_count || 0) + " Not Started | ⚡ " + (modelData.tasks_active_count || 0) + " Active | ✅ " + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "% Closed (" + (modelData.tasks_closed_count || 0) + "/" + (modelData.tasks_count || 0) + ")" +
-                                                          (hasOverdue ? ("\n🚨 Overdue: " + modelData.overdue_count) : "")
-                                        }
-
-                                        Rectangle {
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.bottom: parent.bottom
-                                            width: 1
-                                            color: "#21262d"
                                         }
                                     }
                                 }
 
-                                // Assignee Horizon Total
+                                // Assignee Horizon Total (Pinned Right)
                                 Item {
-                                    Layout.preferredWidth: 100
+                                    Layout.preferredWidth: root.totalColWidth
                                     Layout.fillHeight: true
 
                                     ColumnLayout {
@@ -1242,8 +1358,9 @@ Item {
                             anchors.fill: parent
                             spacing: 0
 
+                            // Pinned Left "TOTAL CAPACITY"
                             Item {
-                                Layout.preferredWidth: 220
+                                Layout.preferredWidth: root.teamMemberColWidth
                                 Layout.fillHeight: true
                                 Text {
                                     anchors.left: parent.left
@@ -1258,37 +1375,51 @@ Item {
                                 Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
                             }
 
-                            Repeater {
-                                model: root.matrixData ? (root.matrixData.column_totals || []) : []
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    ColumnLayout {
-                                        anchors.centerIn: parent
-                                        spacing: 1
-                                        Text {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            text: (modelData.total_count || 0) + " items"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            font.weight: Font.Bold
-                                            color: "#58a6ff"
-                                        }
-                                        Row {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            spacing: 4
-                                            visible: (modelData.tasks_count || 0) > 0
-                                            Text { text: "⏳" + (modelData.tasks_not_started_count || 0); font.pixelSize: 9; color: "#8b949e" }
-                                            Text { text: "⚡" + (modelData.tasks_active_count || 0); font.pixelSize: 9; color: "#58a6ff" }
-                                            Text { text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"; font.pixelSize: 9; color: "#3fb950" }
+                            // Scrollable Sprint Totals Area
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+
+                                Row {
+                                    x: -root.matrixContentX
+                                    height: parent.height
+
+                                    Repeater {
+                                        model: root.matrixData ? (root.matrixData.column_totals || []) : []
+                                        Item {
+                                            width: root.sprintColWidth
+                                            height: parent.height
+
+                                            ColumnLayout {
+                                                anchors.centerIn: parent
+                                                spacing: 1
+                                                Text {
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                    text: (modelData.total_count || 0) + " items"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    color: "#58a6ff"
+                                                }
+                                                Row {
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                    spacing: 4
+                                                    visible: (modelData.tasks_count || 0) > 0
+                                                    Text { text: "⏳" + (modelData.tasks_not_started_count || 0); font.pixelSize: 9; color: "#8b949e" }
+                                                    Text { text: "⚡" + (modelData.tasks_active_count || 0); font.pixelSize: 9; color: "#58a6ff" }
+                                                    Text { text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"; font.pixelSize: 9; color: "#3fb950" }
+                                                }
+                                            }
+                                            Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
                                         }
                                     }
-                                    Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
                                 }
                             }
 
+                            // Pinned Grand Total (Right)
                             Item {
-                                Layout.preferredWidth: 100
+                                Layout.preferredWidth: root.totalColWidth
                                 Layout.fillHeight: true
                                 Text {
                                     anchors.centerIn: parent
@@ -1298,6 +1429,67 @@ Item {
                                     font.weight: Font.Bold
                                     color: "#3fb950"
                                 }
+                            }
+                        }
+                    }
+
+                    // ---- Horizontal Matrix ScrollBar Control Bar ----
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: root.maxMatrixScrollX > 0 ? 22 : 0
+                        visible: root.maxMatrixScrollX > 0
+                        color: "#161b22"
+                        border.color: "#30363d"
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 0
+
+                            // Left spacer matching Team Member column
+                            Item {
+                                Layout.preferredWidth: root.teamMemberColWidth
+                                Layout.fillHeight: true
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    spacing: 6
+                                    Text {
+                                        text: "◀ Sprints Viewport ▶"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+                                Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
+                            }
+
+                            // Middle horizontal scrollbar
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+
+                                ScrollBar {
+                                    id: matrixHorizontalScrollBar
+                                    anchors.fill: parent
+                                    anchors.margins: 2
+                                    orientation: Qt.Horizontal
+                                    policy: ScrollBar.AlwaysOn
+                                    size: Math.min(1.0, root.sprintViewportWidth / Math.max(1, root.totalSprintContentWidth))
+                                    position: root.maxMatrixScrollX > 0 ? (root.matrixContentX / root.totalSprintContentWidth) : 0
+
+                                    onPositionChanged: {
+                                        if (pressed) {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, position * root.totalSprintContentWidth));
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Right spacer matching Total column
+                            Item {
+                                Layout.preferredWidth: root.totalColWidth
+                                Layout.fillHeight: true
                             }
                         }
                     }
@@ -1546,16 +1738,25 @@ Item {
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 delegate: Rectangle {
+                    id: cardDelegate
                     width: drawerItemsList.width - 6
                     implicitHeight: containerCol.implicitHeight + 18
                     radius: 8
                     color: "#0d1117"
                     border.color: {
                         if (modelData.urgency_status === "overdue") return "#f85149"
-                        if (cardHeaderMa.containsMouse) return "#388bfd"
+                        if (cardDelegateMa.containsMouse) return "#388bfd"
                         return "#30363d"
                     }
                     border.width: 1
+
+                    // Hover detection for the whole card border highlight
+                    MouseArea {
+                        id: cardDelegateMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
 
                     ColumnLayout {
                         id: containerCol

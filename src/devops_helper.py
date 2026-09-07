@@ -211,18 +211,16 @@ def addCategoriesToRepos(repos, config_path=None, cache_db=None, auto_save_missi
             category = repo_map[repo_name]
         else:
             category = utils.categorize_repository(repo_name, config=config, cache_db=cache_db)
-            repo_map[repo_name] = category
-            missing_added = True
-            logger.info(f"Assigned default category '{category}' for missing repo '{repo_name}' in config")
+            if not cache_db:
+                repo_map[repo_name] = category
+                missing_added = True
+            logger.debug(f"Categorized repository '{repo_name}' as '{category}'")
 
         repos[key]["category"] = category
 
-    # Persist updated configuration if missing repositories were added
+    # Persist updated configuration if missing repositories were added to YAML configuration file
     if missing_added and auto_save_missing:
-        if cache_db and hasattr(cache_db, "save_repo_category_override"):
-            for rname, cat in repo_map.items():
-                cache_db.save_repo_category_override(rname, cat)
-        elif resolved_path and resolved_path != "database":
+        if resolved_path and resolved_path != "database":
             config["repositories"] = repo_map
             utils.save_repo_categories(config, resolved_path)
 

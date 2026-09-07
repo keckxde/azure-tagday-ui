@@ -2756,15 +2756,49 @@ class DevOpsBackend(QObject):
             self.repoCategoriesChanged.emit()
         return res
 
+    @Slot(result=dict)
+    def rematch_repo_categories(self):
+        """Re-runs repository category matching against database rules for all repositories."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected", "total": 0, "updated": 0}
+        try:
+            cfg = self._cache_db.get_full_repo_category_config()
+            count_updated = 0
+            counts_by_cat = {}
+            for r in self._repositories:
+                rname = r.get("name", "")
+                old_cat = r.get("category", "")
+                new_cat = utils.categorize_repository(rname, config=cfg, cache_db=self._cache_db)
+                if new_cat != old_cat:
+                    count_updated += 1
+                r["category"] = new_cat
+                counts_by_cat[new_cat] = counts_by_cat.get(new_cat, 0) + 1
+
+            self.repositoriesChanged.emit()
+            self.repoCategoriesChanged.emit()
+            logger.info(f"Rematched {len(self._repositories)} repositories: {count_updated} updated across categories {counts_by_cat}")
+            return {
+                "success": True,
+                "total": len(self._repositories),
+                "updated": count_updated,
+                "counts": counts_by_cat,
+            }
+        except Exception as e:
+            logger.error(f"Error executing repo category matching: {e}")
+            return {"success": False, "error": str(e), "total": 0, "updated": 0}
+
     def _recalculate_repo_categories(self):
-        """Recalculates category property on all cached repositories in memory."""
+        """Recalculates category property on all cached repositories in memory using current rules."""
         if not self._repositories or not self._cache_db:
             return
-        cfg = self._cache_db.get_full_repo_category_config()
-        for r in self._repositories:
-            rname = r.get("name", "")
-            r["category"] = utils.categorize_repository(rname, config=cfg, cache_db=self._cache_db)
-        self.repositoriesChanged.emit()
+        try:
+            cfg = self._cache_db.get_full_repo_category_config()
+            for r in self._repositories:
+                rname = r.get("name", "")
+                r["category"] = utils.categorize_repository(rname, config=cfg, cache_db=self._cache_db)
+            self.repositoriesChanged.emit()
+        except Exception as e:
+            logger.error(f"Error recalculating repo categories: {e}")
 
     @Slot(str, str, str, result=dict)
     def test_tfs_connection(self, url, collection, pat):

@@ -9,8 +9,8 @@ Dialog {
     modal: true
     dim: true
     anchors.centerIn: parent
-    width: Math.min(960, parent ? parent.width - 32 : 960)
-    height: Math.min(740, parent ? parent.height - 32 : 740)
+    width: Math.min(parent ? parent.width - 40 : 1100, 1200)
+    height: Math.min(parent ? parent.height - 40 : 860, 900)
     padding: 0
 
     background: Rectangle {
@@ -212,6 +212,40 @@ Dialog {
                         onClicked: {
                             root.currentTab = 2;
                             root.feedbackMsg = "";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "🔄 Re-run Matching"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Re-applies all category rules (prefix rules + overrides) to every repository in memory"
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#58a6ff"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 150
+                        radius: 6
+                        color: parent.hovered ? "#0d2844" : "transparent"
+                        border.color: "#1f6feb"
+                        border.width: 1
+                    }
+                    onClicked: {
+                        if (!backend) return;
+                        var res = backend.rematch_repo_categories();
+                        if (res && res.success) {
+                            root.feedbackMsg = "✓ Rematched " + res.total + " repos — " + res.updated + " updated";
+                            root.feedbackType = "success";
+                        } else {
+                            root.feedbackMsg = (res && res.error) ? res.error : "Matching failed";
+                            root.feedbackType = "error";
                         }
                     }
                 }
