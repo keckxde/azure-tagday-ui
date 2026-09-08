@@ -285,6 +285,287 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertEqual(len(milestones), 1)
         self.assertEqual(milestones[0]["name"], "DDQS-02")
 
+    def test_backend_work_item_milestone_enrichment_and_inheritance(self):
+        self.cache.save_milestone("DDQS-01", "2026-08-14", "ddqs", "Demonstration 1")
+
+        parent_wi = {
+            "id": 701,
+            "title": "[1.0] Camera Driver Story",
+            "type": "User Story",
+            "state": "Active",
+            "assigned_to": "Alice",
+            "tags": "Target:DDQS-01; Camera",
+            "raw_tags": "Target:DDQS-01; Camera",
+            "parent_id": None,
+            "is_iteration_planned": False,
+            "iteration_name": "Backlog",
+        }
+
+        child_task = {
+            "id": 702,
+            "title": "Implement USB capture",
+            "type": "Task",
+            "state": "Active",
+            "assigned_to": "Bob",
+            "tags": "Dev",
+            "raw_tags": "Dev",
+            "parent_id": 701,
+            "is_iteration_planned": False,
+            "iteration_name": "Backlog",
+        }
+
+        unrelated_wi = {
+            "id": 703,
+            "title": "General Docs",
+            "type": "Task",
+            "state": "Active",
+            "assigned_to": "Carol",
+            "tags": "Doc",
+            "raw_tags": "Doc",
+            "parent_id": None,
+            "is_iteration_planned": False,
+            "iteration_name": "Backlog",
+        }
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+        backend._work_items = [parent_wi, child_task, unrelated_wi]
+
+        backend._enrich_work_items_with_milestones()
+
+        # Check direct milestone on parent
+        self.assertTrue(parent_wi["has_direct_milestone"])
+        self.assertTrue(parent_wi["has_milestone"])
+        self.assertFalse(parent_wi["is_milestone_inherited"])
+        self.assertEqual(parent_wi["effective_milestone_name"], "DDQS-01")
+        self.assertEqual(parent_wi["milestone_category"], "Internal Process (DDQS)")
+        self.assertFalse(parent_wi["is_iteration_planned"])
+
+        # Check inherited milestone on child
+        self.assertFalse(child_task["has_direct_milestone"])
+        self.assertTrue(child_task["has_milestone"])
+        self.assertTrue(child_task["is_milestone_inherited"])
+        self.assertEqual(child_task["effective_milestone_name"], "DDQS-01")
+        self.assertEqual(child_task["milestone_category"], "Internal Process (DDQS)")
+
+        # Check unrelated item
+        self.assertFalse(unrelated_wi["has_milestone"])
+        self.assertEqual(unrelated_wi["effective_milestone_name"], "")
+
+        # Check workItemMilestones property
+        ms_list = backend.workItemMilestones
+        self.assertIn("DDQS-01", ms_list)
+
+    def test_multi_day_milestone_crud_and_properties(self):
+        # Save a multi-day milestone
+        m_id = self.cache.save_milestone(
+            name="QIAV Audit Workshop",
+            target_date="2026-08-10",
+            category_id="qiav",
+            description="2-week onsite audit and test execution",
+            end_date="2026-08-21"
+        )
+        self.assertGreater(m_id, 0)
+
+        milestones = self.cache.get_milestones()
+        self.assertEqual(len(milestones), 1)
+        m = milestones[0]
+        self.assertEqual(m["name"], "QIAV Audit Workshop")
+        self.assertEqual(m["target_date"], "2026-08-10")
+        self.assertEqual(m["start_date"], "2026-08-10")
+        self.assertEqual(m["end_date"], "2026-08-21")
+        self.assertTrue(m["is_multi_day"])
+        self.assertEqual(m["duration_days"], 12)
+        self.assertEqual(m["date_display"], "2026-08-10 – 2026-08-21")
+
+        # Test inverted dates auto-swapping
+        m2_id = self.cache.save_milestone(
+            name="Swapped Milestone",
+            target_date="2026-09-10",
+            category_id="ddqs",
+            end_date="2026-09-01"
+        )
+        milestones = self.cache.get_milestones()
+        m2 = next(item for item in milestones if item["id"] == m2_id)
+        self.assertEqual(m2["target_date"], "2026-09-01")
+        self.assertEqual(m2["end_date"], "2026-09-10")
+        self.assertTrue(m2["is_multi_day"])
+        self.assertEqual(m2["duration_days"], 10)
+
+        # Test single-day milestone
+        m3_id = self.cache.save_milestone(
+            name="Single Day Gate",
+            target_date="2026-09-15",
+            category_id="ddqs",
+            end_date=""
+        )
+        milestones = self.cache.get_milestones()
+        m3 = next(item for item in milestones if item["id"] == m3_id)
+        self.assertFalse(m3["is_multi_day"])
+        self.assertEqual(m3["duration_days"], 1)
+        self.assertEqual(m3["date_display"], "2026-09-15")
+
+    def test_multi_day_milestone_range_matching_and_matrix_overlap(self):
+        from src import utils
+
+        # Multi-day milestone spanning from Aug 10 to Aug 21 (covers sprint week 33 and 34)
+        m_id = self.cache.save_milestone(
+            name="Integration Event",
+            target_date="2026-08-10",
+            category_id="scenario",
+            description="System cross-component integration",
+            end_date="2026-08-21"
+        )
+
+        milestones = self.cache.get_milestones()
+        m = milestones[0]
+
+        # Test date range utility
+        self.assertTrue(utils.is_date_in_milestone_range("2026-08-10", m))
+        self.assertTrue(utils.is_date_in_milestone_range("2026-08-15", m))
+        self.assertTrue(utils.is_date_in_milestone_range("2026-08-21", m))
+        self.assertFalse(utils.is_date_in_milestone_range("2026-08-09", m))
+        self.assertFalse(utils.is_date_in_milestone_range("2026-08-22", m))
+
+        # Test work item matching to multi-day range
+        wi_in_range = {
+            "id": 801,
+            "title": "Middle of event task",
+            "target_date": "2026-08-15",
+            "tags": "Integration",
+        }
+        matched = utils.match_work_item_to_milestone(wi_in_range, milestones)
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched["name"], "Integration Event")
+
+        # Test workload matrix multi-sprint column overlap
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+        backend._work_items = [
+            {
+                "id": 801,
+                "title": "Task Week 33",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "target_date": "2026-08-14",
+                "remaining_work": 4.0,
+            },
+            {
+                "id": 802,
+                "title": "Task Week 34",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "iteration_path": "Project\\week-2634",
+                "iteration_name": "week-2634",
+                "target_date": "2026-08-19",
+                "remaining_work": 4.0,
+            }
+        ]
+
+        matrix = backend.getWorkloadMatrix()
+        sprint_cols = matrix.get("sprint_columns", [])
+
+        # Find columns for week 33 and week 34
+        w33_col = next((c for c in sprint_cols if "2633" in c.get("name", "") or "week-2633" in c.get("name", "") or "33" in c.get("name", "")), None)
+        w34_col = next((c for c in sprint_cols if "2634" in c.get("name", "") or "week-2634" in c.get("name", "") or "34" in c.get("name", "")), None)
+
+        if w33_col:
+            col_ms_names = [ms["name"] for ms in w33_col.get("milestones", [])]
+            self.assertIn("Integration Event", col_ms_names)
+
+        if w34_col:
+            col_ms_names = [ms["name"] for ms in w34_col.get("milestones", [])]
+            self.assertIn("Integration Event", col_ms_names)
+
+    def test_workload_matrix_filter_by_milestone(self):
+        self.cache.save_milestone(
+            name="Milestone Alpha",
+            target_date="2026-08-14",
+            category_id="ddqs",
+            description="Alpha milestone"
+        )
+        self.cache.save_milestone(
+            name="Milestone Beta",
+            target_date="2026-08-21",
+            category_id="scenario",
+            description="Beta milestone"
+        )
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+        backend._work_items = [
+            {
+                "id": 901,
+                "title": "Task Alpha",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "target_date": "2026-08-14",
+                "tags": "Target:Milestone Alpha",
+                "remaining_work": 4.0,
+            },
+            {
+                "id": 902,
+                "title": "Task Beta",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Bob",
+                "iteration_path": "Project\\week-2634",
+                "iteration_name": "week-2634",
+                "target_date": "2026-08-21",
+                "tags": "Target:Milestone Beta",
+                "remaining_work": 8.0,
+            },
+            {
+                "id": 903,
+                "title": "Task Unplanned",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Charlie",
+                "iteration_path": "Project\\week-2635",
+                "iteration_name": "week-2635",
+                "target_date": "2026-08-28",
+                "tags": "General",
+                "remaining_work": 2.0,
+            }
+        ]
+
+        # 1. Filter ALL -> returns all 3 assignees/items
+        matrix_all = backend.getWorkloadMatrix(filter_milestone="ALL")
+        all_assignees = [r["assignee"] for r in matrix_all.get("assignee_rows", [])]
+        self.assertIn("Alice", all_assignees)
+        self.assertIn("Bob", all_assignees)
+        self.assertIn("Charlie", all_assignees)
+
+        # 2. Filter specific milestone "Milestone Alpha" -> only Alice / Task 901
+        matrix_alpha = backend.getWorkloadMatrix(filter_milestone="Milestone Alpha")
+        alpha_assignees = [r["assignee"] for r in matrix_alpha.get("assignee_rows", [])]
+        self.assertIn("Alice", alpha_assignees)
+        self.assertNotIn("Bob", alpha_assignees)
+        self.assertNotIn("Charlie", alpha_assignees)
+
+        # 3. Filter PLANNED -> Alice and Bob (both have milestones), Charlie excluded
+        matrix_planned = backend.getWorkloadMatrix(filter_milestone="PLANNED")
+        planned_assignees = [r["assignee"] for r in matrix_planned.get("assignee_rows", [])]
+        self.assertIn("Alice", planned_assignees)
+        self.assertIn("Bob", planned_assignees)
+        self.assertNotIn("Charlie", planned_assignees)
+
+        # 4. Filter UNPLANNED -> Charlie only
+        matrix_unplanned = backend.getWorkloadMatrix(filter_milestone="UNPLANNED")
+        unplanned_assignees = [r["assignee"] for r in matrix_unplanned.get("assignee_rows", [])]
+        self.assertNotIn("Alice", unplanned_assignees)
+        self.assertNotIn("Bob", unplanned_assignees)
+        self.assertIn("Charlie", unplanned_assignees)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

@@ -707,19 +707,20 @@ def pbs_sort_key(tag):
     """
     Converts a PBS tag string into a comparable sort key tuple.
     'x'/'X' wildcards are first normalized to '0' via normalize_pbs_number.
-    Each numeric segment becomes an int; non-numeric segments become lowercase strings.
+    Each numeric segment becomes (0, int); non-numeric segments become (1, lowercase_str).
+    This ensures tuples are always safely comparable in Python 3 without TypeError.
 
     Examples:
-        "10xx"     -> (1000,)
-        "1.2.3"    -> (1, 2, 3)
-        "PBS-01"   -> ("pbs", 1)
-        "SYS-A_1x" -> ("sys", "a", 10)
+        "10xx"     -> ((0, 1000),)
+        "1.2.3"    -> ((0, 1), (0, 2), (0, 3))
+        "PBS-01"   -> ((1, "pbs"), (0, 1))
+        "SYS-A_1x" -> ((1, "sys"), (1, "a"), (0, 10))
 
     Args:
         tag (str): Raw or normalized PBS tag string.
 
     Returns:
-        tuple: Mixed int/str tuple suitable for use as a sort key.
+        tuple: Tuple of (type_flag, value) tuples suitable for safe comparison in Python 3.
     """
     normalized = normalize_pbs_number(tag or "")
     parts = re.split(r'[.\-_]', normalized)
@@ -728,19 +729,25 @@ def pbs_sort_key(tag):
         if not p:
             continue
         try:
-            key.append(int(p))
+            key.append((0, int(p)))
         except ValueError:
-            key.append(p.lower())
-    return tuple(key) if key else ("",)
+            key.append((1, p.lower()))
+    return tuple(key) if key else ((1, ""),)
 
 
 def parse_pbs_tag(title):
     """
-    Parses a Product Breakdown Structure (PBS) tag from the start of a title.
-    Expected syntax: [<PBS Number>] <Name>
-    Example: "[PBS-01] Powertrain Subsystem" -> ("PBS-01", "Powertrain Subsystem", ("pbs", 1))
-    Example: "[1.2.3] Engine Control"        -> ("1.2.3",  "Engine Control",       (1, 2, 3))
-    Example: "[10xx] Chassis"                -> ("10xx",   "Chassis",              (1000,))
+    Parses a Product Breakdown Structure (PBS) tag from a title.
+    Expected syntax: [<PBS Number>] <Name> or variations with separators like ' ', '-', ':', ',', '/'.
+    The part after ']' can contain multiple words with multiple separators (e.g. spaces, commas, hyphens, colons, slashes, ampersands).
+
+    Examples:
+        "[PBS-01] Powertrain Subsystem" -> ("PBS-01", "Powertrain Subsystem", ("pbs", 1))
+        "[1.2.3] Engine Control Unit"    -> ("1.2.3",  "Engine Control Unit",       (1, 2, 3))
+        "[10xx] Chassis, Frame & Body - Main System" -> ("10xx", "Chassis, Frame & Body - Main System", (1000,))
+        "[10] - Powertrain, Battery - Subsystem" -> ("10", "Powertrain, Battery - Subsystem", (10,))
+        "[20]: Drive-Train, Inverter / Controller" -> ("20", "Drive-Train, Inverter / Controller", (20,))
+        "Epic [30] Suspension - Front, Rear & Axle" -> ("30", "Suspension - Front, Rear & Axle", (30,))
 
     'x'/'X' wildcards in numeric segments are treated as '0' for the sort key only;
     the original tag string is preserved unchanged for display purposes.
@@ -755,14 +762,16 @@ def parse_pbs_tag(title):
                sort_key (tuple) – comparable key for sorting; x/X treated as 0
     """
     if not title:
-        return "", "", ("",)
+        return "", "", pbs_sort_key("")
     s_title = str(title).strip()
-    m = re.match(r"^\s*\[([^\]]+)\]\s*(.*)$", s_title)
+    m = re.search(r"\[([^\]]+)\][\s\-:,/_]*(.*)$", s_title)
     if m:
         tag = m.group(1).strip()
-        name = m.group(2).strip()
-        return tag, name, pbs_sort_key(tag)
-    return "", s_title, ("",)
+        raw_name = m.group(2).strip()
+        # Clean leading separator characters from the name if any remain
+        clean_name = re.sub(r"^[\s\-:,/_]+", "", raw_name).strip()
+        return tag, clean_name, pbs_sort_key(tag)
+    return "", s_title, pbs_sort_key("")
 
 
 def parse_level3_priority(title):
@@ -974,12 +983,28 @@ def extract_target_milestone_tags(tags_val):
     return results
 
 
+def is_date_in_milestone_range(date_str, milestone):
+    """
+    Checks if a date string (YYYY-MM-DD) falls within a milestone's start and end date range (inclusive).
+    """
+    if not date_str or not milestone:
+        return False
+    d = date_str.split("T")[0].split(" ")[0].strip()
+    m_start = (milestone.get("target_date") or milestone.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+    m_end = (milestone.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
+    if not m_start:
+        return False
+    if m_start <= d <= m_end:
+        return True
+    return False
+
+
 def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
     """
     Identifies the target milestone for a work item.
     Matching precedence:
     1. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
-    2. Exact date matching against the milestone target_date.
+    2. Date matching against the milestone start/target_date or multi-day range [start_date, end_date].
 
     Args:
         wi (dict): Work item dictionary.
@@ -1024,10 +1049,13 @@ def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
     # 2. Date-based matching (fallback)
     wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0].strip()
     if wi_deadline:
-        if milestones_by_date is not None:
-            return milestones_by_date.get(wi_deadline)
+        if milestones_by_date is not None and wi_deadline in milestones_by_date:
+            return milestones_by_date[wi_deadline]
         for m in all_milestones:
-            if (m.get("target_date") or "").strip() == wi_deadline:
+            if (m.get("target_date") or m.get("start_date") or "").strip() == wi_deadline:
+                return m
+        for m in all_milestones:
+            if is_date_in_milestone_range(wi_deadline, m):
                 return m
 
     return None

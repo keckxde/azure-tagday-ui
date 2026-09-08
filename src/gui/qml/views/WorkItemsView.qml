@@ -16,6 +16,7 @@ Item {
     property string filterLevel2: "ALL"      // "ALL", "UNGROUPED", or specific Level 2 (Feature) display name
     property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
     property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
+    property string filterMilestone: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
     property int currentPage: 1
     property int pageSize: 25
     property int totalPages: 1
@@ -28,6 +29,7 @@ Item {
     property var iterationsList: ["ALL"]
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
+    property var milestonesList: ["ALL"]
 
     property var priorityOptions: [
         { label: "All Priorities", value: "ALL" },
@@ -88,6 +90,12 @@ Item {
         level2List = ["ALL"].concat(l2).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"])
     }
 
+    function refreshMilestonesList() {
+        if (!backend) return
+        var ms = backend.workItemMilestones || []
+        milestonesList = ["ALL", "PLANNED", "UNPLANNED"].concat(ms)
+    }
+
     function resetAllFilters() {
         root.searchQuery = ""
         root.filterState = "ALL"
@@ -100,11 +108,12 @@ Item {
         root.filterLevel2 = "ALL"
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
+        root.filterMilestone = "ALL"
         root.currentPage = 1
         root.updateFilteredModel()
     }
 
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL"
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -807,6 +816,128 @@ Item {
             }
         }
 
+        // ====================== Milestone Filter Row ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Text {
+                text: "Milestone:"
+                font.family: "Segoe UI, sans-serif"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                color: "#8b949e"
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: 64
+            }
+
+            Row {
+                spacing: 4
+                Button {
+                    text: "All"
+                    checkable: true
+                    checked: root.filterMilestone === "ALL"
+                    font.pixelSize: 11
+                    font.weight: checked ? Font.DemiBold : Font.Normal
+                    contentItem: Text {
+                        text: parent.text; font: parent.font
+                        color: parent.checked ? "#ffffff" : "#8b949e"
+                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 26; implicitWidth: 38; radius: 13
+                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                    }
+                    onClicked: {
+                        root.filterMilestone = "ALL"
+                        root.currentPage = 1
+                    }
+                }
+
+                Button {
+                    text: "🚩 With Milestone"
+                    checkable: true
+                    checked: root.filterMilestone === "PLANNED"
+                    font.pixelSize: 11
+                    font.weight: checked ? Font.DemiBold : Font.Normal
+                    contentItem: Text {
+                        text: parent.text; font: parent.font
+                        color: parent.checked ? "#ffffff" : "#d29922"
+                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 26; implicitWidth: 125; radius: 13
+                        color: parent.checked ? "#3d2800" : (parent.hovered ? "#21262d" : "#161b22")
+                        border.color: parent.checked ? "#d29922" : "#30363d"
+                    }
+                    onClicked: {
+                        root.filterMilestone = "PLANNED"
+                        root.currentPage = 1
+                    }
+                }
+
+                Button {
+                    text: "📋 No Milestone"
+                    checkable: true
+                    checked: root.filterMilestone === "UNPLANNED"
+                    font.pixelSize: 11
+                    font.weight: checked ? Font.DemiBold : Font.Normal
+                    contentItem: Text {
+                        text: parent.text; font: parent.font
+                        color: parent.checked ? "#ffffff" : "#8b949e"
+                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 26; implicitWidth: 105; radius: 13
+                        color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
+                        border.color: parent.checked ? "#8b949e" : "#30363d"
+                    }
+                    onClicked: {
+                        root.filterMilestone = "UNPLANNED"
+                        root.currentPage = 1
+                    }
+                }
+            }
+
+            ComboBox {
+                id: milestoneCombo
+                implicitWidth: 220
+                implicitHeight: 28
+                font.pixelSize: 11
+                model: root.milestonesList
+                currentIndex: {
+                    var idx = root.milestonesList.indexOf(root.filterMilestone)
+                    return idx >= 0 ? idx : 0
+                }
+                displayText: {
+                    if (currentIndex === 0 || currentText === "ALL") return "Specific Milestone..."
+                    if (currentIndex === 1 || currentText === "PLANNED") return "🚩 With Milestone (Any)"
+                    if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 No Milestone"
+                    return "🚩 " + currentText
+                }
+                background: Rectangle {
+                    color: "#161b22"
+                    radius: 6
+                    border.color: milestoneCombo.hovered || milestoneCombo.activeFocus ? "#58a6ff" : ((root.filterMilestone !== "ALL" && root.filterMilestone !== "PLANNED" && root.filterMilestone !== "UNPLANNED") ? "#d29922" : "#30363d")
+                }
+                contentItem: Text {
+                    leftPadding: 8
+                    rightPadding: 24
+                    text: milestoneCombo.displayText
+                    font: milestoneCombo.font
+                    color: (root.filterMilestone !== "ALL" && root.filterMilestone !== "PLANNED" && root.filterMilestone !== "UNPLANNED") ? "#f0883e" : "#f0f6fc"
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+                onActivated: function(index) {
+                    var val = root.milestonesList[index] || "ALL"
+                    root.filterMilestone = val
+                    root.currentPage = 1
+                }
+            }
+        }
+
         // ====================== Table Header ======================
         Rectangle {
             Layout.fillWidth: true
@@ -877,10 +1008,23 @@ Item {
                         if (model.deleted) return "#f85149"
                         if (model.urgency_status === "overdue") return "#da3633"
                         if (itemMouse.containsMouse) return "#388bfd"
+                        if (model.has_milestone) return (model.milestone_color ? Qt.rgba(Qt.color(model.milestone_color).r, Qt.color(model.milestone_color).g, Qt.color(model.milestone_color).b, 0.5) : "#d29922")
                         return "#21262d"
                     }
-                    border.width: 1
+                    border.width: model.has_milestone ? 1.5 : 1
                     clip: true
+
+                    // Milestone Left Accent Indicator
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 3
+                        radius: 1.5
+                        visible: !!model.has_milestone
+                        color: model.milestone_color || "#d29922"
+                        z: 2
+                    }
 
                     // Row click area - follows TFS link when clicking anywhere on the work item row
                     MouseArea {
@@ -944,6 +1088,46 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 6
+
+                            // Milestone Strategic Badge (Direct or Inherited)
+                            Rectangle {
+                                implicitHeight: 18
+                                implicitWidth: milestoneBadgeLayout.implicitWidth + 10
+                                radius: 4
+                                visible: !!model.has_milestone
+                                color: model.milestone_bg || (model.milestone_color ? Qt.rgba(Qt.color(model.milestone_color).r, Qt.color(model.milestone_color).g, Qt.color(model.milestone_color).b, 0.2) : "#3d2800")
+                                border.color: model.milestone_color || "#d29922"
+                                border.width: 1
+
+                                RowLayout {
+                                    id: milestoneBadgeLayout
+                                    anchors.centerIn: parent
+                                    spacing: 3
+
+                                    Text {
+                                        text: (model.is_milestone_inherited ? "↳ " : "") + (model.milestone_icon ? model.milestone_icon : "🚩")
+                                        font.pixelSize: 9
+                                    }
+                                    Text {
+                                        text: model.effective_milestone_name || model.milestone_name || "Milestone"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: model.milestone_color || "#f0883e"
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                ToolTip.visible: milestoneMouse.containsMouse
+                                ToolTip.text: model.is_milestone_inherited ?
+                                    ("Inherited Milestone: " + (model.effective_milestone_name || model.milestone_name) + " (from parent story/epic)") :
+                                    ("Target Milestone: " + (model.effective_milestone_name || model.milestone_name) + (model.milestone_category ? " [" + model.milestone_category + "]" : ""))
+
+                                MouseArea {
+                                    id: milestoneMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                }
+                            }
 
                             // Prio 1 Strategic Focus Badge
                             Rectangle {
@@ -1012,8 +1196,8 @@ Item {
                             Layout.preferredWidth: 125
                             height: 24
                             radius: 12
-                            color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : "#21262d") : (model.is_iteration_planned ? "#0d2344" : "#161b22")
-                            border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : "#30363d")
+                            color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : (model.has_milestone ? "#3d2800" : "#21262d")) : (model.is_iteration_planned ? "#0d2344" : (model.has_milestone ? "#241700" : "#161b22"))
+                            border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : (model.has_milestone ? "#d29922" : "#30363d"))
                             border.width: 1
                             RowLayout {
                                 anchors.fill: parent
@@ -1023,11 +1207,19 @@ Item {
                                 Text { text: model.is_iteration_planned ? "🎯" : "📋"; font.pixelSize: 10 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: model.is_iteration_planned ? (model.iteration_name || "Planned") : (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST" ? model.iteration_name : "Unplanned")
+                                    text: {
+                                        if (model.is_iteration_planned) {
+                                            return model.iteration_name || "Planned"
+                                        } else if (model.has_milestone) {
+                                            return "Backlog"
+                                        } else {
+                                            return (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST") ? model.iteration_name : "Unplanned"
+                                        }
+                                    }
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
-                                    font.weight: model.is_iteration_planned ? Font.DemiBold : Font.Normal
-                                    color: model.is_iteration_planned ? "#58a6ff" : "#8b949e"
+                                    font.weight: (model.is_iteration_planned || model.has_milestone) ? Font.DemiBold : Font.Normal
+                                    color: model.is_iteration_planned ? "#58a6ff" : (model.has_milestone ? "#d29922" : "#8b949e")
                                     elide: Text.ElideRight
                                 }
                             }
@@ -1175,6 +1367,18 @@ Item {
                                         }
                                     }
 
+                                    Row {
+                                        spacing: 5
+                                        visible: !!model.has_milestone
+                                        Text { text: "🚩 Milestone:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: (model.effective_milestone_name || model.milestone_name) + (model.is_milestone_inherited ? " (Inherited from parent)" : " (Target direct)")
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: model.milestone_color || "#f0883e"
+                                        }
+                                    }
+
                                     Item { Layout.fillWidth: true }
 
                                     Row {
@@ -1218,43 +1422,54 @@ Item {
                                 }
 
                                 Repeater {
-                                    model: {
-                                        var prs = wiListView.model.get(index) ? wiListView.model.get(index).linked_prs : []
-                                        return prs || []
-                                    }
-                                    Row {
-                                        spacing: 8
-                                        Text {
-                                            text: "!"+modelData.pr_id
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 11
-                                            font.weight: Font.Bold
-                                            color: "#58a6ff"
-                                        }
-                                        Text {
-                                            text: modelData.repo_name || ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                        }
-                                        Text {
-                                            text: (modelData.title || "").substring(0, 60)
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            color: "#c9d1d9"
+                                    model: model.linked_prs || []
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 20
+                                        color: "transparent"
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            spacing: 6
+                                            Text {
+                                                text: "PR #" + (modelData.pr_id || modelData.id || "")
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
+                                            Text {
+                                                text: "· " + (modelData.repo_name || "")
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                color: "#8b949e"
+                                            }
+                                            Text {
+                                                text: modelData.title || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                color: "#c9d1d9"
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                text: modelData.status || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                color: (modelData.status || "").toLowerCase() === "completed" ? "#3fb950" : "#d29922"
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            // Repo list
-                            ColumnLayout {
+                            // Repo tags / links
+                            RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 3
+                                spacing: 6
                                 visible: (model.linked_repo_count || 0) > 0
 
                                 Text {
-                                    text: "📦 Referenced Repositories"
+                                    text: "📦 Repositories:"
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
@@ -1263,25 +1478,23 @@ Item {
 
                                 Flow {
                                     Layout.fillWidth: true
-                                    spacing: 6
+                                    spacing: 4
                                     Repeater {
-                                        model: {
-                                            var item = wiListView.model.get(index)
-                                            return item ? (item.linked_repos || []) : []
-                                        }
+                                        model: model.linked_repos || []
                                         Rectangle {
-                                            height: 20
-                                            width: repoChipText.implicitWidth + 14
-                                            radius: 10
-                                            color: "#0a1f2e"
+                                            implicitHeight: 18
+                                            implicitWidth: repoTagText.implicitWidth + 8
+                                            radius: 3
+                                            color: "#21262d"
                                             border.color: "#30363d"
+                                            border.width: 1
                                             Text {
-                                                id: repoChipText
+                                                id: repoTagText
                                                 anchors.centerIn: parent
                                                 text: modelData
                                                 font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 10
-                                                color: "#8b949e"
+                                                font.pixelSize: 9
+                                                color: "#7ee787"
                                             }
                                         }
                                     }
@@ -1293,10 +1506,10 @@ Item {
             }
         }
 
-        // ====================== Pagination ======================
+        // ====================== Pagination Bar ======================
         Rectangle {
             Layout.fillWidth: true
-            height: 46
+            height: 40
             color: "#161b22"
             radius: 6
             border.color: "#30363d"
@@ -1306,45 +1519,27 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 16
                 anchors.rightMargin: 16
-                spacing: 12
+                spacing: 8
 
                 Text {
-                    text: "Page " + root.currentPage + " of " + Math.max(1, root.totalPages) + "  ·  " + root.totalMatchingCount + " items"
+                    text: {
+                        var start = root.totalMatchingCount === 0 ? 0 : (root.currentPage - 1) * root.pageSize + 1
+                        var end = Math.min(root.currentPage * root.pageSize, root.totalMatchingCount)
+                        return "Showing " + start + "–" + end + " of " + root.totalMatchingCount + " items"
+                    }
                     font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
+                    font.pixelSize: 11
                     color: "#8b949e"
                 }
 
                 Item { Layout.fillWidth: true }
 
-                // Page size selector
-                Row {
-                    spacing: 4
-                    Text { text: "Rows:"; font.pixelSize: 12; color: "#8b949e"; anchors.verticalCenter: parent.verticalCenter }
-                    Repeater {
-                        model: [15, 25, 50, 100]
-                        Button {
-                            text: modelData.toString()
-                            checkable: true
-                            checked: root.pageSize === modelData
-                            font.pixelSize: 11
-                            font.weight: checked ? Font.DemiBold : Font.Normal
-                            contentItem: Text {
-                                text: parent.text; font: parent.font
-                                color: parent.checked ? "#ffffff" : "#8b949e"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 26; implicitWidth: 36; radius: 4
-                                color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "transparent")
-                                border.color: parent.checked ? "#388bfd" : "#30363d"
-                            }
-                            onClicked: { root.pageSize = modelData; root.currentPage = 1; root.updateFilteredModel() }
-                        }
-                    }
+                Text {
+                    text: "Page " + root.currentPage + " of " + root.totalPages
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#8b949e"
                 }
-
-                Item { width: 8 }
 
                 Button {
                     text: "«"; enabled: root.currentPage > 1; font.pixelSize: 14
@@ -1398,7 +1593,10 @@ Item {
                 (item.iteration_path || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.level1_display || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.level2_display || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.prio_tag || "").toLowerCase().indexOf(q) !== -1
+                (item.prio_tag || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.effective_milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.milestone_category || "").toLowerCase().indexOf(q) !== -1
 
             var matchesState = true
             if (st === "ALL") {
@@ -1497,7 +1695,22 @@ Item {
                 matchesGrouping = !item.is_grouped
             }
 
-            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping) {
+            var matchesMilestone = true
+            if (root.filterMilestone === "ALL") {
+                matchesMilestone = true
+            } else if (root.filterMilestone === "PLANNED" || root.filterMilestone === "WITH_MILESTONE") {
+                matchesMilestone = !!item.has_milestone
+            } else if (root.filterMilestone === "UNPLANNED" || root.filterMilestone === "NO_MILESTONE") {
+                matchesMilestone = !item.has_milestone
+            } else {
+                var targetM = root.filterMilestone.toLowerCase()
+                var mName = (item.milestone_name || "").toLowerCase()
+                var effMName = (item.effective_milestone_name || "").toLowerCase()
+                var mCat = (item.milestone_category || "").toLowerCase()
+                matchesMilestone = (mName === targetM || effMName === targetM || mName.indexOf(targetM) !== -1 || effMName.indexOf(targetM) !== -1 || mCat.indexOf(targetM) !== -1)
+            }
+
+            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone) {
                 matched.push(item)
             }
         }
@@ -1555,6 +1768,15 @@ Item {
                 prio_type: wi.prio_type || "",
                 prio_tag: wi.prio_tag || "",
                 prio_badge: wi.prio_badge || "",
+                milestone_name: wi.milestone_name || "",
+                milestone_icon: wi.milestone_icon || "",
+                milestone_color: wi.milestone_color || "",
+                milestone_bg: wi.milestone_bg || "",
+                milestone_category: wi.milestone_category || "",
+                has_direct_milestone: !!wi.has_direct_milestone,
+                has_milestone: !!wi.has_milestone,
+                effective_milestone_name: wi.effective_milestone_name || "",
+                is_milestone_inherited: !!wi.is_milestone_inherited,
                 linked_pr_count: wi.linked_pr_count || 0,
                 linked_repo_count: wi.linked_repo_count || 0,
                 linked_prs: wi.linked_prs || [],
@@ -1572,6 +1794,11 @@ Item {
             root.refreshAssigneesList()
             root.refreshIterationsList()
             root.refreshHierarchyLists()
+            root.refreshMilestonesList()
+            root.updateFilteredModel()
+        }
+        function onMilestonesChanged() {
+            root.refreshMilestonesList()
             root.updateFilteredModel()
         }
     }
@@ -1587,6 +1814,7 @@ Item {
     onFilterLevel2Changed:    updateFilteredModel()
     onFilterPriorityChanged:  updateFilteredModel()
     onFilterGroupingChanged:  updateFilteredModel()
+    onFilterMilestoneChanged: updateFilteredModel()
 
     DeadlineEditorDialog {
         id: deadlineDialog
@@ -1608,7 +1836,7 @@ Item {
         refreshAssigneesList()
         refreshIterationsList()
         refreshHierarchyLists()
+        refreshMilestonesList()
         updateFilteredModel()
     }
 }
-

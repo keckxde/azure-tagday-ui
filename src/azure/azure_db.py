@@ -2,6 +2,7 @@
 import sqlite3
 import json
 import os
+import re
 import contextlib
 from datetime import datetime, date
 
@@ -335,12 +336,19 @@ class AzureDevOpsCache:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 target_date TEXT NOT NULL,
+                end_date TEXT,
                 category_id TEXT NOT NULL,
                 description TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(category_id) REFERENCES milestone_categories(id)
             )""")
+
+            # Schema migration for existing milestones table
+            try:
+                conn.execute("ALTER TABLE milestones ADD COLUMN end_date TEXT")
+            except Exception:
+                pass
 
             # Populate default milestone categories if none exist
             try:
@@ -696,6 +704,7 @@ class AzureDevOpsCache:
                     m.id,
                     m.name,
                     m.target_date,
+                    COALESCE(m.end_date, m.target_date) AS end_date,
                     m.category_id,
                     m.description,
                     m.created_at,
@@ -708,31 +717,70 @@ class AzureDevOpsCache:
                 LEFT JOIN milestone_categories c ON m.category_id = c.id
                 ORDER BY m.target_date ASC, m.name ASC
                 """).fetchall()
-                return [dict(r) for r in rows]
+                results = []
+                for r in rows:
+                    item = dict(r)
+                    start_d = (item.get("target_date") or "").strip()
+                    end_d = (item.get("end_date") or start_d).strip()
+                    item["start_date"] = start_d
+                    item["end_date"] = end_d
+
+                    is_multi = False
+                    duration = 1
+                    if start_d and end_d and end_d != start_d:
+                        try:
+                            s_obj = datetime.strptime(start_d.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                            e_obj = datetime.strptime(end_d.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                            if e_obj > s_obj:
+                                is_multi = True
+                                duration = (e_obj - s_obj).days + 1
+                        except Exception:
+                            pass
+
+                    item["is_multi_day"] = is_multi
+                    item["duration_days"] = duration
+                    if is_multi:
+                        item["date_display"] = f"{start_d} – {end_d}"
+                    else:
+                        item["date_display"] = start_d
+                    results.append(item)
+                return results
         except Exception:
             return []
 
-    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0):
-        """Creates or updates a milestone."""
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date=""):
+        """Creates or updates a milestone, supporting single-day or multi-day date ranges."""
         now_str = datetime.now().isoformat()
         clean_name = (name or "").strip()
         clean_date = (target_date or "").strip()
+        clean_end_date = (end_date or "").strip()
         clean_cat = (category_id or "general").strip()
         clean_desc = (description or "").strip()
+
+        if clean_end_date and clean_date:
+            try:
+                s_obj = datetime.strptime(clean_date.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                e_obj = datetime.strptime(clean_end_date.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                if e_obj < s_obj:
+                    clean_date, clean_end_date = clean_end_date, clean_date
+            except Exception:
+                pass
+        elif not clean_end_date:
+            clean_end_date = clean_date
 
         with self._connection() as conn:
             if milestone_id and int(milestone_id) > 0:
                 conn.execute("""
                 UPDATE milestones
-                SET name = ?, target_date = ?, category_id = ?, description = ?, updated_at = ?
+                SET name = ?, target_date = ?, end_date = ?, category_id = ?, description = ?, updated_at = ?
                 WHERE id = ?
-                """, (clean_name, clean_date, clean_cat, clean_desc, now_str, int(milestone_id)))
+                """, (clean_name, clean_date, clean_end_date, clean_cat, clean_desc, now_str, int(milestone_id)))
                 return int(milestone_id)
             else:
                 cursor = conn.execute("""
-                INSERT INTO milestones (name, target_date, category_id, description, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (clean_name, clean_date, clean_cat, clean_desc, now_str, now_str))
+                INSERT INTO milestones (name, target_date, end_date, category_id, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (clean_name, clean_date, clean_end_date, clean_cat, clean_desc, now_str, now_str))
                 return cursor.lastrowid
 
     def delete_milestone(self, milestone_id):
@@ -764,7 +812,7 @@ class AzureDevOpsCache:
                 try:
                     data = json.loads(raw_s) if isinstance(raw_s, str) else raw_s
                     fields = data.get("fields", {}) if isinstance(data, dict) else {}
-                    tags_str = fields.get("System.Tags") or fields.get("Tags") or ""
+                    tags_str = fields.get("System.Tags") or fields.get("Tags") or data.get("tags") or ""
                     if not tags_str:
                         continue
 
@@ -773,6 +821,9 @@ class AzureDevOpsCache:
                         or fields.get("System.TargetDate")
                         or fields.get("Microsoft.VSTS.Scheduling.DueDate")
                         or fields.get("System.DueDate")
+                        or data.get("target_date")
+                        or data.get("finish_date")
+                        or data.get("due_date")
                         or ""
                     )
                     if wi_date:

@@ -517,10 +517,10 @@ class DevOpsBackend(QObject):
                 seen.add(disp)
         
         def sort_key(s):
-            m = re.match(r'^\[(\d+)\]\s*(.*)', str(s).strip())
-            if m:
-                return (0, int(m.group(1)), m.group(2).lower())
-            return (1, 0, str(s).lower())
+            tag, name, sk = utils.parse_pbs_tag(str(s).strip())
+            if tag:
+                return (0, sk, name.lower())
+            return (1, (0,), str(s).lower())
 
         return sorted(seen, key=sort_key)
 
@@ -534,12 +534,30 @@ class DevOpsBackend(QObject):
                 seen.add(disp)
         
         def sort_key(s):
-            m = re.match(r'^\[(\d+)\]\s*(.*)', str(s).strip())
-            if m:
-                return (0, int(m.group(1)), m.group(2).lower())
-            return (1, 0, str(s).lower())
+            tag, name, sk = utils.parse_pbs_tag(str(s).strip())
+            if tag:
+                return (0, sk, name.lower())
+            return (1, (0,), str(s).lower())
 
         return sorted(seen, key=sort_key)
+
+    @Property(list, notify=milestonesChanged)
+    def workItemMilestones(self):
+        """Returns the sorted list of unique milestone names from configured milestones and work items."""
+        seen = set()
+        try:
+            if self._cache_db:
+                for m in self._cache_db.get_milestones():
+                    name = (m.get("name") or "").strip()
+                    if name:
+                        seen.add(name)
+        except Exception:
+            pass
+        for wi in self._work_items:
+            m_name = (wi.get("milestone_name") or wi.get("effective_milestone_name") or "").strip()
+            if m_name:
+                seen.add(m_name)
+        return sorted(seen)
 
     @Property(list, notify=workItemsChanged)
     def availableSprintList(self):
@@ -1101,6 +1119,7 @@ class DevOpsBackend(QObject):
                 item.update(h_info)
 
             self._work_items = sorted(wi_list, key=lambda x: x["id"], reverse=True)
+            self._enrich_work_items_with_milestones()
             self.workItemsChanged.emit()
 
 
@@ -1418,6 +1437,9 @@ class DevOpsBackend(QObject):
     @Slot(int, result=dict)
     @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, result="QVariantMap")
     @Slot(int, str, str, result="QVariantMap")
@@ -1434,11 +1456,12 @@ class DevOpsBackend(QObject):
         hide_closed: bool = False,
         search_query: str = "",
         lookback_weeks: int = 0,
+        filter_milestone: str = "ALL",
     ):
         """
         Computes the interactive capacity and workload matrix for team members across
         the given horizon of weekly iterations (4, 8, or 12 weeks), filtered by
-        Level 1, Level 2, priority, grouping, completion status, or search query.
+        Level 1, Level 2, priority, grouping, completion status, search query, or milestone.
         lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
         sprint_keys = set()
@@ -1476,22 +1499,29 @@ class DevOpsBackend(QObject):
             lbl = utils.format_sprint_range_label(y, w)
             col_milestones = []
             for m in all_milestones:
-                m_date = (m.get("target_date") or "").strip()
+                m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+                m_end = (m.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
                 in_col = False
-                if start_str and end_str and (start_str <= m_date <= end_str):
-                    in_col = True
-                else:
+                if start_str and end_str and m_start and m_end:
+                    if m_start <= end_str and m_end >= start_str:
+                        in_col = True
+                if not in_col and m_start:
                     try:
-                        md_obj = datetime.strptime(m_date.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
-                        my, mw, _ = md_obj.isocalendar()
-                        if my == y and mw == w:
+                        s_obj = datetime.strptime(m_start, "%Y-%m-%d").date()
+                        sy, sw, _ = s_obj.isocalendar()
+                        e_obj = datetime.strptime(m_end, "%Y-%m-%d").date()
+                        ey, ew, _ = e_obj.isocalendar()
+                        if (sy, sw) <= (y, w) <= (ey, ew):
                             in_col = True
                     except Exception:
                         pass
-                    if not in_col:
-                        my, mw, _ = utils.parse_sprint_week(m_date)
-                        if my == y and mw == w:
-                            in_col = True
+                if not in_col and m_start:
+                    sy, sw, _ = utils.parse_sprint_week(m_start)
+                    ey, ew, _ = utils.parse_sprint_week(m_end)
+                    if sy and ey and (sy, sw) <= (y, w) <= (ey, ew):
+                        in_col = True
+                    elif sy and (sy, sw) == (y, w):
+                        in_col = True
                 if in_col:
                     col_milestones.append(m)
 
@@ -1527,6 +1557,7 @@ class DevOpsBackend(QObject):
 
         f_l1_raw = (filter_level1 or "ALL").strip()
         f_l2_raw = (filter_level2 or "ALL").strip()
+        f_m_raw = (filter_milestone or "ALL").strip()
         sq_raw = (search_query or "").strip().lower()
 
         for wi in self._work_items:
@@ -1603,9 +1634,28 @@ class DevOpsBackend(QObject):
             if hide_closed and is_done:
                 continue
 
+            matched_m = utils.match_work_item_to_milestone(wi, all_milestones, milestones_by_date)
+            has_ms = bool(wi.get("has_milestone") or matched_m)
+            m_name = (wi.get("milestone_name") or wi.get("effective_milestone_name") or (matched_m.get("name") if matched_m else "")).strip()
+            m_cat = (wi.get("milestone_category") or (matched_m.get("category_name") if matched_m else "")).strip()
+
+            # 6. Milestone Filter
+            if f_m_raw and f_m_raw.upper() != "ALL":
+                f_m_upper = f_m_raw.upper()
+                if f_m_upper in ("PLANNED", "WITH_MILESTONE", "HAS_MILESTONE"):
+                    if not has_ms:
+                        continue
+                elif f_m_upper in ("UNPLANNED", "NO_MILESTONE", "WITHOUT_MILESTONE"):
+                    if has_ms:
+                        continue
+                else:
+                    target_m = f_m_raw.lower()
+                    if (target_m not in m_name.lower()) and (target_m not in m_cat.lower()):
+                        continue
+
             assignee = (wi.get("assigned_to") or "Unassigned").strip()
 
-            # 6. Search Query Filter
+            # 7. Search Query Filter
             if sq_raw:
                 matches_search = (
                     sq_raw in assignee.lower()
@@ -1613,6 +1663,8 @@ class DevOpsBackend(QObject):
                     or sq_raw in str(wi.get("id") or "")
                     or sq_raw in (wi.get("type") or "").lower()
                     or sq_raw in (wi.get("prio_tag") or "").lower()
+                    or sq_raw in m_name.lower()
+                    or sq_raw in m_cat.lower()
                 )
                 if not matches_search:
                     continue
@@ -1635,8 +1687,6 @@ class DevOpsBackend(QObject):
                     "tasks_not_started": 0, "tasks_active": 0, "tasks_closed": 0,
                     "total_not_started": 0, "total_active": 0, "total_closed": 0
                 }
-
-            matched_m = utils.match_work_item_to_milestone(wi, all_milestones, milestones_by_date)
 
             item_info = {
                 "id": wi.get("id"),
@@ -2618,6 +2668,71 @@ class DevOpsBackend(QObject):
             logger.error(f"Error setting project config '{key}': {e}")
             return False
 
+    def _enrich_work_items_with_milestones(self):
+        """Enriches self._work_items with direct and inherited milestone associations."""
+        if not self._work_items:
+            return
+        all_milestones = self.get_milestones()
+        milestones_by_date = {m.get("target_date"): m for m in all_milestones if m.get("target_date")}
+        all_wis_map = {w["id"]: w for w in self._work_items}
+
+        # First pass: direct milestone match
+        for item in self._work_items:
+            matched_m = utils.match_work_item_to_milestone(item, all_milestones, milestones_by_date)
+            if matched_m:
+                item["milestone_name"] = matched_m.get("name", "")
+                item["milestone_icon"] = matched_m.get("category_icon", "")
+                item["milestone_color"] = matched_m.get("category_color", "")
+                item["milestone_bg"] = matched_m.get("category_bg_color", "")
+                item["milestone_category"] = matched_m.get("category_name", "")
+                item["milestone_start_date"] = matched_m.get("start_date") or matched_m.get("target_date") or ""
+                item["milestone_end_date"] = matched_m.get("end_date") or item["milestone_start_date"]
+                item["milestone_date_display"] = matched_m.get("date_display") or item["milestone_start_date"]
+                item["milestone_is_multi_day"] = matched_m.get("is_multi_day", False)
+                item["has_direct_milestone"] = True
+                item["has_milestone"] = True
+                item["effective_milestone_name"] = matched_m.get("name", "")
+                item["is_milestone_inherited"] = False
+            else:
+                item["milestone_name"] = ""
+                item["milestone_icon"] = ""
+                item["milestone_color"] = ""
+                item["milestone_bg"] = ""
+                item["milestone_category"] = ""
+                item["milestone_start_date"] = ""
+                item["milestone_end_date"] = ""
+                item["milestone_date_display"] = ""
+                item["milestone_is_multi_day"] = False
+                item["has_direct_milestone"] = False
+                item["has_milestone"] = False
+                item["effective_milestone_name"] = ""
+                item["is_milestone_inherited"] = False
+
+        # Second pass: inherit milestone from parent/ancestor container if child has no direct milestone
+        for item in self._work_items:
+            if not item["has_milestone"]:
+                curr_pid = item.get("parent_id")
+                visited = set()
+                while curr_pid and curr_pid in all_wis_map and curr_pid not in visited:
+                    visited.add(curr_pid)
+                    p_item = all_wis_map[curr_pid]
+                    if p_item.get("has_direct_milestone") or p_item.get("has_milestone"):
+                        item["milestone_name"] = p_item.get("milestone_name", "")
+                        item["milestone_icon"] = p_item.get("milestone_icon", "")
+                        item["milestone_color"] = p_item.get("milestone_color", "")
+                        item["milestone_bg"] = p_item.get("milestone_bg", "")
+                        item["milestone_category"] = p_item.get("milestone_category", "")
+                        item["milestone_start_date"] = p_item.get("milestone_start_date", "")
+                        item["milestone_end_date"] = p_item.get("milestone_end_date", "")
+                        item["milestone_date_display"] = p_item.get("milestone_date_display", "")
+                        item["milestone_is_multi_day"] = p_item.get("milestone_is_multi_day", False)
+                        item["has_direct_milestone"] = False
+                        item["has_milestone"] = True
+                        item["effective_milestone_name"] = p_item.get("effective_milestone_name", "") or p_item.get("milestone_name", "")
+                        item["is_milestone_inherited"] = True
+                        break
+                    curr_pid = p_item.get("parent_id")
+
     @Slot(result=list)
     def get_milestones(self):
         """Returns all configured milestones."""
@@ -2625,22 +2740,27 @@ class DevOpsBackend(QObject):
             return self._cache_db.get_milestones()
         return []
 
+    @Slot(str, str, str, str, int, str, result=dict)
     @Slot(str, str, str, str, int, result=dict)
-    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0):
-        """Creates or updates a milestone."""
+    @Slot(str, str, str, str, result=dict)
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date=""):
+        """Creates or updates a milestone, supporting single-day or multi-day date ranges."""
         if not self._cache_db:
             return {"success": False, "error": "No database connected"}
         clean_name = (name or "").strip()
         clean_date = (target_date or "").strip()
+        clean_end_date = (end_date or "").strip()
         if not clean_name:
             return {"success": False, "error": "Milestone name is required"}
         if not clean_date:
             return {"success": False, "error": "Target date is required"}
 
         try:
-            m_id = self._cache_db.save_milestone(clean_name, clean_date, category_id, description, milestone_id)
+            m_id = self._cache_db.save_milestone(clean_name, clean_date, category_id, description, milestone_id, clean_end_date)
+            self._enrich_work_items_with_milestones()
             self.milestonesChanged.emit()
             self.workloadMatrixChanged.emit()
+            self.workItemsChanged.emit()
             return {"success": True, "id": m_id}
         except Exception as e:
             logger.error(f"Error saving milestone: {e}")
@@ -2653,8 +2773,10 @@ class DevOpsBackend(QObject):
             return False
         res = self._cache_db.delete_milestone(milestone_id)
         if res:
+            self._enrich_work_items_with_milestones()
             self.milestonesChanged.emit()
             self.workloadMatrixChanged.emit()
+            self.workItemsChanged.emit()
         return res
 
     @Slot(result=int)
@@ -2665,8 +2787,10 @@ class DevOpsBackend(QObject):
         try:
             new_milestones = self._cache_db.discover_and_prefill_milestones_from_work_items()
             if new_milestones:
+                self._enrich_work_items_with_milestones()
                 self.milestonesChanged.emit()
                 self.workloadMatrixChanged.emit()
+                self.workItemsChanged.emit()
             return len(new_milestones) if isinstance(new_milestones, list) else 0
         except Exception as e:
             logger.error(f"Error prefilling milestones from work items: {e}")

@@ -28,6 +28,8 @@ Dialog {
     property int editingMilestoneId: 0
     property string editingMilestoneName: ""
     property string editingMilestoneDate: ""
+    property string editingMilestoneEndDate: ""
+    property bool isMultiDay: false
     property string editingMilestoneCat: "ddqs"
     property string editingMilestoneDesc: ""
 
@@ -40,6 +42,21 @@ Dialog {
 
     property string feedbackMsg: ""
     property string feedbackType: "success"
+
+    function calculateDurationDisplay(s, e) {
+        if (!s || !e) return "";
+        var p1 = s.split("-");
+        var p2 = e.split("-");
+        if (p1.length === 3 && p2.length === 3) {
+            var d1 = new Date(parseInt(p1[0], 10), parseInt(p1[1], 10) - 1, parseInt(p1[2], 10));
+            var d2 = new Date(parseInt(p2[0], 10), parseInt(p2[1], 10) - 1, parseInt(p2[2], 10));
+            var diffTime = d2.getTime() - d1.getTime();
+            var days = Math.round(diffTime / (1000 * 3600 * 24)) + 1;
+            if (days < 1) return "End date before start date (will auto-adjust)";
+            return days + " day" + (days > 1 ? "s" : "") + " (" + s + " → " + e + ")";
+        }
+        return "";
+    }
 
     // Date Chooser Properties
     property int pickerYear: (new Date()).getFullYear()
@@ -156,10 +173,13 @@ Dialog {
         editingMilestoneId = 0;
         editingMilestoneName = "";
         editingMilestoneDate = "";
+        editingMilestoneEndDate = "";
+        isMultiDay = false;
         editingMilestoneCat = categoriesList.length > 0 ? categoriesList[0].id : "ddqs";
         editingMilestoneDesc = "";
         mNameInput.text = "";
         mDateInput.text = "";
+        mEndDateInput.text = "";
         mDescInput.text = "";
         if (categoriesList.length > 0) mCatCombo.currentIndex = 0;
     }
@@ -168,10 +188,13 @@ Dialog {
         editingMilestoneId = m.id;
         editingMilestoneName = m.name;
         editingMilestoneDate = m.target_date;
+        editingMilestoneEndDate = m.end_date || "";
+        isMultiDay = !!(m.is_multi_day || (m.end_date && m.end_date !== m.target_date));
         editingMilestoneCat = m.category_id;
         editingMilestoneDesc = m.description || "";
         mNameInput.text = m.name;
         mDateInput.text = m.target_date;
+        mEndDateInput.text = isMultiDay ? (m.end_date || m.target_date) : "";
         mDescInput.text = m.description || "";
         for (var i = 0; i < categoriesList.length; i++) {
             if (categoriesList[i].id === m.category_id) {
@@ -516,13 +539,34 @@ Dialog {
                                                     }
                                                 }
                                             }
-                                            Text {
-                                                text: "📅 " + modelData.target_date + (modelData.description ? (" · " + modelData.description) : "")
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
-                                                color: "#8b949e"
-                                                elide: Text.ElideRight
+                                            RowLayout {
                                                 Layout.fillWidth: true
+                                                spacing: 6
+                                                Text {
+                                                    text: "📅 " + (modelData.date_display || modelData.target_date) + (modelData.description ? (" · " + modelData.description) : "")
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    color: "#8b949e"
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
+                                                }
+                                                // Multi-day duration badge
+                                                Rectangle {
+                                                    visible: !!modelData.is_multi_day
+                                                    implicitHeight: 16
+                                                    implicitWidth: multiDayTxt.implicitWidth + 8
+                                                    radius: 8
+                                                    color: "#1f2d3d"
+                                                    border.color: "#388bfd"
+                                                    Text {
+                                                        id: multiDayTxt
+                                                        anchors.centerIn: parent
+                                                        text: "📆 " + (modelData.duration_days ? (modelData.duration_days + "d") : "Multi-day")
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.Bold
+                                                        color: "#79c0ff"
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -600,24 +644,24 @@ Dialog {
                             }
                         }
 
-                        // Target Date with Interactive Date Chooser
+                        // Target / Start Date with Interactive Date Chooser
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 4
 
                             RowLayout {
                                 Layout.fillWidth: true
-                                Text { text: "TARGET DATE (YYYY-MM-DD)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
+                                Text { text: root.isMultiDay ? "START DATE (YYYY-MM-DD)" : "TARGET DATE (YYYY-MM-DD)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
                                 Item { Layout.fillWidth: true }
                                 Text {
-                                    text: "📅 Open Calendar"
+                                    text: "📅 Pick Start Date"
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
                                     color: "#58a6ff"
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: datePickerPopup.openOrToggle()
+                                        onClicked: datePickerPopup.openOrToggleFor("start")
                                     }
                                 }
                             }
@@ -657,16 +701,16 @@ Dialog {
                                     }
                                     background: Rectangle {
                                         radius: 4
-                                        color: (datePickerPopup.visible || parent.hovered) ? "#21262d" : "#0d1117"
-                                        border.color: (datePickerPopup.visible || parent.hovered) ? "#58a6ff" : "#30363d"
+                                        color: (datePickerPopup.visible && datePickerPopup.targetField === "start" || parent.hovered) ? "#21262d" : "#0d1117"
+                                        border.color: (datePickerPopup.visible && datePickerPopup.targetField === "start" || parent.hovered) ? "#58a6ff" : "#30363d"
                                     }
                                     onClicked: {
-                                        datePickerPopup.openOrToggle();
+                                        datePickerPopup.openOrToggleFor("start");
                                     }
                                 }
                             }
 
-                            // Quick Preset Chips below input
+                            // Quick Preset Chips below start input
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 4
@@ -711,6 +755,210 @@ Dialog {
                                                 root.editingMilestoneDate = mDateInput.text;
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Multi-day Event Toggle Checkbox
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Rectangle {
+                                implicitWidth: 16
+                                implicitHeight: 16
+                                radius: 3
+                                color: root.isMultiDay ? "#1f6feb" : "#0d1117"
+                                border.color: root.isMultiDay ? "#58a6ff" : "#484f58"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "✓"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                    visible: root.isMultiDay
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.isMultiDay = !root.isMultiDay;
+                                        if (root.isMultiDay && (!mEndDateInput.text || mEndDateInput.text.trim() === "")) {
+                                            mEndDateInput.text = mDateInput.text;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Multi-day Event (Spans a date range across sprints)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: root.isMultiDay ? "#f0f6fc" : "#8b949e"
+                                font.weight: root.isMultiDay ? Font.DemiBold : Font.Normal
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.isMultiDay = !root.isMultiDay;
+                                        if (root.isMultiDay && (!mEndDateInput.text || mEndDateInput.text.trim() === "")) {
+                                            mEndDateInput.text = mDateInput.text;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // End Date Section (Visible when root.isMultiDay is true)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            visible: root.isMultiDay
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: "END DATE (YYYY-MM-DD)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: "📅 Pick End Date"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#58a6ff"
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: datePickerPopup.openOrToggleFor("end")
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                TextField {
+                                    id: mEndDateInput
+                                    Layout.fillWidth: true
+                                    implicitHeight: 32
+                                    font.family: "Consolas, monospace"
+                                    font.pixelSize: 12
+                                    color: "#f0f6fc"
+                                    placeholderText: "YYYY-MM-DD (e.g. 2026-06-25)"
+                                    placeholderTextColor: "#484f58"
+                                    background: Rectangle {
+                                        color: "#0d1117"
+                                        radius: 4
+                                        border.color: mEndDateInput.activeFocus ? "#58a6ff" : "#30363d"
+                                    }
+                                    onTextChanged: {
+                                        root.editingMilestoneEndDate = text;
+                                    }
+                                }
+
+                                Button {
+                                    id: endDatePickerBtn
+                                    implicitHeight: 32
+                                    implicitWidth: 36
+                                    contentItem: Text {
+                                        text: "📅"
+                                        font.pixelSize: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: (datePickerPopup.visible && datePickerPopup.targetField === "end" || parent.hovered) ? "#21262d" : "#0d1117"
+                                        border.color: (datePickerPopup.visible && datePickerPopup.targetField === "end" || parent.hovered) ? "#58a6ff" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        datePickerPopup.openOrToggleFor("end");
+                                    }
+                                }
+                            }
+
+                            // Quick Presets from Start Date (+1d, +2d, +3d, +1w, +2w)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+
+                                Repeater {
+                                    model: [
+                                        { label: "+1 Day", days: 1 },
+                                        { label: "+2 Days", days: 2 },
+                                        { label: "+3 Days", days: 3 },
+                                        { label: "+1 Wk", days: 7 },
+                                        { label: "+2 Wks", days: 14 }
+                                    ]
+
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: qEndTxt.implicitWidth + 10
+                                        radius: 10
+                                        color: qEndMa.containsMouse ? "#21262d" : "#0d1117"
+                                        border.color: qEndMa.containsMouse ? "#58a6ff" : "#30363d"
+
+                                        Text {
+                                            id: qEndTxt
+                                            anchors.centerIn: parent
+                                            text: modelData.label
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: qEndMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                        }
+
+                                        MouseArea {
+                                            id: qEndMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var baseStr = mDateInput.text.trim();
+                                                var d = new Date();
+                                                if (baseStr) {
+                                                    var parts = baseStr.split("-");
+                                                    if (parts.length === 3) {
+                                                        d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                                                    }
+                                                }
+                                                d.setDate(d.getDate() + modelData.days);
+                                                var y = d.getFullYear();
+                                                var m = (d.getMonth() + 1 < 10 ? "0" : "") + (d.getMonth() + 1);
+                                                var dd = (d.getDate() < 10 ? "0" : "") + d.getDate();
+                                                mEndDateInput.text = y + "-" + m + "-" + dd;
+                                                root.editingMilestoneEndDate = mEndDateInput.text;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Live Duration Text Badge
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 24
+                                radius: 4
+                                color: "#0d2344"
+                                border.color: "#1f6feb"
+                                visible: {
+                                    var s = mDateInput.text.trim();
+                                    var e = mEndDateInput.text.trim();
+                                    return (s !== "" && e !== "" && s !== e);
+                                }
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+                                    Text {
+                                        text: "⏳ Duration: " + root.calculateDurationDisplay(mDateInput.text.trim(), mEndDateInput.text.trim())
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: "#79c0ff"
                                     }
                                 }
                             }
@@ -789,6 +1037,7 @@ Dialog {
                                 onClicked: {
                                     var n = mNameInput.text.trim();
                                     var d = mDateInput.text.trim();
+                                    var endD = root.isMultiDay ? mEndDateInput.text.trim() : "";
                                     var catObj = root.categoriesList[mCatCombo.currentIndex];
                                     var catId = catObj ? catObj.id : "general";
                                     var desc = mDescInput.text.trim();
@@ -796,7 +1045,7 @@ Dialog {
                                     if (!n || !d) return;
 
                                     if (backend) {
-                                        var res = backend.save_milestone(n, d, catId, desc, root.editingMilestoneId);
+                                        var res = backend.save_milestone(n, d, catId, desc, root.editingMilestoneId, endD);
                                         if (res && res.success) {
                                             root.resetMilestoneForm();
                                         }
@@ -1188,8 +1437,15 @@ Dialog {
     Popup {
         id: datePickerPopup
         parent: Overlay.overlay
-        x: Math.min(Overlay.overlay ? Overlay.overlay.width - width - 20 : 0, Math.max(20, (mDateInput.mapToItem(Overlay.overlay, 0, 0).x - 120)))
-        y: Math.min(Overlay.overlay ? Overlay.overlay.height - height - 20 : 0, mDateInput.mapToItem(Overlay.overlay, 0, 0).y + mDateInput.height + 6)
+        property string targetField: "start"
+        x: {
+            var srcItem = (targetField === "end" && mEndDateInput.visible) ? mEndDateInput : mDateInput;
+            return Math.min(Overlay.overlay ? Overlay.overlay.width - width - 20 : 0, Math.max(20, (srcItem.mapToItem(Overlay.overlay, 0, 0).x - 120)));
+        }
+        y: {
+            var srcItem = (targetField === "end" && mEndDateInput.visible) ? mEndDateInput : mDateInput;
+            return Math.min(Overlay.overlay ? Overlay.overlay.height - height - 20 : 0, srcItem.mapToItem(Overlay.overlay, 0, 0).y + srcItem.height + 6);
+        }
         width: 320
         modal: true
         focus: true
@@ -1212,13 +1468,20 @@ Dialog {
             }
         }
 
-        function openOrToggle() {
-            if (visible) {
+        function openOrToggleFor(field) {
+            if (visible && targetField === field) {
                 close();
             } else {
-                root.syncPickerWithDateString(mDateInput.text);
+                targetField = field || "start";
+                var curText = (targetField === "end") ? mEndDateInput.text : mDateInput.text;
+                if (!curText && targetField === "end") curText = mDateInput.text;
+                root.syncPickerWithDateString(curText);
                 open();
             }
+        }
+
+        function openOrToggle() {
+            openOrToggleFor("start");
         }
 
         contentItem: ColumnLayout {
@@ -1331,7 +1594,7 @@ Dialog {
                 columnSpacing: 2
 
                 Repeater {
-                    model: root.getCalendarCells(root.pickerYear, root.pickerMonth, mDateInput.text)
+                    model: root.getCalendarCells(root.pickerYear, root.pickerMonth, (datePickerPopup.targetField === "end" ? mEndDateInput.text : mDateInput.text))
 
                     Rectangle {
                         Layout.fillWidth: true
@@ -1370,8 +1633,13 @@ Dialog {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                mDateInput.text = modelData.dateStr;
-                                root.editingMilestoneDate = modelData.dateStr;
+                                if (datePickerPopup.targetField === "end") {
+                                    mEndDateInput.text = modelData.dateStr;
+                                    root.editingMilestoneEndDate = modelData.dateStr;
+                                } else {
+                                    mDateInput.text = modelData.dateStr;
+                                    root.editingMilestoneDate = modelData.dateStr;
+                                }
                                 datePickerPopup.close();
                             }
                         }
@@ -1398,8 +1666,14 @@ Dialog {
                         var y = now.getFullYear();
                         var m = (now.getMonth() + 1 < 10 ? "0" : "") + (now.getMonth() + 1);
                         var d = (now.getDate() < 10 ? "0" : "") + now.getDate();
-                        mDateInput.text = y + "-" + m + "-" + d;
-                        root.editingMilestoneDate = mDateInput.text;
+                        var dStr = y + "-" + m + "-" + d;
+                        if (datePickerPopup.targetField === "end") {
+                            mEndDateInput.text = dStr;
+                            root.editingMilestoneEndDate = dStr;
+                        } else {
+                            mDateInput.text = dStr;
+                            root.editingMilestoneDate = dStr;
+                        }
                         datePickerPopup.close();
                     }
                 }
@@ -1412,8 +1686,13 @@ Dialog {
                     contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     background: Rectangle { radius: 4; color: parent.hovered ? "#21262d" : "#0d1117"; border.color: "#30363d" }
                     onClicked: {
-                        mDateInput.text = "";
-                        root.editingMilestoneDate = "";
+                        if (datePickerPopup.targetField === "end") {
+                            mEndDateInput.text = "";
+                            root.editingMilestoneEndDate = "";
+                        } else {
+                            mDateInput.text = "";
+                            root.editingMilestoneDate = "";
+                        }
                         datePickerPopup.close();
                     }
                 }

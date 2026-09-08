@@ -13,12 +13,14 @@ Item {
     property bool hideClosedTasks: false
     property string filterLevel1: "ALL"
     property string filterLevel2: "ALL"
+    property string filterMilestone: "ALL" // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
     property bool prio1Only: false
     property bool groupedOnly: false
     property real drawerWidth: 420
     property int historyOffset: 0  // 0 = current window, N = N sprints back into history
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
+    property var milestonesList: ["ALL"]
 
     // Horizontal Matrix Scrolling Properties
     property real matrixContentX: 0
@@ -44,6 +46,8 @@ Item {
         level1List = ["ALL"].concat(l1).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"]);
         var l2 = backend.workItemLevel2List || [];
         level2List = ["ALL"].concat(l2).concat(["[ WITHOUT [<NR>] SYNTAX ]", "UNGROUPED"]);
+        var ms = backend.workItemMilestones || [];
+        milestonesList = ["ALL", "PLANNED", "UNPLANNED"].concat(ms);
     }
 
     function getFilteredContainers(containers) {
@@ -96,6 +100,29 @@ Item {
                 continue;
             }
 
+            // Milestone filter
+            if (root.filterMilestone === "PLANNED" || root.filterMilestone === "WITH_MILESTONE") {
+                var cHasM = !!(c.has_milestone || c.milestone_name || c.effective_milestone_name);
+                var cTaskHasM = c.tasks && c.tasks.some(function(t) { return !!(t.has_milestone || t.milestone_name || t.effective_milestone_name); });
+                if (!cHasM && !cTaskHasM) continue;
+            } else if (root.filterMilestone === "UNPLANNED" || root.filterMilestone === "NO_MILESTONE") {
+                var cHasM2 = !!(c.has_milestone || c.milestone_name || c.effective_milestone_name);
+                var cTaskHasM2 = c.tasks && c.tasks.some(function(t) { return !!(t.has_milestone || t.milestone_name || t.effective_milestone_name); });
+                if (cHasM2 || cTaskHasM2) continue;
+            } else if (root.filterMilestone !== "ALL" && root.filterMilestone !== "") {
+                var targetM = root.filterMilestone.toLowerCase();
+                var mName = (c.milestone_name || "").toLowerCase();
+                var effMName = (c.effective_milestone_name || "").toLowerCase();
+                var mCat = (c.milestone_category || "").toLowerCase();
+                var matchesSelf = (mName === targetM || effMName === targetM || mName.indexOf(targetM) !== -1 || effMName.indexOf(targetM) !== -1 || mCat.indexOf(targetM) !== -1);
+                var matchesAnyTask = c.tasks && c.tasks.some(function(t) {
+                    var tm = (t.milestone_name || t.effective_milestone_name || "").toLowerCase();
+                    var tc = (t.milestone_category || "").toLowerCase();
+                    return (tm === targetM || tm.indexOf(targetM) !== -1 || tc.indexOf(targetM) !== -1);
+                });
+                if (!matchesSelf && !matchesAnyTask) continue;
+            }
+
             var openTasks = getFilteredTasks(c.tasks || []);
             // Keep container if it has open child tasks, or if the parent container itself is not done/closed
             if (root.hideClosedTasks) {
@@ -143,25 +170,31 @@ Item {
             !!root.groupedOnly,
             !!root.hideClosedTasks,
             root.searchQuery || "",
-            root.historyOffset
+            root.historyOffset,
+            root.filterMilestone || "ALL"
         )
     }
 
-    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.searchQuery !== ""
+    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.searchQuery !== ""
 
     function resetHierarchyFilters() {
         root.filterLevel1 = "ALL"
         root.filterLevel2 = "ALL"
+        root.filterMilestone = "ALL"
         root.prio1Only = false
         root.groupedOnly = false
         root.hideClosedTasks = false
         root.searchQuery = ""
+        if (typeof wlLevel1Combo !== "undefined" && wlLevel1Combo) { wlLevel1Combo.currentIndex = 0; wlLevel1Combo.editText = ""; }
+        if (typeof wlLevel2Combo !== "undefined" && wlLevel2Combo) { wlLevel2Combo.currentIndex = 0; wlLevel2Combo.editText = ""; }
+        if (typeof wlMilestoneCombo !== "undefined" && wlMilestoneCombo) { wlMilestoneCombo.currentIndex = 0; wlMilestoneCombo.editText = ""; }
         refreshMatrix()
     }
 
     onSelectedHorizonChanged: refreshMatrix()
     onFilterLevel1Changed:    refreshMatrix()
     onFilterLevel2Changed:    refreshMatrix()
+    onFilterMilestoneChanged: refreshMatrix()
     onPrio1OnlyChanged:       refreshMatrix()
     onGroupedOnlyChanged:     refreshMatrix()
     onHideClosedTasksChanged: refreshMatrix()
@@ -174,6 +207,10 @@ Item {
             root.refreshMatrix()
         }
         function onWorkloadMatrixChanged() {
+            root.refreshMatrix()
+        }
+        function onMilestonesChanged() {
+            root.refreshHierarchyLists()
             root.refreshMatrix()
         }
     }
@@ -653,6 +690,78 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
+            // Milestone Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Milestone:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wlMilestoneCombo
+                    implicitWidth: 200
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    editable: true
+                    model: root.milestonesList
+                    editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterMilestone = (val === "" ? "ALL" : val);
+                    }
+
+                    onActivated: function(index) {
+                        var val = root.milestonesList[index] || "ALL";
+                        root.filterMilestone = val;
+                        editText = (val === "ALL" ? "" : val);
+                    }
+
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wlMilestoneCombo.hovered || wlMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
+                    }
+
+                    contentItem: TextField {
+                        leftPadding: 8
+                        rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
+                        text: wlMilestoneCombo.editText
+                        placeholderText: "Type or select milestone..."
+                        placeholderTextColor: "#484f58"
+                        font: wlMilestoneCombo.font
+                        color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wlMilestoneCombo.editText) {
+                                wlMilestoneCombo.editText = text;
+                            }
+                        }
+                    }
+                }
+
+                // Clear Milestone filter button
+                Button {
+                    visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterMilestone = "ALL";
+                        wlMilestoneCombo.currentIndex = 0;
+                        wlMilestoneCombo.editText = "";
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
             // ⭐ Prio 1 Focus Only Toggle
             Button {
                 text: root.prio1Only ? "⭐ Prio 1 Focus Only" : "⭐ All Priorities"
@@ -711,7 +820,7 @@ Item {
 
             // 🚩 Manage Milestones Button
             Button {
-                text: "🚩 Milestones"
+                text: "🚩 Manage"
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
                 ToolTip.visible: hovered
@@ -725,7 +834,7 @@ Item {
                 }
                 background: Rectangle {
                     implicitHeight: 28
-                    implicitWidth: 105
+                    implicitWidth: 95
                     radius: 6
                     color: parent.hovered ? "#21262d" : "#161b22"
                     border.color: "#30363d"
@@ -1074,7 +1183,7 @@ Item {
                                                             }
 
                                                             ToolTip.visible: sMMa.containsMouse
-                                                            ToolTip.text: modelData.name + " (" + (modelData.category_name || "Milestone") + ")\nDate: " + modelData.target_date + (modelData.description ? ("\n" + modelData.description) : "") + "\n(Click to manage)"
+                                                            ToolTip.text: modelData.name + " (" + (modelData.category_name || "Milestone") + ")\nDate: " + (modelData.date_display || modelData.target_date) + (modelData.description ? ("\n" + modelData.description) : "") + "\n(Click to manage)"
 
                                                             MouseArea {
                                                                 id: sMMa

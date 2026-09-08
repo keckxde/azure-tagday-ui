@@ -165,6 +165,41 @@ In the **Workload Explorer**, selecting a team member's cell groups tasks cleanl
   - **`Bugs as Tasks` (`like_task`)**: Bugs are child work items contained inside parent User Stories or Requirements.
   - **Quick Toggle**: Switch dynamically in the Workload Explorer header (`🪲 Bugs: As Stories | As Tasks`) or configure under **Settings ➔ Bug Hierarchy & Workload Container Grouping** (persisted in `config/user_settings.yaml`).
 
+### 9. Major Milestones, Multi-day Events & `Target:<Milestone>` Tagging
+Track strategic deadlines, external audits, quality gates, and release phases across all project views:
+- **`Target:<Milestone>` Work Item Tag Mechanism**:
+  - Assign any work item (Epic, Feature, User Story, Bug, Task) to a milestone in Azure DevOps / TFS by adding a tag formatted as:
+    ```text
+    Target:<MilestoneName>
+    ```
+  - **Tag Examples**:
+    - `Target:DDQS-01` ➔ Internal Process Quality Gate (⚙️ DDQS)
+    - `Target:QIAV-GateA` ➔ External Process Compliance (🔷 QIAV)
+    - `Target:Scenario_Bravo` ➔ External Scenario Demo (🎬 Scenario)
+    - `Target:Release_2026.1` ➔ Internal Release (🚀 SW/FW)
+    - `Target:System_Freeze` ➔ General Milestone (🏁 General)
+  - **Features**: Case-insensitive matching (`target: ddqs-01` = `Target:DDQS-01`), combinable with other tags separated by semicolons (`Target:DDQS-01; Backend; Prio1`).
+- **Auto-Discovery & Automatic Pre-filling**:
+  - During TFS synchronization, the app automatically scans cached work items for `Target:<MilestoneName>` tags.
+  - New milestones are automatically created in the database with auto-inferred categories and target dates derived from the most frequent date among tagged work items.
+  - Can also be triggered manually by clicking **⚡ Pre-fill from Work Items** in the **🚩 Milestones** manager dialog.
+- **Matching Precedence & Hierarchy Inheritance**:
+  1. **Tag Match (Highest Priority)**: Matches explicit `Target:<MilestoneName>` tags.
+  2. **Date / Range Match (Fallback)**: Matches work items whose target date or deadline falls on the milestone date or within a multi-day event range `[start_date, end_date]`.
+  3. **Inheritance**: Child tasks inherit the milestone of their parent story/feature if not explicitly tagged.
+- **Multi-Day Events & Multi-Sprint Overlap**:
+  - Milestones support single-day deadlines or **multi-day spans** (e.g. 2-week testing window `2026-08-10 – 2026-08-21`).
+  - Automatically calculates duration in days and displays milestone chips across **all overlapping sprint week columns** in the Workload Explorer.
+- **Milestone Filter in Workload Explorer**:
+  - Top toolbar ComboBox supporting both dropdown selection and **free-text editing / substring search**:
+    - `All Milestones` (`ALL`)
+    - `🎯 Planned (Has Milestone)` (`PLANNED`)
+    - `⚪ Unplanned (No Milestone)` (`UNPLANNED`)
+    - Specific milestone names or custom typed substrings (e.g. `DDQS`, `Alpha`, `QIAV`).
+  - Includes a quick 1-click clear button (`✖`).
+- **Milestones Manager Dialog**:
+  - Accessible via the **🚩 Milestones** header button to create, edit, customize colors and icons, set date ranges with calendar pickers and duration presets (`+1 Day`, `+2 Days`, `+1 Wk`, `+2 Wks`), and delete milestones.
+
 ---
 
 ## Running Tests

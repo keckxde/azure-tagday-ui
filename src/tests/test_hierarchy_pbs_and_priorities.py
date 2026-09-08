@@ -13,36 +13,57 @@ from src.gui.backend import DevOpsBackend
 class TestHierarchyPBSAndPriorities(unittest.TestCase):
     def test_parse_pbs_tag(self):
         """Test parsing [<PBS Number>] <Name> tag syntax, now returning 3-tuple (tag, name, sort_key)."""
-        # Valid PBS tags – sort key is a tuple of ints/strings
+        # Valid PBS tags – sort key is a type-safe tuple of (flag, val) tuples
         tag, name, sk = parse_pbs_tag("[PBS-01] Powertrain Subsystem")
         self.assertEqual(tag, "PBS-01")
         self.assertEqual(name, "Powertrain Subsystem")
-        self.assertEqual(sk, ("pbs", 1))
+        self.assertEqual(sk, ((1, "pbs"), (0, 1)))
 
         tag, name, sk = parse_pbs_tag("[1.2.3] Engine Control Unit")
         self.assertEqual(tag, "1.2.3")
         self.assertEqual(name, "Engine Control Unit")
-        self.assertEqual(sk, (1, 2, 3))
+        self.assertEqual(sk, ((0, 1), (0, 2), (0, 3)))
 
         tag, name, sk = parse_pbs_tag("[SYS-A_01] Battery Management")
         self.assertEqual(tag, "SYS-A_01")
         self.assertEqual(name, "Battery Management")
-        self.assertEqual(sk, ("sys", "a", 1))
+        self.assertEqual(sk, ((1, "sys"), (1, "a"), (0, 1)))
 
         # x-wildcard: tag preserved, sort key uses 0 for x
         tag, name, sk = parse_pbs_tag("[10xx] Chassis Sub-System")
         self.assertEqual(tag, "10xx")          # original preserved for display
         self.assertEqual(name, "Chassis Sub-System")
-        self.assertEqual(sk, (1000,))          # x→0 for sort
+        self.assertEqual(sk, ((0, 1000),))     # x→0 for sort
 
         tag, name, sk = parse_pbs_tag("[1.2.xx] Brake Module")
         self.assertEqual(tag, "1.2.xx")
-        self.assertEqual(sk, (1, 2, 0))
+        self.assertEqual(sk, ((0, 1), (0, 2), (0, 0)))
+
+        # Relaxed parsing with multiple words and multiple separators like " ", ",", "-", ":", "/"
+        tag, name, sk = parse_pbs_tag("[10xx] Chassis, Frame & Body - Main System")
+        self.assertEqual(tag, "10xx")
+        self.assertEqual(name, "Chassis, Frame & Body - Main System")
+        self.assertEqual(sk, ((0, 1000),))
+
+        tag, name, sk = parse_pbs_tag("[20] - Powertrain, Electric Drive - Battery, Inverter")
+        self.assertEqual(tag, "20")
+        self.assertEqual(name, "Powertrain, Electric Drive - Battery, Inverter")
+        self.assertEqual(sk, ((0, 20),))
+
+        tag, name, sk = parse_pbs_tag("[30]: Suspension / Steering, Front-Axle & Rear-Axle")
+        self.assertEqual(tag, "30")
+        self.assertEqual(name, "Suspension / Steering, Front-Axle & Rear-Axle")
+        self.assertEqual(sk, ((0, 30),))
+
+        tag, name, sk = parse_pbs_tag("Epic [40] ADAS, Sensors, Cameras - Radar / LiDAR")
+        self.assertEqual(tag, "40")
+        self.assertEqual(name, "ADAS, Sensors, Cameras - Radar / LiDAR")
+        self.assertEqual(sk, ((0, 40),))
 
         # Invalid or non-PBS tags
-        self.assertEqual(parse_pbs_tag("Powertrain Subsystem without brackets"), ("", "Powertrain Subsystem without brackets", ("",)))
-        self.assertEqual(parse_pbs_tag(""), ("", "", ("",)))
-        self.assertEqual(parse_pbs_tag(None), ("", "", ("",)))
+        self.assertEqual(parse_pbs_tag("Powertrain Subsystem without brackets"), ("", "Powertrain Subsystem without brackets", ((1, ""),)))
+        self.assertEqual(parse_pbs_tag(""), ("", "", ((1, ""),)))
+        self.assertEqual(parse_pbs_tag(None), ("", "", ((1, ""),)))
 
     def test_normalize_pbs_number(self):
         """normalize_pbs_number replaces x/X with 0 only in numeric-token segments."""
@@ -57,16 +78,16 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
         self.assertEqual(normalize_pbs_number(None), None)
 
     def test_pbs_sort_key(self):
-        """pbs_sort_key produces a comparable tuple, x/X treated as 0."""
-        self.assertEqual(pbs_sort_key("10xx"), (1000,))
-        self.assertEqual(pbs_sort_key("1.2.3"), (1, 2, 3))
-        self.assertEqual(pbs_sort_key("PBS-01"), ("pbs", 1))
-        self.assertEqual(pbs_sort_key("SYS-A_1x"), ("sys", "a", 10))
-        self.assertEqual(pbs_sort_key(""), ("",))
+        """pbs_sort_key produces a comparable tuple, x/X treated as 0, safe across mixed types."""
+        self.assertEqual(pbs_sort_key("10xx"), ((0, 1000),))
+        self.assertEqual(pbs_sort_key("1.2.3"), ((0, 1), (0, 2), (0, 3)))
+        self.assertEqual(pbs_sort_key("PBS-01"), ((1, "pbs"), (0, 1)))
+        self.assertEqual(pbs_sort_key("SYS-A_1x"), ((1, "sys"), (1, "a"), (0, 10)))
+        self.assertEqual(pbs_sort_key(""), ((1, ""),))
 
         # Sorting: [10xx] (1000) sorts before [1001], between [900] and [1001], before [11xx]
-        keys = sorted(["10xx", "1001", "1099", "11xx", "900"], key=pbs_sort_key)
-        self.assertEqual(keys, ["900", "10xx", "1001", "1099", "11xx"])
+        keys = sorted(["10xx", "1001", "1099", "11xx", "900", "PBS-01", "UI", "A-1"], key=pbs_sort_key)
+        self.assertEqual(keys, ["900", "10xx", "1001", "1099", "11xx", "A-1", "PBS-01", "UI"])
 
 
     def test_parse_level3_priority_focus_types(self):
