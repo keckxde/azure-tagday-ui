@@ -49,13 +49,10 @@ def check_branch_important(text: str) -> bool:
     text_clean = text.lower().strip()
     
     # Prüfen, ob eines der Keywords im Text existiert => Nicht wichtig
-    if text_clean.startswith(keywords):
-        return False
-    # Wichtiger Branch, den wir nicht filtern
     return True
 
 
-def load_tagday_data(cache_db, project_id=None, ignore_repos=None):
+def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=False):
     """
     Queries SQLite cache database and prepares Tag Day data evaluated per repository
     relative to each repository's own latest version tag.
@@ -64,6 +61,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None):
         cache_db (AzureDevOpsCache): Cache database instance.
         project_id (str, optional): Project identifier.
         ignore_repos (list, optional): List of repository names to ignore.
+        patch_titles (bool, optional): Whether to run the PR title patcher (enforce [<TYPE>_<NR>] prefixes). Default False.
 
     Returns:
         dict: Structured datasets for Tag Day report.
@@ -195,7 +193,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None):
             source_branch = (pr["source_branch"] or "").replace("refs/heads/", "").strip()
 
             pr_title = pr["title"] or "(No title)"
-            if patch_pr_title_for_release_notes:
+            if patch_titles and patch_pr_title_for_release_notes:
                 pr_title = patch_pr_title_for_release_notes(pr, cache_db=cache_db, default_title=pr_title)
 
             # Determine tag association: direct tag match or release tag based on closed_date
@@ -641,7 +639,7 @@ def run_tagday_report(db_path, output_path, project_id, config_path=None, templa
     cache_db = AzureDevOpsCache(db_path)
 
     logger.info(f"Loading repository data from cache DB: {db_path}...")
-    data = load_tagday_data(cache_db, project_id=project_id)
+    data = load_tagday_data(cache_db, project_id=project_id, patch_titles=True)
 
     generate_tagday_markdown(data, output_path=output_path, template_path=template_path, config_path=config_path, project_id=project_id)
 

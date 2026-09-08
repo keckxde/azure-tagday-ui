@@ -254,6 +254,7 @@ class DevOpsBackend(QObject):
         self._work_items = []
         self._pull_requests = []
         self._pr_repositories = []
+        self._is_pr_titles_patched = False
         self._tagday_data = {}
         self._storage_data = {}
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
@@ -584,6 +585,31 @@ class DevOpsBackend(QObject):
     def prRepositories(self):
         return self._pr_repositories
 
+    @Property(bool, notify=pullRequestsChanged)
+    def isPrTitlesPatched(self):
+        return self._is_pr_titles_patched
+
+    @Slot(result=int)
+    def patch_pr_titles(self):
+        """
+        On user request (e.g. from PR View), patches PR titles by enforcing
+        [<TYPE>_<NR>] prefixes from referenced work items.
+        Returns the number of patched PR titles.
+        """
+        if not self._cache_db:
+            return 0
+        patched_count = 0
+        for pr in self._pull_requests:
+            orig = pr.get("title") or ""
+            patched = devops_helper.patch_pr_title_for_release_notes(pr, cache_db=self._cache_db)
+            if patched != orig:
+                pr["title"] = patched
+                patched_count += 1
+        self._is_pr_titles_patched = True
+        logger.info(f"PR Title Patcher: Patched {patched_count} pull request titles on request.")
+        self.pullRequestsChanged.emit()
+        return patched_count
+
     @Property(dict, notify=tagDayDataChanged)
     def tagDayData(self):
         return self._tagday_data
@@ -788,10 +814,11 @@ class DevOpsBackend(QObject):
         if not self._cache_db:
             return
 
+        self._is_pr_titles_patched = False
         try:
             # 1. Tag Day Analysis & Repositories
             import generate_tagday_report
-            td_raw = generate_tagday_report.load_tagday_data(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
+            td_raw = generate_tagday_report.load_tagday_data(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID, patch_titles=False)
             self._populate_tagday_data(td_raw)
             repos_changed_map = td_raw.get("repos_with_any_changes", {})
 

@@ -173,6 +173,46 @@ class TestPatchPrTitle(unittest.TestCase):
         patched2 = devops_helper.patch_pr_title_for_release_notes(pr2, cache_db=self.mock_cache)
         self.assertEqual(patched2, "Merged PR 27375: v0.10.24")
 
+    def test_load_tagday_data_patch_titles_flag(self):
+        import generate_tagday_report
+        import tempfile
+        from azure import AzureDevOpsCache
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            cache = AzureDevOpsCache(temp_db)
+            with cache._connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url, is_disabled)
+                    VALUES ('101', 'PROJ', 'repo-core', 'main', 'http://tfs/repo-core', 0)
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment)
+                    VALUES ('101', 'v1.0.0', 'c1', '2026-01-01 10:00:00', 'Alice', 'tag')
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO work_items (id, title, type, state, raw_json)
+                    VALUES (138058, 'OI-171: LoupeDeck Profil', 'Task', 'Active', '{"fields": {"System.Title": "OI-171: LoupeDeck Profil"}}')
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, closed_date, status_str, target_branch, source_branch, raw_json)
+                    VALUES (501, '101', 'LoupeDeck Implementierung #138058', 'completed', '2026-02-01 10:00:00', 'Completed', 'refs/heads/main', 'refs/heads/feat', '{"description":"test"}')
+                """)
+
+            # Default load (e.g. on startup): patch_titles is False -> raw title preserved
+            data_unpatched = generate_tagday_report.load_tagday_data(cache, project_id="PROJ", patch_titles=False)
+            pr_unpatched = data_unpatched["all_repositories"]["repo-core"]["prs_after_tag"][0]
+            self.assertEqual(pr_unpatched["title"], "LoupeDeck Implementierung #138058")
+
+            # Report generation / explicit patch: patch_titles is True -> title is patched
+            data_patched = generate_tagday_report.load_tagday_data(cache, project_id="PROJ", patch_titles=True)
+            pr_patched = data_patched["all_repositories"]["repo-core"]["prs_after_tag"][0]
+            self.assertEqual(pr_patched["title"], "[OI_171] LoupeDeck Implementierung")
+        finally:
+            if os.path.exists(temp_db):
+                os.remove(temp_db)
+
 
 if __name__ == "__main__":
     unittest.main()

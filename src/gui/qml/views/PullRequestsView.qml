@@ -283,6 +283,36 @@ Item {
                 }
             }
 
+            // Patch Titles On-Demand Button
+            Button {
+                id: patchTitlesBtn
+                text: (backend && backend.isPrTitlesPatched) ? "✨ Titles Patched" : "✨ Patch Titles"
+                enabled: backend ? !backend.isBusy : false
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: (backend && backend.isPrTitlesPatched) ? "PR titles have been patched with [<TYPE>_<NR>] tags from referenced work items.\nClick to re-run patcher." : "Run PR Title Patcher on demand: Enforce [<TYPE>_<NR>] tags discovered in referenced work items."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: (backend && backend.isPrTitlesPatched) ? "#58a6ff" : "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 30
+                    implicitWidth: 115
+                    radius: 6
+                    color: (backend && backend.isPrTitlesPatched) ? "#0d2344" : (parent.hovered ? "#30363d" : "#21262d")
+                    border.color: (backend && backend.isPrTitlesPatched) ? "#1f6feb" : "#30363d"
+                }
+                onClicked: {
+                    if (backend) {
+                        backend.patch_pr_titles();
+                    }
+                }
+            }
+
             // Quick Refresh Button
             Button {
                 text: "↻ Refresh"

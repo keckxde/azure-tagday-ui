@@ -773,6 +773,34 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
+            // 🚨 Overdue Deadlines Only Toggle
+            Button {
+                text: root.overdueOnly ? "🚨 Overdue Only" : "🚨 Overdue"
+                checkable: true
+                checked: root.overdueOnly
+                font.pixelSize: 11
+                font.weight: checked ? Font.Bold : Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.overdueOnly ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 115
+                    radius: 6
+                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#f85149" : "#30363d"
+                }
+                onClicked: { root.overdueOnly = !root.overdueOnly }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
             // ⭐ Prio 1 Focus Only Toggle
             Button {
                 text: root.prio1Only ? "⭐ Prio 1 Focus Only" : "⭐ All Priorities"
@@ -825,34 +853,6 @@ Item {
                     border.color: parent.checked ? "#1f6feb" : "#30363d"
                 }
                 onClicked: { root.groupedOnly = !root.groupedOnly }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // 🚨 Overdue Deadlines Only Toggle
-            Button {
-                text: root.overdueOnly ? "🚨 Overdue Only" : "🚨 Overdue"
-                checkable: true
-                checked: root.overdueOnly
-                font.pixelSize: 11
-                font.weight: checked ? Font.Bold : Font.DemiBold
-                ToolTip.visible: hovered
-                ToolTip.text: root.overdueOnly ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 28
-                    implicitWidth: 115
-                    radius: 6
-                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
-                    border.color: parent.checked ? "#f85149" : "#30363d"
-                }
-                onClicked: { root.overdueOnly = !root.overdueOnly }
             }
 
             Rectangle { width: 1; height: 18; color: "#30363d" }

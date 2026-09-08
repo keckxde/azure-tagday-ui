@@ -122,6 +122,14 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        if (typeof level1Combo !== "undefined" && level1Combo) {
+            level1Combo.currentIndex = 0
+            level1Combo.editText = ""
+        }
+        if (typeof level2Combo !== "undefined" && level2Combo) {
+            level2Combo.currentIndex = 0
+            level2Combo.editText = ""
+        }
         if (typeof wiMilestoneCombo !== "undefined" && wiMilestoneCombo) {
             wiMilestoneCombo.currentIndex = 0
             wiMilestoneCombo.editText = ""
@@ -792,7 +800,7 @@ Item {
             }
         }
 
-        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Priority Filter Row ======================
+        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Milestone Filter Row ======================
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
@@ -813,29 +821,62 @@ Item {
                     implicitWidth: 190
                     implicitHeight: 28
                     font.pixelSize: 11
+                    editable: true
                     model: root.level1List
-                    currentIndex: {
-                        var idx = root.level1List.indexOf(root.filterLevel1)
-                        return idx >= 0 ? idx : 0
+                    editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterLevel1 = (val === "" ? "ALL" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
                     }
-                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Sub-Systems (L1)" : currentText
+
+                    onActivated: function(index) {
+                        var val = root.level1List[index] || "ALL";
+                        root.filterLevel1 = val;
+                        editText = (val === "ALL" ? "" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
                     background: Rectangle {
                         color: "#161b22"
                         radius: 6
                         border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
                     }
-                    contentItem: Text {
+
+                    contentItem: TextField {
                         leftPadding: 8
-                        rightPadding: 24
-                        text: level1Combo.displayText
+                        rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
+                        text: level1Combo.editText
+                        placeholderText: "Type or select L1..."
+                        placeholderTextColor: "#484f58"
                         font: level1Combo.font
                         color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
                         verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== level1Combo.editText) {
+                                level1Combo.editText = text;
+                            }
+                        }
                     }
-                    onActivated: function(index) {
-                        root.filterLevel1 = root.level1List[index] || "ALL"
-                        root.currentPage = 1
+                }
+
+                // Clear L1 filter button
+                Button {
+                    visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterLevel1 = "ALL";
+                        level1Combo.currentIndex = 0;
+                        level1Combo.editText = "";
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
                     }
                 }
             }
@@ -858,29 +899,62 @@ Item {
                     implicitWidth: 190
                     implicitHeight: 28
                     font.pixelSize: 11
+                    editable: true
                     model: root.level2List
-                    currentIndex: {
-                        var idx = root.level2List.indexOf(root.filterLevel2)
-                        return idx >= 0 ? idx : 0
+                    editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterLevel2 = (val === "" ? "ALL" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
                     }
-                    displayText: (currentIndex === 0 || currentText === "ALL") ? "All Components (L2)" : currentText
+
+                    onActivated: function(index) {
+                        var val = root.level2List[index] || "ALL";
+                        root.filterLevel2 = val;
+                        editText = (val === "ALL" ? "" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
                     background: Rectangle {
                         color: "#161b22"
                         radius: 6
                         border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
                     }
-                    contentItem: Text {
+
+                    contentItem: TextField {
                         leftPadding: 8
-                        rightPadding: 24
-                        text: level2Combo.displayText
+                        rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
+                        text: level2Combo.editText
+                        placeholderText: "Type or select L2..."
+                        placeholderTextColor: "#484f58"
                         font: level2Combo.font
                         color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
                         verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== level2Combo.editText) {
+                                level2Combo.editText = text;
+                            }
+                        }
                     }
-                    onActivated: function(index) {
-                        root.filterLevel2 = root.level2List[index] || "ALL"
-                        root.currentPage = 1
+                }
+
+                // Clear L2 filter button
+                Button {
+                    visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterLevel2 = "ALL";
+                        level2Combo.currentIndex = 0;
+                        level2Combo.editText = "";
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
                     }
                 }
             }
@@ -965,9 +1039,47 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
+            // 🚨 Overdue Deadlines Only Toggle (positioned right next to Milestone)
+            Button {
+                text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
+                checkable: true
+                checked: root.filterUrgency === "OVERDUE"
+                font.pixelSize: 11
+                font.weight: checked ? Font.Bold : Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 115
+                    radius: 6
+                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#f85149" : "#30363d"
+                }
+                onClicked: {
+                    root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
+                    root.currentPage = 1;
+                    root.updateFilteredModel();
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        // ====================== Priority & PBS Grouping Filter Row ======================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
             // Priority Focus Filter (OI, MP, SCEN, SPEC, PA, CS, DOC)
             RowLayout {
-                spacing: 4
+                spacing: 6
                 Text {
                     text: "Priority:"
                     font.family: "Segoe UI, sans-serif"
@@ -1010,7 +1122,7 @@ Item {
 
             // PBS Grouping Filter
             RowLayout {
-                spacing: 4
+                spacing: 6
                 Text {
                     text: "PBS:"
                     font.family: "Segoe UI, sans-serif"
@@ -1048,128 +1160,8 @@ Item {
                     }
                 }
             }
-        }
 
-        // ====================== Milestone Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-
-            Text {
-                text: "Milestone:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 64
-            }
-
-            Row {
-                spacing: 4
-                Button {
-                    text: "All"
-                    checkable: true
-                    checked: root.filterMilestone === "ALL"
-                    font.pixelSize: 11
-                    font.weight: checked ? Font.DemiBold : Font.Normal
-                    contentItem: Text {
-                        text: parent.text; font: parent.font
-                        color: parent.checked ? "#ffffff" : "#8b949e"
-                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        implicitHeight: 26; implicitWidth: 38; radius: 13
-                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                        border.color: parent.checked ? "#388bfd" : "#30363d"
-                    }
-                    onClicked: {
-                        root.filterMilestone = "ALL"
-                        root.currentPage = 1
-                    }
-                }
-
-                Button {
-                    text: "🚩 With Milestone"
-                    checkable: true
-                    checked: root.filterMilestone === "PLANNED"
-                    font.pixelSize: 11
-                    font.weight: checked ? Font.DemiBold : Font.Normal
-                    contentItem: Text {
-                        text: parent.text; font: parent.font
-                        color: parent.checked ? "#ffffff" : "#d29922"
-                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        implicitHeight: 26; implicitWidth: 125; radius: 13
-                        color: parent.checked ? "#3d2800" : (parent.hovered ? "#21262d" : "#161b22")
-                        border.color: parent.checked ? "#d29922" : "#30363d"
-                    }
-                    onClicked: {
-                        root.filterMilestone = "PLANNED"
-                        root.currentPage = 1
-                    }
-                }
-
-                Button {
-                    text: "📋 No Milestone"
-                    checkable: true
-                    checked: root.filterMilestone === "UNPLANNED"
-                    font.pixelSize: 11
-                    font.weight: checked ? Font.DemiBold : Font.Normal
-                    contentItem: Text {
-                        text: parent.text; font: parent.font
-                        color: parent.checked ? "#ffffff" : "#8b949e"
-                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        implicitHeight: 26; implicitWidth: 105; radius: 13
-                        color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
-                        border.color: parent.checked ? "#8b949e" : "#30363d"
-                    }
-                    onClicked: {
-                        root.filterMilestone = "UNPLANNED"
-                        root.currentPage = 1
-                    }
-                }
-            }
-
-            ComboBox {
-                id: milestoneCombo
-                implicitWidth: 220
-                implicitHeight: 28
-                font.pixelSize: 11
-                model: root.milestonesList
-                currentIndex: {
-                    var idx = root.milestonesList.indexOf(root.filterMilestone)
-                    return idx >= 0 ? idx : 0
-                }
-                displayText: {
-                    if (currentIndex === 0 || currentText === "ALL") return "Specific Milestone..."
-                    if (currentIndex === 1 || currentText === "PLANNED") return "🚩 With Milestone (Any)"
-                    if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 No Milestone"
-                    return "🚩 " + currentText
-                }
-                background: Rectangle {
-                    color: "#161b22"
-                    radius: 6
-                    border.color: milestoneCombo.hovered || milestoneCombo.activeFocus ? "#58a6ff" : ((root.filterMilestone !== "ALL" && root.filterMilestone !== "PLANNED" && root.filterMilestone !== "UNPLANNED") ? "#d29922" : "#30363d")
-                }
-                contentItem: Text {
-                    leftPadding: 8
-                    rightPadding: 24
-                    text: milestoneCombo.displayText
-                    font: milestoneCombo.font
-                    color: (root.filterMilestone !== "ALL" && root.filterMilestone !== "PLANNED" && root.filterMilestone !== "UNPLANNED") ? "#f0883e" : "#f0f6fc"
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
-                }
-                onActivated: function(index) {
-                    var val = root.milestonesList[index] || "ALL"
-                    root.filterMilestone = val
-                    root.currentPage = 1
-                }
-            }
+            Item { Layout.fillWidth: true }
         }
 
         // ====================== Table Header ======================
