@@ -1195,7 +1195,6 @@ Item {
                 Text { text: "DEADLINE";    Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
                 Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
                 Text { text: "REFS";        Layout.preferredWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "LINK";        Layout.preferredWidth: 45;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
             }
         }
 
@@ -1517,41 +1516,6 @@ Item {
                                     color: "#484f58"
                                     visible: (model.linked_pr_count || 0) === 0 && (model.linked_repo_count || 0) === 0
                                     anchors.verticalCenter: parent.verticalCenter
-                                }
-                            }
-                        }
-
-                        // TFS Link Button
-                        Rectangle {
-                            Layout.preferredWidth: 45
-                            height: 24
-                            radius: 4
-                            visible: (model.tfs_url || "") !== ""
-                            color: tfsLinkMa.containsMouse ? "#0d2344" : "transparent"
-                            border.color: tfsLinkMa.containsMouse ? "#1f6feb" : "transparent"
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "↗ TFS"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: tfsLinkMa.containsMouse ? "#58a6ff" : "#388bfd"
-                            }
-
-                            ToolTip.visible: tfsLinkMa.containsMouse
-                            ToolTip.text: "Open in TFS: " + (model.tfs_url || "")
-
-                            MouseArea {
-                                id: tfsLinkMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (backend && (model.tfs_url || "") !== "") {
-                                        backend.open_url(model.tfs_url)
-                                    }
                                 }
                             }
                         }
