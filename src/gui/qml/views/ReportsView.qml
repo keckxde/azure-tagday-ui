@@ -3705,10 +3705,11 @@ Item {
                                     id: sprintRowMa
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        if (backend && (modelData.tfs_url || "") !== "") {
-                                            backend.open_url(modelData.tfs_url);
+                                        var sTarget = modelData.iteration_path || root.selectedSprintReport || modelData.id;
+                                        if (backend) {
+                                            backend.open_sprint_in_browser(sTarget);
                                         }
                                     }
                                 }
@@ -3717,16 +3718,39 @@ Item {
                                     anchors.fill: parent
                                     anchors.leftMargin: 12
                                     anchors.rightMargin: 12
-                                    spacing: 10
+                                    spacing: 8
 
-                                    // ID
-                                    Text {
-                                        text: "#" + modelData.id
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: "#58a6ff"
-                                        Layout.preferredWidth: 64
+                                    // ID (Click opens Work Item Editor)
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: rptIdText.implicitWidth + 8
+                                        radius: 4
+                                        color: rptIdMa.containsMouse ? "#1f6feb" : "#161b22"
+                                        border.color: rptIdMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Text {
+                                            id: rptIdText
+                                            anchors.centerIn: parent
+                                            text: "#" + modelData.id
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: rptIdMa.containsMouse ? "#ffffff" : "#58a6ff"
+                                        }
+                                        ToolTip.visible: rptIdMa.containsMouse
+                                        ToolTip.text: "Click to open Work Item Editor in TFS (#" + modelData.id + ")"
+                                        MouseArea {
+                                            id: rptIdMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (backend) {
+                                                    backend.open_work_item_in_browser(modelData.id);
+                                                }
+                                            }
+                                        }
                                     }
 
                                     // Type Pill
@@ -3746,7 +3770,7 @@ Item {
                                         }
                                     }
 
-                                    // Title
+                                    // Title (Click opens Sprint View)
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.title || ""
@@ -3754,6 +3778,8 @@ Item {
                                         font.pixelSize: 12
                                         color: "#f0f6fc"
                                         elide: Text.ElideRight
+                                        ToolTip.visible: sprintRowMa.containsMouse
+                                        ToolTip.text: (modelData.title || "") + "\n• Left-Click: Open Sprint Taskboard in TFS\n• Click #" + modelData.id + ": Open Work Item Editor"
                                     }
 
                                     // State
@@ -3796,20 +3822,39 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 11
                                         color: "#8b949e"
-                                        Layout.preferredWidth: 120
+                                        Layout.preferredWidth: 110
                                         elide: Text.ElideRight
                                     }
 
-                                    // TFS Link
+                                    // Quick Sprint Taskboard Button
                                     Button {
-                                        text: "↗ TFS"
+                                        text: "🏃 Sprint"
+                                        font.pixelSize: 10
+                                        Layout.preferredWidth: 62
+                                        contentItem: Text { text: parent.text; font: parent.font; color: "#79c0ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        background: Rectangle { implicitHeight: 22; radius: 4; color: parent.hovered ? "#1f6feb" : "#16243b"; border.color: "#1f6feb" }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Open Sprint Taskboard in TFS Browser"
+                                        onClicked: {
+                                            var sTarget = modelData.iteration_path || root.selectedSprintReport || modelData.id;
+                                            if (backend) {
+                                                backend.open_sprint_in_browser(sTarget);
+                                            }
+                                        }
+                                    }
+
+                                    // Quick Work Item Editor Button
+                                    Button {
+                                        text: "📝 Edit"
                                         font.pixelSize: 10
                                         Layout.preferredWidth: 50
-                                        contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                                        background: Rectangle { implicitHeight: 22; radius: 4; color: parent.hovered ? "#30363d" : "transparent"; border.color: "#30363d" }
+                                        contentItem: Text { text: parent.text; font: parent.font; color: "#7ee787"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        background: Rectangle { implicitHeight: 22; radius: 4; color: parent.hovered ? "#238636" : "#0d3525"; border.color: "#3fb950" }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Open Work Item Editor in TFS (#" + modelData.id + ")"
                                         onClicked: {
-                                            if (backend && (modelData.tfs_url || "") !== "") {
-                                                backend.open_url(modelData.tfs_url);
+                                            if (backend) {
+                                                backend.open_work_item_in_browser(modelData.id);
                                             }
                                         }
                                     }

@@ -58,6 +58,20 @@ ApplicationWindow {
         navigateToPullRequests("", false);
     }
 
+    function navigateToSprint(sprintName) {
+        window.currentTabIndex = 5;
+        if (reportsView && typeof reportsView.openSprintReport === "function") {
+            reportsView.openSprintReport(sprintName);
+        }
+    }
+
+    function navigateToWorkItem(workItemId) {
+        window.currentTabIndex = 3;
+        if (workItemsView && typeof workItemsView.searchQuery !== "undefined") {
+            workItemsView.searchQuery = "#" + workItemId;
+        }
+    }
+
     property bool isSyncLogDrawerOpen: false
     property real syncLogDrawerHeight: 380
 

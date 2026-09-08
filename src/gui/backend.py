@@ -7,6 +7,7 @@ import sys
 import json
 import logging
 import re
+import urllib.parse
 from datetime import datetime
 from PySide6.QtCore import QObject, Signal, Slot, Property
 
@@ -1159,6 +1160,15 @@ class DevOpsBackend(QObject):
                 elif s_count > 0:
                     s_badge = f"🔄 Shifted ({s_count}x)"
 
+                # Construct sprint taskboard URL
+                sprint_leaf = (base_sprint_name or iter_name or "").strip()
+                tfs_sprint_url = ""
+                if tfs_base and tfs_col and tfs_proj:
+                    if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
+                        tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+                    else:
+                        tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard"
+
                 wi_list.append({
                     "id": wi_id,
                     "title": wi.get("title") or f"Work Item #{wi_id}",
@@ -1185,6 +1195,7 @@ class DevOpsBackend(QObject):
                     "shift_badge": s_badge,
                     "deleted": is_del,
                     "tfs_url": html_link,
+                    "tfs_sprint_url": tfs_sprint_url,
                     "linked_pr_count": len(linked_prs),
                     "linked_prs": linked_prs[:10],  # cap at 10 to stay QML-friendly
                     "linked_repos": linked_repos[:8],
@@ -2532,6 +2543,67 @@ class DevOpsBackend(QObject):
             self.open_url(url)
         else:
             self.logMessage.emit(f"Could not construct Azure DevOps URL for Work Item #{clean_id}")
+
+    @Slot(str, result=str)
+    @Slot(int, result=str)
+    @Slot(str, str, result=str)
+    @Slot(int, str, result=str)
+    def get_sprint_taskboard_url(self, target="", sprint_name=""):
+        """
+        Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item or sprint name.
+        """
+        import urllib.parse
+        base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
+        col = (getattr(devops_helper, "AZURE_COLLECTION", "") or getattr(devops_helper, "DEFAULT_COLLECTION", "") or "").strip("/")
+        proj = (getattr(devops_helper, "AZURE_PROJECT_ID", "") or getattr(devops_helper, "DEFAULT_PROJECT", "") or "").strip("/")
+        if not (base_url and col and proj):
+            return ""
+
+        sprint_leaf = ""
+        if sprint_name:
+            sprint_leaf = str(sprint_name).replace("\\", "/").strip("/").split("/")[-1]
+        elif target:
+            # Check if target is work item ID or sprint name
+            try:
+                clean_id = int(str(target).lstrip("#"))
+                if self._cache_db:
+                    wi = self._cache_db.get_work_item(clean_id)
+                    if wi and isinstance(wi, dict):
+                        ipath = wi.get("iteration_path") or ""
+                        if not ipath:
+                            raw_s = wi.get("raw_json")
+                            if raw_s and isinstance(raw_s, str):
+                                try:
+                                    raw = json.loads(raw_s)
+                                    ipath = raw.get("fields", {}).get("System.IterationPath") or ""
+                                except Exception:
+                                    pass
+                        if ipath:
+                            sprint_leaf = ipath.replace("\\", "/").strip("/").split("/")[-1]
+            except (ValueError, TypeError):
+                sprint_leaf = str(target).replace("\\", "/").strip("/").split("/")[-1]
+
+        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root"):
+            return f"{base_url}/{col}/{proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+        else:
+            return f"{base_url}/{col}/{proj}/_sprints/taskboard"
+
+    @Slot(str)
+    @Slot(int)
+    @Slot(str, str)
+    @Slot(int, str)
+    def open_sprint_in_browser(self, target="", sprint_name=""):
+        """
+        Opens the TFS / Azure DevOps Sprint Taskboard page in the system web browser.
+        """
+        url = self.get_sprint_taskboard_url(target, sprint_name)
+        if url:
+            s_label = sprint_name or str(target)
+            logger.info(f"Opening Sprint Taskboard in browser: {url}")
+            self.logMessage.emit(f"Opening Sprint Taskboard in browser ({s_label})...")
+            self.open_url(url)
+        else:
+            self.logMessage.emit("Could not construct Azure DevOps Sprint URL (check Server URL and Project settings).")
 
     @Slot(int, str, result=bool)
     @Slot(int, result=bool)

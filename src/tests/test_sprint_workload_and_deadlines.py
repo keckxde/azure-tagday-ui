@@ -240,6 +240,41 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         self.assertIn("Alice", assignees_overdue)
         self.assertNotIn("Bob", assignees_overdue)
 
+    def test_get_sprint_taskboard_url_and_open_sprint(self):
+        from src.gui.backend import DevOpsBackend
+        from unittest.mock import MagicMock, patch
+        import devops_helper
+
+        backend = DevOpsBackend()
+        devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"
+        devops_helper.AZURE_COLLECTION = "DefaultCollection"
+        devops_helper.AZURE_PROJECT_ID = "MyProject"
+
+        # 1. URL from sprint name
+        url_sprint = backend.get_sprint_taskboard_url("week-2634")
+        self.assertEqual(url_sprint, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/week-2634")
+
+        # 2. URL with spaces in sprint name
+        url_space = backend.get_sprint_taskboard_url("Sprint 2026.1")
+        self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Sprint%202026.1")
+
+        # 3. URL from work item in cache DB
+        mock_db = MagicMock()
+        mock_db.get_work_item.return_value = {
+            "id": 999,
+            "title": "Test Task",
+            "iteration_path": "MyProject\\Sprint-33",
+        }
+        backend._cache_db = mock_db
+        url_wi = backend.get_sprint_taskboard_url(999)
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Sprint-33")
+
+        # 4. open_sprint_in_browser calls open_url
+        with patch.object(backend, "open_url") as mock_open:
+            backend.open_sprint_in_browser("week-2634")
+            mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/week-2634")
+
 
 if __name__ == "__main__":
     unittest.main()
+

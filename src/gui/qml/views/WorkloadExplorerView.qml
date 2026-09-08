@@ -2150,50 +2150,78 @@ Item {
                                         Layout.alignment: Qt.AlignTop
                                     }
 
-                                    // #ID Badge / Link
-                                    Text {
-                                        text: modelData.id > 0 ? ("#" + modelData.id) : "Direct"
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 13
-                                        font.weight: Font.Bold
-                                        color: modelData.id > 0 ? "#58a6ff" : "#8b949e"
+                                    // #ID Badge / Link (Opens Work Item Editor)
+                                    Rectangle {
+                                        visible: modelData.id > 0
+                                        implicitHeight: 22
+                                        implicitWidth: cIdText.implicitWidth + 10
+                                        radius: 4
+                                        color: cIdMa.containsMouse ? "#1f6feb" : "#21262d"
+                                        border.color: cIdMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
                                         Layout.alignment: Qt.AlignTop
 
+                                        Text {
+                                            id: cIdText
+                                            anchors.centerIn: parent
+                                            text: "#" + modelData.id
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: cIdMa.containsMouse ? "#ffffff" : "#58a6ff"
+                                        }
+
+                                        ToolTip.visible: cIdMa.containsMouse
+                                        ToolTip.text: "Click to open Work Item Editor in TFS (#" + modelData.id + ")"
+
                                         MouseArea {
+                                            id: cIdMa
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                if (backend && (modelData.tfs_url || "") !== "") {
-                                                    backend.open_url(modelData.tfs_url);
+                                                if (backend && modelData.id > 0) {
+                                                    backend.open_work_item_in_browser(modelData.id);
                                                 }
                                             }
                                         }
                                     }
 
-                                    // Parent Title in BIG BOLD Font
+                                    // Standalone label for unparented container
+                                    Text {
+                                        visible: modelData.id === 0
+                                        text: "Direct"
+                                        font.family: "Consolas, monospace"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#8b949e"
+                                        Layout.alignment: Qt.AlignTop
+                                    }
+
+                                    // Parent Title in BIG BOLD Font (Click opens Sprint Taskboard in TFS)
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.title || (modelData.id > 0 ? ("Work Item #" + modelData.id) : "Direct Tasks / Standalone Items")
                                         font.family: "Segoe UI, -apple-system, BlinkMacSystemFont, sans-serif"
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
-                                        color: cardTitleMa.containsMouse && (modelData.tfs_url || "") !== "" ? "#58a6ff" : "#ffffff"
+                                        color: cardTitleMa.containsMouse ? "#58a6ff" : "#ffffff"
                                         wrapMode: Text.Wrap
                                         lineHeight: 1.2
                                         Layout.alignment: Qt.AlignVCenter
 
                                         ToolTip.visible: cardTitleMa.containsMouse
-                                        ToolTip.text: (modelData.title || "") + ((modelData.tfs_url || "") !== "" ? "\n(Click to open in TFS)" : "")
+                                        ToolTip.text: (modelData.title || "") + "\n• Left-Click: Open Sprint Taskboard in TFS\n• Click #" + (modelData.id > 0 ? modelData.id : "ID") + ": Open Work Item Editor"
 
                                         MouseArea {
                                             id: cardTitleMa
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                if (backend && (modelData.tfs_url || "") !== "") {
-                                                    backend.open_url(modelData.tfs_url);
+                                                var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                if (backend) {
+                                                    backend.open_sprint_in_browser(sTarget);
                                                 }
                                             }
                                         }
@@ -2451,6 +2479,102 @@ Item {
                                             color: "#f85149"
                                         }
                                     }
+
+                                    // Quick Action: Open Sprint Taskboard in TFS Browser
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: cSprintBtnText.implicitWidth + 10
+                                        radius: 10
+                                        color: cSprintBtnMa.containsMouse ? "#1f6feb" : "#16243b"
+                                        border.color: cSprintBtnMa.containsMouse ? "#58a6ff" : "#1f6feb"
+                                        border.width: 1
+                                        Text {
+                                            id: cSprintBtnText
+                                            anchors.centerIn: parent
+                                            text: "🏃 Sprint Board"
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: cSprintBtnMa.containsMouse ? "#ffffff" : "#79c0ff"
+                                        }
+                                        ToolTip.visible: cSprintBtnMa.containsMouse
+                                        ToolTip.text: "Open Sprint Taskboard in TFS Browser\n(" + (modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "Sprint")) + ")"
+                                        MouseArea {
+                                            id: cSprintBtnMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                if (backend) {
+                                                    backend.open_sprint_in_browser(sTarget);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Quick Action: Open Work Item Editor in TFS
+                                    Rectangle {
+                                        visible: modelData.id > 0
+                                        implicitHeight: 20
+                                        implicitWidth: cEditItemText.implicitWidth + 10
+                                        radius: 10
+                                        color: cEditItemMa.containsMouse ? "#238636" : "#21262d"
+                                        border.color: cEditItemMa.containsMouse ? "#3fb950" : "#30363d"
+                                        border.width: 1
+                                        Text {
+                                            id: cEditItemText
+                                            anchors.centerIn: parent
+                                            text: "📝 Edit #" + modelData.id
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: cEditItemMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                        }
+                                        ToolTip.visible: cEditItemMa.containsMouse
+                                        ToolTip.text: "Open Work Item Editor in TFS (#" + modelData.id + ")"
+                                        MouseArea {
+                                            id: cEditItemMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (backend && modelData.id > 0) {
+                                                    backend.open_work_item_in_browser(modelData.id);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Quick Action: In-App Sprint Analytics
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: cAppSprintReportText.implicitWidth + 10
+                                        radius: 10
+                                        color: cAppSprintReportMa.containsMouse ? "#388bfd33" : "#21262d"
+                                        border.color: cAppSprintReportMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+                                        Text {
+                                            id: cAppSprintReportText
+                                            anchors.centerIn: parent
+                                            text: "📊 Analytics"
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: cAppSprintReportMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                        }
+                                        ToolTip.visible: cAppSprintReportMa.containsMouse
+                                        ToolTip.text: "Open In-App Sprint Analytics Report"
+                                        MouseArea {
+                                            id: cAppSprintReportMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.iteration_name || modelData.iteration_path;
+                                                if (typeof window !== "undefined" && typeof window.navigateToSprint === "function") {
+                                                    window.navigateToSprint(sName);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2529,6 +2653,7 @@ Item {
                                     model: root.getFilteredTasks(modelData.tasks || [])
 
                                     Rectangle {
+                                        id: taskCard
                                         Layout.fillWidth: true
                                         implicitHeight: taskRow.implicitHeight + 10
                                         radius: 4
@@ -2536,12 +2661,105 @@ Item {
                                         border.color: taskMa.containsMouse ? "#388bfd" : "#30363d"
                                         border.width: 1
 
+                                        // Right-Click Context Menu for Task Row
+                                        Menu {
+                                            id: taskContextMenu
+                                            MenuItem {
+                                                text: "🏃 Open Sprint Taskboard (TFS)"
+                                                onTriggered: {
+                                                    var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                    if (backend) backend.open_sprint_in_browser(sTarget);
+                                                }
+                                            }
+                                            MenuItem {
+                                                text: "📝 Open Work Item Editor (TFS #" + modelData.id + ")"
+                                                onTriggered: {
+                                                    if (backend) backend.open_work_item_in_browser(modelData.id);
+                                                }
+                                            }
+                                            MenuItem {
+                                                text: "📊 View Sprint Analytics (In-App)"
+                                                onTriggered: {
+                                                    var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.iteration_name || modelData.iteration_path;
+                                                    if (typeof window !== "undefined" && typeof window.navigateToSprint === "function") {
+                                                        window.navigateToSprint(sName);
+                                                    }
+                                                }
+                                            }
+                                            MenuItem {
+                                                text: "📋 Filter in Work Items Tab"
+                                                onTriggered: {
+                                                    if (typeof window !== "undefined" && typeof window.navigateToWorkItem === "function") {
+                                                        window.navigateToWorkItem(modelData.id);
+                                                    }
+                                                }
+                                            }
+                                            MenuSeparator {}
+                                            MenuItem {
+                                                text: "🔄 Reschedule Task Iteration..."
+                                                onTriggered: {
+                                                    workloadIterationPickerModal.openForWorkItem(
+                                                        modelData.id,
+                                                        modelData.title,
+                                                        modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "")
+                                                    );
+                                                }
+                                            }
+                                            MenuItem {
+                                                text: "📅 Set / Change Deadline..."
+                                                onTriggered: {
+                                                    workloadDeadlineDialog.openForWorkItem(
+                                                        modelData.id,
+                                                        modelData.title,
+                                                        modelData.deadline_str,
+                                                        root.selectedCell ? root.selectedCell.sprint_name : ""
+                                                    );
+                                                }
+                                            }
+                                            MenuSeparator {}
+                                            MenuItem {
+                                                text: "🔗 Copy Work Item URL"
+                                                onTriggered: {
+                                                    if (backend && modelData.tfs_url) backend.copy_to_clipboard(modelData.tfs_url);
+                                                }
+                                            }
+                                            MenuItem {
+                                                text: "🔗 Copy Sprint Taskboard URL"
+                                                onTriggered: {
+                                                    if (backend) {
+                                                        var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                        var sUrl = backend.get_sprint_taskboard_url(sTarget);
+                                                        if (sUrl) backend.copy_to_clipboard(sUrl);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: taskMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: function(mouse) {
+                                                if (mouse.button === Qt.RightButton) {
+                                                    taskContextMenu.popup();
+                                                } else {
+                                                    // Main Left Click on Task Row: Directly jump into Sprint View in TFS
+                                                    var sprintTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                    if (backend) {
+                                                        backend.open_sprint_in_browser(sprintTarget);
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         RowLayout {
                                             id: taskRow
                                             anchors.fill: parent
                                             anchors.leftMargin: 8
                                             anchors.rightMargin: 8
-                                            spacing: 8
+                                            spacing: 6
 
                                             // Status Icon
                                             Text {
@@ -2551,13 +2769,37 @@ Item {
                                                 color: modelData.is_done ? "#3fb950" : "#58a6ff"
                                             }
 
-                                            // Task ID
-                                            Text {
-                                                text: "#" + modelData.id
-                                                font.family: "Consolas, monospace"
-                                                font.pixelSize: 11
-                                                font.weight: Font.Bold
-                                                color: "#58a6ff"
+                                            // Task ID Badge (Direct Click opens Work Item Editor in TFS)
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkIdText.implicitWidth + 8
+                                                radius: 4
+                                                color: tkIdMa.containsMouse ? "#1f6feb" : "#21262d"
+                                                border.color: tkIdMa.containsMouse ? "#58a6ff" : "#30363d"
+                                                border.width: 1
+
+                                                Text {
+                                                    id: tkIdText
+                                                    anchors.centerIn: parent
+                                                    text: "#" + modelData.id
+                                                    font.family: "Consolas, monospace"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    color: tkIdMa.containsMouse ? "#ffffff" : "#58a6ff"
+                                                }
+                                                ToolTip.visible: tkIdMa.containsMouse
+                                                ToolTip.text: "Click to open Work Item Editor in TFS (#" + modelData.id + ")"
+                                                MouseArea {
+                                                    id: tkIdMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (backend) {
+                                                            backend.open_work_item_in_browser(modelData.id);
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             // Task Title
@@ -2568,8 +2810,8 @@ Item {
                                                 font.pixelSize: 11
                                                 color: modelData.is_done ? "#8b949e" : "#e6edf3"
                                                 elide: Text.ElideRight
-                                                ToolTip.visible: taskMa.containsMouse && (modelData.title || "").length > 30
-                                                ToolTip.text: modelData.title || ""
+                                                ToolTip.visible: taskMa.containsMouse
+                                                ToolTip.text: (modelData.title || "") + "\n• Left-Click: Open Sprint Taskboard in TFS\n• Click #" + modelData.id + ": Open Work Item Editor\n• Right-Click: More sprint & item options"
                                             }
 
                                             // Type Pill (Task vs Bug)
@@ -2601,6 +2843,99 @@ Item {
                                                     text: modelData.state || "Active"
                                                     font.pixelSize: 9
                                                     color: modelData.is_done ? "#3fb950" : "#d29922"
+                                                }
+                                            }
+
+                                            // Quick Action: Sprint Taskboard Button
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkSprintBtnText.implicitWidth + 8
+                                                radius: 9
+                                                color: tkSprintBtnMa.containsMouse ? "#1f6feb" : "#16243b"
+                                                border.color: tkSprintBtnMa.containsMouse ? "#58a6ff" : "#1f6feb"
+                                                border.width: 1
+                                                Text {
+                                                    id: tkSprintBtnText
+                                                    anchors.centerIn: parent
+                                                    text: "🏃 Sprint"
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
+                                                    color: tkSprintBtnMa.containsMouse ? "#ffffff" : "#79c0ff"
+                                                }
+                                                ToolTip.visible: tkSprintBtnMa.containsMouse
+                                                ToolTip.text: "Open Sprint Taskboard in TFS Browser\n(" + (modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "Sprint")) + ")"
+                                                MouseArea {
+                                                    id: tkSprintBtnMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        var sprintTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                        if (backend) {
+                                                            backend.open_sprint_in_browser(sprintTarget);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Quick Action: Work Item Editor Button
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkEditBtnText.implicitWidth + 8
+                                                radius: 9
+                                                color: tkEditBtnMa.containsMouse ? "#238636" : "#21262d"
+                                                border.color: tkEditBtnMa.containsMouse ? "#3fb950" : "#30363d"
+                                                border.width: 1
+                                                Text {
+                                                    id: tkEditBtnText
+                                                    anchors.centerIn: parent
+                                                    text: "📝 Edit"
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
+                                                    color: tkEditBtnMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                }
+                                                ToolTip.visible: tkEditBtnMa.containsMouse
+                                                ToolTip.text: "Open Work Item Editor in TFS (#" + modelData.id + ")"
+                                                MouseArea {
+                                                    id: tkEditBtnMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (backend) {
+                                                            backend.open_work_item_in_browser(modelData.id);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Quick Action: In-App Sprint Analytics
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: tkAppSprintText.implicitWidth + 8
+                                                radius: 9
+                                                color: tkAppSprintMa.containsMouse ? "#388bfd33" : "#161b22"
+                                                border.color: tkAppSprintMa.containsMouse ? "#58a6ff" : "#30363d"
+                                                border.width: 1
+                                                Text {
+                                                    id: tkAppSprintText
+                                                    anchors.centerIn: parent
+                                                    text: "📊"
+                                                    font.pixelSize: 9
+                                                }
+                                                ToolTip.visible: tkAppSprintMa.containsMouse
+                                                ToolTip.text: "View in App Sprint Report (" + (root.selectedCell ? root.selectedCell.sprint_name : (modelData.iteration_path || "Sprint")) + ")"
+                                                MouseArea {
+                                                    id: tkAppSprintMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.iteration_name || modelData.iteration_path;
+                                                        if (typeof window !== "undefined" && typeof window.navigateToSprint === "function") {
+                                                            window.navigateToSprint(sName);
+                                                        }
+                                                    }
                                                 }
                                             }
 
@@ -2702,18 +3037,6 @@ Item {
                                                             window.openMilestonesManager();
                                                         }
                                                     }
-                                                }
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: taskMa
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                            onClicked: {
-                                                if (backend && (modelData.tfs_url || "") !== "") {
-                                                    backend.open_url(modelData.tfs_url)
                                                 }
                                             }
                                         }
