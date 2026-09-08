@@ -17,6 +17,7 @@ Item {
     property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
     property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
     property string filterMilestone: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
+    property string filterTagCategory: "ALL" // "ALL" or specific category name
     property string filterTag: "ALL"         // "ALL", "TAGGED", "UNTAGGED", or specific tag name
     property int currentPage: 1
     property int pageSize: 25
@@ -58,6 +59,8 @@ Item {
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
     property var milestonesList: ["ALL"]
+    property var tagCategoryList: ["ALL"]   // populated from backend.get_tag_category_names()
+    property var tagsByCategoryData: ({})   // populated from backend.get_tags_by_category() JSON
     property var tagsList: ["ALL"]
 
     property var priorityOptions: [
@@ -127,8 +130,22 @@ Item {
 
     function refreshTagsList() {
         if (!backend) return
-        var tags = backend.workItemTags || []
-        tagsList = ["ALL", "TAGGED", "UNTAGGED"].concat(tags)
+        // Refresh the category → tags mapping
+        var rawJson = backend.get_tags_by_category ? backend.get_tags_by_category() : "{}"
+        try { tagsByCategoryData = JSON.parse(rawJson) } catch(e) { tagsByCategoryData = {} }
+
+        // Rebuild category list
+        var catNames = Object.keys(tagsByCategoryData).sort()
+        tagCategoryList = ["ALL"].concat(catNames)
+
+        // Rebuild tag list filtered by selected category
+        if (root.filterTagCategory === "ALL" || root.filterTagCategory === "") {
+            var all = backend.workItemTags || []
+            tagsList = ["ALL", "TAGGED", "UNTAGGED"].concat(all)
+        } else {
+            var catTags = (tagsByCategoryData[root.filterTagCategory] || []).slice()
+            tagsList = ["ALL"].concat(catTags)
+        }
     }
 
     function resetAllFilters() {
@@ -144,6 +161,7 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        root.filterTagCategory = "ALL"
         root.filterTag = "ALL"
         if (typeof level1Combo !== "undefined" && level1Combo) {
             level1Combo.currentIndex = 0
@@ -157,6 +175,9 @@ Item {
             wiMilestoneCombo.currentIndex = 0
             wiMilestoneCombo.editText = ""
         }
+        if (typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo) {
+            wiTagCategoryCombo.currentIndex = 0
+        }
         if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
             wiTagCombo.currentIndex = 0
             wiTagCombo.editText = ""
@@ -165,7 +186,7 @@ Item {
         root.updateFilteredModel()
     }
 
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTag !== "ALL"
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -1119,9 +1140,85 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            // Tag Filter
+            // Tag Category + Tag Two-Step Filter
             RowLayout {
                 spacing: 6
+
+                Text {
+                    text: "Cat:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                    ToolTip.visible: catLabelMa.containsMouse
+                    ToolTip.text: "Select a tag category first, then pick a specific tag"
+                    MouseArea { id: catLabelMa; anchors.fill: parent; hoverEnabled: true }
+                }
+
+                // Category combo
+                ComboBox {
+                    id: wiTagCategoryCombo
+                    implicitWidth: 150
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    model: root.tagCategoryList
+                    currentIndex: {
+                        var idx = root.tagCategoryList.indexOf(root.filterTagCategory)
+                        return idx >= 0 ? idx : 0
+                    }
+                    displayText: currentIndex === 0 ? "All Categories" : currentText
+
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wiTagCategoryCombo.hovered || wiTagCategoryCombo.activeFocus ? "#58a6ff" : (root.filterTagCategory !== "ALL" ? "#a371f7" : "#30363d")
+                    }
+                    contentItem: Text {
+                        leftPadding: 8; rightPadding: 24
+                        text: wiTagCategoryCombo.displayText
+                        font: wiTagCategoryCombo.font
+                        color: root.filterTagCategory !== "ALL" ? "#a371f7" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    delegate: ItemDelegate {
+                        width: wiTagCategoryCombo.width
+                        contentItem: Text {
+                            text: modelData === "ALL" ? "All Categories" : modelData
+                            font: wiTagCategoryCombo.font
+                            color: "#f0f6fc"
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        background: Rectangle {
+                            color: highlighted ? "#21262d" : "#161b22"
+                        }
+                        highlighted: wiTagCategoryCombo.highlightedIndex === index
+                    }
+                    popup: Popup {
+                        y: wiTagCategoryCombo.height + 2
+                        width: wiTagCategoryCombo.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 1
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: wiTagCategoryCombo.delegateModel
+                            ScrollIndicator.vertical: ScrollIndicator {}
+                        }
+                        background: Rectangle { color: "#161b22"; border.color: "#30363d"; radius: 6 }
+                    }
+                    onActivated: function(index) {
+                        root.filterTagCategory = root.tagCategoryList[index] || "ALL"
+                        // Reset tag selection when category changes
+                        root.filterTag = "ALL"
+                        if (wiTagCombo) { wiTagCombo.currentIndex = 0; wiTagCombo.editText = "" }
+                        root.refreshTagsList()
+                        root.currentPage = 1
+                        root.updateFilteredModel()
+                    }
+                }
+
                 Text {
                     text: "Tag:"
                     font.family: "Segoe UI, sans-serif"
@@ -1164,7 +1261,7 @@ Item {
                         leftPadding: 8
                         rightPadding: (root.filterTag !== "ALL") ? 32 : 24
                         text: wiTagCombo.editText
-                        placeholderText: "Type or select tag..."
+                        placeholderText: root.filterTagCategory !== "ALL" ? ("Tag in '" + root.filterTagCategory + "'...") : "Type or select tag..."
                         placeholderTextColor: "#484f58"
                         font: wiTagCombo.font
                         color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
@@ -1178,17 +1275,20 @@ Item {
                     }
                 }
 
-                // Clear Tag filter button
+                // Clear Tag filter button (resets both category and tag)
                 Button {
-                    visible: root.filterTag !== "ALL" && root.filterTag !== ""
+                    visible: root.filterTag !== "ALL" || root.filterTagCategory !== "ALL"
                     text: "✖"
                     font.pixelSize: 10
                     contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
                     onClicked: {
+                        root.filterTagCategory = "ALL";
                         root.filterTag = "ALL";
+                        wiTagCategoryCombo.currentIndex = 0;
                         wiTagCombo.currentIndex = 0;
                         wiTagCombo.editText = "";
+                        root.refreshTagsList();
                         root.currentPage = 1;
                         root.updateFilteredModel();
                     }
@@ -1598,6 +1698,22 @@ Item {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             root.filterTag = modelData;
+                                            // Auto-select category for this tag
+                                            if (backend && backend.get_tags_by_category) {
+                                                try {
+                                                    var catData = JSON.parse(backend.get_tags_by_category());
+                                                    for (var catKey in catData) {
+                                                        if (catData[catKey].indexOf(modelData) !== -1) {
+                                                            root.filterTagCategory = catKey;
+                                                            root.refreshTagsList();
+                                                            var catIdx = root.tagCategoryList.indexOf(catKey);
+                                                            if (catIdx >= 0 && typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo)
+                                                                wiTagCategoryCombo.currentIndex = catIdx;
+                                                            break;
+                                                        }
+                                                    }
+                                                } catch(e) {}
+                                            }
                                             if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
                                                 wiTagCombo.editText = modelData;
                                             }
@@ -1920,6 +2036,22 @@ Item {
                                                     cursorShape: Qt.PointingHandCursor
                                                     onClicked: {
                                                         root.filterTag = modelData;
+                                                        // Auto-select category for this tag
+                                                        if (backend && backend.get_tags_by_category) {
+                                                            try {
+                                                                var catData2 = JSON.parse(backend.get_tags_by_category());
+                                                                for (var catKey2 in catData2) {
+                                                                    if (catData2[catKey2].indexOf(modelData) !== -1) {
+                                                                        root.filterTagCategory = catKey2;
+                                                                        root.refreshTagsList();
+                                                                        var catIdx2 = root.tagCategoryList.indexOf(catKey2);
+                                                                        if (catIdx2 >= 0 && typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo)
+                                                                            wiTagCategoryCombo.currentIndex = catIdx2;
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            } catch(e) {}
+                                                        }
                                                         if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
                                                             wiTagCombo.editText = modelData;
                                                         }
@@ -2368,6 +2500,10 @@ Item {
             root.refreshMilestonesList()
             root.updateFilteredModel()
         }
+        function onTagCategoriesChanged() {
+            root.refreshTagsList()
+            root.updateFilteredModel()
+        }
     }
 
     onSearchQueryChanged:     updateFilteredModel()
@@ -2381,8 +2517,9 @@ Item {
     onFilterLevel2Changed:    updateFilteredModel()
     onFilterPriorityChanged:  updateFilteredModel()
     onFilterGroupingChanged:  updateFilteredModel()
-    onFilterMilestoneChanged: updateFilteredModel()
-    onFilterTagChanged:       updateFilteredModel()
+    onFilterMilestoneChanged:    updateFilteredModel()
+    onFilterTagCategoryChanged:  updateFilteredModel()
+    onFilterTagChanged:          updateFilteredModel()
 
     DeadlineEditorDialog {
         id: deadlineDialog

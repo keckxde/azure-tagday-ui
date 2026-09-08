@@ -884,6 +884,433 @@ Item {
             }
 
             // ==========================================
+            // Work Item Tag Categories Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: tagCatCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                // Local state for the editable rules list and add-row
+                property var tagRules: []
+                property string newPattern: ""
+                property string newCategory: ""
+
+                id: tagCatCard
+
+                function loadRules() {
+                    if (backend && backend.tagCategories) {
+                        // Deep-copy so edits don't mutate the backend list directly
+                        var src = backend.tagCategories;
+                        var copy = [];
+                        for (var i = 0; i < src.length; i++) {
+                            copy.push({ pattern: src[i].pattern || "", category: src[i].category || "" });
+                        }
+                        tagRules = copy;
+                    }
+                }
+
+                function saveRules() {
+                    if (!backend) return;
+                    backend.save_tag_categories(JSON.stringify(tagRules));
+                    root.bannerMsg = "Tag categories saved (" + tagRules.length + " rules).";
+                    root.bannerType = "success";
+                }
+
+                function resetToDefaults() {
+                    tagRules = [
+                        { pattern: "Target:*",    category: "Milestone" },
+                        { pattern: "Subsystem:*", category: "PBS" },
+                        { pattern: "v*.*.*",      category: "Software Revision" },
+                        { pattern: "OI",          category: "Open Item" },
+                        { pattern: "MP",          category: "Merkpunkt" }
+                    ];
+                    saveRules();
+                }
+
+                Component.onCompleted: loadRules()
+
+                Connections {
+                    target: backend
+                    function onTagCategoriesChanged() { tagCatCard.loadRules(); }
+                }
+
+                ColumnLayout {
+                    id: tagCatCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // ---- Header ----
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text { text: "🏷️"; font.pixelSize: 18 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Work Item Tag Categories"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Map tag patterns to category names. Use * for wildcards (e.g. Target:* → Milestone). Rules are evaluated top-to-bottom; the first match wins."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "↺ Reset to Defaults"
+                            font.pixelSize: 11
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Restore the five built-in rules"
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 28; implicitWidth: 130; radius: 5
+                                color: parent.hovered ? "#30363d" : "transparent"
+                                border.color: "#30363d"
+                            }
+                            onClicked: tagCatCard.resetToDefaults()
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // ---- Table Header ----
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 28
+                        color: "#0d1117"
+                        radius: 4
+                        border.color: "#21262d"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Text { text: "#";        font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 20 }
+                            Text { text: "PATTERN";  font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.fillWidth: true }
+                            Text { text: "CATEGORY"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 160 }
+                            Text { text: "";          font.pixelSize: 10; color: "transparent";   Layout.preferredWidth: 54 }
+                        }
+                    }
+
+                    // ---- Rules List ----
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Repeater {
+                            model: tagCatCard.tagRules
+
+                            delegate: Rectangle {
+                                id: ruleRow
+                                Layout.fillWidth: true
+                                implicitHeight: 36
+                                radius: 5
+                                color: ruleRowMa.containsMouse ? "#1c2128" : "#0d1117"
+                                border.color: "#21262d"
+
+                                property int ruleIndex: index
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 10
+
+                                    // Row number
+                                    Text {
+                                        text: (ruleRow.ruleIndex + 1) + "."
+                                        font.pixelSize: 11
+                                        color: "#484f58"
+                                        Layout.preferredWidth: 20
+                                    }
+
+                                    // Pattern field (editable)
+                                    TextField {
+                                        id: patternField
+                                        Layout.fillWidth: true
+                                        implicitHeight: 26
+                                        text: modelData.pattern
+                                        font.family: "Consolas, monospace"
+                                        font.pixelSize: 11
+                                        color: "#58a6ff"
+                                        placeholderText: "e.g.  Target:*  or  v*.*.*"
+                                        placeholderTextColor: "#484f58"
+                                        background: Rectangle {
+                                            color: patternField.activeFocus ? "#0d2344" : "transparent"
+                                            radius: 4
+                                            border.color: patternField.activeFocus ? "#388bfd" : "transparent"
+                                        }
+                                        onEditingFinished: {
+                                            var rules = tagCatCard.tagRules.slice();
+                                            rules[ruleRow.ruleIndex] = { pattern: text.trim(), category: rules[ruleRow.ruleIndex].category };
+                                            tagCatCard.tagRules = rules;
+                                        }
+                                    }
+
+                                    // Category field (editable)
+                                    TextField {
+                                        id: categoryField
+                                        Layout.preferredWidth: 160
+                                        implicitHeight: 26
+                                        text: modelData.category
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#e6edf3"
+                                        placeholderText: "Category name"
+                                        placeholderTextColor: "#484f58"
+                                        background: Rectangle {
+                                            color: categoryField.activeFocus ? "#1a2a1a" : "transparent"
+                                            radius: 4
+                                            border.color: categoryField.activeFocus ? "#3fb950" : "transparent"
+                                        }
+                                        onEditingFinished: {
+                                            var rules = tagCatCard.tagRules.slice();
+                                            rules[ruleRow.ruleIndex] = { pattern: rules[ruleRow.ruleIndex].pattern, category: text.trim() };
+                                            tagCatCard.tagRules = rules;
+                                        }
+                                    }
+
+                                    // Move up / down / remove buttons
+                                    RowLayout {
+                                        spacing: 2
+                                        Layout.preferredWidth: 54
+
+                                        // ↑ Move up
+                                        Text {
+                                            text: "↑"
+                                            font.pixelSize: 13
+                                            color: upMa.containsMouse ? "#79c0ff" : "#484f58"
+                                            visible: ruleRow.ruleIndex > 0
+                                            MouseArea {
+                                                id: upMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    var rules = tagCatCard.tagRules.slice();
+                                                    var tmp = rules[ruleRow.ruleIndex - 1];
+                                                    rules[ruleRow.ruleIndex - 1] = rules[ruleRow.ruleIndex];
+                                                    rules[ruleRow.ruleIndex] = tmp;
+                                                    tagCatCard.tagRules = rules;
+                                                }
+                                            }
+                                            ToolTip.visible: upMa.containsMouse; ToolTip.text: "Move rule up"
+                                        }
+
+                                        // ↓ Move down
+                                        Text {
+                                            text: "↓"
+                                            font.pixelSize: 13
+                                            color: downMa.containsMouse ? "#79c0ff" : "#484f58"
+                                            visible: ruleRow.ruleIndex < tagCatCard.tagRules.length - 1
+                                            MouseArea {
+                                                id: downMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    var rules = tagCatCard.tagRules.slice();
+                                                    var tmp = rules[ruleRow.ruleIndex + 1];
+                                                    rules[ruleRow.ruleIndex + 1] = rules[ruleRow.ruleIndex];
+                                                    rules[ruleRow.ruleIndex] = tmp;
+                                                    tagCatCard.tagRules = rules;
+                                                }
+                                            }
+                                            ToolTip.visible: downMa.containsMouse; ToolTip.text: "Move rule down"
+                                        }
+
+                                        // ✕ Remove
+                                        Text {
+                                            text: "✕"
+                                            font.pixelSize: 12
+                                            color: removeMa.containsMouse ? "#f85149" : "#484f58"
+                                            MouseArea {
+                                                id: removeMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    var rules = tagCatCard.tagRules.slice();
+                                                    rules.splice(ruleRow.ruleIndex, 1);
+                                                    tagCatCard.tagRules = rules;
+                                                }
+                                            }
+                                            ToolTip.visible: removeMa.containsMouse; ToolTip.text: "Remove rule"
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: ruleRowMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    propagateComposedEvents: true
+                                    cursorShape: Qt.ArrowCursor
+                                }
+                            }
+                        }
+
+                        // Empty placeholder
+                        Text {
+                            visible: tagCatCard.tagRules.length === 0
+                            text: "No rules defined. Add a rule below or click '↺ Reset to Defaults'."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            color: "#484f58"
+                            Layout.topMargin: 4
+                        }
+                    }
+
+                    // ---- Add New Rule Row ----
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        radius: 5
+                        color: "#0d1117"
+                        border.color: "#238636"
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Text {
+                                text: "+"
+                                font.pixelSize: 16
+                                font.weight: Font.Bold
+                                color: "#3fb950"
+                                Layout.preferredWidth: 20
+                            }
+
+                            TextField {
+                                id: newPatternField
+                                Layout.fillWidth: true
+                                implicitHeight: 26
+                                text: tagCatCard.newPattern
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: 11
+                                color: "#58a6ff"
+                                placeholderText: "Pattern  (e.g. QA:*)"
+                                placeholderTextColor: "#484f58"
+                                background: Rectangle {
+                                    color: newPatternField.activeFocus ? "#0d2344" : "transparent"
+                                    radius: 4
+                                    border.color: newPatternField.activeFocus ? "#388bfd" : "transparent"
+                                }
+                                onTextChanged: tagCatCard.newPattern = text
+                                Keys.onReturnPressed: newCategoryField.forceActiveFocus()
+                            }
+
+                            TextField {
+                                id: newCategoryField
+                                Layout.preferredWidth: 160
+                                implicitHeight: 26
+                                text: tagCatCard.newCategory
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#e6edf3"
+                                placeholderText: "Category name"
+                                placeholderTextColor: "#484f58"
+                                background: Rectangle {
+                                    color: newCategoryField.activeFocus ? "#1a2a1a" : "transparent"
+                                    radius: 4
+                                    border.color: newCategoryField.activeFocus ? "#3fb950" : "transparent"
+                                }
+                                onTextChanged: tagCatCard.newCategory = text
+                                Keys.onReturnPressed: addRuleBtn.clicked()
+                            }
+
+                            Button {
+                                id: addRuleBtn
+                                text: "Add"
+                                enabled: tagCatCard.newPattern.trim() !== "" && tagCatCard.newCategory.trim() !== ""
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font
+                                    color: parent.enabled ? "#ffffff" : "#484f58"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 28; implicitWidth: 54; radius: 5
+                                    color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#21262d"
+                                    border.color: parent.enabled ? "#3fb950" : "#30363d"
+                                }
+                                onClicked: {
+                                    var p = tagCatCard.newPattern.trim();
+                                    var c = tagCatCard.newCategory.trim();
+                                    if (p && c) {
+                                        var rules = tagCatCard.tagRules.slice();
+                                        rules.push({ pattern: p, category: c });
+                                        tagCatCard.tagRules = rules;
+                                        tagCatCard.newPattern = "";
+                                        tagCatCard.newCategory = "";
+                                        newPatternField.text = "";
+                                        newCategoryField.text = "";
+                                        newPatternField.forceActiveFocus();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- Save Button ----
+                    RowLayout {
+                        Layout.topMargin: 4
+                        spacing: 10
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: tagCatCard.tagRules.length + " rule(s) configured"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#484f58"
+                        }
+
+                        Button {
+                            text: "💾 Save Tag Categories"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 180; radius: 6
+                                color: parent.hovered ? "#1f6feb" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: tagCatCard.saveRules()
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Recent Projects History Card (if any)
             // ==========================================
             Rectangle {

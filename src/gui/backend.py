@@ -156,6 +156,47 @@ def _save_user_settings(settings):
         logger.error(f"Failed to save user settings to {USER_SETTINGS_PATH}: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Tag-category helpers (module level so they can be tested independently)
+# ---------------------------------------------------------------------------
+
+#: Default tag-category rules shipped with the application.
+#: Users can override / extend these in Settings → Tag Categories.
+DEFAULT_TAG_CATEGORIES = [
+    {"pattern": "Target:*",    "category": "Milestone"},
+    {"pattern": "Subsystem:*", "category": "PBS"},
+    {"pattern": "v*.*.*",      "category": "Software Revision"},
+    {"pattern": "OI",          "category": "Open Item"},
+    {"pattern": "MP",          "category": "Merkpunkt"},
+]
+
+
+def classify_tag(tag, tag_categories):
+    """
+    Returns the category name for *tag* by testing it against the ordered
+    *tag_categories* list (each entry is ``{"pattern": str, "category": str}``).
+
+    Matching is done with :func:`fnmatch.fnmatch` which supports ``*`` and ``?``
+    wildcards.  The first matching rule wins.  If no rule matches, ``"Other"``
+    is returned.
+
+    Args:
+        tag (str): The raw tag string from a work item.
+        tag_categories (list): Ordered list of ``{pattern, category}`` dicts.
+
+    Returns:
+        str: Category name, or ``"Other"`` when no rule matches.
+    """
+    import fnmatch
+    for entry in (tag_categories or []):
+        pattern = (entry.get("pattern") or "").strip()
+        if not pattern:
+            continue
+        if fnmatch.fnmatch(tag, pattern):
+            return (entry.get("category") or "Other").strip() or "Other"
+    return "Other"
+
+
 class DevOpsBackend(QObject):
     """
     Main backend interface for QML.
@@ -175,6 +216,7 @@ class DevOpsBackend(QObject):
     milestoneCategoriesChanged = Signal()
     repoCategoriesChanged = Signal()
     iterationShiftsChanged = Signal()
+    tagCategoriesChanged = Signal()
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
     logRecord = Signal(str, str, str, str)  # timestamp, level, logger_name, message
@@ -587,6 +629,92 @@ class DevOpsBackend(QObject):
                 "target_short_name": tag.split(":", 1)[1].strip() if is_target else ""
             })
         return sorted(results, key=lambda x: (-x["count"], x["tag"].lower()))
+
+    # ------------------------------------------------------------------
+    # Tag-category configuration
+    # ------------------------------------------------------------------
+
+    @Property(list, notify=tagCategoriesChanged)
+    def tagCategories(self):
+        """
+        Returns the ordered list of tag-category mapping rules.
+
+        Each item is a dict ``{"pattern": str, "category": str}``.
+        Rules are evaluated in order; the first match wins.
+        Falls back to :data:`DEFAULT_TAG_CATEGORIES` when nothing is configured.
+        """
+        cfg = _load_user_settings()
+        cats = cfg.get("tag_categories")
+        if cats and isinstance(cats, list):
+            return cats
+        return list(DEFAULT_TAG_CATEGORIES)
+
+    @Slot(str)
+    def save_tag_categories(self, categories_json):
+        """
+        Persists a JSON-encoded list of ``{"pattern", "category"}`` dicts to
+        ``user_settings.yaml`` and notifies QML.
+
+        Args:
+            categories_json (str): JSON string of the list.
+        """
+        try:
+            cats = json.loads(categories_json)
+            if not isinstance(cats, list):
+                logger.warning("save_tag_categories: expected a JSON list, got %s", type(cats))
+                return
+            # Sanitise entries
+            cleaned = [
+                {"pattern": str(e.get("pattern", "")).strip(),
+                 "category": str(e.get("category", "")).strip()}
+                for e in cats
+                if isinstance(e, dict) and e.get("pattern", "").strip()
+            ]
+            cfg = _load_user_settings()
+            cfg["tag_categories"] = cleaned
+            _save_user_settings(cfg)
+            self.tagCategoriesChanged.emit()
+            self.workItemsChanged.emit()   # refresh tag-by-category derived data
+            logger.info("Tag categories saved (%d rules)", len(cleaned))
+        except Exception as e:
+            logger.error("save_tag_categories failed: %s", e)
+
+    @Slot(result=str)
+    def get_tags_by_category(self):
+        """
+        Returns a JSON string mapping category name → sorted list of tags
+        for all tags currently present in work items.
+
+        Used by QML to populate the two-step Category → Tag filter.
+        The special category ``"All"`` contains every tag.
+
+        Returns:
+            str: JSON-encoded ``{category: [tag, ...], ...}``.
+        """
+        cats = self.tagCategories
+        result = {}
+        for tag in self.workItemTags:
+            cat = classify_tag(tag, cats)
+            result.setdefault(cat, []).append(tag)
+        # Sort each bucket
+        for key in result:
+            result[key] = sorted(result[key], key=lambda s: s.lower())
+        return json.dumps(result, ensure_ascii=False)
+
+    @Slot(result=list)
+    def get_tag_category_names(self):
+        """
+        Returns a sorted list of category names that currently have at least
+        one matching tag in the work item cache.
+
+        Returns:
+            list: Sorted list of category name strings.
+        """
+        try:
+            raw = json.loads(self.get_tags_by_category())
+            return sorted(raw.keys())
+        except Exception:
+            return []
 
     @Property(list, notify=milestonesChanged)
     def workItemMilestones(self):
