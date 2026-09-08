@@ -2809,6 +2809,220 @@ class DevOpsBackend(QObject):
         """Snake_case alias for prefillMilestonesFromWorkItems."""
         return self.prefillMilestonesFromWorkItems()
 
+    @Slot(list, str, result="QVariantMap")
+    @Slot(list, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def exportWorkItemsToExcel(self, items_or_file_path=None, file_path=""):
+        """
+        Exports work items to an Excel (.xlsx) spreadsheet with professional formatting.
+        Accepts either a list of work item dicts (e.g. filtered items from QML) or defaults to all cached items.
+        """
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+
+            items_to_export = []
+            target_path = ""
+
+            if isinstance(items_or_file_path, list):
+                items_to_export = items_or_file_path
+                target_path = file_path
+            elif isinstance(items_or_file_path, str):
+                target_path = items_or_file_path
+                items_to_export = self._work_items
+            else:
+                items_to_export = self._work_items
+                target_path = file_path
+
+            if not items_to_export:
+                items_to_export = self._work_items or []
+
+            if not target_path:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                target_dir = devops_helper.BASE_FOLDER if os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+                target_path = os.path.join(target_dir, f"WORK_ITEMS_EXPORT_{timestamp}.xlsx")
+
+            target_path = os.path.abspath(target_path)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Work Items"
+            ws.views.sheetView[0].showGridLines = True
+
+            headers = [
+                "ID",
+                "Type",
+                "Title",
+                "State",
+                "Assigned To",
+                "Sprint / Iteration",
+                "Iteration Path",
+                "Deadline / Target Date",
+                "Urgency Status",
+                "Milestone",
+                "Milestone Category",
+                "Sub-System (L1)",
+                "L1 PBS",
+                "Component (L2)",
+                "L2 PBS",
+                "Priority Focus",
+                "PBS Grouped",
+                "Remaining Work (h)",
+                "Completed Work (h)",
+                "Changed Date",
+                "TFS URL"
+            ]
+            ws.append(headers)
+
+            # Styling definitions
+            header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center", wrap_text=False)
+
+            thin_border = Border(
+                left=Side(style="thin", color="D0D7DE"),
+                right=Side(style="thin", color="D0D7DE"),
+                top=Side(style="thin", color="D0D7DE"),
+                bottom=Side(style="thin", color="D0D7DE")
+            )
+
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+                cell.border = thin_border
+            ws.row_dimensions[1].height = 28
+
+            data_font = Font(name="Segoe UI", size=10)
+            id_font = Font(name="Segoe UI", size=10, bold=True, color="0969DA")
+            link_font = Font(name="Segoe UI", size=10, color="0969DA", underline="single")
+
+            zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+            overdue_fill = PatternFill(start_color="FFDCE0", end_color="FFDCE0", fill_type="solid")
+            due_soon_fill = PatternFill(start_color="FFF3C4", end_color="FFF3C4", fill_type="solid")
+            closed_fill = PatternFill(start_color="DCFFE4", end_color="DCFFE4", fill_type="solid")
+
+            for row_idx, item in enumerate(items_to_export, start=2):
+                wi_id = item.get("id") or ""
+                wi_type = item.get("type") or ""
+                wi_title = item.get("title") or ""
+                wi_state = item.get("state") or ""
+                wi_assigned = item.get("assigned_to") or "Unassigned"
+                wi_sprint = item.get("sprint_week_name") or item.get("iteration_name") or ""
+                wi_iter_path = item.get("iteration_path") or ""
+                wi_deadline = item.get("deadline_str") or item.get("target_date") or ""
+                wi_urgency = (item.get("urgency_status") or "").lower()
+                wi_ms_name = item.get("milestone_name") or item.get("effective_milestone_name") or ""
+                wi_ms_cat = item.get("milestone_category") or ""
+                wi_l1 = item.get("level1_display") or item.get("level1_title") or ""
+                wi_l1_pbs = item.get("level1_pbs") or ""
+                wi_l2 = item.get("level2_display") or item.get("level2_title") or ""
+                wi_l2_pbs = item.get("level2_pbs") or ""
+                wi_prio = item.get("prio_badge") or ("Prio 1" if item.get("is_prio1") else "Standard")
+                wi_grouped = "Grouped" if item.get("is_grouped") else "Ungrouped"
+                wi_rem = item.get("remaining_work") or 0.0
+                wi_comp = item.get("completed_work") or 0.0
+                wi_changed = (item.get("changed_date") or "").split("T")[0]
+                wi_tfs_url = item.get("tfs_url") or ""
+
+                row_vals = [
+                    wi_id,
+                    wi_type,
+                    wi_title,
+                    wi_state,
+                    wi_assigned,
+                    wi_sprint,
+                    wi_iter_path,
+                    wi_deadline,
+                    wi_urgency.replace("_", " ").title() if wi_urgency else "—",
+                    wi_ms_name,
+                    wi_ms_cat,
+                    wi_l1,
+                    wi_l1_pbs,
+                    wi_l2,
+                    wi_l2_pbs,
+                    wi_prio,
+                    wi_grouped,
+                    wi_rem,
+                    wi_comp,
+                    wi_changed,
+                    wi_tfs_url
+                ]
+                ws.append(row_vals)
+                ws.row_dimensions[row_idx].height = 20
+
+                is_even = (row_idx % 2 == 0)
+                for col_idx in range(1, len(headers) + 1):
+                    c = ws.cell(row=row_idx, column=col_idx)
+                    c.font = data_font
+                    c.border = thin_border
+                    if is_even:
+                        c.fill = zebra_fill
+
+                    if col_idx in (1, 2, 4, 6, 8, 9, 13, 15, 16, 17, 20):
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    elif col_idx in (18, 19):
+                        c.alignment = Alignment(horizontal="right", vertical="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+
+                    if col_idx == 9:
+                        if wi_urgency == "overdue":
+                            c.fill = overdue_fill
+                            c.font = Font(name="Segoe UI", size=10, bold=True, color="9E1C23")
+                        elif "due" in wi_urgency:
+                            c.fill = due_soon_fill
+                            c.font = Font(name="Segoe UI", size=10, bold=True, color="8A6D3B")
+                        elif wi_urgency == "completed":
+                            c.fill = closed_fill
+                            c.font = Font(name="Segoe UI", size=10, color="1B5E20")
+
+                    if col_idx == 21 and wi_tfs_url:
+                        c.hyperlink = wi_tfs_url
+                        c.font = link_font
+                        c.value = "Open TFS"
+
+                ws.cell(row=row_idx, column=1).font = id_font
+
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    val_str = str(cell.value or '')
+                    if len(val_str) > max_len:
+                        max_len = len(val_str)
+                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 11), 60)
+
+            ws.auto_filter.ref = ws.dimensions
+            ws.freeze_panes = "A2"
+
+            wb.save(target_path)
+            msg = f"Exported {len(items_to_export)} work items to Excel: {target_path}"
+            logger.info(msg)
+            self.logMessage.emit(f"✅ {msg}")
+            return {
+                "success": True,
+                "file_path": target_path,
+                "item_count": len(items_to_export)
+            }
+        except Exception as e:
+            err = f"Failed to export work items to Excel: {e}"
+            logger.error(err)
+            self.logMessage.emit(f"❌ {err}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(list, str, result="QVariantMap")
+    @Slot(list, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def export_work_items_to_excel(self, items_or_file_path=None, file_path=""):
+        """Snake_case alias for exportWorkItemsToExcel."""
+        return self.exportWorkItemsToExcel(items_or_file_path, file_path)
+
     @Slot(result=list)
     def get_milestone_categories(self):
         """Returns all milestone categories."""

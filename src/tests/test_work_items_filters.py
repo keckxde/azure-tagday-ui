@@ -126,6 +126,90 @@ class TestWorkItemsFilters(unittest.TestCase):
         assignees = backend.workItemAssignees
         self.assertEqual(assignees, ["Dev 1", "Dev 2", "Dev 3"])
 
+    def test_export_work_items_to_excel(self):
+        import openpyxl
+        backend = DevOpsBackend()
+        backend._work_items = [
+            {
+                "id": 3001,
+                "title": "Implement Login",
+                "type": "Requirement",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "iteration_path": "Project\\week-2633",
+                "sprint_week_name": "week-2633",
+                "deadline_str": "2026-08-14",
+                "urgency_status": "overdue",
+                "milestone_name": "DDQS Gate 1",
+                "milestone_category": "Internal Process (DDQS)",
+                "level1_display": "[10] Powertrain",
+                "level1_pbs": "10",
+                "level2_display": "[10.1] Battery Control",
+                "level2_pbs": "10.1",
+                "is_prio1": True,
+                "is_grouped": True,
+                "remaining_work": 6.0,
+                "completed_work": 2.0,
+                "changed_date": "2026-08-10T12:00:00Z",
+                "tfs_url": "https://tfs.example.com/workitem/3001",
+            },
+            {
+                "id": 3002,
+                "title": "Fix Memory Leak",
+                "type": "Bug",
+                "state": "Closed",
+                "assigned_to": "Bob",
+                "iteration_path": "Project\\week-2634",
+                "sprint_week_name": "week-2634",
+                "deadline_str": "2026-08-21",
+                "urgency_status": "completed",
+                "milestone_name": "",
+                "milestone_category": "",
+                "level1_display": "",
+                "level1_pbs": "",
+                "level2_display": "",
+                "level2_pbs": "",
+                "is_prio1": False,
+                "is_grouped": False,
+                "remaining_work": 0.0,
+                "completed_work": 4.0,
+                "changed_date": "2026-08-15T15:30:00Z",
+                "tfs_url": "https://tfs.example.com/workitem/3002",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_file = os.path.join(tmpdir, "exported_workitems.xlsx")
+            res = backend.exportWorkItemsToExcel(file_path=out_file)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["item_count"], 2)
+            self.assertTrue(os.path.exists(out_file))
+
+            # Inspect generated Excel file with openpyxl
+            wb = openpyxl.load_workbook(out_file)
+            self.assertIn("Work Items", wb.sheetnames)
+            ws = wb["Work Items"]
+
+            # Header assertions
+            self.assertEqual(ws.cell(row=1, column=1).value, "ID")
+            self.assertEqual(ws.cell(row=1, column=2).value, "Type")
+            self.assertEqual(ws.cell(row=1, column=3).value, "Title")
+            self.assertEqual(ws.cell(row=1, column=4).value, "State")
+
+            # Row 1 assertions
+            self.assertEqual(ws.cell(row=2, column=1).value, 3001)
+            self.assertEqual(ws.cell(row=2, column=2).value, "Requirement")
+            self.assertEqual(ws.cell(row=2, column=3).value, "Implement Login")
+            self.assertEqual(ws.cell(row=2, column=5).value, "Alice")
+            self.assertEqual(ws.cell(row=2, column=10).value, "DDQS Gate 1")
+
+            # Row 2 assertions
+            self.assertEqual(ws.cell(row=3, column=1).value, 3002)
+            self.assertEqual(ws.cell(row=3, column=2).value, "Bug")
+            self.assertEqual(ws.cell(row=3, column=4).value, "Closed")
+            self.assertEqual(ws.cell(row=3, column=5).value, "Bob")
+
 
 if __name__ == "__main__":
     unittest.main()
+

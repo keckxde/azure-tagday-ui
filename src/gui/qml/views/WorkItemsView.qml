@@ -21,6 +21,19 @@ Item {
     property int pageSize: 25
     property int totalPages: 1
     property int totalMatchingCount: 0
+    property var matchedItemsList: []
+
+    property int overdueItemsCount: {
+        if (!backend || !backend.workItems) return 0;
+        var count = 0;
+        var all = backend.workItems;
+        for (var i = 0; i < all.length; i++) {
+            if (!all[i].deleted && all[i].urgency_status === "overdue") {
+                count++;
+            }
+        }
+        return count;
+    }
 
     // -- Filter lists, updated dynamically from database cache --
     property var typesList: []
@@ -109,6 +122,10 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        if (typeof wiMilestoneCombo !== "undefined" && wiMilestoneCombo) {
+            wiMilestoneCombo.currentIndex = 0
+            wiMilestoneCombo.editText = ""
+        }
         root.currentPage = 1
         root.updateFilteredModel()
     }
@@ -185,6 +202,43 @@ Item {
                 color: "#8b949e"
             }
 
+            // Clickable Overdue Deadlines Badge Pill in Top Header
+            Rectangle {
+                visible: root.overdueItemsCount > 0
+                implicitHeight: 24
+                implicitWidth: overdueTopText.implicitWidth + 16
+                radius: 12
+                color: root.filterUrgency === "OVERDUE" ? "#da3633" : (overdueTopMa.containsMouse ? "#321719" : "#261315")
+                border.color: root.filterUrgency === "OVERDUE" ? "#f85149" : "#da3633"
+                border.width: 1
+
+                MouseArea {
+                    id: overdueTopMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue work items only.\nClick to show all deadlines." : "Click to filter to " + root.overdueItemsCount + " overdue work items."
+                    onClicked: {
+                        root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
+                        root.currentPage = 1;
+                    }
+                }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Text {
+                        id: overdueTopText
+                        text: "🚨 " + root.overdueItemsCount + " Overdue"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 11
+                        font.weight: Font.Bold
+                        color: root.filterUrgency === "OVERDUE" ? "#ffffff" : "#f85149"
+                    }
+                }
+            }
+
             Item { Layout.fillWidth: true }
 
             SearchBar {
@@ -192,6 +246,39 @@ Item {
                 onSearchUpdated: function(query) {
                     root.searchQuery = query
                     root.currentPage = 1
+                }
+            }
+
+            // Export to Excel Button
+            Button {
+                id: exportExcelBtn
+                text: "📊 Export to Excel"
+                enabled: backend ? !backend.isBusy && root.totalMatchingCount > 0 : false
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: "Export the current (" + root.totalMatchingCount + ") matching work items to an Excel (.xlsx) spreadsheet"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.enabled ? "#ffffff" : "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 34
+                    implicitWidth: 135
+                    radius: 6
+                    color: parent.enabled ? (parent.hovered ? "#238636" : "#2ea043") : "#21262d"
+                    border.color: parent.enabled ? "#3fb950" : "#30363d"
+                }
+                onClicked: {
+                    if (!backend) return;
+                    var res = backend.exportWorkItemsToExcel(root.matchedItemsList || []);
+                    if (res && res.success) {
+                        exportBanner.filePath = res.file_path || "";
+                        exportBanner.itemCount = res.item_count || 0;
+                        exportBanner.visible = true;
+                    }
                 }
             }
 
@@ -215,6 +302,75 @@ Item {
                 onClicked: {
                     if (backend)
                         backend.sync_work_items_async();
+                }
+            }
+        }
+
+        // Excel Export Success Banner
+        Rectangle {
+            id: exportBanner
+            Layout.fillWidth: true
+            implicitHeight: 44
+            visible: false
+            radius: 8
+            color: "#122619"
+            border.color: "#238636"
+            border.width: 1
+
+            property string filePath: ""
+            property int itemCount: 0
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 16
+                spacing: 12
+
+                Text { text: "✅"; font.pixelSize: 16 }
+                Text {
+                    text: "Exported " + exportBanner.itemCount + " work items to Excel: "
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#3fb950"
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: exportBanner.filePath
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                    elide: Text.ElideMiddle
+                }
+
+                Button {
+                    text: "📂 Open File"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#ffffff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitHeight: 28; implicitWidth: 85; radius: 6; color: parent.hovered ? "#2ea043" : "#238636" }
+                    onClicked: {
+                        if (backend && exportBanner.filePath) backend.open_path_in_explorer(exportBanner.filePath)
+                    }
+                }
+
+                Button {
+                    text: "📁 Open Folder"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#c9d1d9"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitHeight: 28; implicitWidth: 95; radius: 6; color: parent.hovered ? "#30363d" : "#21262d"; border.color: "#30363d" }
+                    onClicked: {
+                        if (backend && exportBanner.filePath) backend.open_path_in_explorer(exportBanner.filePath)
+                    }
+                }
+
+                Button {
+                    text: "✖"
+                    font.pixelSize: 11
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitHeight: 22; implicitWidth: 22; radius: 11; color: parent.hovered ? "#30363d" : "transparent" }
+                    onClicked: exportBanner.visible = false
                 }
             }
         }
@@ -725,6 +881,84 @@ Item {
                     onActivated: function(index) {
                         root.filterLevel2 = root.level2List[index] || "ALL"
                         root.currentPage = 1
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Milestone Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Milestone:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wiMilestoneCombo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    editable: true
+                    model: root.milestonesList
+                    editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterMilestone = (val === "" ? "ALL" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    onActivated: function(index) {
+                        var val = root.milestonesList[index] || "ALL";
+                        root.filterMilestone = val;
+                        editText = (val === "ALL" ? "" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wiMilestoneCombo.hovered || wiMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
+                    }
+
+                    contentItem: TextField {
+                        leftPadding: 8
+                        rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
+                        text: wiMilestoneCombo.editText
+                        placeholderText: "Type or select milestone..."
+                        placeholderTextColor: "#484f58"
+                        font: wiMilestoneCombo.font
+                        color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wiMilestoneCombo.editText) {
+                                wiMilestoneCombo.editText = text;
+                            }
+                        }
+                    }
+                }
+
+                // Clear Milestone filter button
+                Button {
+                    visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterMilestone = "ALL";
+                        wiMilestoneCombo.currentIndex = 0;
+                        wiMilestoneCombo.editText = "";
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
                     }
                 }
             }
@@ -1728,6 +1962,7 @@ Item {
             return (b.id || 0) - (a.id || 0)
         })
 
+        root.matchedItemsList = matched
         root.totalMatchingCount = matched.length
         root.totalPages = Math.ceil(matched.length / root.pageSize) || 1
         if (root.currentPage > root.totalPages) root.currentPage = root.totalPages
