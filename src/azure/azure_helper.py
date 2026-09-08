@@ -656,14 +656,64 @@ class AzureInfoHandler(AzureBaseClient):
             logger.warning("  -- Failed to check push ID for %s: %s", repo_name, e)
         return None, None
 
+    def _fetch_new_prs_incremental(self, project_id, repo, cache_db):
+        """
+        Incrementally discovers new PRs for a repository from TFS by querying PRs
+        in descending order and stopping as soon as pr_id <= max_known_pr_id.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo (dict): Repository metadata dictionary (must contain 'id').
+            cache_db: The database cache instance.
+
+        Returns:
+            int: Number of new PRs saved to the database cache.
+        """
+        from utils import normalize_pr_status
+        repo_id = repo["id"]
+        repo_name = repo.get("name", "")
+        max_known_id = cache_db.get_max_pr_id(repo_id) if cache_db else 0
+        new_count = 0
+        skip = 0
+        top = 100
+
+        while True:
+            try:
+                page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
+            except Exception as e:
+                logger.warning("  -- Error querying pull requests for repo %s (skip=%s): %s", repo_name, skip, e)
+                break
+
+            if not page:
+                break
+
+            stop_pagination = False
+            for pr in page:
+                pr_id = int(pr.get("pullRequestId") or pr.get("id") or 0)
+                if max_known_id > 0 and pr_id <= max_known_id:
+                    stop_pagination = True
+                    break
+
+                if not pr.get("repository"):
+                    pr["repository"] = repo
+
+                _enrich_pr(pr, normalize_pr_status)
+                if cache_db:
+                    cache_db.save_single_pull_request(pr)
+                new_count += 1
+                logger.info("  -- Discovered new PR #%s in %s (%s)", pr_id, repo_name, pr.get("status"))
+
+            if stop_pagination or len(page) < top:
+                break
+            skip += len(page)
+
+        return new_count
+
     def _refresh_active_prs(self, project_id, repo_id, repo_name, cache_db):
         """
-        Re-syncs all active pull requests for a repository from TFS into the cache DB.
-
-        This is called even when the push ID has not changed because:
-        - Active PRs may have been updated (title, reviewers, votes) without a new push.
-        - New PRs may have been opened against an existing commit (e.g. draft PRs).
-        - Active PRs may have been closed/abandoned since the last full sync.
+        Re-syncs pull requests for a repository from TFS into the cache DB:
+        1. Refreshes all PRs currently stored as active in SQLite (detects completion/abandonment).
+        2. Incrementally searches for any newly created PRs until hitting latest known PR ID.
 
         Args:
             project_id (str): The project ID or name.
@@ -677,38 +727,28 @@ class AzureInfoHandler(AzureBaseClient):
         from utils import normalize_pr_status
         has_changes = False
         try:
-            # Fetch the current live-active PR list from TFS (one cheap list call)
-            live_active = self.get_pull_requests(project_id, repo_id, status="active")
-            live_active_ids = {str(p.get("pullRequestId") or p.get("id")) for p in live_active}
-
-            # 1. Re-fetch every PR currently stored as active in the DB.
-            #    This covers status changes (completed/abandoned) as well as metadata updates.
-            active_db_prs = cache_db.get_active_pull_requests(repo_id)
-            db_active_ids = set()
+            # 1. Re-fetch every PR currently stored as active in the DB to capture closures & changes.
+            active_db_prs = cache_db.get_active_pull_requests(repo_id) if cache_db else []
             for db_pr in active_db_prs:
                 pr_id_str = str(db_pr.get("id"))
-                db_active_ids.add(pr_id_str)
                 try:
                     updated_pr = self.get_pull_request(pr_id_str)
                     if updated_pr:
+                        if not updated_pr.get("repository"):
+                            updated_pr["repository"] = {"id": repo_id, "name": repo_name}
                         _enrich_pr(updated_pr, normalize_pr_status)
-                        cache_db.save_single_pull_request(updated_pr)
+                        if cache_db:
+                            cache_db.save_single_pull_request(updated_pr)
                         has_changes = True
                         logger.info("  -- PR #%s in %s refreshed: %s", pr_id_str, repo_name, updated_pr["status"])
                 except Exception as ex:
-                    logger.warning("Could not refresh PR #%s: %s", pr_id_str, ex)
+                    logger.warning("Could not refresh active PR #%s: %s", pr_id_str, ex)
 
-            # 2. Discover new active PRs from TFS that are not yet recorded in the DB.
-            for pr_id_str in live_active_ids - db_active_ids:
-                try:
-                    new_pr = self.get_pull_request(pr_id_str)
-                    if new_pr:
-                        _enrich_pr(new_pr, normalize_pr_status)
-                        cache_db.save_single_pull_request(new_pr)
-                        has_changes = True
-                        logger.info("  -- New active PR #%s discovered in %s", pr_id_str, repo_name)
-                except Exception as ex:
-                    logger.warning("Could not fetch new PR #%s: %s", pr_id_str, ex)
+            # 2. Incremental scan for new PRs stopping at max_known_pr_id
+            repo_dict = {"id": repo_id, "name": repo_name}
+            new_prs_count = self._fetch_new_prs_incremental(project_id, repo_dict, cache_db)
+            if new_prs_count > 0:
+                has_changes = True
 
         except Exception as e:
             logger.warning("  -- Failed to refresh active PRs for %s: %s", repo_name, e)
@@ -908,6 +948,54 @@ class AzureInfoHandler(AzureBaseClient):
                 logger.error("Error fetching PR %s details: %s", pr_id, e)
 
         return dev_prs, stable_prs
+
+    def sync_pull_requests(self, cache_db, project_id=None, filter_repos=""):
+        """
+        Directly synchronizes pull request states between TFS and SQLite database.
+        Phase 1: Refreshes all PRs currently recorded as active in SQLite (detects completion/abandonment).
+        Phase 2: Incrementally scans for new PRs across all repositories, stopping at max_known_pr_id.
+        """
+        if not cache_db:
+            return {"synced": 0, "updated": 0, "new": 0, "errors": 0}
+        
+        proj = project_id or getattr(self, "project_id", "")
+        summary = {"synced": 0, "updated": 0, "new": 0, "errors": 0}
+        from utils import normalize_pr_status
+        
+        # Phase 1: Re-check all PRs currently stored in SQLite as active
+        active_db_prs = cache_db.get_active_pull_requests()
+        for db_pr in active_db_prs:
+            pr_id = str(db_pr.get("id"))
+            try:
+                live_pr = self.get_pull_request(pr_id)
+                if live_pr:
+                    _enrich_pr(live_pr, normalize_pr_status)
+                    old_st = normalize_pr_status(db_pr.get("status"))
+                    if old_st != live_pr["status"]:
+                        logger.info("PR #%s status changed: %s -> %s", pr_id, old_st, live_pr["status"])
+                        summary["updated"] += 1
+                    
+                    cache_db.save_single_pull_request(live_pr)
+                    summary["synced"] += 1
+            except Exception as e:
+                logger.warning("Could not sync status for active PR #%s: %s", pr_id, e)
+                summary["errors"] += 1
+
+        # Phase 2: Incremental Scan for New PRs across enabled repositories
+        if proj:
+            try:
+                repos = self.get_repositories(proj)
+                for repo in repos:
+                    if self._should_skip_repo(repo, filter_repos):
+                        continue
+                    new_count = self._fetch_new_prs_incremental(proj, repo, cache_db)
+                    summary["new"] += new_count
+                    summary["synced"] += new_count
+            except Exception as e:
+                logger.warning("Could not incrementally fetch new PRs for project %s: %s", proj, e)
+                summary["errors"] += 1
+        
+        return summary
 
     def GetTFSRepositories(self, project_id, filter_version_tags_format=False, filter_repos="", cache_db=None):
         """

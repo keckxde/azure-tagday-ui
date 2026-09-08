@@ -282,9 +282,96 @@ class TestPullRequestsViewData(unittest.TestCase):
             self.assertTrue(all_prs[0]["status_str"].startswith("DON"))
 
             # 5. Verify sync_pull_requests direct method works
+            handler.get_repositories = MagicMock(return_value=[repo])
             summary = handler.sync_pull_requests(cache_db, project_id="proj-1")
             self.assertIn("synced", summary)
             self.assertEqual(summary["errors"], 0)
+
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_incremental_pr_sync_stops_at_max_known_id(self):
+        """
+        Verifies that sync_pull_requests:
+        1. Reconciles existing active PR states (Phase 1).
+        2. Incrementally pulls newer PRs (Phase 2) and stops searching as soon as pr_id <= max_known_id.
+        """
+        db_fd, db_path = tempfile.mkstemp(suffix=".sqlite3")
+        os.close(db_fd)
+        try:
+            cache_db = AzureDevOpsCache(db_path)
+            repo = {"id": "repo-200", "name": "EngineCore"}
+            cache_db.save_repository("proj-1", repo)
+
+            # DB has PR 450 (active) and PR 500 (completed)
+            cache_db.save_single_pull_request({
+                "pullRequestId": 450,
+                "title": "Old Active Feature",
+                "status": "active",
+                "repository": repo
+            })
+            cache_db.save_single_pull_request({
+                "pullRequestId": 500,
+                "title": "Previously Merged Feature",
+                "status": "completed",
+                "repository": repo
+            })
+
+            self.assertEqual(cache_db.get_max_pr_id("repo-200"), 500)
+            self.assertEqual(len(cache_db.get_active_pull_requests("repo-200")), 1)
+
+            # Mock TFS Handler
+            handler = AzureInfoHandler("https://tfs.company.com/tfs/DefaultCollection", "dummy_pat")
+            handler.get_repositories = MagicMock(return_value=[repo])
+
+            # PR 450 is now completed in TFS
+            def mock_get_pr(pr_id):
+                if str(pr_id) == "450":
+                    return {
+                        "pullRequestId": 450,
+                        "title": "Old Active Feature",
+                        "status": "completed",
+                        "closedDate": "2026-09-08T15:00:00Z",
+                        "repository": repo
+                    }
+                return None
+            handler.get_pull_request = MagicMock(side_effect=mock_get_pr)
+
+            # TFS returns PRs in descending order: 503, 502, 501, 500, 499...
+            # The incremental scan should process 503, 502, 501, and STOP at 500!
+            tfs_prs_page = [
+                {"pullRequestId": 503, "title": "New PR 503", "status": "active", "repository": repo},
+                {"pullRequestId": 502, "title": "New PR 502", "status": "completed", "repository": repo},
+                {"pullRequestId": 501, "title": "New PR 501", "status": "abandoned", "repository": repo},
+                {"pullRequestId": 500, "title": "Old PR 500", "status": "completed", "repository": repo},
+                {"pullRequestId": 499, "title": "Old PR 499", "status": "completed", "repository": repo},
+            ]
+            handler.get_pull_requests = MagicMock(return_value=tfs_prs_page)
+
+            summary = handler.sync_pull_requests(cache_db, project_id="proj-1")
+
+            # 1 active PR updated + 3 new PRs discovered
+            self.assertEqual(summary["updated"], 1)
+            self.assertEqual(summary["new"], 3)
+            self.assertEqual(summary["errors"], 0)
+
+            # Max PR id in DB should now be 503
+            self.assertEqual(cache_db.get_max_pr_id("repo-200"), 503)
+
+            # Verify PR 450 is completed
+            all_prs = cache_db.get_all_prs()
+            pr_map = {p["pr_id"]: p for p in all_prs}
+            self.assertIn(450, pr_map)
+            self.assertEqual(pr_map[450]["status"], "completed")
+
+            # Verify new PRs were inserted
+            self.assertIn(503, pr_map)
+            self.assertIn(502, pr_map)
+            self.assertIn(501, pr_map)
+
+            # Verify PR 499 was NOT inserted since scan stopped at 500
+            self.assertNotIn(499, pr_map)
 
         finally:
             if os.path.exists(db_path):

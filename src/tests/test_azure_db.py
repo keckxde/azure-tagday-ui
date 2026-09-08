@@ -290,6 +290,39 @@ class TestAzureDevOpsCache(unittest.TestCase):
         # 3. Non-existent user
         self.assertIsNone(self.cache.get_user("nonexistent-user-id"))
 
+    def test_get_max_pr_id(self):
+        # Empty DB returns 0
+        self.assertEqual(self.cache.get_max_pr_id("repo-empty"), 0)
+        self.assertEqual(self.cache.get_max_pr_id(), 0)
+
+        # Insert PRs across repos
+        self.cache.save_single_pull_request({
+            "pullRequestId": 105,
+            "title": "PR 105",
+            "status": "completed",
+            "repository": {"id": "repo-A", "name": "Repo A"}
+        })
+        self.cache.save_single_pull_request({
+            "pullRequestId": 250,
+            "title": "PR 250",
+            "status": "active",
+            "repository": {"id": "repo-A", "name": "Repo A"}
+        })
+        self.cache.save_single_pull_request({
+            "pullRequestId": 500,
+            "title": "PR 500",
+            "status": "completed",
+            "repository": {"id": "repo-B", "name": "Repo B"}
+        })
+
+        # Test repo-specific max
+        self.assertEqual(self.cache.get_max_pr_id("repo-A"), 250)
+        self.assertEqual(self.cache.get_max_pr_id("repo-B"), 500)
+        self.assertEqual(self.cache.get_max_pr_id("repo-C"), 0)
+
+        # Test overall max
+        self.assertEqual(self.cache.get_max_pr_id(), 500)
+
     def test_pipeline_crud(self):
         project_id = "proj-1"
         pipeline = {

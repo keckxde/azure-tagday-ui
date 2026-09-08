@@ -1185,6 +1185,20 @@ class AzureDevOpsCache:
                 ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_max_pr_id(self, repo_id=None):
+        """
+        Retrieves the maximum Pull Request ID stored in the database (optionally filtered by repo_id).
+        Returns 0 if no pull requests exist.
+        """
+        with self._connection() as conn:
+            if repo_id:
+                row = conn.execute("SELECT MAX(id) as max_id FROM pull_requests WHERE repo_id = ?", (repo_id,)).fetchone()
+            else:
+                row = conn.execute("SELECT MAX(id) as max_id FROM pull_requests").fetchone()
+            if row and row["max_id"] is not None:
+                return int(row["max_id"])
+            return 0
+
     def get_cached_repository(self, repo_id, repo_name):
         """
         Reconstructs and returns the cached dictionary structure for a specific repository.

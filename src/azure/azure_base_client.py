@@ -332,7 +332,7 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
 
-    def get_pull_requests(self, project_id, repo_id, status=None):
+    def get_pull_requests(self, project_id, repo_id, status=None, top=None, skip=None):
         """
         Retrieves pull requests for a specific repository.
 
@@ -340,6 +340,8 @@ class AzureBaseClient:
             project_id (str): The project ID or name.
             repo_id (str): The repository ID.
             status (str, optional): Status filter (e.g. 'active', 'completed', 'abandoned', 'all').
+            top (int, optional): Number of pull requests to retrieve.
+            skip (int, optional): Number of pull requests to skip.
 
         Returns:
             list: List of pull request dictionaries.
@@ -347,6 +349,10 @@ class AzureBaseClient:
         params = {"api-version": "6.0"}
         if status:
             params["searchCriteria.status"] = status
+        if top is not None:
+            params["$top"] = top
+        if skip is not None:
+            params["$skip"] = skip
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests", params=params)
         return res.get("value", [])
 
