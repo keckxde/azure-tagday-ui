@@ -200,6 +200,46 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 self.assertIn("Alice", content)
                 self.assertIn("Bob", content)
 
+    def test_workload_matrix_overdue_only_filter(self):
+        from src.gui.backend import DevOpsBackend
+        backend = DevOpsBackend()
+        backend._work_items = [
+            {
+                "id": 1001,
+                "title": "Overdue Feature",
+                "type": "Requirement",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "deadline_str": "2026-08-01",
+                "urgency_status": "overdue",
+            },
+            {
+                "id": 1002,
+                "title": "On-Time Task",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Bob",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "deadline_str": "2026-09-30",
+                "urgency_status": "future",
+            }
+        ]
+
+        # 1. Normal (overdue_only=False) -> both Alice and Bob included
+        matrix_all = backend.getWorkloadMatrix(overdue_only=False)
+        assignees_all = [r["assignee"] for r in matrix_all.get("assignee_rows", [])]
+        self.assertIn("Alice", assignees_all)
+        self.assertIn("Bob", assignees_all)
+
+        # 2. Filtered (overdue_only=True) -> only Alice included
+        matrix_overdue = backend.getWorkloadMatrix(overdue_only=True)
+        assignees_overdue = [r["assignee"] for r in matrix_overdue.get("assignee_rows", [])]
+        self.assertIn("Alice", assignees_overdue)
+        self.assertNotIn("Bob", assignees_overdue)
+
 
 if __name__ == "__main__":
     unittest.main()

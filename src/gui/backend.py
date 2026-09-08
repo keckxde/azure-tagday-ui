@@ -1435,8 +1435,7 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"File does not exist: {path}")
 
     @Slot(int, result=dict)
-    @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
-    @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
@@ -1457,6 +1456,7 @@ class DevOpsBackend(QObject):
         search_query: str = "",
         lookback_weeks: int = 0,
         filter_milestone: str = "ALL",
+        overdue_only: bool = False,
     ):
         """
         Computes the interactive capacity and workload matrix for team members across
@@ -1574,10 +1574,18 @@ class DevOpsBackend(QObject):
             is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
             is_bug = t_lower in ("bug", "defect", "problem")
             is_task = t_lower in ("task",)
-            is_overdue = wi.get("urgency_status") == "overdue"
             is_done = wi.get("state", "").lower() in ("closed", "done", "resolved", "completed", "cut")
+            wi_urgency = wi.get("urgency_status")
+            if not wi_urgency:
+                deadline_val = wi.get("deadline_str") or wi.get("target_date")
+                urg_calc = utils.calculate_deadline_urgency(deadline_val, is_done)
+                wi_urgency = urg_calc.get("status")
+            is_overdue = (wi_urgency == "overdue")
 
             # --- Filter Criteria Evaluation ---
+            # 0. Overdue Deadlines Filter
+            if overdue_only and not is_overdue:
+                continue
             # 1. Level 1 Filter (Exact, Substring, or Ungrouped / Without [<NR>] Syntax)
             if f_l1_raw and f_l1_raw.upper() != "ALL":
                 f1_upper = f_l1_raw.upper()

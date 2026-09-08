@@ -16,6 +16,7 @@ Item {
     property string filterMilestone: "ALL" // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
     property bool prio1Only: false
     property bool groupedOnly: false
+    property bool overdueOnly: false
     property real drawerWidth: 420
     property int historyOffset: 0  // 0 = current window, N = N sprints back into history
     property var level1List: ["ALL"]
@@ -123,6 +124,13 @@ Item {
                 if (!matchesSelf && !matchesAnyTask) continue;
             }
 
+            // Overdue Deadlines filter
+            if (root.overdueOnly) {
+                var cIsOverdue = (c.urgency_status === "overdue");
+                var cHasOverdueTask = c.tasks && c.tasks.some(function(t) { return t.urgency_status === "overdue"; });
+                if (!cIsOverdue && !cHasOverdueTask) continue;
+            }
+
             var openTasks = getFilteredTasks(c.tasks || []);
             // Keep container if it has open child tasks, or if the parent container itself is not done/closed
             if (root.hideClosedTasks) {
@@ -171,11 +179,12 @@ Item {
             !!root.hideClosedTasks,
             root.searchQuery || "",
             root.historyOffset,
-            root.filterMilestone || "ALL"
+            root.filterMilestone || "ALL",
+            !!root.overdueOnly
         )
     }
 
-    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.searchQuery !== ""
+    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.overdueOnly || root.searchQuery !== ""
 
     function resetHierarchyFilters() {
         root.filterLevel1 = "ALL"
@@ -184,6 +193,7 @@ Item {
         root.prio1Only = false
         root.groupedOnly = false
         root.hideClosedTasks = false
+        root.overdueOnly = false
         root.searchQuery = ""
         if (typeof wlLevel1Combo !== "undefined" && wlLevel1Combo) { wlLevel1Combo.currentIndex = 0; wlLevel1Combo.editText = ""; }
         if (typeof wlLevel2Combo !== "undefined" && wlLevel2Combo) { wlLevel2Combo.currentIndex = 0; wlLevel2Combo.editText = ""; }
@@ -198,6 +208,7 @@ Item {
     onPrio1OnlyChanged:       refreshMatrix()
     onGroupedOnlyChanged:     refreshMatrix()
     onHideClosedTasksChanged: refreshMatrix()
+    onOverdueOnlyChanged:     refreshMatrix()
     onSearchQueryChanged:     refreshMatrix()
     onHistoryOffsetChanged:   refreshMatrix()
 
@@ -818,6 +829,34 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
+            // 🚨 Overdue Deadlines Only Toggle
+            Button {
+                text: root.overdueOnly ? "🚨 Overdue Only" : "🚨 Overdue"
+                checkable: true
+                checked: root.overdueOnly
+                font.pixelSize: 11
+                font.weight: checked ? Font.Bold : Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.overdueOnly ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 115
+                    radius: 6
+                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#f85149" : "#30363d"
+                }
+                onClicked: { root.overdueOnly = !root.overdueOnly }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
             // 🚩 Manage Milestones Button
             Button {
                 text: "🚩 Manage"
@@ -1024,14 +1063,26 @@ Item {
                 }
             }
 
-            // Overdue Warnings
+            // Overdue Warnings (Interactive Filter Card)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 70
-                color: root.matrixData && root.matrixData.total_overdue > 0 ? "#261315" : "#161b22"
+                color: root.overdueOnly ? "#3d1214" : (root.matrixData && root.matrixData.total_overdue > 0 ? (overdueCardMa.containsMouse ? "#321719" : "#261315") : (overdueCardMa.containsMouse ? "#21262d" : "#161b22"))
                 radius: 8
-                border.color: root.matrixData && root.matrixData.total_overdue > 0 ? "#da3633" : "#30363d"
-                border.width: 1
+                border.color: root.overdueOnly ? "#f85149" : (root.matrixData && root.matrixData.total_overdue > 0 ? (overdueCardMa.containsMouse ? "#f85149" : "#da3633") : (overdueCardMa.containsMouse ? "#58a6ff" : "#30363d"))
+                border.width: root.overdueOnly ? 2 : 1
+
+                MouseArea {
+                    id: overdueCardMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: root.overdueOnly ? "Filter Active: Showing overdue items only.\nClick to disable filter." : "Click to filter workload matrix and items by Overdue Deadlines."
+                    onClicked: {
+                        root.overdueOnly = !root.overdueOnly;
+                    }
+                }
 
                 RowLayout {
                     anchors.fill: parent
@@ -1041,13 +1092,35 @@ Item {
                     Text { text: "🚨"; font.pixelSize: 24 }
                     ColumnLayout {
                         spacing: 2
-                        Text { text: "OVERDUE DEADLINES"; font.pixelSize: 10; font.weight: Font.Bold; color: root.matrixData && root.matrixData.total_overdue > 0 ? "#ff7b72" : "#8b949e" }
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "OVERDUE DEADLINES"
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                color: root.overdueOnly ? "#f85149" : (root.matrixData && root.matrixData.total_overdue > 0 ? "#ff7b72" : "#8b949e")
+                            }
+                            Rectangle {
+                                visible: root.overdueOnly
+                                implicitHeight: 14
+                                implicitWidth: 46
+                                radius: 7
+                                color: "#da3633"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "FILTER"
+                                    font.pixelSize: 8
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                }
+                            }
+                        }
                         Text {
                             text: root.matrixData ? (root.matrixData.total_overdue || 0).toString() : "0"
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 18
                             font.weight: Font.Bold
-                            color: root.matrixData && root.matrixData.total_overdue > 0 ? "#f85149" : "#8b949e"
+                            color: root.overdueOnly ? "#ff7b72" : (root.matrixData && root.matrixData.total_overdue > 0 ? "#f85149" : "#8b949e")
                         }
                     }
                 }
