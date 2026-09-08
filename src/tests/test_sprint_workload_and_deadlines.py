@@ -278,7 +278,65 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             backend.open_sprint_in_browser("week-2634")
             mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard/week-2634")
 
+    def test_work_items_payload_team_and_sprint_url(self):
+        from src.gui.backend import DevOpsBackend
+        import devops_helper
+
+        tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp_db.close()
+        try:
+            cache = AzureDevOpsCache(tmp_db.name)
+            raw = {
+                "id": 1234,
+                "fields": {
+                    "System.Title": "Alpha Sprint Task",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Alice"},
+                    "System.ChangedDate": "2026-09-01T10:00:00",
+                    "System.IterationPath": "MyProject\\AlphaTeam\\week-2635",
+                    "System.AreaPath": "MyProject\\AlphaTeam",
+                }
+            }
+            cache.save_work_item(
+                1234,
+                "Alpha Sprint Task",
+                "Task",
+                "Active",
+                "Alice",
+                "2026-09-01T10:00:00",
+                raw,
+                deleted=0
+            )
+
+            backend = DevOpsBackend()
+            backend._cache_db = cache
+            backend._db_path = tmp_db.name
+            devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"
+            devops_helper.AZURE_COLLECTION = "DefaultCollection"
+            devops_helper.AZURE_PROJECT_ID = "MyProject"
+
+            backend.refresh_all_data()
+            items = backend.workItems
+            self.assertEqual(len(items), 1)
+            wi = items[0]
+            self.assertEqual(wi["id"], 1234)
+            self.assertEqual(wi["team_name"], "AlphaTeam")
+            self.assertEqual(wi["area_path"], "MyProject\\AlphaTeam")
+            self.assertEqual(
+                wi["tfs_sprint_url"],
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/AlphaTeam/_sprints/taskboard/week-2635"
+            )
+        finally:
+            if os.path.exists(tmp_db.name):
+                try:
+                    os.remove(tmp_db.name)
+                except Exception:
+                    pass
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

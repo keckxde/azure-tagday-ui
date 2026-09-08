@@ -65,6 +65,19 @@ ApplicationWindow {
         }
     }
 
+    function navigateToWorkloadSprint(assignee, sprintName) {
+        window.currentTabIndex = 4;
+        if (workloadExplorerView) {
+            if (assignee && assignee !== "Unassigned" && assignee !== "ALL") {
+                workloadExplorerView.searchQuery = assignee;
+            } else if (sprintName) {
+                workloadExplorerView.searchQuery = sprintName;
+            } else {
+                workloadExplorerView.searchQuery = "";
+            }
+        }
+    }
+
     function navigateToWorkItem(workItemId) {
         window.currentTabIndex = 3;
         if (workItemsView && typeof workItemsView.searchQuery !== "undefined") {

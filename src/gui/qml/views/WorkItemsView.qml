@@ -1478,7 +1478,7 @@ Item {
                 property int expandedHeight: {
                     var prs = model.linked_prs || []
                     var repos = model.linked_repos || []
-                    return Math.max(90, 80 + prs.length * 20 + repos.length * 18 + 32)
+                    return Math.max(120, 115 + prs.length * 22 + repos.length * 18 + 36)
                 }
 
                 Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -1689,7 +1689,7 @@ Item {
                                     }
 
                                     ToolTip.visible: rowTagMa.containsMouse
-                                    ToolTip.text: "Tag: " + modelData + "\nClick to filter by this tag"
+                                    ToolTip.text: isTarget ? ("Target Milestone: " + modelData) : ("Tag: " + modelData)
 
                                     MouseArea {
                                         id: rowTagMa
@@ -1698,25 +1698,6 @@ Item {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             root.filterTag = modelData;
-                                            // Auto-select category for this tag
-                                            if (backend && backend.get_tags_by_category) {
-                                                try {
-                                                    var catData = JSON.parse(backend.get_tags_by_category());
-                                                    for (var catKey in catData) {
-                                                        if (catData[catKey].indexOf(modelData) !== -1) {
-                                                            root.filterTagCategory = catKey;
-                                                            root.refreshTagsList();
-                                                            var catIdx = root.tagCategoryList.indexOf(catKey);
-                                                            if (catIdx >= 0 && typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo)
-                                                                wiTagCategoryCombo.currentIndex = catIdx;
-                                                            break;
-                                                        }
-                                                    }
-                                                } catch(e) {}
-                                            }
-                                            if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
-                                                wiTagCombo.editText = modelData;
-                                            }
                                             root.currentPage = 1;
                                             root.updateFilteredModel();
                                         }
@@ -1764,21 +1745,30 @@ Item {
                                 text: model.title
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 13
+                                font.weight: Font.Normal
                                 color: model.deleted ? "#8b949e" : "#f0f6fc"
                                 font.strikeout: model.deleted
                                 elide: Text.ElideRight
                             }
                         }
 
-                        // State
-                        Text {
-                            text: model.state
+                        // State badge
+                        Rectangle {
                             Layout.preferredWidth: 88
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: root.stateColor(model.state, model.deleted)
-                            elide: Text.ElideRight
+                            height: 22
+                            radius: 11
+                            property color stateC: root.stateColor(model.state)
+                            color: Qt.rgba(stateC.r, stateC.g, stateC.b, 0.15)
+                            border.color: Qt.rgba(stateC.r, stateC.g, stateC.b, 0.5)
+                            Text {
+                                anchors.centerIn: parent
+                                text: model.state || "New"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: root.stateColor(model.state)
+                                elide: Text.ElideRight
+                            }
                         }
 
                         // Iteration Pill
@@ -1813,7 +1803,17 @@ Item {
                                     elide: Text.ElideRight
                                 }
                             }
-                            MouseArea { id: iterMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: iterationModal.openForWorkItem(model.id, model.title, model.iteration_name); }
+                            MouseArea {
+                                id: iterMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.text: "Iteration: " + (model.iteration_path || model.iteration_name || "Unplanned") +
+                                              (model.team_name ? ("\nTeam: " + model.team_name) : "") +
+                                              "\nClick to change iteration assignment"
+                                onClicked: iterationModal.openForWorkItem(model.id, model.title, model.iteration_name);
+                            }
                         }
 
                         // Deadline Pill
@@ -1934,6 +1934,18 @@ Item {
                                         }
                                     }
 
+                                    Row {
+                                        spacing: 5
+                                        visible: (model.team_name || "") !== ""
+                                        Text { text: "👥 Team:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: model.team_name
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: "#58a6ff"
+                                        }
+                                    }
+
                                     Item { Layout.fillWidth: true }
 
                                     Row {
@@ -1947,18 +1959,144 @@ Item {
                                             color: model.urgency_color || "#f0f6fc"
                                         }
                                     }
+                                }
+                            }
 
-                                    Row {
-                                        spacing: 5
-                                        visible: (model.changed_date || "") !== ""
-                                        Text { text: "🕒 Last Changed:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                                        Text {
-                                            text: (model.changed_date || "").replace("T", " ").split(".")[0].replace("Z", "")
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 11
-                                            color: "#c9d1d9"
+                            // Quick Actions Bar (Jump to Sprint Matrix, Team Taskboard, TFS item)
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 30
+                                color: "#161b22"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    Text {
+                                        text: "⚡ Quick Actions:"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#8b949e"
+                                    }
+
+                                    // Jump to Team Workload Sprint Matrix
+                                    Rectangle {
+                                        height: 22
+                                        implicitWidth: workloadBtnRow.implicitWidth + 14
+                                        radius: 11
+                                        color: workloadMa.containsMouse ? "#1f6feb" : "#21262d"
+                                        border.color: workloadMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Row {
+                                            id: workloadBtnRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "🏃"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: "Team Sprint Matrix"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: workloadMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: workloadMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Navigate to Team Workload Matrix for " + (model.assigned_to || "this sprint")
+                                            onClicked: {
+                                                if (window && typeof window.navigateToWorkloadSprint === "function") {
+                                                    window.navigateToWorkloadSprint(model.assigned_to, model.sprint_week_name || model.iteration_name);
+                                                }
+                                            }
                                         }
                                     }
+
+                                    // Open Team Sprint Taskboard in live TFS/Azure DevOps
+                                    Rectangle {
+                                        height: 22
+                                        implicitWidth: tfsSprintBtnRow.implicitWidth + 14
+                                        radius: 11
+                                        visible: (model.tfs_sprint_url || "") !== ""
+                                        color: tfsSprintMa.containsMouse ? "#238636" : "#21262d"
+                                        border.color: tfsSprintMa.containsMouse ? "#3fb950" : "#30363d"
+                                        border.width: 1
+
+                                        Row {
+                                            id: tfsSprintBtnRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "🌐"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: model.team_name ? (model.team_name + " Sprint Board") : "TFS Sprint Board"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: tfsSprintMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: tfsSprintMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open Team Sprint Taskboard in Browser:\n" + model.tfs_sprint_url
+                                            onClicked: {
+                                                if (model.tfs_sprint_url) Qt.openUrlExternally(model.tfs_sprint_url);
+                                            }
+                                        }
+                                    }
+
+                                    // Open Work Item in TFS/Azure DevOps
+                                    Rectangle {
+                                        height: 22
+                                        implicitWidth: tfsWiBtnRow.implicitWidth + 14
+                                        radius: 11
+                                        visible: (model.tfs_url || "") !== ""
+                                        color: tfsWiMa.containsMouse ? "#1f6feb" : "#21262d"
+                                        border.color: tfsWiMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Row {
+                                            id: tfsWiBtnRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "↗"; font.pixelSize: 10; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter; color: tfsWiMa.containsMouse ? "#ffffff" : "#58a6ff" }
+                                            Text {
+                                                text: "Open in TFS #" + model.id
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: tfsWiMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: tfsWiMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open Work Item #" + model.id + " in Browser"
+                                            onClicked: {
+                                                if (model.tfs_url) Qt.openUrlExternally(model.tfs_url);
+                                            }
+                                        }
+                                    }
+
+                                    Item { Layout.fillWidth: true }
                                 }
                             }
 
@@ -2003,9 +2141,9 @@ Item {
                                             }
 
                                             Rectangle {
-                                                height: 20
+                                                implicitHeight: 20
                                                 implicitWidth: chipRow.implicitWidth + 10
-                                                radius: 10
+                                                radius: 4
                                                 property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
                                                 color: chipMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#201804" : "#16202c")
                                                 border.color: isTarget ? "#d29922" : "#388bfd"
@@ -2093,9 +2231,12 @@ Item {
                                     Rectangle {
                                         Layout.fillWidth: true
                                         height: 20
-                                        color: "transparent"
+                                        color: prItemMa.containsMouse ? "#21262d" : "transparent"
+                                        radius: 3
                                         RowLayout {
                                             anchors.fill: parent
+                                            anchors.leftMargin: 4
+                                            anchors.rightMargin: 4
                                             spacing: 6
                                             Text {
                                                 text: "PR #" + (modelData.pr_id || modelData.id || "")
@@ -2123,6 +2264,18 @@ Item {
                                                 font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 9
                                                 color: (modelData.status || "").toLowerCase() === "completed" ? "#3fb950" : "#d29922"
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: prItemMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open PR in Browser:\n" + (modelData.web_url || modelData.url || "")
+                                            onClicked: {
+                                                var link = modelData.web_url || modelData.url || "";
+                                                if (link) Qt.openUrlExternally(link);
                                             }
                                         }
                                     }
@@ -2475,6 +2628,9 @@ Item {
                 has_milestone: !!wi.has_milestone,
                 effective_milestone_name: wi.effective_milestone_name || "",
                 is_milestone_inherited: !!wi.is_milestone_inherited,
+                team_name: wi.team_name || "",
+                area_path: wi.area_path || "",
+                tfs_sprint_url: wi.tfs_sprint_url || "",
                 linked_pr_count: wi.linked_pr_count || 0,
                 linked_repo_count: wi.linked_repo_count || 0,
                 linked_prs: wi.linked_prs || [],

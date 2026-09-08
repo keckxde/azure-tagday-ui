@@ -1312,14 +1312,30 @@ class DevOpsBackend(QObject):
                 elif s_count > 0:
                     s_badge = f"🔄 Shifted ({s_count}x)"
 
-                # Construct sprint taskboard URL
+                # Area Path & Team resolution
+                area_path = raw_fields.get("System.AreaPath") or wi.get("area_path") or ""
+                norm_ap = area_path.replace("\\", "/").strip("/") if area_path else ""
+                ap_parts = [p for p in norm_ap.split("/") if p]
+                team_name = ""
+                if len(ap_parts) > 1:
+                    team_name = ap_parts[-1]
+                elif len(ip_parts) > 2:
+                    team_name = ip_parts[1]
+
+                # Construct team sprint taskboard URL
                 sprint_leaf = (base_sprint_name or iter_name or "").strip()
                 tfs_sprint_url = ""
                 if tfs_base and tfs_col and tfs_proj:
-                    if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
-                        tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+                    if team_name:
+                        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
+                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/{urllib.parse.quote(team_name)}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+                        else:
+                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/{urllib.parse.quote(team_name)}/_sprints/taskboard"
                     else:
-                        tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard"
+                        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
+                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+                        else:
+                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard"
 
                 wi_list.append({
                     "id": wi_id,
@@ -1336,6 +1352,8 @@ class DevOpsBackend(QObject):
                     "iteration_name": iter_name,
                     "is_iteration_planned": is_planned,
                     "sprint_week_name": base_sprint_name or (iter_name if is_planned else ""),
+                    "area_path": area_path,
+                    "team_name": team_name,
                     "target_date": target_date,
                     "deadline_str": urgency.get("deadline_str", ""),
                     "urgency_status": urgency.get("status", "none"),

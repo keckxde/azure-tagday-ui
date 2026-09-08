@@ -6,6 +6,10 @@ import base64
 import ssl
 import re
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class AzureBaseClient:
     """
     A base HTTP client for communicating with the Azure DevOps (TFS) REST API.
@@ -58,13 +62,37 @@ class AzureBaseClient:
         req = urllib.request.Request(full_url, headers=self.headers, method=method)
         if data is not None:
             req.data = json.dumps(data).encode('utf-8')
-            
-        with urllib.request.urlopen(req, context=self.ssl_context) as response:
-            content = response.read()
-            if raw_text:
-                return content.decode('utf-8'), response.status
-            else:
-                return json.loads(content.decode('utf-8')), response.status
+
+        is_wiql = "_apis/wit/wiql" in full_url
+        if is_wiql:
+            query_text = data.get("query", "") if isinstance(data, dict) else ""
+            print(f"[WIQL REQUEST] Method: {method} | URL: {full_url}\n[WIQL QUERY] {query_text}")
+            logger.info("[WIQL REQUEST] Method: %s | URL: %s | Query: %s", method, full_url, query_text)
+
+        try:
+            with urllib.request.urlopen(req, context=self.ssl_context) as response:
+                content = response.read()
+                if is_wiql:
+                    try:
+                        parsed = json.loads(content.decode('utf-8'))
+                        wi_count = len(parsed.get("workItems", [])) if isinstance(parsed, dict) else 0
+                        rel_count = len(parsed.get("workItemRelations", [])) if isinstance(parsed, dict) else 0
+                        print(f"[WIQL RESPONSE] Status: {response.status} | URL: {full_url} | Found: {wi_count} work items, {rel_count} relations")
+                        logger.info("[WIQL RESPONSE] Status: %s | URL: %s | WorkItems: %d | Relations: %d", response.status, full_url, wi_count, rel_count)
+                    except Exception as parse_ex:
+                        print(f"[WIQL RESPONSE] Status: {response.status} | URL: {full_url} | Bytes: {len(content)}")
+                if raw_text:
+                    return content.decode('utf-8'), response.status
+                else:
+                    return json.loads(content.decode('utf-8')), response.status
+        except urllib.error.HTTPError as err:
+            try:
+                err_body = err.read().decode('utf-8', errors='replace')
+            except Exception:
+                err_body = ""
+            print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
+            logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
+            raise err
 
     def get_distributed_task_tasks(self):
         """
@@ -262,7 +290,8 @@ class AzureBaseClient:
         Returns:
             list: List of integer work item IDs matching the query.
         """
-        path = f"{project_id}/_apis/wit/wiql" if project_id else "_apis/wit/wiql"
+        proj_part = urllib.parse.quote(str(project_id)) if project_id else ""
+        path = f"{proj_part}/_apis/wit/wiql" if proj_part else "_apis/wit/wiql"
         if not query:
             where_clauses = []
             if project_id:
@@ -322,7 +351,8 @@ class AzureBaseClient:
         Returns:
             list: List of workItemRelations dicts with 'source', 'target', and 'rel'.
         """
-        path = f"{project_id}/_apis/wit/wiql" if project_id else "_apis/wit/wiql"
+        proj_part = urllib.parse.quote(str(project_id)) if project_id else ""
+        path = f"{proj_part}/_apis/wit/wiql" if proj_part else "_apis/wit/wiql"
         if not query:
             if project_id:
                 query = (

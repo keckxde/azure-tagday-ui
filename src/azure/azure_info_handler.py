@@ -224,8 +224,10 @@ class AzureInfoHandler(AzureBaseClient):
         try:
             remote_all_ids_list = self.query_work_item_ids_wiql(project_id)
             remote_all_ids = set(remote_all_ids_list)
+            _notify(f"WIQL discovery successful: found {len(remote_all_ids)} work item(s) for project '{target_proj}'", 0, len(remote_all_ids))
         except Exception as wiql_err:
             logger.warning("WIQL query failed (%s), falling back to cached DB IDs", wiql_err)
+            _notify(f"⚠️ WIQL query failed: {wiql_err}. Falling back to cached DB IDs.", 0, 0)
             remote_all_ids_list = cache_db.get_all_work_item_ids(include_deleted=True)
             remote_all_ids = set(remote_all_ids_list)
 
@@ -269,6 +271,7 @@ class AzureInfoHandler(AzureBaseClient):
                 )
             except Exception as inc_err:
                 logger.warning("Incremental WIQL query failed (%s), falling back to full sync", inc_err)
+                _notify(f"⚠️ Incremental WIQL query failed: {inc_err}. Falling back to full sync.", 0, 0)
                 items_to_fetch = remote_all_ids
         else:
             # Full sync or first sync
