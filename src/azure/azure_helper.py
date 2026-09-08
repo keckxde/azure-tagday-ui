@@ -379,6 +379,13 @@ class AzureInfoHandler(AzureBaseClient):
                 break
             missing_parents = (next_level_parents - found_ids) - active_db_ids
 
+        # Auto-discover and pre-fill major milestones from work item tags
+        try:
+            if hasattr(cache_db, "discover_and_prefill_milestones_from_work_items"):
+                cache_db.discover_and_prefill_milestones_from_work_items()
+        except Exception as e:
+            logger.warning(" - sync_work_items: error pre-filling milestones: %s", e)
+
         return summary
 
     def GetRecentActivityData(self, project_id=None):
@@ -691,6 +698,16 @@ class AzureInfoHandler(AzureBaseClient):
             except Exception as e:
                 logger.error("Error retrieving push detail for %s: %s", repo_name, e)
 
+        # Also fetch all PRs that have not been closed yet (active PRs)
+        try:
+            active_prs = self.get_pull_requests(project_id, repo_id, status="active")
+            for a_pr in active_prs:
+                a_id = str(a_pr.get("pullRequestId") or a_pr.get("id") or "")
+                if a_id and a_id not in prs_list:
+                    prs_list.append(a_id)
+        except Exception as e:
+            logger.error("Error fetching active pull requests for %s: %s", repo_name, e)
+
         for pr_id in prs_list:
             try:
                 pr = self.get_pull_request(pr_id)
@@ -772,11 +789,8 @@ class AzureInfoHandler(AzureBaseClient):
                 project_id, repo, filter_version_tags_format
             )
 
-            # Load pushes and PRs
-            dev_prs, stable_prs = [], []
-            if b_we_have_dev_branch:
-                
-                dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo)
+            # Load pushes and PRs (including active unclosed PRs)
+            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo)
 
             result[repo_name] = {
                 "info": repo,

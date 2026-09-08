@@ -335,6 +335,46 @@ Dialog {
             }
         }
 
+        // ---- Feedback Banner ----
+        Rectangle {
+            Layout.fillWidth: true
+            height: root.feedbackMsg ? 32 : 0
+            visible: root.feedbackMsg !== ""
+            color: root.feedbackType === "success" ? "#162b20" : (root.feedbackType === "error" ? "#3c1e1e" : "#16243b")
+            border.color: root.feedbackType === "success" ? "#238636" : (root.feedbackType === "error" ? "#da3633" : "#388bfd")
+            clip: true
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 16
+                spacing: 8
+
+                Text {
+                    text: root.feedbackType === "success" ? "✅" : (root.feedbackType === "error" ? "⚠️" : "ℹ️")
+                    font.pixelSize: 12
+                }
+                Text {
+                    text: root.feedbackMsg
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: root.feedbackType === "success" ? "#3fb950" : (root.feedbackType === "error" ? "#f85149" : "#58a6ff")
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: "✕"
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.feedbackMsg = ""
+                    }
+                }
+            }
+        }
+
         // ---- Body / Tab Content ----
         Item {
             Layout.fillWidth: true
@@ -373,12 +413,39 @@ Dialog {
                                 anchors.fill: parent
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
+                                spacing: 8
                                 Text { text: "PROJECT MILESTONES"; font.pixelSize: 11; font.weight: Font.Bold; color: "#8b949e" }
                                 Item { Layout.fillWidth: true }
                                 Button {
+                                    text: "🔍 Pre-fill from Tags"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    background: Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: 135
+                                        radius: 4
+                                        color: parent.hovered ? "#16243b" : "#0d1b2e"
+                                        border.color: parent.hovered ? "#58a6ff" : "#388bfd"
+                                    }
+                                    onClicked: {
+                                        if (backend) {
+                                            var addedCount = backend.prefillMilestonesFromWorkItems();
+                                            root.refreshData();
+                                            if (addedCount > 0) {
+                                                root.feedbackMsg = "Discovered and added " + addedCount + " milestone(s) from Work Item Target tags!";
+                                                root.feedbackType = "success";
+                                            } else {
+                                                root.feedbackMsg = "All Target:<Tag> milestones from work items are already configured.";
+                                                root.feedbackType = "info";
+                                            }
+                                        }
+                                    }
+                                }
+                                Button {
                                     text: "➕ New"
                                     font.pixelSize: 11
-                                    contentItem: Text { text: parent.text; font: parent.font; color: "#3fb950" }
+                                    contentItem: Text { text: parent.text; font: parent.font; color: "#3fb950"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                     background: Rectangle { implicitHeight: 22; implicitWidth: 60; radius: 4; color: parent.hovered ? "#162b20" : "transparent"; border.color: "#238636" }
                                     onClicked: root.resetMilestoneForm()
                                 }

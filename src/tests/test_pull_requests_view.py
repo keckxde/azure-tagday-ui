@@ -11,7 +11,8 @@ py_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if py_dir not in sys.path:
     sys.path.insert(0, py_dir)
 
-from azure import AzureDevOpsCache
+from unittest.mock import MagicMock, patch
+from azure import AzureDevOpsCache, AzureInfoHandler
 
 
 class TestPullRequestsViewData(unittest.TestCase):
@@ -138,6 +139,60 @@ class TestPullRequestsViewData(unittest.TestCase):
 
         pr1002 = next(p for p in prs if p["pr_id"] == 1002)
         self.assertIsNone(pr1002.get("direct_tag_name"))
+
+    def test_process_pushes_and_prs_syncs_unclosed_active_prs(self):
+        """Test that _process_pushes_and_prs syncs active (unclosed) pull requests along with merged push PRs."""
+        handler = AzureInfoHandler("https://tfs.example.com/tfs", "fake-token")
+
+        # Mock get_pushes and push detail with one merged PR (ID 5001)
+        handler.get_pushes = MagicMock(return_value=[{"pushId": 101}])
+        handler.get_push_detail = MagicMock(return_value={
+            "refUpdates": [{"name": "refs/pull/5001/merge"}]
+        })
+
+        # Mock get_pull_requests returning active unclosed PR (ID 5002)
+        handler.get_pull_requests = MagicMock(return_value=[
+            {"pullRequestId": 5002, "title": "Active Unclosed PR", "status": "active"}
+        ])
+
+        # Mock get_pull_request details for both PRs
+        def mock_get_pr(pr_id):
+            if str(pr_id) == "5001":
+                return {
+                    "pullRequestId": 5001,
+                    "title": "Merged PR",
+                    "status": "completed",
+                    "targetRefName": "refs/heads/dev",
+                    "sourceRefName": "refs/heads/feat1",
+                    "creationDate": "2026-09-01T10:00:00Z",
+                    "closedDate": "2026-09-02T12:00:00Z",
+                    "createdBy": {"displayName": "Alice"},
+                }
+            elif str(pr_id) == "5002":
+                return {
+                    "pullRequestId": 5002,
+                    "title": "Active Unclosed PR",
+                    "status": "active",
+                    "targetRefName": "refs/heads/dev",
+                    "sourceRefName": "refs/heads/feat2",
+                    "creationDate": "2026-09-07T14:00:00Z",
+                    "closedDate": None,
+                    "createdBy": {"displayName": "Bob"},
+                }
+            return {}
+
+        handler.get_pull_request = MagicMock(side_effect=mock_get_pr)
+
+        repo = {"id": "repo-test-1", "name": "test-repo"}
+        dev_prs, stable_prs = handler._process_pushes_and_prs("proj-1", repo)
+
+        pr_ids = [p["pullRequestId"] for p in (dev_prs + stable_prs)]
+        self.assertIn(5001, pr_ids, "Merged PR from push history should be synced")
+        self.assertIn(5002, pr_ids, "Active unclosed PR should be synced")
+
+        # Verify active PR has OPN statusStr
+        active_pr = next(p for p in (dev_prs + stable_prs) if p["pullRequestId"] == 5002)
+        self.assertTrue(active_pr["statusStr"].startswith("OPN"))
 
 
 if __name__ == "__main__":

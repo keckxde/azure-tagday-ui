@@ -995,6 +995,9 @@ class DevOpsBackend(QObject):
                 if not target_date:
                     target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
 
+                raw_tags = raw_fields.get("System.Tags") or raw_fields.get("Tags") or wi.get("tags") or ""
+                target_tags = utils.extract_target_milestone_tags(raw_tags)
+
                 # Parent ID extraction
                 parent_id = None
                 p_val = raw_fields.get("System.Parent")
@@ -1065,6 +1068,8 @@ class DevOpsBackend(QObject):
                     "state": state_val,
                     "assigned_to": assigned_val,
                     "parent_id": parent_id,
+                    "tags": raw_tags,
+                    "target_tags": target_tags,
                     "changed_date": wi.get("changed_date") or "",
                     "iteration_path": iter_path,
                     "iteration_name": iter_name,
@@ -1513,6 +1518,12 @@ class DevOpsBackend(QObject):
         total_matrix_bugs = 0
         total_matrix_tasks = 0
         total_matrix_overdue = 0
+        total_tasks_not_started = 0
+        total_tasks_active = 0
+        total_tasks_closed = 0
+        total_not_started = 0
+        total_active = 0
+        total_completed = 0
 
         f_l1_raw = (filter_level1 or "ALL").strip()
         f_l2_raw = (filter_level2 or "ALL").strip()
@@ -1625,8 +1636,7 @@ class DevOpsBackend(QObject):
                     "total_not_started": 0, "total_active": 0, "total_closed": 0
                 }
 
-            wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0]
-            matched_m = milestones_by_date.get(wi_deadline)
+            matched_m = utils.match_work_item_to_milestone(wi, all_milestones, milestones_by_date)
 
             item_info = {
                 "id": wi.get("id"),
@@ -1677,46 +1687,60 @@ class DevOpsBackend(QObject):
             }
 
             assignees_data[assignee][wi_sprint].append(item_info)
-            assignee_stats[assignee]["total"] += 1
-            if state_cat == "closed":
-                assignee_stats[assignee]["total_closed"] += 1
-            elif state_cat == "active":
-                assignee_stats[assignee]["total_active"] += 1
-            else:
-                assignee_stats[assignee]["total_not_started"] += 1
 
+            # Update stats
+            st = assignee_stats[assignee]
+            st["total"] += 1
             if is_story:
-                assignee_stats[assignee]["stories"] += 1
-                total_matrix_stories += 1
+                st["stories"] += 1
             elif is_bug:
-                assignee_stats[assignee]["bugs"] += 1
-                total_matrix_bugs += 1
+                st["bugs"] += 1
             elif is_task:
-                assignee_stats[assignee]["tasks"] += 1
-                total_matrix_tasks += 1
-                if state_cat == "closed":
-                    assignee_stats[assignee]["tasks_closed"] += 1
+                st["tasks"] += 1
+                if state_cat == "not_started":
+                    st["tasks_not_started"] += 1
                 elif state_cat == "active":
-                    assignee_stats[assignee]["tasks_active"] += 1
-                else:
-                    assignee_stats[assignee]["tasks_not_started"] += 1
+                    st["tasks_active"] += 1
+                elif state_cat == "closed":
+                    st["tasks_closed"] += 1
+
+            if state_cat == "not_started":
+                st["total_not_started"] += 1
+            elif state_cat == "active":
+                st["total_active"] += 1
+            elif state_cat == "closed":
+                st["total_closed"] += 1
 
             if is_overdue:
-                assignee_stats[assignee]["overdue"] += 1
-                total_matrix_overdue += 1
+                st["overdue"] += 1
             if is_done:
-                assignee_stats[assignee]["completed"] += 1
+                st["completed"] += 1
 
             total_matrix_items += 1
+            if is_story:
+                total_matrix_stories += 1
+            elif is_bug:
+                total_matrix_bugs += 1
+            elif is_task:
+                total_matrix_tasks += 1
+                if state_cat == "not_started":
+                    total_tasks_not_started += 1
+                elif state_cat == "active":
+                    total_tasks_active += 1
+                elif state_cat == "closed":
+                    total_tasks_closed += 1
+
+            if state_cat == "not_started":
+                total_not_started += 1
+            elif state_cat == "active":
+                total_active += 1
+            elif state_cat == "closed":
+                total_completed += 1
+
+            if is_overdue:
+                total_matrix_overdue += 1
 
         all_wis_by_id = {wi["id"]: wi for wi in self._work_items if not wi.get("deleted")}
-
-        total_tasks_not_started = sum(s["tasks_not_started"] for s in assignee_stats.values())
-        total_tasks_active = sum(s["tasks_active"] for s in assignee_stats.values())
-        total_tasks_closed = sum(s["tasks_closed"] for s in assignee_stats.values())
-        total_not_started = sum(s["total_not_started"] for s in assignee_stats.values())
-        total_active = sum(s["total_active"] for s in assignee_stats.values())
-        total_completed = sum(s["total_closed"] for s in assignee_stats.values())
 
         assignee_rows = []
         for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
@@ -1738,7 +1762,10 @@ class DevOpsBackend(QObject):
                 all_active = sum(1 for it in items if it.get("state_category") == "active")
 
                 # Group items by parent containers
-                grouped = self._group_items_into_containers(items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode, milestones_by_date=milestones_by_date)
+                grouped = self._group_items_into_containers(
+                    items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode,
+                    milestones_by_date=milestones_by_date, all_milestones=all_milestones
+                )
 
                 tk_closed_percent = round((tk_closed / max(1, tk_count)) * 100) if tk_count > 0 else 0
 
@@ -1824,7 +1851,7 @@ class DevOpsBackend(QObject):
             "lookback_weeks": lookback_weeks,
         }
 
-    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None):
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None):
         """
         Groups work items in a sprint cell by parent container.
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
@@ -1860,8 +1887,7 @@ class DevOpsBackend(QObject):
         for c in cell_containers:
             cid = c["id"]
             c_done = _is_item_done(c)
-            c_dl = (c.get("deadline_str") or "").split("T")[0].split(" ")[0]
-            matched_c_m = m_map.get(c_dl)
+            matched_c_m = utils.match_work_item_to_milestone(c, all_milestones, m_map)
             container_map[cid] = {
                 "id": cid,
                 "title": c.get("title") or f"#{cid}",
@@ -1951,6 +1977,7 @@ class DevOpsBackend(QObject):
 
                 if pid not in container_map:
                     p_done = _is_item_done(p_wi)
+                    matched_p_m = utils.match_work_item_to_milestone(p_wi, all_milestones, m_map)
                     container_map[pid] = {
                         "id": pid,
                         "title": p_wi.get("title") or f"#{pid}",
@@ -1961,6 +1988,11 @@ class DevOpsBackend(QObject):
                         "is_external_parent": True,
                         "tfs_url": p_wi.get("tfs_url", ""),
                         "deadline_str": p_wi.get("deadline_str", ""),
+                        "milestone_name": matched_p_m.get("name", "") if matched_p_m else "",
+                        "milestone_icon": matched_p_m.get("category_icon", "") if matched_p_m else "",
+                        "milestone_color": matched_p_m.get("category_color", "") if matched_p_m else "",
+                        "milestone_bg": matched_p_m.get("category_bg_color", "") if matched_p_m else "",
+                        "milestone_category": matched_p_m.get("category_name", "") if matched_p_m else "",
                         "urgency_status": p_wi.get("urgency_status", "none"),
                         "urgency_badge": p_wi.get("urgency_badge", "—"),
                         "urgency_color": p_wi.get("urgency_color", "#8b949e"),
@@ -2624,6 +2656,26 @@ class DevOpsBackend(QObject):
             self.milestonesChanged.emit()
             self.workloadMatrixChanged.emit()
         return res
+
+    @Slot(result=int)
+    def prefillMilestonesFromWorkItems(self):
+        """Scans all work items in the database for Target:<TargetShortName> tags and pre-fills milestones."""
+        if not self._cache_db:
+            return 0
+        try:
+            new_milestones = self._cache_db.discover_and_prefill_milestones_from_work_items()
+            if new_milestones:
+                self.milestonesChanged.emit()
+                self.workloadMatrixChanged.emit()
+            return len(new_milestones) if isinstance(new_milestones, list) else 0
+        except Exception as e:
+            logger.error(f"Error prefilling milestones from work items: {e}")
+            return 0
+
+    @Slot(result=int)
+    def prefill_milestones_from_work_items(self):
+        """Snake_case alias for prefillMilestonesFromWorkItems."""
+        return self.prefillMilestonesFromWorkItems()
 
     @Slot(result=list)
     def get_milestone_categories(self):

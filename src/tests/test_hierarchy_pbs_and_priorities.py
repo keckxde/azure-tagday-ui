@@ -64,9 +64,9 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
         self.assertEqual(pbs_sort_key("SYS-A_1x"), ("sys", "a", 10))
         self.assertEqual(pbs_sort_key(""), ("",))
 
-        # Sorting: [10xx] sorts between [1000] and [1099], before [11xx]
+        # Sorting: [10xx] (1000) sorts before [1001], between [900] and [1001], before [11xx]
         keys = sorted(["10xx", "1001", "1099", "11xx", "900"], key=pbs_sort_key)
-        self.assertEqual(keys, ["900", "1001", "10xx", "1099", "11xx"])
+        self.assertEqual(keys, ["900", "10xx", "1001", "1099", "11xx"])
 
 
     def test_parse_level3_priority_focus_types(self):

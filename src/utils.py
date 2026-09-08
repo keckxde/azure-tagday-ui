@@ -693,8 +693,8 @@ def normalize_pbs_number(tag):
         return tag
 
     def _normalize_token(tok):
-        # A token is "numeric" if it contains at least one digit alongside optional x/X chars
-        if re.search(r'\d', tok) and re.match(r'^[0-9xX]+$', tok):
+        # A token is "numeric" if all characters are digits or x/X (e.g. "10xx", "xx", "01")
+        if tok and re.match(r'^[0-9xX]+$', tok):
             return tok.replace('x', '0').replace('X', '0')
         return tok
 
@@ -940,4 +940,96 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
         "prio_badge": prio_info["prio_badge"],
         "clean_title": prio_info["clean_title"],
     }
+
+
+def extract_target_milestone_tags(tags_val):
+    """
+    Extracts target milestone short names from work item tags formatted as Target:<TargetShortName>.
+    Case-insensitive matching of the 'Target:' prefix. Semicolon and comma delimiters are supported.
+
+    Examples:
+        "Target:DDQS-01; Backend; Prio1" -> ["DDQS-01"]
+        "Target:QIAV-02; Target:Release_1.0" -> ["QIAV-02", "Release_1.0"]
+
+    Args:
+        tags_val (str, list, or None): The raw tags string or list of tag strings.
+
+    Returns:
+        list of str: Unique TargetShortName strings in appearance order.
+    """
+    if not tags_val:
+        return []
+    if isinstance(tags_val, list):
+        tags_list = tags_val
+    else:
+        tags_list = [t.strip() for t in re.split(r'[;,]', str(tags_val)) if t.strip()]
+
+    results = []
+    for tag in tags_list:
+        m = re.match(r"^Target\s*:\s*(.+)$", tag, re.IGNORECASE)
+        if m:
+            short_name = m.group(1).strip()
+            if short_name and short_name not in results:
+                results.append(short_name)
+    return results
+
+
+def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
+    """
+    Identifies the target milestone for a work item.
+    Matching precedence:
+    1. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
+    2. Exact date matching against the milestone target_date.
+
+    Args:
+        wi (dict): Work item dictionary.
+        all_milestones (list of dict): Configured milestones list.
+        milestones_by_date (dict, optional): Map of target_date (YYYY-MM-DD) -> milestone dict.
+
+    Returns:
+        dict or None: The matched milestone dictionary, or None if no match.
+    """
+    if not all_milestones or not wi:
+        return None
+
+    # 1. Tag-based matching
+    target_tags = wi.get("target_tags")
+    if target_tags is None:
+        raw_tags = wi.get("tags") or ""
+        if not raw_tags and wi.get("raw_json"):
+            try:
+                raw_data = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+                fields = raw_data.get("fields", {}) if isinstance(raw_data, dict) else {}
+                raw_tags = fields.get("System.Tags") or fields.get("Tags") or ""
+            except Exception:
+                raw_tags = ""
+        target_tags = extract_target_milestone_tags(raw_tags)
+
+    if target_tags:
+        for t_name in target_tags:
+            t_lower = t_name.lower().strip()
+            # Exact name or Target: prefixed name
+            for m in all_milestones:
+                m_name = (m.get("name") or "").lower().strip()
+                if m_name == t_lower or m_name == f"target:{t_lower}":
+                    return m
+                if m_name.startswith("target:") and m_name.split("target:", 1)[1].strip() == t_lower:
+                    return m
+            # Substring name matching
+            for m in all_milestones:
+                m_name = (m.get("name") or "").lower().strip()
+                if t_lower in m_name or m_name in t_lower:
+                    return m
+
+    # 2. Date-based matching (fallback)
+    wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0].strip()
+    if wi_deadline:
+        if milestones_by_date is not None:
+            return milestones_by_date.get(wi_deadline)
+        for m in all_milestones:
+            if (m.get("target_date") or "").strip() == wi_deadline:
+                return m
+
+    return None
+
 

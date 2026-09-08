@@ -744,6 +744,108 @@ class AzureDevOpsCache:
         except Exception:
             return False
 
+    def discover_and_prefill_milestones_from_work_items(self):
+        """
+        Scans all cached work items for tags matching 'Target:<TargetShortName>'.
+        For each unique target short name discovered that does not already exist in the milestones table,
+        creates a new milestone with inferred category and the most representative target date from those items.
+
+        Returns:
+            list of dict: The newly created milestones.
+        """
+        from collections import Counter
+        with self._connection() as conn:
+            rows = conn.execute("SELECT id, raw_json FROM work_items WHERE deleted = 0").fetchall()
+            discovered = {}
+            for r in rows:
+                raw_s = r["raw_json"]
+                if not raw_s:
+                    continue
+                try:
+                    data = json.loads(raw_s) if isinstance(raw_s, str) else raw_s
+                    fields = data.get("fields", {}) if isinstance(data, dict) else {}
+                    tags_str = fields.get("System.Tags") or fields.get("Tags") or ""
+                    if not tags_str:
+                        continue
+
+                    wi_date = (
+                        fields.get("Microsoft.VSTS.Scheduling.TargetDate")
+                        or fields.get("System.TargetDate")
+                        or fields.get("Microsoft.VSTS.Scheduling.DueDate")
+                        or fields.get("System.DueDate")
+                        or ""
+                    )
+                    if wi_date:
+                        wi_date = str(wi_date).split("T")[0].split(" ")[0].strip()
+
+                    for part in re.split(r'[;,]', tags_str):
+                        part = part.strip()
+                        m = re.match(r"^Target\s*:\s*(.+)$", part, re.IGNORECASE)
+                        if m:
+                            short_name = m.group(1).strip()
+                            if short_name:
+                                if short_name not in discovered:
+                                    discovered[short_name] = []
+                                if wi_date:
+                                    discovered[short_name].append(wi_date)
+                except Exception:
+                    continue
+
+            if not discovered:
+                return []
+
+            existing_rows = conn.execute("SELECT name FROM milestones").fetchall()
+            existing_names_lower = {
+                r["name"].lower().strip() for r in existing_rows if r["name"]
+            }
+            for r in existing_rows:
+                nm = (r["name"] or "").lower().strip()
+                if nm.startswith("target:"):
+                    existing_names_lower.add(nm.split("target:", 1)[1].strip())
+
+            newly_added = []
+            now_str = datetime.now().isoformat()
+
+            for short_name, dates_list in discovered.items():
+                if short_name.lower() in existing_names_lower:
+                    continue
+
+                sn_lower = short_name.lower()
+                if "qiav" in sn_lower:
+                    cat_id = "qiav"
+                elif "ddqs" in sn_lower:
+                    cat_id = "ddqs"
+                elif "scen" in sn_lower:
+                    cat_id = "scenario"
+                elif "rel" in sn_lower or "release" in sn_lower or re.match(r"^v\d+", sn_lower):
+                    cat_id = "release"
+                else:
+                    cat_id = "general"
+
+                chosen_date = ""
+                if dates_list:
+                    counts = Counter(dates_list)
+                    chosen_date = counts.most_common(1)[0][0]
+
+                desc = f"Auto-discovered from work item tag Target:{short_name}"
+
+                cursor = conn.execute("""
+                INSERT INTO milestones (name, target_date, category_id, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (short_name, chosen_date, cat_id, desc, now_str, now_str))
+
+                new_id = cursor.lastrowid
+                existing_names_lower.add(short_name.lower())
+                newly_added.append({
+                    "id": new_id,
+                    "name": short_name,
+                    "target_date": chosen_date,
+                    "category_id": cat_id,
+                    "description": desc,
+                })
+
+            return newly_added
+
     def get_repo_categories(self):
         """Returns all repository categories sorted by sort_order ascending."""
         try:

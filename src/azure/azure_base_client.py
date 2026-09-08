@@ -318,6 +318,24 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
 
+    def get_pull_requests(self, project_id, repo_id, status=None):
+        """
+        Retrieves pull requests for a specific repository.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            status (str, optional): Status filter (e.g. 'active', 'completed', 'abandoned', 'all').
+
+        Returns:
+            list: List of pull request dictionaries.
+        """
+        params = {"api-version": "6.0"}
+        if status:
+            params["searchCriteria.status"] = status
+        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests", params=params)
+        return res.get("value", [])
+
     def get_repositories(self, project_id):
         """
         Retrieves all Git repositories for a specific project.

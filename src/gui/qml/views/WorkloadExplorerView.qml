@@ -1905,359 +1905,370 @@ Item {
                         anchors.margins: 12
                         spacing: 10
 
-                        // ==================== Parent Header Line (Line 1: Type, ID, Badges, Owner, State) ====================
-                        RowLayout {
+                        // ==================== HIGHLIGHTED PARENT ITEM HEADER (ON TOP) ====================
+                        Rectangle {
+                            id: parentHeaderBox
                             Layout.fillWidth: true
-                            spacing: 8
+                            implicitHeight: parentHeaderCol.implicitHeight + 16
+                            radius: 6
+                            color: cardDelegateMa.containsMouse ? "#1c2128" : "#161b22"
+                            border.color: {
+                                if (modelData.is_prio1) return "#d29922";
+                                if (modelData.urgency_status === "overdue") return "#f85149";
+                                if (modelData.is_done) return "#238636";
+                                return "#30363d";
+                            }
+                            border.width: modelData.is_prio1 || modelData.urgency_status === "overdue" ? 1.5 : 1
 
-                            // Container Type Icon & ID
-                            RowLayout {
-                                spacing: 4
-                                Text {
-                                    text: {
-                                        var t = (modelData.type || "").toLowerCase();
-                                        if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "🐛";
-                                        if (t.indexOf("feature") !== -1) return "🎯";
-                                        if (t.indexOf("epic") !== -1) return "👑";
-                                        if (t.indexOf("req") !== -1) return "📋";
-                                        if (t.indexOf("standalone") !== -1 || modelData.id === 0) return "🛠️";
-                                        return "📘";
-                                    }
-                                    font.pixelSize: 14
+                            // Left Accent Indicator Strip
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 4
+                                radius: 2
+                                color: {
+                                    if (modelData.urgency_status === "overdue") return "#f85149";
+                                    if (modelData.is_prio1) return "#d29922";
+                                    if (modelData.is_done) return "#3fb950";
+                                    var t = (modelData.type || "").toLowerCase();
+                                    if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "#f85149";
+                                    if (t.indexOf("feature") !== -1 || t.indexOf("epic") !== -1) return "#a371f7";
+                                    if (t.indexOf("standalone") !== -1 || modelData.id === 0) return "#8b949e";
+                                    return "#58a6ff";
                                 }
+                            }
 
-                                Text {
-                                    text: modelData.id > 0 ? ("#" + modelData.id) : "Direct"
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Bold
-                                    color: modelData.id > 0 ? "#58a6ff" : "#8b949e"
+                            ColumnLayout {
+                                id: parentHeaderCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 10
+                                anchors.topMargin: 8
+                                anchors.bottomMargin: 8
+                                spacing: 8
 
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                        onClicked: {
-                                            if (backend && (modelData.tfs_url || "") !== "") {
-                                                backend.open_url(modelData.tfs_url)
+                                // Top Line: Icon, #ID, BIG BOLD TITLE, Prio 1 & State Badges
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    // Container Type Icon
+                                    Text {
+                                        text: {
+                                            var t = (modelData.type || "").toLowerCase();
+                                            if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "🐛";
+                                            if (t.indexOf("feature") !== -1) return "🎯";
+                                            if (t.indexOf("epic") !== -1) return "👑";
+                                            if (t.indexOf("req") !== -1) return "📋";
+                                            if (t.indexOf("standalone") !== -1 || modelData.id === 0) return "🛠️";
+                                            return "📘";
+                                        }
+                                        font.pixelSize: 16
+                                        Layout.alignment: Qt.AlignTop
+                                    }
+
+                                    // #ID Badge / Link
+                                    Text {
+                                        text: modelData.id > 0 ? ("#" + modelData.id) : "Direct"
+                                        font.family: "Consolas, monospace"
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        color: modelData.id > 0 ? "#58a6ff" : "#8b949e"
+                                        Layout.alignment: Qt.AlignTop
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: {
+                                                if (backend && (modelData.tfs_url || "") !== "") {
+                                                    backend.open_url(modelData.tfs_url);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            // Type badge
-                            Rectangle {
-                                implicitHeight: 20
-                                implicitWidth: cTypeLabel.implicitWidth + 10
-                                radius: 10
-                                color: "#161b22"
-                                border.color: "#30363d"
-                                Text {
-                                    id: cTypeLabel
-                                    anchors.centerIn: parent
-                                    text: modelData.type || "Story"
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    color: "#c9d1d9"
-                                }
-                            }
-
-                            // External Parent Indicator Badge
-                            Rectangle {
-                                visible: !!modelData.is_external_parent
-                                implicitHeight: 20
-                                implicitWidth: cExtLabel.implicitWidth + 10
-                                radius: 10
-                                color: "#16243b"
-                                border.color: "#1f6feb"
-                                Text {
-                                    id: cExtLabel
-                                    anchors.centerIn: parent
-                                    text: "🌐 External Parent"
-                                    font.pixelSize: 9
-                                    color: "#58a6ff"
-                                }
-                            }
-
-                            // Prio 1 Strategic Focus Badge
-                            Rectangle {
-                                visible: !!modelData.is_prio1
-                                implicitHeight: 20
-                                implicitWidth: cPrioText.implicitWidth + 10
-                                radius: 4
-                                color: "#3d2800"
-                                border.color: "#d29922"
-                                border.width: 1
-                                Text {
-                                    id: cPrioText
-                                    anchors.centerIn: parent
-                                    text: modelData.prio_badge || "⭐ Prio 1"
-                                    font.pixelSize: 9
-                                    font.weight: Font.Bold
-                                    color: "#f0883e"
-                                }
-                            }
-
-                            Item { Layout.fillWidth: true }
-
-                            // Owner / Assignee pill
-                            Rectangle {
-                                implicitHeight: 20
-                                implicitWidth: cOwnerText.implicitWidth + 12
-                                radius: 10
-                                color: "#161b22"
-                                border.color: "#30363d"
-                                Text {
-                                    id: cOwnerText
-                                    anchors.centerIn: parent
-                                    text: "👤 " + (modelData.assigned_to || "Unassigned")
-                                    font.pixelSize: 10
-                                    color: "#c9d1d9"
-                                }
-                            }
-
-                            // State badge
-                            Rectangle {
-                                visible: modelData.id > 0
-                                implicitHeight: 20
-                                implicitWidth: cStateLabel.implicitWidth + 12
-                                radius: 10
-                                color: modelData.is_done ? "#0d3525" : (modelData.state === "Proposed" ? "#2d2006" : "#161b22")
-                                border.color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#30363d")
-                                Text {
-                                    id: cStateLabel
-                                    anchors.centerIn: parent
-                                    text: modelData.state || "Active"
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#58a6ff")
-                                }
-                            }
-                        }
-
-                        // ==================== Parent Title (Line 2: Prominent & Full-Width) ====================
-                        Text {
-                            Layout.fillWidth: true
-                            text: modelData.title || (modelData.id > 0 ? ("Work Item #" + modelData.id) : "Direct Tasks / Standalone Items")
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 13
-                            font.weight: Font.Bold
-                            color: cardTitleMa.containsMouse && (modelData.tfs_url || "") !== "" ? "#58a6ff" : "#f0f6fc"
-                            wrapMode: Text.Wrap
-
-                            ToolTip.visible: cardTitleMa.containsMouse
-                            ToolTip.text: (modelData.title || "") + ((modelData.tfs_url || "") !== "" ? "\n(Click to open in TFS)" : "")
-
-                            MouseArea {
-                                id: cardTitleMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                onClicked: {
-                                    if (backend && (modelData.tfs_url || "") !== "") {
-                                        backend.open_url(modelData.tfs_url)
-                                    }
-                                }
-                            }
-                        }
-
-                        // ==================== Metadata & Schedule (Line 2: Iteration, Deadline, PBS Breadcrumbs) ====================
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            // Move / Planned Iteration Pill
-                            Rectangle {
-                                visible: modelData.id > 0
-                                implicitHeight: 22
-                                implicitWidth: cSprintRow.implicitWidth + 12
-                                radius: 11
-                                color: "#161b22"
-                                border.color: cEditSprintMa.containsMouse ? "#58a6ff" : "#30363d"
-                                border.width: 1
-
-                                RowLayout {
-                                    id: cSprintRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-                                    Text { text: "🔄"; font.pixelSize: 10 }
+                                    // Parent Title in BIG BOLD Font
                                     Text {
-                                        text: modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : (root.selectedCell ? root.selectedCell.sprint_name : "Sprint")
-                                        font.pixelSize: 10
-                                        font.weight: Font.DemiBold
-                                        color: "#58a6ff"
-                                    }
-                                }
-                                ToolTip.visible: cEditSprintMa.containsMouse
-                                ToolTip.text: "Planned Iteration: " + (modelData.iteration_path || "Sprint") + "\n(Click to reschedule)"
-
-                                MouseArea {
-                                    id: cEditSprintMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        workloadIterationPickerModal.openForWorkItem(
-                                            modelData.id,
-                                            modelData.title,
-                                            modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "")
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Deadline Pill
-                            Rectangle {
-                                visible: modelData.id > 0
-                                implicitHeight: 22
-                                implicitWidth: cDdRow.implicitWidth + 12
-                                radius: 11
-                                property bool hasDate: (modelData.deadline_str || "") !== ""
-                                color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.15)
-                                border.color: cEditDlMa.containsMouse ? "#58a6ff" : Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.5)
-                                border.width: 1
-
-                                RowLayout {
-                                    id: cDdRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-                                    Text {
-                                        text: parent.parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "➕ Set Date"
-                                        font.pixelSize: 10
-                                        font.weight: Font.DemiBold
-                                        color: modelData.urgency_color || "#8b949e"
-                                    }
-                                }
-                                ToolTip.visible: cEditDlMa.containsMouse
-                                ToolTip.text: "Deadline: " + (modelData.deadline_str || "None") + "\n(Click to edit)"
-
-                                MouseArea {
-                                    id: cEditDlMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        workloadDeadlineDialog.openForWorkItem(
-                                            modelData.id,
-                                            modelData.title,
-                                            modelData.deadline_str,
-                                            root.selectedCell ? root.selectedCell.sprint_name : ""
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Milestone Pill (if workitem is matched to a major milestone)
-                            Rectangle {
-                                visible: (modelData.milestone_name || "") !== ""
-                                implicitHeight: 22
-                                implicitWidth: cMStoneRow.implicitWidth + 12
-                                radius: 11
-                                color: modelData.milestone_bg || "#16243b"
-                                border.color: modelData.milestone_color || "#1f6feb"
-                                border.width: 1
-
-                                RowLayout {
-                                    id: cMStoneRow
-                                    anchors.centerIn: parent
-                                    spacing: 4
-                                    Text {
-                                        text: modelData.milestone_icon || "🚩"
-                                        font.pixelSize: 10
-                                    }
-                                    Text {
-                                        text: modelData.milestone_name
-                                        font.pixelSize: 10
+                                        Layout.fillWidth: true
+                                        text: modelData.title || (modelData.id > 0 ? ("Work Item #" + modelData.id) : "Direct Tasks / Standalone Items")
+                                        font.family: "Segoe UI, -apple-system, BlinkMacSystemFont, sans-serif"
+                                        font.pixelSize: 15
                                         font.weight: Font.Bold
-                                        color: modelData.milestone_color || "#79c0ff"
+                                        color: cardTitleMa.containsMouse && (modelData.tfs_url || "") !== "" ? "#58a6ff" : "#ffffff"
+                                        wrapMode: Text.Wrap
+                                        lineHeight: 1.2
+                                        Layout.alignment: Qt.AlignVCenter
+
+                                        ToolTip.visible: cardTitleMa.containsMouse
+                                        ToolTip.text: (modelData.title || "") + ((modelData.tfs_url || "") !== "" ? "\n(Click to open in TFS)" : "")
+
+                                        MouseArea {
+                                            id: cardTitleMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: (modelData.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: {
+                                                if (backend && (modelData.tfs_url || "") !== "") {
+                                                    backend.open_url(modelData.tfs_url);
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                                ToolTip.visible: cMStoneMa.containsMouse
-                                ToolTip.text: "Major Milestone: " + (modelData.milestone_name || "") + " (" + (modelData.milestone_category || "") + ")"
-                                MouseArea {
-                                    id: cMStoneMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (typeof window !== "undefined" && window.openMilestonesManager) {
-                                            window.openMilestonesManager();
+
+                                    // Prio 1 Strategic Focus Badge
+                                    Rectangle {
+                                        visible: !!modelData.is_prio1
+                                        implicitHeight: 22
+                                        implicitWidth: cPrioText.implicitWidth + 12
+                                        radius: 4
+                                        color: "#3d2800"
+                                        border.color: "#d29922"
+                                        border.width: 1
+                                        Layout.alignment: Qt.AlignTop
+                                        Text {
+                                            id: cPrioText
+                                            anchors.centerIn: parent
+                                            text: modelData.prio_badge || "⭐ Prio 1"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: "#f0883e"
+                                        }
+                                    }
+
+                                    // State badge
+                                    Rectangle {
+                                        visible: modelData.id > 0
+                                        implicitHeight: 22
+                                        implicitWidth: cStateLabel.implicitWidth + 12
+                                        radius: 11
+                                        color: modelData.is_done ? "#0d3525" : (modelData.state === "Proposed" ? "#2d2006" : "#21262d")
+                                        border.color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#30363d")
+                                        Layout.alignment: Qt.AlignTop
+                                        Text {
+                                            id: cStateLabel
+                                            anchors.centerIn: parent
+                                            text: modelData.state || "Active"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: modelData.is_done ? "#3fb950" : (modelData.state === "Proposed" ? "#d29922" : "#58a6ff")
                                         }
                                     }
                                 }
-                            }
 
-                            // Hierarchy / PBS Breadcrumb Chip
-                            Rectangle {
-                                visible: (modelData.level1_display || "") !== "" && modelData.level1_display !== "Ungrouped Sub-System"
-                                implicitHeight: 20
-                                implicitWidth: cHierarchyText.implicitWidth + 10
-                                radius: 4
-                                color: "#161b22"
-                                border.color: modelData.is_grouped ? "#30363d" : "#da3633"
-                                border.width: 1
-                                Text {
-                                    id: cHierarchyText
-                                    anchors.centerIn: parent
-                                    text: "🏷️ " + (modelData.level1_display || "") + ((modelData.level2_display && modelData.level2_display !== "Ungrouped Component") ? (" › " + modelData.level2_display) : "")
-                                    font.pixelSize: 9
-                                    color: modelData.is_grouped ? "#8b949e" : "#f85149"
-                                    elide: Text.ElideRight
-                                }
-                            }
+                                // Bottom Line of Parent Header: Badges & Metadata Chips
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
-                            // Ungrouped Warning Chip
-                            Rectangle {
-                                visible: modelData.id > 0 && !modelData.is_grouped && ((modelData.level1_display || "") === "" || modelData.level1_display === "Ungrouped Sub-System")
-                                implicitHeight: 20
-                                implicitWidth: cUngroupedText.implicitWidth + 8
-                                radius: 4
-                                color: "#2d1515"
-                                border.color: "#da3633"
-                                border.width: 1
-                                Text {
-                                    id: cUngroupedText
-                                    anchors.centerIn: parent
-                                    text: "⚠️ Ungrouped (No PBS)"
-                                    font.pixelSize: 9
-                                    color: "#f85149"
-                                }
-                            }
-
-                            Item { Layout.fillWidth: true }
-
-                            // Tasks summary count & relation pill
-                            RowLayout {
-                                visible: (modelData.total_tasks_count || 0) > 0
-                                spacing: 8
-
-                                Row {
-                                    spacing: 4
-                                    Text {
-                                        text: "⏳" + (modelData.tasks_not_started_count || 0)
-                                        font.pixelSize: 10
-                                        color: "#8b949e"
-                                        visible: (modelData.tasks_not_started_count || 0) > 0
+                                    // Type badge
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: cTypeLabel.implicitWidth + 10
+                                        radius: 10
+                                        color: "#21262d"
+                                        border.color: "#30363d"
+                                        Text {
+                                            id: cTypeLabel
+                                            anchors.centerIn: parent
+                                            text: modelData.type || "Story"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: "#c9d1d9"
+                                        }
                                     }
-                                    Text {
-                                        text: "⚡" + (modelData.tasks_active_count || 0)
-                                        font.pixelSize: 10
-                                        color: "#58a6ff"
-                                        visible: (modelData.tasks_active_count || 0) > 0
-                                    }
-                                    Text {
-                                        text: "✅" + (modelData.progress_percent !== undefined ? modelData.progress_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.total_tasks_count || 1)) * 100)) + "%"
-                                        font.pixelSize: 10
-                                        color: "#3fb950"
-                                        visible: (modelData.tasks_closed_count || 0) > 0
-                                    }
-                                }
 
-                                Text {
-                                    text: "(" + (modelData.completed_tasks_count || 0) + "/" + (modelData.total_tasks_count || 0) + " done · " + (modelData.progress_percent || 0) + "%)"
-                                    font.pixelSize: 10
-                                    color: modelData.progress_percent === 100 ? "#3fb950" : "#8b949e"
+                                    // External Parent Indicator Badge
+                                    Rectangle {
+                                        visible: !!modelData.is_external_parent
+                                        implicitHeight: 20
+                                        implicitWidth: cExtLabel.implicitWidth + 10
+                                        radius: 10
+                                        color: "#16243b"
+                                        border.color: "#1f6feb"
+                                        Text {
+                                            id: cExtLabel
+                                            anchors.centerIn: parent
+                                            text: "🌐 External Parent"
+                                            font.pixelSize: 9
+                                            color: "#58a6ff"
+                                        }
+                                    }
+
+                                    // Owner / Assignee pill
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: cOwnerText.implicitWidth + 12
+                                        radius: 10
+                                        color: "#21262d"
+                                        border.color: "#30363d"
+                                        Text {
+                                            id: cOwnerText
+                                            anchors.centerIn: parent
+                                            text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                            font.pixelSize: 10
+                                            color: "#c9d1d9"
+                                        }
+                                    }
+
+                                    // Move / Planned Iteration Pill
+                                    Rectangle {
+                                        visible: modelData.id > 0
+                                        implicitHeight: 20
+                                        implicitWidth: cSprintRow.implicitWidth + 10
+                                        radius: 10
+                                        color: "#21262d"
+                                        border.color: cEditSprintMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: cSprintRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "🔄"; font.pixelSize: 9 }
+                                            Text {
+                                                text: modelData.iteration_path ? modelData.iteration_path.split("\\").pop() : (root.selectedCell ? root.selectedCell.sprint_name : "Sprint")
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: "#58a6ff"
+                                            }
+                                        }
+                                        ToolTip.visible: cEditSprintMa.containsMouse
+                                        ToolTip.text: "Planned Iteration: " + (modelData.iteration_path || "Sprint") + "\n(Click to reschedule)"
+
+                                        MouseArea {
+                                            id: cEditSprintMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                workloadIterationPickerModal.openForWorkItem(
+                                                    modelData.id,
+                                                    modelData.title,
+                                                    modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "")
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Deadline Pill
+                                    Rectangle {
+                                        visible: modelData.id > 0
+                                        implicitHeight: 20
+                                        implicitWidth: cDdRow.implicitWidth + 10
+                                        radius: 10
+                                        property bool hasDate: (modelData.deadline_str || "") !== ""
+                                        color: Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.15)
+                                        border.color: cEditDlMa.containsMouse ? "#58a6ff" : Qt.rgba(modelData.urgency_color.r, modelData.urgency_color.g, modelData.urgency_color.b, 0.5)
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: cDdRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text {
+                                                text: parent.parent.hasDate ? (modelData.urgency_badge || modelData.deadline_str) : "➕ Set Date"
+                                                font.pixelSize: 9
+                                                font.weight: Font.DemiBold
+                                                color: modelData.urgency_color || "#8b949e"
+                                            }
+                                        }
+                                        ToolTip.visible: cEditDlMa.containsMouse
+                                        ToolTip.text: "Deadline: " + (modelData.deadline_str || "None") + "\n(Click to edit)"
+
+                                        MouseArea {
+                                            id: cEditDlMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                workloadDeadlineDialog.openForWorkItem(
+                                                    modelData.id,
+                                                    modelData.title,
+                                                    modelData.deadline_str,
+                                                    root.selectedCell ? root.selectedCell.sprint_name : ""
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Milestone Pill (if workitem is matched to a major milestone)
+                                    Rectangle {
+                                        visible: (modelData.milestone_name || "") !== ""
+                                        implicitHeight: 20
+                                        implicitWidth: cMStoneRow.implicitWidth + 10
+                                        radius: 10
+                                        color: modelData.milestone_bg || "#16243b"
+                                        border.color: modelData.milestone_color || "#1f6feb"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: cMStoneRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text {
+                                                text: modelData.milestone_icon || "🚩"
+                                                font.pixelSize: 9
+                                            }
+                                            Text {
+                                                text: modelData.milestone_name
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: modelData.milestone_color || "#79c0ff"
+                                            }
+                                        }
+                                        ToolTip.visible: cMStoneMa.containsMouse
+                                        ToolTip.text: "Major Milestone: " + (modelData.milestone_name || "") + " (" + (modelData.milestone_category || "") + ")"
+                                        MouseArea {
+                                            id: cMStoneMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                                    window.openMilestonesManager();
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Hierarchy / PBS Breadcrumb Chip
+                                    Rectangle {
+                                        visible: (modelData.level1_display || "") !== "" && modelData.level1_display !== "Ungrouped Sub-System"
+                                        implicitHeight: 20
+                                        implicitWidth: cHierarchyText.implicitWidth + 10
+                                        radius: 4
+                                        color: "#21262d"
+                                        border.color: modelData.is_grouped ? "#30363d" : "#da3633"
+                                        border.width: 1
+                                        Text {
+                                            id: cHierarchyText
+                                            anchors.centerIn: parent
+                                            text: "🏷️ " + (modelData.level1_display || "") + ((modelData.level2_display && modelData.level2_display !== "Ungrouped Component") ? (" › " + modelData.level2_display) : "")
+                                            font.pixelSize: 9
+                                            color: modelData.is_grouped ? "#8b949e" : "#f85149"
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+
+                                    // Ungrouped Warning Chip
+                                    Rectangle {
+                                        visible: modelData.id > 0 && !modelData.is_grouped && ((modelData.level1_display || "") === "" || modelData.level1_display === "Ungrouped Sub-System")
+                                        implicitHeight: 20
+                                        implicitWidth: cUngroupedText.implicitWidth + 8
+                                        radius: 4
+                                        color: "#2d1515"
+                                        border.color: "#da3633"
+                                        border.width: 1
+                                        Text {
+                                            id: cUngroupedText
+                                            anchors.centerIn: parent
+                                            text: "⚠️ Ungrouped (No PBS)"
+                                            font.pixelSize: 9
+                                            color: "#f85149"
+                                        }
+                                    }
                                 }
                             }
                         }

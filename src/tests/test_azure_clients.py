@@ -84,6 +84,19 @@ class TestAzureBaseClient(unittest.TestCase):
         self.assertIsNotNone(pr)
         self.assertEqual(pr["pullRequestId"], 27676)
 
+    @patch.object(AzureBaseClient, "_request")
+    def test_get_pull_requests(self, mock_request):
+        mock_request.return_value = ({"value": [{"pullRequestId": 27676, "title": "Active PR", "status": "active"}]}, 200)
+        prs = self.client.get_pull_requests("proj-1", "repo-1", status="active")
+        self.assertEqual(len(prs), 1)
+        self.assertEqual(prs[0]["pullRequestId"], 27676)
+        self.assertEqual(prs[0]["status"], "active")
+        mock_request.assert_called_once_with(
+            "GET",
+            "proj-1/_apis/git/repositories/repo-1/pullrequests",
+            params={"api-version": "6.0", "searchCriteria.status": "active"}
+        )
+
 
 class TestAzureInfoBaseClient(unittest.TestCase):
 
