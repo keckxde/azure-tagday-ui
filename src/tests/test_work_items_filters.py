@@ -127,7 +127,6 @@ class TestWorkItemsFilters(unittest.TestCase):
         self.assertEqual(assignees, ["Dev 1", "Dev 2", "Dev 3"])
 
     def test_export_work_items_to_excel(self):
-        import openpyxl
         backend = DevOpsBackend()
         backend._work_items = [
             {
@@ -178,6 +177,11 @@ class TestWorkItemsFilters(unittest.TestCase):
             }
         ]
 
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed in the test environment")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             out_file = os.path.join(tmpdir, "exported_workitems.xlsx")
             res = backend.exportWorkItemsToExcel(file_path=out_file)
@@ -185,7 +189,6 @@ class TestWorkItemsFilters(unittest.TestCase):
             self.assertEqual(res["item_count"], 2)
             self.assertTrue(os.path.exists(out_file))
 
-            # Inspect generated Excel file with openpyxl
             wb = openpyxl.load_workbook(out_file)
             self.assertIn("Work Items", wb.sheetnames)
             ws = wb["Work Items"]
@@ -209,7 +212,82 @@ class TestWorkItemsFilters(unittest.TestCase):
             self.assertEqual(ws.cell(row=3, column=4).value, "Closed")
             self.assertEqual(ws.cell(row=3, column=5).value, "Bob")
 
+    def test_work_items_tags_extraction_and_properties(self):
+        backend = DevOpsBackend()
+        backend._work_items = [
+            {
+                "id": 4001,
+                "title": "Setup CI/CD Pipeline",
+                "type": "Task",
+                "state": "Active",
+                "tags": "Target:DDQS-01; DevOps; Prio1",
+                "tag_list": ["Target:DDQS-01", "DevOps", "Prio1"],
+                "target_tags": ["DDQS-01"],
+            },
+            {
+                "id": 4002,
+                "title": "Database Migration",
+                "type": "Requirement",
+                "state": "Active",
+                "tags": "Target:DDQS-01; Backend; Infra",
+                "tag_list": ["Target:DDQS-01", "Backend", "Infra"],
+                "target_tags": ["DDQS-01"],
+            },
+            {
+                "id": 4003,
+                "title": "Frontend Redesign",
+                "type": "User Story",
+                "state": "New",
+                "tags": "Target:DDQS-02; Frontend; UI",
+                "tag_list": ["Target:DDQS-02", "Frontend", "UI"],
+                "target_tags": ["DDQS-02"],
+            },
+            {
+                "id": 4004,
+                "title": "Untagged Cleanup",
+                "type": "Task",
+                "state": "Closed",
+                "tags": "",
+                "tag_list": [],
+                "target_tags": [],
+            }
+        ]
+
+        # Test workItemTags property
+        tags = backend.workItemTags
+        self.assertIn("Backend", tags)
+        self.assertIn("DevOps", tags)
+        self.assertIn("Frontend", tags)
+        self.assertIn("Infra", tags)
+        self.assertIn("Prio1", tags)
+        self.assertIn("Target:DDQS-01", tags)
+        self.assertIn("Target:DDQS-02", tags)
+        self.assertIn("UI", tags)
+
+        # Test workItemTargetTags property
+        target_tags = backend.workItemTargetTags
+        self.assertIn("DDQS-01", target_tags)
+        self.assertIn("DDQS-02", target_tags)
+
+        # Test workItemTagCounts property
+        counts = backend.workItemTagCounts
+        self.assertEqual(counts["Target:DDQS-01"], 2)
+        self.assertEqual(counts["Backend"], 1)
+        self.assertEqual(counts["UI"], 1)
+
+        # Test get_work_item_tags_summary()
+        summary = backend.get_work_item_tags_summary()
+        self.assertEqual(summary[0]["tag"], "Target:DDQS-01")
+        self.assertEqual(summary[0]["count"], 2)
+        self.assertTrue(summary[0]["is_target"])
+
+        # Test target tag prefill in milestones
+        milestones = backend.workItemMilestones
+        self.assertIn("DDQS-01", milestones)
+        self.assertIn("DDQS-02", milestones)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

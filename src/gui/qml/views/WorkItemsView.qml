@@ -17,6 +17,7 @@ Item {
     property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
     property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
     property string filterMilestone: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
+    property string filterTag: "ALL"         // "ALL", "TAGGED", "UNTAGGED", or specific tag name
     property int currentPage: 1
     property int pageSize: 25
     property int totalPages: 1
@@ -35,6 +36,20 @@ Item {
         return count;
     }
 
+    property int taggedItemsCount: {
+        if (!backend || !backend.workItems) return 0;
+        var count = 0;
+        var all = backend.workItems;
+        for (var i = 0; i < all.length; i++) {
+            if (!all[i].deleted && ((all[i].tag_list && all[i].tag_list.length > 0) || (all[i].tags && all[i].tags.trim() !== ""))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    property int uniqueTagsCount: backend && backend.workItemTags ? backend.workItemTags.length : 0
+
     // -- Filter lists, updated dynamically from database cache --
     property var typesList: []
     property var statesList: []
@@ -43,6 +58,7 @@ Item {
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
     property var milestonesList: ["ALL"]
+    property var tagsList: ["ALL"]
 
     property var priorityOptions: [
         { label: "All Priorities", value: "ALL" },
@@ -109,6 +125,12 @@ Item {
         milestonesList = ["ALL", "PLANNED", "UNPLANNED"].concat(ms)
     }
 
+    function refreshTagsList() {
+        if (!backend) return
+        var tags = backend.workItemTags || []
+        tagsList = ["ALL", "TAGGED", "UNTAGGED"].concat(tags)
+    }
+
     function resetAllFilters() {
         root.searchQuery = ""
         root.filterState = "ALL"
@@ -122,6 +144,7 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        root.filterTag = "ALL"
         if (typeof level1Combo !== "undefined" && level1Combo) {
             level1Combo.currentIndex = 0
             level1Combo.editText = ""
@@ -134,11 +157,15 @@ Item {
             wiMilestoneCombo.currentIndex = 0
             wiMilestoneCombo.editText = ""
         }
+        if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
+            wiTagCombo.currentIndex = 0
+            wiTagCombo.editText = ""
+        }
         root.currentPage = 1
         root.updateFilteredModel()
     }
 
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL"
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTag !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -243,6 +270,59 @@ Item {
                         font.pixelSize: 11
                         font.weight: Font.Bold
                         color: root.filterUrgency === "OVERDUE" ? "#ffffff" : "#f85149"
+                    }
+                }
+            }
+
+            // Clickable Tag Summary Pill in Top Header
+            Rectangle {
+                visible: root.uniqueTagsCount > 0
+                implicitHeight: 24
+                implicitWidth: tagTopText.implicitWidth + 16
+                radius: 12
+                color: (root.filterTag !== "ALL") ? "#1f334d" : (tagTopMa.containsMouse ? "#21262d" : "#161b22")
+                border.color: (root.filterTag !== "ALL") ? "#58a6ff" : "#30363d"
+                border.width: 1
+
+                MouseArea {
+                    id: tagTopMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: root.filterTag !== "ALL" ?
+                        ("Active Tag Filter: " + root.filterTag + "\nClick to reset tag filter.") :
+                        ("🏷️ " + root.uniqueTagsCount + " unique tags across " + root.taggedItemsCount + " work items.\nClick to filter to tagged items.")
+                    onClicked: {
+                        if (root.filterTag !== "ALL") {
+                            root.filterTag = "ALL";
+                            if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
+                                wiTagCombo.currentIndex = 0;
+                                wiTagCombo.editText = "";
+                            }
+                        } else {
+                            root.filterTag = "TAGGED";
+                            if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
+                                wiTagCombo.editText = "TAGGED";
+                            }
+                        }
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+                }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Text {
+                        id: tagTopText
+                        text: (root.filterTag !== "ALL" && root.filterTag !== "TAGGED") ?
+                            ("🏷️ Tag: " + root.filterTag) :
+                            ("🏷️ " + root.uniqueTagsCount + " Tags (" + root.taggedItemsCount + ")")
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 11
+                        font.weight: (root.filterTag !== "ALL") ? Font.Bold : Font.Normal
+                        color: (root.filterTag !== "ALL") ? "#58a6ff" : "#8b949e"
                     }
                 }
             }
@@ -1039,7 +1119,85 @@ Item {
 
             Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            // 🚨 Overdue Deadlines Only Toggle (positioned right next to Milestone)
+            // Tag Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Tag:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wiTagCombo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    editable: true
+                    model: root.tagsList
+                    editText: root.filterTag === "ALL" ? "" : root.filterTag
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterTag = (val === "" ? "ALL" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    onActivated: function(index) {
+                        var val = root.tagsList[index] || "ALL";
+                        root.filterTag = val;
+                        editText = (val === "ALL" ? "" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wiTagCombo.hovered || wiTagCombo.activeFocus ? "#58a6ff" : (root.filterTag !== "ALL" ? "#58a6ff" : "#30363d")
+                    }
+
+                    contentItem: TextField {
+                        leftPadding: 8
+                        rightPadding: (root.filterTag !== "ALL") ? 32 : 24
+                        text: wiTagCombo.editText
+                        placeholderText: "Type or select tag..."
+                        placeholderTextColor: "#484f58"
+                        font: wiTagCombo.font
+                        color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wiTagCombo.editText) {
+                                wiTagCombo.editText = text;
+                            }
+                        }
+                    }
+                }
+
+                // Clear Tag filter button
+                Button {
+                    visible: root.filterTag !== "ALL" && root.filterTag !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterTag = "ALL";
+                        wiTagCombo.currentIndex = 0;
+                        wiTagCombo.editText = "";
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // 🚨 Overdue Deadlines Only Toggle (positioned right next to Tag)
             Button {
                 text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
                 checkable: true
@@ -1220,7 +1378,7 @@ Item {
                 property int expandedHeight: {
                     var prs = model.linked_prs || []
                     var repos = model.linked_repos || []
-                    return Math.max(48, 40 + prs.length * 20 + repos.length * 18 + 32)
+                    return Math.max(90, 80 + prs.length * 20 + repos.length * 18 + 32)
                 }
 
                 Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -1394,6 +1552,97 @@ Item {
                                 }
                             }
 
+                            // Tag Badges in Main Row (First 2-3 tags)
+                            Repeater {
+                                model: {
+                                    var list = [];
+                                    if (model.tag_list && model.tag_list.length > 0) {
+                                        list = model.tag_list;
+                                    } else if (model.tags && model.tags.trim() !== "") {
+                                        list = model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                                    }
+                                    return list.slice(0, 3);
+                                }
+
+                                Rectangle {
+                                    implicitHeight: 18
+                                    implicitWidth: rowTagLayout.implicitWidth + 8
+                                    radius: 4
+                                    property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
+                                    color: rowTagMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#241700" : "#16202c")
+                                    border.color: isTarget ? "#d29922" : "#388bfd"
+                                    border.width: 1
+
+                                    RowLayout {
+                                        id: rowTagLayout
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        Text { text: isTarget ? "🎯" : "🏷️"; font.pixelSize: 8 }
+                                        Text {
+                                            id: rowTagText
+                                            text: modelData
+                                            font.pixelSize: 9
+                                            font.weight: isTarget ? Font.Bold : Font.Normal
+                                            color: isTarget ? "#f0883e" : "#58a6ff"
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+
+                                    ToolTip.visible: rowTagMa.containsMouse
+                                    ToolTip.text: "Tag: " + modelData + "\nClick to filter by this tag"
+
+                                    MouseArea {
+                                        id: rowTagMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.filterTag = modelData;
+                                            if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
+                                                wiTagCombo.editText = modelData;
+                                            }
+                                            root.currentPage = 1;
+                                            root.updateFilteredModel();
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Extra Tags "+N" Counter Chip if > 3 tags
+                            Rectangle {
+                                property int totalTags: {
+                                    if (model.tag_list && model.tag_list.length > 0) return model.tag_list.length;
+                                    if (model.tags && model.tags.trim() !== "") return model.tags.split(";").filter(function(t){ return t.trim().length > 0; }).length;
+                                    return 0;
+                                }
+                                visible: totalTags > 3
+                                implicitHeight: 18
+                                implicitWidth: extraTagText.implicitWidth + 8
+                                radius: 4
+                                color: "#21262d"
+                                border.color: "#30363d"
+                                border.width: 1
+
+                                Text {
+                                    id: extraTagText
+                                    anchors.centerIn: parent
+                                    text: "+" + (parent.totalTags - 3)
+                                    font.pixelSize: 9
+                                    color: "#8b949e"
+                                }
+
+                                ToolTip.visible: extraTagMa.containsMouse
+                                ToolTip.text: "Tags: " + (model.tags || "") + "\nClick to expand details"
+
+                                MouseArea {
+                                    id: extraTagMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: expanded = !expanded
+                                }
+                            }
+
                             Text {
                                 Layout.fillWidth: true
                                 text: model.title
@@ -1513,7 +1762,7 @@ Item {
                         }
                     }
 
-                    // ---- Expanded References Panel ----
+                    // ---- Expanded References & Details Panel ----
                     Rectangle {
                         id: expandPanel
                         anchors.top: mainRow.bottom
@@ -1592,6 +1841,102 @@ Item {
                                             font.family: "Consolas, monospace"
                                             font.pixelSize: 11
                                             color: "#c9d1d9"
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Interactive Tags Metadata Bar
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: Math.max(28, tagChipsFlow.implicitHeight + 8)
+                                color: "#161b22"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    anchors.topMargin: 3
+                                    anchors.bottomMargin: 3
+                                    spacing: 8
+
+                                    Text {
+                                        text: "🏷️ Tags:"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#8b949e"
+                                        Layout.alignment: Qt.AlignVCenter
+                                    }
+
+                                    Flow {
+                                        id: tagChipsFlow
+                                        Layout.fillWidth: true
+                                        spacing: 5
+
+                                        Repeater {
+                                            model: {
+                                                if (model.tag_list && model.tag_list.length > 0) {
+                                                    return model.tag_list;
+                                                } else if (model.tags && model.tags.trim() !== "") {
+                                                    return model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                                                }
+                                                return [];
+                                            }
+
+                                            Rectangle {
+                                                height: 20
+                                                implicitWidth: chipRow.implicitWidth + 10
+                                                radius: 10
+                                                property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
+                                                color: chipMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#201804" : "#16202c")
+                                                border.color: isTarget ? "#d29922" : "#388bfd"
+                                                border.width: 1
+
+                                                RowLayout {
+                                                    id: chipRow
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+                                                    Text { text: isTarget ? "🎯" : "🏷️"; font.pixelSize: 9 }
+                                                    Text {
+                                                        text: modelData
+                                                        font.pixelSize: 10
+                                                        font.weight: isTarget ? Font.Bold : Font.Normal
+                                                        color: isTarget ? "#f0883e" : "#58a6ff"
+                                                    }
+                                                }
+
+                                                ToolTip.visible: chipMa.containsMouse
+                                                ToolTip.text: isTarget ?
+                                                    ("Target Milestone Tag: " + modelData + "\nClick to filter work items by this tag") :
+                                                    ("Tag: " + modelData + "\nClick to filter work items by this tag")
+
+                                                MouseArea {
+                                                    id: chipMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        root.filterTag = modelData;
+                                                        if (typeof wiTagCombo !== "undefined" && wiTagCombo) {
+                                                            wiTagCombo.editText = modelData;
+                                                        }
+                                                        root.currentPage = 1;
+                                                        root.updateFilteredModel();
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            visible: (!model.tag_list || model.tag_list.length === 0) && (!model.tags || model.tags.trim() === "")
+                                            text: "No tags assigned"
+                                            font.pixelSize: 11
+                                            font.italic: true
+                                            color: "#484f58"
+                                            anchors.verticalCenter: parent.verticalCenter
                                         }
                                     }
                                 }
@@ -1684,6 +2029,7 @@ Item {
                                                 text: modelData
                                                 font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 9
+                                                font.weight: Font.DemiBold
                                                 color: "#7ee787"
                                             }
                                         }
@@ -1784,6 +2130,7 @@ Item {
                 (item.level1_display || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.level2_display || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.prio_tag || "").toLowerCase().indexOf(q) !== -1 ||
+                (item.tags || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.effective_milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.milestone_category || "").toLowerCase().indexOf(q) !== -1
@@ -1893,14 +2240,39 @@ Item {
             } else if (root.filterMilestone === "UNPLANNED" || root.filterMilestone === "NO_MILESTONE") {
                 matchesMilestone = !item.has_milestone
             } else {
-                var targetM = root.filterMilestone.toLowerCase()
+                var targetM = root.filterMilestone.toLowerCase().trim()
                 var mName = (item.milestone_name || "").toLowerCase()
                 var effMName = (item.effective_milestone_name || "").toLowerCase()
                 var mCat = (item.milestone_category || "").toLowerCase()
-                matchesMilestone = (mName === targetM || effMName === targetM || mName.indexOf(targetM) !== -1 || effMName.indexOf(targetM) !== -1 || mCat.indexOf(targetM) !== -1)
+                var targetTags = (item.target_tags || []).map(function(t) { return (t || "").toLowerCase(); })
+                var rawTags = (item.tags || "").toLowerCase()
+                matchesMilestone = (
+                    mName === targetM ||
+                    effMName === targetM ||
+                    mName.indexOf(targetM) !== -1 ||
+                    effMName.indexOf(targetM) !== -1 ||
+                    mCat.indexOf(targetM) !== -1 ||
+                    targetTags.indexOf(targetM) !== -1 ||
+                    targetTags.some(function(t) { return t.indexOf(targetM) !== -1; }) ||
+                    rawTags.indexOf("target:" + targetM) !== -1
+                )
             }
 
-            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone) {
+            var matchesTag = true
+            if (root.filterTag === "ALL") {
+                matchesTag = true
+            } else if (root.filterTag === "TAGGED") {
+                matchesTag = (item.tag_list && item.tag_list.length > 0) || (item.tags && item.tags.trim() !== "")
+            } else if (root.filterTag === "UNTAGGED") {
+                matchesTag = (!item.tag_list || item.tag_list.length === 0) && (!item.tags || item.tags.trim() === "")
+            } else {
+                var targetTag = root.filterTag.toLowerCase().trim()
+                var rawT = (item.tags || "").toLowerCase()
+                var tList = (item.tag_list || []).map(function(x) { return (x || "").toLowerCase(); })
+                matchesTag = tList.indexOf(targetTag) !== -1 || tList.some(function(t) { return t.indexOf(targetTag) !== -1; }) || rawT.indexOf(targetTag) !== -1
+            }
+
+            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone && matchesTag) {
                 matched.push(item)
             }
         }
@@ -1947,6 +2319,9 @@ Item {
                 days_diff: wi.days_diff !== undefined && wi.days_diff !== null ? wi.days_diff : 0,
                 deleted: !!wi.deleted,
                 tfs_url: wi.tfs_url || "",
+                tags: wi.tags || "",
+                tag_list: wi.tag_list || [],
+                target_tags: wi.target_tags || [],
                 level: wi.level || 4,
                 level1_id: wi.level1_id || 0,
                 level1_display: wi.level1_display || "",
@@ -1986,6 +2361,7 @@ Item {
             root.refreshIterationsList()
             root.refreshHierarchyLists()
             root.refreshMilestonesList()
+            root.refreshTagsList()
             root.updateFilteredModel()
         }
         function onMilestonesChanged() {
@@ -2006,6 +2382,7 @@ Item {
     onFilterPriorityChanged:  updateFilteredModel()
     onFilterGroupingChanged:  updateFilteredModel()
     onFilterMilestoneChanged: updateFilteredModel()
+    onFilterTagChanged:       updateFilteredModel()
 
     DeadlineEditorDialog {
         id: deadlineDialog
@@ -2028,6 +2405,7 @@ Item {
         refreshIterationsList()
         refreshHierarchyLists()
         refreshMilestonesList()
+        refreshTagsList()
         updateFilteredModel()
     }
 }

@@ -542,6 +542,51 @@ class DevOpsBackend(QObject):
 
         return sorted(seen, key=sort_key)
 
+    @Property(list, notify=workItemsChanged)
+    def workItemTags(self):
+        """Returns the sorted unique list of all tags currently present on work items in cache."""
+        seen = set()
+        for wi in self._work_items:
+            for t in wi.get("tag_list") or []:
+                if t:
+                    seen.add(t)
+        return sorted(seen, key=lambda s: s.lower())
+
+    @Property(list, notify=workItemsChanged)
+    def workItemTargetTags(self):
+        """Returns the sorted unique list of Target:<Name> milestone tags present on work items."""
+        seen = set()
+        for wi in self._work_items:
+            for t in wi.get("target_tags") or []:
+                if t:
+                    seen.add(t)
+        return sorted(seen, key=lambda s: s.lower())
+
+    @Property(dict, notify=workItemsChanged)
+    def workItemTagCounts(self):
+        """Returns a dict mapping tag name -> count of work items having that tag."""
+        counts = {}
+        for wi in self._work_items:
+            for t in wi.get("tag_list") or []:
+                if t:
+                    counts[t] = counts.get(t, 0) + 1
+        return counts
+
+    @Slot(result=list)
+    def get_work_item_tags_summary(self):
+        """Returns structured list of unique tags with item counts and Target milestone indicator."""
+        counts = self.workItemTagCounts
+        results = []
+        for tag, count in counts.items():
+            is_target = tag.lower().startswith("target:")
+            results.append({
+                "tag": tag,
+                "count": count,
+                "is_target": is_target,
+                "target_short_name": tag.split(":", 1)[1].strip() if is_target else ""
+            })
+        return sorted(results, key=lambda x: (-x["count"], x["tag"].lower()))
+
     @Property(list, notify=milestonesChanged)
     def workItemMilestones(self):
         """Returns the sorted list of unique milestone names from configured milestones and work items."""
@@ -558,6 +603,9 @@ class DevOpsBackend(QObject):
             m_name = (wi.get("milestone_name") or wi.get("effective_milestone_name") or "").strip()
             if m_name:
                 seen.add(m_name)
+            for tt in wi.get("target_tags") or []:
+                if tt:
+                    seen.add(tt)
         return sorted(seen)
 
     @Property(list, notify=workItemsChanged)
@@ -1041,6 +1089,11 @@ class DevOpsBackend(QObject):
                     target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
 
                 raw_tags = raw_fields.get("System.Tags") or raw_fields.get("Tags") or wi.get("tags") or ""
+                if isinstance(raw_tags, list):
+                    tag_list = [str(t).strip() for t in raw_tags if str(t).strip()]
+                    raw_tags = "; ".join(tag_list)
+                else:
+                    tag_list = [t.strip() for t in re.split(r'[;,]', str(raw_tags)) if t.strip()]
                 target_tags = utils.extract_target_milestone_tags(raw_tags)
 
                 # Parent ID extraction
@@ -1114,6 +1167,7 @@ class DevOpsBackend(QObject):
                     "assigned_to": assigned_val,
                     "parent_id": parent_id,
                     "tags": raw_tags,
+                    "tag_list": tag_list,
                     "target_tags": target_tags,
                     "changed_date": wi.get("changed_date") or "",
                     "iteration_path": iter_path,
@@ -1685,7 +1739,16 @@ class DevOpsBackend(QObject):
                         continue
                 else:
                     target_m = f_m_raw.lower()
-                    if (target_m not in m_name.lower()) and (target_m not in m_cat.lower()):
+                    target_tags_lower = [t.lower() for t in (wi.get("target_tags") or [])]
+                    raw_tags_lower = (wi.get("tags") or "").lower()
+                    matches_m = (
+                        (target_m in m_name.lower())
+                        or (target_m in m_cat.lower())
+                        or any(target_m in tt for tt in target_tags_lower)
+                        or (f"target:{target_m}" in raw_tags_lower)
+                        or (target_m in raw_tags_lower)
+                    )
+                    if not matches_m:
                         continue
 
             assignee = (wi.get("assigned_to") or "Unassigned").strip()
@@ -1698,6 +1761,7 @@ class DevOpsBackend(QObject):
                     or sq_raw in str(wi.get("id") or "")
                     or sq_raw in (wi.get("type") or "").lower()
                     or sq_raw in (wi.get("prio_tag") or "").lower()
+                    or sq_raw in (wi.get("tags") or "").lower()
                     or sq_raw in m_name.lower()
                     or sq_raw in m_cat.lower()
                 )
@@ -1738,6 +1802,9 @@ class DevOpsBackend(QObject):
                 "milestone_color": matched_m.get("category_color", "") if matched_m else "",
                 "milestone_bg": matched_m.get("category_bg_color", "") if matched_m else "",
                 "milestone_category": matched_m.get("category_name", "") if matched_m else "",
+                "tags": wi.get("tags", ""),
+                "tag_list": wi.get("tag_list", []),
+                "target_tags": wi.get("target_tags", []),
                 "urgency_status": wi.get("urgency_status", "none"),
                 "urgency_badge": wi.get("urgency_badge", "—"),
                 "urgency_color": wi.get("urgency_color", "#8b949e"),
