@@ -1061,3 +1061,25 @@ def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
     return None
 
 
+def normalize_pr_status(status_val) -> str:
+    """
+    Normalizes pull request status values from TFS / Azure DevOps REST API (ints or strings)
+    into standard canonical lowercase strings: 'active', 'completed', 'abandoned', or 'unknown'.
+
+    TFS / Azure DevOps API values:
+      - 1 / "1" / "active" / "open" / "in_progress" -> "active"
+      - 2 / "2" / "abandoned" / "rejected" / "canceled" / "cancelled" / "declined" -> "abandoned"
+      - 3 / "3" / "completed" / "closed" / "done" / "merged" -> "completed"
+    """
+    if status_val is None:
+        return "unknown"
+    s = str(status_val).strip().lower()
+    if s in ("3", "completed", "closed", "done", "merged"):
+        return "completed"
+    elif s in ("1", "active", "open", "in_progress", "in progress"):
+        return "active"
+    elif s in ("2", "abandoned", "rejected", "canceled", "cancelled", "declined"):
+        return "abandoned"
+    return s or "unknown"
+
+

@@ -194,6 +194,102 @@ class TestPullRequestsViewData(unittest.TestCase):
         active_pr = next(p for p in (dev_prs + stable_prs) if p["pullRequestId"] == 5002)
         self.assertTrue(active_pr["statusStr"].startswith("OPN"))
 
+    def test_normalize_pr_status(self):
+        """Tests that normalize_pr_status handles all TFS integer and string variations."""
+        from utils import normalize_pr_status
+        self.assertEqual(normalize_pr_status(1), "active")
+        self.assertEqual(normalize_pr_status("1"), "active")
+        self.assertEqual(normalize_pr_status("active"), "active")
+        self.assertEqual(normalize_pr_status("Active"), "active")
+        self.assertEqual(normalize_pr_status("open"), "active")
+
+        self.assertEqual(normalize_pr_status(3), "completed")
+        self.assertEqual(normalize_pr_status("3"), "completed")
+        self.assertEqual(normalize_pr_status("completed"), "completed")
+        self.assertEqual(normalize_pr_status("Completed"), "completed")
+        self.assertEqual(normalize_pr_status("closed"), "completed")
+        self.assertEqual(normalize_pr_status("merged"), "completed")
+
+        self.assertEqual(normalize_pr_status(2), "abandoned")
+        self.assertEqual(normalize_pr_status("2"), "abandoned")
+        self.assertEqual(normalize_pr_status("abandoned"), "abandoned")
+        self.assertEqual(normalize_pr_status("Abandoned"), "abandoned")
+        self.assertEqual(normalize_pr_status("rejected"), "abandoned")
+        self.assertEqual(normalize_pr_status(None), "unknown")
+
+    def test_active_pr_reconciled_when_closed_in_tfs(self):
+        """
+        Tests that when a PR was cached as active in the local DB,
+        and subsequently closed or abandoned in TFS, syncing updates
+        its state to 'completed' / 'abandoned' in both the DB and UI backend.
+        """
+        # 1. Setup DB cache with a repository and an active PR
+        db_fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(db_fd)
+        try:
+            cache_db = AzureDevOpsCache(db_path)
+            repo = {"id": "repo-100", "name": "core-engine"}
+            cache_db.save_repository("proj-1", repo, last_push_id=1234)
+
+            # Initially active PR in DB
+            initial_active_pr = {
+                "pullRequestId": 9001,
+                "title": "Add Turbo Engine",
+                "status": "active",
+                "targetRefName": "refs/heads/dev",
+                "sourceRefName": "refs/heads/feature-turbo",
+                "createdBy": {"displayName": "Alice"},
+                "creationDateStr": "2026-09-01 10:00:00",
+                "closedDateStr": "",
+                "statusStr": "OPN 2026-09-01 10:00:00",
+                "repository": {"id": "repo-100"}
+            }
+            cache_db.save_pull_requests("repo-100", [initial_active_pr])
+
+            # Verify it is recorded as active
+            active_prs_before = cache_db.get_active_pull_requests("repo-100")
+            self.assertEqual(len(active_prs_before), 1)
+            self.assertEqual(active_prs_before[0]["status"], "active")
+
+            # 2. Mock TFS handler where PR 9001 is now COMPLETED in TFS
+            handler = AzureInfoHandler("https://tfs.company.com/tfs/DefaultCollection", "dummy_pat")
+            handler.get_pushes = MagicMock(return_value=[{"pushId": 1234}])  # Push ID unchanged
+            handler.get_pull_requests = MagicMock(return_value=[])  # No more active PRs in TFS
+            handler.get_pull_request = MagicMock(return_value={
+                "pullRequestId": 9001,
+                "title": "Add Turbo Engine",
+                "status": "completed",  # Closed in TFS!
+                "targetRefName": "refs/heads/dev",
+                "sourceRefName": "refs/heads/feature-turbo",
+                "createdBy": {"displayName": "Alice"},
+                "closedBy": {"displayName": "Bob Reviewer"},
+                "creationDate": "2026-09-01T10:00:00Z",
+                "closedDate": "2026-09-08T14:30:00Z",
+                "repository": {"id": "repo-100"}
+            })
+
+            # 3. Trigger Delta Sync / PR status sync
+            cached_repo, push_id = handler._get_cached_repo_if_up_to_date("proj-1", repo, cache_db)
+
+            # 4. Verify that PR was updated in SQLite
+            active_prs_after = cache_db.get_active_pull_requests("repo-100")
+            self.assertEqual(len(active_prs_after), 0, "PR should no longer be active in DB")
+
+            all_prs = cache_db.get_all_prs()
+            self.assertEqual(len(all_prs), 1)
+            self.assertEqual(all_prs[0]["status"], "completed")
+            self.assertEqual(all_prs[0]["closed_by"], "Bob Reviewer")
+            self.assertTrue(all_prs[0]["status_str"].startswith("DON"))
+
+            # 5. Verify sync_pull_requests direct method works
+            summary = handler.sync_pull_requests(cache_db, project_id="proj-1")
+            self.assertIn("synced", summary)
+            self.assertEqual(summary["errors"], 0)
+
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
 
 if __name__ == "__main__":
     unittest.main()

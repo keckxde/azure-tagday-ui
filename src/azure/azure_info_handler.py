@@ -489,6 +489,42 @@ class AzureInfoHandler(AzureBaseClient):
                 if remote_push_id is not None and remote_push_id == cached_push_id:
                     cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                     if cached_repo:
+                        # Check if any active PRs in DB for this repo have changed status in TFS
+                        active_db_prs = cache_db.get_active_pull_requests(repo_id)
+                        if active_db_prs:
+                            try:
+                                live_active = self.get_pull_requests(project_id, repo_id, status="active")
+                                live_active_ids = {str(p.get("pullRequestId") or p.get("id")) for p in live_active}
+                                from utils import normalize_pr_status
+                                has_status_changes = False
+                                for db_pr in active_db_prs:
+                                    pr_id_str = str(db_pr.get("id"))
+                                    if pr_id_str not in live_active_ids:
+                                        # PR was closed/completed/abandoned! Fetch updated details
+                                        try:
+                                            updated_pr = self.get_pull_request(pr_id_str)
+                                            if updated_pr:
+                                                updated_pr["closedDateStr"] = UpdateDateString(updated_pr.get("closedDate"))
+                                                updated_pr["creationDateStr"] = UpdateDateString(updated_pr.get("creationDate"))
+                                                st_norm = normalize_pr_status(updated_pr.get("status"))
+                                                updated_pr["status"] = st_norm
+                                                if st_norm == "completed":
+                                                    updated_pr["statusStr"] = f"DON {updated_pr['closedDateStr']}"
+                                                elif st_norm == "abandoned":
+                                                    updated_pr["statusStr"] = f"ABANDONED {updated_pr['closedDateStr']}"
+                                                else:
+                                                    updated_pr["statusStr"] = f"OPN {updated_pr['creationDateStr']}"
+                                                cache_db.save_single_pull_request(updated_pr)
+                                                has_status_changes = True
+                                                logger.info("  -- PR #%s in %s status updated: %s", pr_id_str, repo_name, st_norm)
+                                        except Exception as ex:
+                                            logger.warning("Could not refresh closed PR #%s: %s", pr_id_str, ex)
+                                
+                                if has_status_changes:
+                                    cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
+                            except Exception as e:
+                                logger.warning("  -- Failed to check active PRs for %s during delta sync: %s", repo_name, e)
+
                         logger.info("  -- Repo %s is up to date (Push ID: %s). Skipping remote query.", repo_name, remote_push_id)
                         return cached_repo, remote_push_id
                 return None, remote_push_id
@@ -528,119 +564,79 @@ class AzureInfoHandler(AzureBaseClient):
                 default_branch = repo["defaultBranch"].replace("refs/heads/", "")
                 if branch["FriendlyName"] != default_branch:
                     try:
-                        branch["Stats"] = self.get_branch_stats(project_id, repo_id, branch['FriendlyName'])
-                    except Exception:
-                        branch["Stats"] = {"aheadCount": -1, "behindCount": -1}
+                        diff = self.get_diff(project_id, repo_id, default_branch, branch['FriendlyName'])
+                        branch["Ahead"] = diff.get("aheadCount", 0)
+                        branch["Behind"] = diff.get("behindCount", 0)
+                    except Exception as e:
+                        logger.error("Error getting diff for branch %s against %s: %s", branch['FriendlyName'], default_branch, e)
+                        branch["Ahead"] = 0
+                        branch["Behind"] = 0
+                else:
+                    branch["Ahead"] = 0
+                    branch["Behind"] = 0
+            else:
+                branch["Ahead"] = 0
+                branch["Behind"] = 0
 
-            last_commit_raw_date = repo.get("LastCommitRawDate")
-            commit_date_obj = branch["CommitDateObj"]
-            if commit_date_obj and (not last_commit_raw_date or commit_date_obj > last_commit_raw_date):
-                repo["LastCommitRawDate"] = commit_date_obj
-                repo["LatestCommit"] = branch["CommitId"]
-                repo["CommitDate"] = branch["CommitDate"]
-                repo["Committer"] = branch["Committer"]
-                repo["Comment"] = branch["Comment"]
-
-        branches.sort(key=lambda x: x.get("CommitDate", ""))
         return b_we_have_dev_branch
 
-    def _process_tags(self, project_id, repo, filter_version_tags_format=True):
-        """Filters tags, extracts annotated tag information, and returns stable/unstable lists."""
+    def _process_tags(self, project_id, repo, filter_version_tags_format):
+        """Processes repository tags, annotated tag details, and determines stable/unstable tags."""
         tags_filtered = []
         last_stable_tag = ""
         last_unstable_tag = ""
         repo_id = repo["id"]
+        repo_name = repo.get("name", "")
 
         tags = []
         try:
             tags = self.get_repository_refs(project_id, repo_id, "tags/")
         except Exception as e:
-            logger.error("Error fetching tags for %s: %s", repo["name"], e)
-            return
+            logger.error("Error fetching tags for %s: %s", repo_name, e)
 
         for tag in tags:
             tag["FriendlyName"] = tag.get("name", "").replace("refs/tags/", "")
-            if filter_version_tags_format and not tag["FriendlyName"].startswith("v"):
-                logger.debug("  -- Ignore Tag %s -> missing 'v'", tag['name'])
-                continue
 
-            version_parts = tag["FriendlyName"].split(".")
-            if filter_version_tags_format and len(version_parts) < 3:
-                logger.debug("  -- Ignore Tag %s -> wrong version number %d", tag['FriendlyName'], len(version_parts))
-                continue
-
-            if filter_version_tags_format and len(version_parts[1]) < 2:
-                logger.debug("  -- Ignore Tag %s -> wrong MINOR version number %s", tag['FriendlyName'], version_parts[1])
-                continue
-
-            if len(version_parts) == 3:
+            if filter_version_tags_format:
                 try:
-                    major, minor, patch = parse_semver_tuple(tag["FriendlyName"])
-                    tag["FriendlyName"] = f"v{major:02d}.{minor:02d}.{patch:04d}"
+                    is_valid, _ = check_tag_format(tag["FriendlyName"])
+                    if not is_valid:
+                        continue
+                except ValueError:
+                    continue
 
-                    # todo: Try to understand if we can get the information here to see to which branch a Tag / Tagged Commit actually belongs
-                    # then we can get rid of the declaration with even/uneven numbers for the minor versions
-                    if minor % 2:
+                try:
+                    if check_tag_unstable(tag["FriendlyName"]):
                         tag["unstable"] = True
-                        tag["stable"] = False
                         if not last_unstable_tag or tag["FriendlyName"] > last_unstable_tag:
                             last_unstable_tag = tag["FriendlyName"]
-                    else:
-                        tag["unstable"] = False
+                    elif check_tag_stable(tag["FriendlyName"]):
                         tag["stable"] = True
                         if not last_stable_tag or tag["FriendlyName"] > last_stable_tag:
                             last_stable_tag = tag["FriendlyName"]
                 except ValueError:
                     pass
 
-            try:
-                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag['objectId'])
-                if tag["addinfo"]:
-                    try:
-                        tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
-                    except Exception:
-                        logger.warning("Ignore error - cannot work with taggedObject %s, %s", repo_id, tag['objectId'])
-            except Exception:
-                tag["addinfo"] = None
-
-            if tag.get("CommitId") and tag.get("addinfo"):
-                try:
-                    date_str = tag["addinfo"]["taggedBy"]["date"]
-                    tag_date_obj = parse_iso_datetime(date_str)
-                    if tag_date_obj:
-                        tag_date_obj = tag_date_obj + timedelta(hours=1)
-                        tag["CommitDateObj"] = tag_date_obj
-                        tag["CommitDate"] = UpdateDateString(tag_date_obj)
-                    tag["Committer"] = tag["addinfo"]["taggedBy"]["name"]
-                    tag["CommentComplete"] = tag["addinfo"].get("message", "").replace("\n", " ")
-                    if len(tag["CommentComplete"]) > 50:
-                        tag["Comment"] = tag["CommentComplete"][:46] + "..."
-                    else:
-                        tag["Comment"] = tag["CommentComplete"]
-                except Exception as e:
-                    logger.error("Error parsing annotated tag info for %s: %s", tag['FriendlyName'], e)
-
-            tags_filtered.append(tag)
-
-        tags_filtered.reverse()
-        tags_filtered = tags_filtered[:10]
-
-        if tags_filtered:
-            repo["LatestTag"] = tags_filtered[0]
-        else:
-            repo["LatestTag"] = {"FriendlyName": "", "CommitDate": ""}
-
-        return tags_filtered, last_stable_tag, last_unstable_tag
-
-    def _process_pushes_and_prs(self, project_id, repo):
-        """Scans push events to find all Pull Requests merged since the latest tag."""
+    def _process_pushes_and_prs(self, project_id, repo, cache_db=None):
+        """Scans push events and fetches all active and merged Pull Requests."""
         dev_prs = []
         stable_prs = []
         repo_id = repo["id"]
         repo_name = repo.get("name", "")
         prs_list = []
-#        latest_tag_date = repo["LatestTag"].get("CommitDateObj")
 
+        # 1. If database cache is available, re-check any PRs currently recorded as active
+        if cache_db is not None:
+            try:
+                active_db_prs = cache_db.get_active_pull_requests(repo_id)
+                for db_pr in active_db_prs:
+                    p_id_str = str(db_pr.get("id"))
+                    if p_id_str and p_id_str not in prs_list:
+                        prs_list.append(p_id_str)
+            except Exception as e:
+                logger.debug("Could not query active PRs from DB for %s: %s", repo_name, e)
+
+        # 2. Scan push details for merged PRs
         pushes = []
         try:
             pushes = self.get_pushes(project_id, repo_id)
@@ -649,8 +645,6 @@ class AzureInfoHandler(AzureBaseClient):
 
         for push_meta in pushes:
             try:
-                #push_date = parse_iso_datetime(push_meta.get("date"))
-                #if latest_tag_date and push_date and push_date > latest_tag_date:
                 push_detail = self.get_push_detail(project_id, repo_id, push_meta['pushId'])
                 ref_updates = push_detail.get("refUpdates", [])
                 for ref_up in ref_updates:
@@ -662,7 +656,7 @@ class AzureInfoHandler(AzureBaseClient):
             except Exception as e:
                 logger.error("Error retrieving push detail for %s: %s", repo_name, e)
 
-        # Also fetch all PRs that have not been closed yet (active PRs)
+        # 3. Also fetch all PRs that have not been closed yet (active PRs)
         try:
             active_prs = self.get_pull_requests(project_id, repo_id, status="active")
             for a_pr in active_prs:
@@ -672,6 +666,7 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as e:
             logger.error("Error fetching active pull requests for %s: %s", repo_name, e)
 
+        from utils import normalize_pr_status
         for pr_id in prs_list:
             try:
                 pr = self.get_pull_request(pr_id)
@@ -679,23 +674,69 @@ class AzureInfoHandler(AzureBaseClient):
                 pr["creationDateStr"] = UpdateDateString(pr.get("creationDate"))
 
                 status_val = pr.get("status")
-                status_str = str(status_val).lower()
-                if status_str in ("1", "active"):
+                norm_status = normalize_pr_status(status_val)
+                pr["status"] = norm_status
+                if norm_status == "active":
                     pr["statusStr"] = f"OPN {pr['creationDateStr']}"
-                elif status_str in ("3", "completed"):
+                elif norm_status == "completed":
                     pr["statusStr"] = f"DON {pr['closedDateStr']}"
+                elif norm_status == "abandoned":
+                    pr["statusStr"] = f"ABANDONED {pr['closedDateStr']}"
                 else:
                     pr["statusStr"] = f"REJECTED {pr['closedDateStr']}"
 
-                if status_str in ("1", "3", "active", "completed"):
-                    if "dev" in pr.get("targetRefName", ""):
-                        dev_prs.append(pr)
-                    else:
-                        stable_prs.append(pr)
+                if "dev" in pr.get("targetRefName", ""):
+                    dev_prs.append(pr)
+                else:
+                    stable_prs.append(pr)
             except Exception as e:
                 logger.error("Error fetching PR %s details: %s", pr_id, e)
 
         return dev_prs, stable_prs
+
+    def sync_pull_requests(self, cache_db, project_id=None, filter_repos=""):
+        """
+        Directly synchronizes pull request states between TFS and SQLite database.
+        Refreshes all PRs currently recorded as active to detect if they were closed/abandoned in TFS,
+        and discovers any new active PRs across all enabled repositories.
+        """
+        if not cache_db:
+            return {"synced": 0, "updated": 0, "errors": 0}
+        
+        proj = project_id or getattr(self, "project_id", "")
+        summary = {"synced": 0, "updated": 0, "errors": 0}
+        
+        # 1. Re-check all PRs currently stored in SQLite as active
+        active_db_prs = cache_db.get_active_pull_requests()
+        from utils import normalize_pr_status
+        for db_pr in active_db_prs:
+            pr_id = str(db_pr.get("id"))
+            try:
+                live_pr = self.get_pull_request(pr_id)
+                if live_pr:
+                    live_pr["closedDateStr"] = UpdateDateString(live_pr.get("closedDate"))
+                    live_pr["creationDateStr"] = UpdateDateString(live_pr.get("creationDate"))
+                    st_norm = normalize_pr_status(live_pr.get("status"))
+                    live_pr["status"] = st_norm
+                    if st_norm == "completed":
+                        live_pr["statusStr"] = f"DON {live_pr['closedDateStr']}"
+                    elif st_norm == "abandoned":
+                        live_pr["statusStr"] = f"ABANDONED {live_pr['closedDateStr']}"
+                    else:
+                        live_pr["statusStr"] = f"OPN {live_pr['creationDateStr']}"
+                    
+                    old_st = normalize_pr_status(db_pr.get("status"))
+                    if old_st != st_norm:
+                        logger.info("PR #%s status changed: %s -> %s", pr_id, old_st, st_norm)
+                        summary["updated"] += 1
+                    
+                    cache_db.save_single_pull_request(live_pr)
+                    summary["synced"] += 1
+            except Exception as e:
+                logger.warning("Could not sync status for active PR #%s: %s", pr_id, e)
+                summary["errors"] += 1
+        
+        return summary
 
     def GetTFSRepositories(self, project_id, filter_version_tags_format=False, filter_repos="", cache_db=None):
         """
@@ -754,7 +795,7 @@ class AzureInfoHandler(AzureBaseClient):
             )
 
             # Load pushes and PRs (including active unclosed PRs)
-            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo)
+            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo, cache_db=cache_db)
 
             result[repo_name] = {
                 "info": repo,

@@ -1254,7 +1254,7 @@ class DevOpsBackend(QObject):
 
                 title = pr.get("title") or ""
                 description = raw_dict.get("description") or ""
-                status = (pr.get("status") or raw_dict.get("status") or "unknown").lower()
+                status = utils.normalize_pr_status(pr.get("status") or raw_dict.get("status") or "unknown")
 
                 web_url = f"{base_url}/{collection}/{project_id}/_git/{rname}/pullrequest/{pr_id}" if base_url else ""
                 tasks = self._extract_pr_tasks(pr)
@@ -1321,9 +1321,9 @@ class DevOpsBackend(QObject):
                 "prs_open_count": prs_open_count,
                 "prs_completed_count": prs_completed_count,
                 "prs_abandoned_count": prs_abandoned_count,
-                "last_synced": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
-                "project_name": devops_helper.AZURE_PROJECT_ID or "N/A",
-                "db_path": self._db_path,
+                "project_name": devops_helper.AZURE_PROJECT_ID or self._stats.get("project_name", "TFS Project"),
+                "db_path": self._db_path or "tfs_cache.db",
+                "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
             }
             self.statsChanged.emit()
 
@@ -1353,6 +1353,28 @@ class DevOpsBackend(QObject):
             return summary
 
         self._run_worker(_work, "Syncing work items...")
+
+    @Slot()
+    def sync_pull_requests_async(self):
+        """Directly reconciles pull request statuses with TFS API (updates closed/abandoned PRs)."""
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            worker.log_message.emit("Connecting to TFS API for Pull Request reconciliation...")
+            azHandler = devops_helper._getHandler()
+            if not azHandler:
+                raise RuntimeError("Failed to create Azure/TFS client. Check .env variables.")
+
+            worker.log_message.emit("Reconciling active pull requests with TFS...")
+            summary = azHandler.sync_pull_requests(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
+            worker.log_message.emit(
+                f"PR sync complete: {summary.get('synced', 0)} verified, "
+                f"{summary.get('updated', 0)} status updated, {summary.get('errors', 0)} errors"
+            )
+            return summary
+
+        self._run_worker(_work, "Syncing pull requests...")
 
     @Slot()
     def sync_all_async(self):

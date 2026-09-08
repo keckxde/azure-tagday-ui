@@ -695,6 +695,14 @@ def sync(force_sync: bool = False, run_templates_flag: bool = False) -> None:
     except Exception as e:
         logger.error(f"Error syncing work items to SQLite: {e}")
 
+    # Reconcile pull request statuses (ensure active PRs closed/abandoned in TFS are updated)
+    try:
+        if azHandler and hasattr(azHandler, "sync_pull_requests"):
+            logger.info("Synchronizing and reconciling pull request statuses with TFS...")
+            azHandler.sync_pull_requests(cache_db, project_id=AZURE_PROJECT_ID)
+    except Exception as e:
+        logger.warning(f"Error reconciling pull request statuses: {e}")
+
     try:
         cache_db.update_project_last_synced(AZURE_PROJECT_ID, AZURE_PROJECT_ID)
     except Exception as e:

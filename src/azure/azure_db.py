@@ -1176,19 +1176,45 @@ class AzureDevOpsCache:
         """
         Saves PRs for a repository. Clears old PRs of this repo first.
         """
+        from utils import normalize_pr_status
         with self._connection() as conn:
             conn.execute("DELETE FROM pull_requests WHERE repo_id = ?", (repo_id,))
             for pr in prs:
                 created_by = pr.get("createdBy", {}).get("displayName", "")
                 closed_by = pr.get("closedBy", {}).get("displayName", "") if pr.get("closedBy") else ""
                 closed_date = pr.get("closedDateStr", "")
+                creation_date = pr.get("creationDateStr", "")
+                norm_status = normalize_pr_status(pr.get("status"))
                 status_str = pr.get("statusStr", "")
+                if not status_str:
+                    if norm_status == "completed":
+                        status_str = f"DON {closed_date}"
+                    elif norm_status == "abandoned":
+                        status_str = f"ABANDONED {closed_date}"
+                    else:
+                        status_str = f"OPN {creation_date}"
                 raw_json = json.dumps(pr, cls=DateTimeEncoder, ensure_ascii=False)
 
                 conn.execute("""
                 INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pr["pullRequestId"], repo_id, pr.get("title"), str(pr.get("status")), pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+                """, (pr["pullRequestId"], repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+
+    def get_active_pull_requests(self, repo_id=None):
+        """
+        Retrieves all PRs currently stored in the database with active status ('active', '1', 'open', or 'OPN%').
+        """
+        with self._connection() as conn:
+            if repo_id:
+                rows = conn.execute(
+                    "SELECT * FROM pull_requests WHERE repo_id = ? AND (status IN ('1', 'active', 'open', 'in_progress') OR status_str LIKE 'OPN%')",
+                    (repo_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM pull_requests WHERE status IN ('1', 'active', 'open', 'in_progress') OR status_str LIKE 'OPN%'"
+                ).fetchall()
+            return [dict(r) for r in rows]
 
     def get_cached_repository(self, repo_id, repo_name):
         """
@@ -1747,20 +1773,30 @@ class AzureDevOpsCache:
         """
         Saves a single pull request to the database.
         """
+        from utils import normalize_pr_status
         repo_id = pr.get("repository", {}).get("id")
         if not repo_id:
             return
         created_by = pr.get("createdBy", {}).get("displayName", "")
         closed_by = pr.get("closedBy", {}).get("displayName", "") if pr.get("closedBy") else ""
         closed_date = pr.get("closedDateStr", "")
+        creation_date = pr.get("creationDateStr", "")
+        norm_status = normalize_pr_status(pr.get("status"))
         status_str = pr.get("statusStr", "")
+        if not status_str:
+            if norm_status == "completed":
+                status_str = f"DON {closed_date}"
+            elif norm_status == "abandoned":
+                status_str = f"ABANDONED {closed_date}"
+            else:
+                status_str = f"OPN {creation_date}"
         raw_json = json.dumps(pr, cls=DateTimeEncoder, ensure_ascii=False)
 
         with self._connection() as conn:
             conn.execute("""
             INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pr["pullRequestId"], repo_id, pr.get("title"), str(pr.get("status")), pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+            """, (pr["pullRequestId"], repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
 
     def save_pipeline(self, project_id, pipeline):
         """

@@ -529,6 +529,38 @@ class AzureInfoHandler(AzureBaseClient):
                 if remote_push_id is not None and remote_push_id == cached_push_id:
                     cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                     if cached_repo:
+                        active_db_prs = cache_db.get_active_pull_requests(repo_id)
+                        if active_db_prs:
+                            try:
+                                live_active = self.get_pull_requests(project_id, repo_id, status="active")
+                                live_active_ids = {str(p.get("pullRequestId") or p.get("id")) for p in live_active}
+                                from utils import normalize_pr_status
+                                has_status_changes = False
+                                for db_pr in active_db_prs:
+                                    pr_id_str = str(db_pr.get("id"))
+                                    if pr_id_str not in live_active_ids:
+                                        try:
+                                            updated_pr = self.get_pull_request(pr_id_str)
+                                            if updated_pr:
+                                                updated_pr["closedDateStr"] = UpdateDateString(updated_pr.get("closedDate"))
+                                                updated_pr["creationDateStr"] = UpdateDateString(updated_pr.get("creationDate"))
+                                                st_norm = normalize_pr_status(updated_pr.get("status"))
+                                                updated_pr["status"] = st_norm
+                                                if st_norm == "completed":
+                                                    updated_pr["statusStr"] = f"DON {updated_pr['closedDateStr']}"
+                                                elif st_norm == "abandoned":
+                                                    updated_pr["statusStr"] = f"ABANDONED {updated_pr['closedDateStr']}"
+                                                else:
+                                                    updated_pr["statusStr"] = f"OPN {updated_pr['creationDateStr']}"
+                                                cache_db.save_single_pull_request(updated_pr)
+                                                has_status_changes = True
+                                        except Exception as ex:
+                                            logger.warning("Could not refresh closed PR #%s: %s", pr_id_str, ex)
+                                if has_status_changes:
+                                    cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
+                            except Exception as e:
+                                logger.warning("  -- Failed to check active PRs for %s during delta sync: %s", repo_name, e)
+
                         logger.info("  -- Repo %s is up to date (Push ID: %s). Skipping remote query.", repo_name, remote_push_id)
                         return cached_repo, remote_push_id
                 return None, remote_push_id
@@ -668,15 +700,26 @@ class AzureInfoHandler(AzureBaseClient):
 
         return tags_filtered, last_stable_tag, last_unstable_tag
 
-    def _process_pushes_and_prs(self, project_id, repo):
+    def _process_pushes_and_prs(self, project_id, repo, cache_db=None):
         """Scans push events to find all Pull Requests merged since the latest tag."""
         dev_prs = []
         stable_prs = []
         repo_id = repo["id"]
         repo_name = repo.get("name", "")
         prs_list = []
-#        latest_tag_date = repo["LatestTag"].get("CommitDateObj")
 
+        # 1. If database cache is available, re-check any PRs currently recorded as active
+        if cache_db is not None:
+            try:
+                active_db_prs = cache_db.get_active_pull_requests(repo_id)
+                for db_pr in active_db_prs:
+                    p_id_str = str(db_pr.get("id"))
+                    if p_id_str and p_id_str not in prs_list:
+                        prs_list.append(p_id_str)
+            except Exception as e:
+                logger.debug("Could not query active PRs from DB for %s: %s", repo_name, e)
+
+        # 2. Scan push details for merged PRs
         pushes = []
         try:
             pushes = self.get_pushes(project_id, repo_id)
@@ -685,8 +728,6 @@ class AzureInfoHandler(AzureBaseClient):
 
         for push_meta in pushes:
             try:
-                #push_date = parse_iso_datetime(push_meta.get("date"))
-                #if latest_tag_date and push_date and push_date > latest_tag_date:
                 push_detail = self.get_push_detail(project_id, repo_id, push_meta['pushId'])
                 ref_updates = push_detail.get("refUpdates", [])
                 for ref_up in ref_updates:
@@ -698,7 +739,7 @@ class AzureInfoHandler(AzureBaseClient):
             except Exception as e:
                 logger.error("Error retrieving push detail for %s: %s", repo_name, e)
 
-        # Also fetch all PRs that have not been closed yet (active PRs)
+        # 3. Also fetch all PRs that have not been closed yet (active PRs)
         try:
             active_prs = self.get_pull_requests(project_id, repo_id, status="active")
             for a_pr in active_prs:
@@ -708,6 +749,7 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as e:
             logger.error("Error fetching active pull requests for %s: %s", repo_name, e)
 
+        from utils import normalize_pr_status
         for pr_id in prs_list:
             try:
                 pr = self.get_pull_request(pr_id)
@@ -715,19 +757,21 @@ class AzureInfoHandler(AzureBaseClient):
                 pr["creationDateStr"] = UpdateDateString(pr.get("creationDate"))
 
                 status_val = pr.get("status")
-                status_str = str(status_val).lower()
-                if status_str in ("1", "active"):
+                norm_status = normalize_pr_status(status_val)
+                pr["status"] = norm_status
+                if norm_status == "active":
                     pr["statusStr"] = f"OPN {pr['creationDateStr']}"
-                elif status_str in ("3", "completed"):
+                elif norm_status == "completed":
                     pr["statusStr"] = f"DON {pr['closedDateStr']}"
+                elif norm_status == "abandoned":
+                    pr["statusStr"] = f"ABANDONED {pr['closedDateStr']}"
                 else:
                     pr["statusStr"] = f"REJECTED {pr['closedDateStr']}"
 
-                if status_str in ("1", "3", "active", "completed"):
-                    if "dev" in pr.get("targetRefName", ""):
-                        dev_prs.append(pr)
-                    else:
-                        stable_prs.append(pr)
+                if "dev" in pr.get("targetRefName", ""):
+                    dev_prs.append(pr)
+                else:
+                    stable_prs.append(pr)
             except Exception as e:
                 logger.error("Error fetching PR %s details: %s", pr_id, e)
 
@@ -790,7 +834,7 @@ class AzureInfoHandler(AzureBaseClient):
             )
 
             # Load pushes and PRs (including active unclosed PRs)
-            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo)
+            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo, cache_db=cache_db)
 
             result[repo_name] = {
                 "info": repo,
