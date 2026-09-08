@@ -276,7 +276,7 @@ class AzureBaseClient:
 
         return all_results
 
-    def query_work_item_ids_wiql(self, project_id=None, query=None, changed_since=None):
+    def query_work_item_ids_wiql(self, project_id=None, query=None, changed_since=None, time_precision=True):
         """
         Queries work item IDs directly using WIQL without needing to know task IDs in advance.
         Supports both flat work item queries (FROM WorkItems) and hierarchical link queries (FROM WorkItemLinks).
@@ -286,19 +286,23 @@ class AzureBaseClient:
             project_id (str, optional): Target project ID or name. Defaults to None.
             query (str, optional): Custom WIQL query string. If None, queries work items in project.
             changed_since (str or datetime, optional): Filter work items where System.ChangedDate >= changed_since.
+            time_precision (bool, optional): Whether to request time precision. Defaults to True.
 
         Returns:
             list: List of integer work item IDs matching the query.
         """
         proj_part = urllib.parse.quote(str(project_id)) if project_id else ""
         path = f"{proj_part}/_apis/wit/wiql" if proj_part else "_apis/wit/wiql"
-        if not query:
+        params = {"timePrecision": "true", "api-version": "6.0"} if time_precision else {"timePrecision": "false", "api-version": "6.0"}
+
+        def _build_wiql(with_time=True):
             where_clauses = []
             if project_id:
                 where_clauses.append(f"[System.TeamProject] = '{project_id}'")
             if changed_since:
                 if hasattr(changed_since, "strftime"):
-                    date_str = changed_since.strftime("%Y-%m-%d %H:%M:%S")
+                    fmt = "%Y-%m-%d %H:%M:%S" if with_time else "%Y-%m-%d"
+                    date_str = changed_since.strftime(fmt)
                 else:
                     date_str = str(changed_since).replace("T", " ").replace("Z", "").strip()
                     if "." in date_str:
@@ -306,13 +310,28 @@ class AzureBaseClient:
                     if "+" in date_str:
                         date_str = date_str.split("+")[0]
                     date_str = re.sub(r'-\d{2}:?\d{2}$', '', date_str).strip()
+                    if not with_time and " " in date_str:
+                        date_str = date_str.split(" ")[0]
                 where_clauses.append(f"[System.ChangedDate] >= '{date_str}'")
 
             where_str = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-            query = f"SELECT [System.Id] FROM WorkItems{where_str} ORDER BY [System.Id]"
+            return f"SELECT [System.Id] FROM WorkItems{where_str} ORDER BY [System.Id]"
 
-        data = {"query": query}
-        res, _ = self._request("POST", path, params={"api-version": "6.0"}, data=data)
+        wiql_query = query if query else _build_wiql(with_time=time_precision)
+        data = {"query": wiql_query}
+
+        try:
+            res, _ = self._request("POST", path, params=params, data=data)
+        except Exception as ex:
+            err_str = str(ex).lower()
+            if time_precision and ("cannot supply a time" in err_str or "date precision" in err_str or "system.changeddate" in err_str):
+                logger.warning("WIQL query failed with date precision issue (%s). Retrying with date-only precision...", ex)
+                fallback_query = _build_wiql(with_time=False) if not query else re.sub(r"'\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}'", lambda m: m.group(0).split()[0] + "'", query)
+                fallback_params = {"timePrecision": "false", "api-version": "6.0"}
+                res, _ = self._request("POST", path, params=fallback_params, data={"query": fallback_query})
+            else:
+                raise
+
         if not isinstance(res, dict):
             return []
 

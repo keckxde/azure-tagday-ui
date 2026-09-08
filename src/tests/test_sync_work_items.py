@@ -130,7 +130,7 @@ class TestSyncWorkItems(unittest.TestCase):
         ids = self.handler.query_work_item_ids_wiql("TEST_PROJECT")
         self.assertEqual(ids, [501, 502])
         self.handler._request.assert_called_with(
-            "POST", "TEST_PROJECT/_apis/wit/wiql", params={"api-version": "6.0"},
+            "POST", "TEST_PROJECT/_apis/wit/wiql", params={"timePrecision": "true", "api-version": "6.0"},
             data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'TEST_PROJECT' ORDER BY [System.Id]"}
         )
 
@@ -335,8 +335,28 @@ class TestSyncWorkItems(unittest.TestCase):
         self.assertEqual(ids, [10, 20])
 
         self.handler._request.assert_called_once_with(
-            "POST", "MY_PROJ/_apis/wit/wiql", params={"api-version": "6.0"},
+            "POST", "MY_PROJ/_apis/wit/wiql", params={"timePrecision": "true", "api-version": "6.0"},
             data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MY_PROJ' AND [System.ChangedDate] >= '2026-03-01 10:00:00' ORDER BY [System.Id]"}
+        )
+
+    def test_query_work_item_ids_wiql_date_precision_fallback(self):
+        """Tests that if TFS rejects time precision, query automatically falls back to date-only precision."""
+        call_count = 0
+        def side_effect(method, path, params=None, data=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("You cannot supply a time with the date when running a query using date precision. The Error is caused by System.ChangedDate")
+            return ({"workItems": [{"id": 999}]}, 200)
+
+        self.handler._request = MagicMock(side_effect=side_effect)
+        ids = self.handler.query_work_item_ids_wiql("MY_PROJ", changed_since="2026-03-01T10:00:00Z")
+        self.assertEqual(ids, [999])
+        self.assertEqual(call_count, 2)
+        # Second call should use timePrecision=false and date-only (2026-03-01)
+        self.handler._request.assert_called_with(
+            "POST", "MY_PROJ/_apis/wit/wiql", params={"timePrecision": "false", "api-version": "6.0"},
+            data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MY_PROJ' AND [System.ChangedDate] >= '2026-03-01' ORDER BY [System.Id]"}
         )
 
     def test_incremental_sync_skips_unchanged_work_items(self):
