@@ -722,6 +722,82 @@ Item {
                             }
                         }
                     }
+
+                    // Divider
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#30363d"
+                        Layout.topMargin: 4
+                        Layout.bottomMargin: 4
+                    }
+
+                    // TFS / Azure DevOps Team Name for Sprint URLs
+                    RowLayout {
+                        spacing: 8
+                        Text { text: "👥"; font.pixelSize: 16 }
+                        Text {
+                            text: "Azure DevOps / TFS Team Assignment (Sprint View URLs)"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 14
+                            font.weight: Font.Bold
+                            color: "#f0f6fc"
+                        }
+                    }
+
+                    Text {
+                        text: "Specify the Team Name that sprint iterations are assigned to. Azure DevOps requires the team name in sprint taskboard URLs (e.g. {server}/{col}/{project}/{team}/_sprints/taskboard/{sprint}). If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        color: "#8b949e"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        TextField {
+                            id: teamNameInput
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            text: (backend && backend.tfsTeamName) ? backend.tfsTeamName : ""
+                            placeholderText: "e.g. MyTeam or Core Team (leave empty for automatic detection / default)"
+                            placeholderTextColor: "#484f58"
+                            color: "#f0f6fc"
+                            background: Rectangle {
+                                color: "#0d1117"
+                                radius: 6
+                                border.color: teamNameInput.activeFocus ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                        }
+
+                        Button {
+                            text: "💾 Save Team"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 130; radius: 6
+                                color: parent.hovered ? "#1f6feb" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setTfsTeamName(teamNameInput.text);
+                                    root.bannerMsg = "TFS Team Name updated to: " + (teamNameInput.text.trim() || "Default / Auto-detected");
+                                    root.bannerType = "success";
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

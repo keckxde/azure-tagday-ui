@@ -249,6 +249,7 @@ class DevOpsBackend(QObject):
         self._font_size_mode = user_cfg.get("font_size_mode", "medium")
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
+        self._tfs_team_name = user_cfg.get("tfs_team_name", "")
 
         # Sync Logs storage & logger bridge
         self._sync_logs = []
@@ -368,6 +369,8 @@ class DevOpsBackend(QObject):
                 self._custom_deadline_field = db_cfg["WORK_ITEM_DEADLINE_FIELD"]
             if db_cfg.get("bug_behavior"):
                 self._bug_hierarchy_mode = db_cfg["bug_behavior"]
+            if db_cfg.get("AZURE_TEAM"):
+                self._tfs_team_name = db_cfg["AZURE_TEAM"]
             if "IGNORE_REPOS" in db_cfg:
                 devops_helper.IGNORE_REPOS = db_cfg["IGNORE_REPOS"]
             if "FILTER_REPOS" in db_cfg:
@@ -409,6 +412,27 @@ class DevOpsBackend(QObject):
     @Property(str, notify=settingsChanged)
     def tfsCollection(self):
         return devops_helper.AZURE_COLLECTION or "DefaultCollection"
+
+    @Property(str, notify=settingsChanged)
+    def tfsTeamName(self):
+        """Returns the configured TFS / Azure DevOps team name used for sprint URLs."""
+        return self._tfs_team_name or ""
+
+    @Slot(str)
+    def setTfsTeamName(self, team_name):
+        """Persists the TFS team name used to build sprint taskboard URLs."""
+        val = (team_name or "").strip()
+        if self._tfs_team_name != val:
+            self._tfs_team_name = val
+            cfg = _load_user_settings()
+            cfg["tfs_team_name"] = val
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("AZURE_TEAM", val)
+                except Exception:
+                    pass
+            self.settingsChanged.emit()
 
     @Property(str, notify=settingsChanged)
     def tfsPat(self):
@@ -2673,12 +2697,22 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"Could not construct Azure DevOps URL for Work Item #{clean_id}")
 
     @Slot(str, result=str)
+    @Slot(result=str)
+    @Slot(str, result=str)
     @Slot(int, result=str)
     @Slot(str, str, result=str)
     @Slot(int, str, result=str)
     def get_sprint_taskboard_url(self, target="", sprint_name=""):
         """
         Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item or sprint name.
+
+        The URL format requires a team name:
+          {base_url}/{collection}/{project}/{team}/_sprints/taskboard/{sprint_leaf}
+
+        The team name is determined by:
+          1. Configured TFS Team Name in settings/project config (if set)
+          2. Extracted team segment from the work item's iteration/area path (e.g. 'Project\\Team\\Sprint')
+          3. Default Azure DevOps team convention: '{project} Team'
         """
         import urllib.parse
         base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
@@ -2687,34 +2721,57 @@ class DevOpsBackend(QObject):
         if not (base_url and col and proj):
             return ""
 
+        team = (self._tfs_team_name or "").strip()
+        extracted_team = ""
         sprint_leaf = ""
+
         if sprint_name:
-            sprint_leaf = str(sprint_name).replace("\\", "/").strip("/").split("/")[-1]
+            s_parts = str(sprint_name).replace("\\", "/").strip("/").split("/")
+            sprint_leaf = s_parts[-1]
+            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower():
+                extracted_team = s_parts[1]
         elif target:
-            # Check if target is work item ID or sprint name
             try:
                 clean_id = int(str(target).lstrip("#"))
                 if self._cache_db:
                     wi = self._cache_db.get_work_item(clean_id)
                     if wi and isinstance(wi, dict):
                         ipath = wi.get("iteration_path") or ""
-                        if not ipath:
-                            raw_s = wi.get("raw_json")
-                            if raw_s and isinstance(raw_s, str):
-                                try:
-                                    raw = json.loads(raw_s)
-                                    ipath = raw.get("fields", {}).get("System.IterationPath") or ""
-                                except Exception:
-                                    pass
+                        apath = wi.get("area_path") or ""
+                        raw_s = wi.get("raw_json")
+                        if (not ipath or not apath) and raw_s and isinstance(raw_s, str):
+                            try:
+                                raw = json.loads(raw_s)
+                                fields = raw.get("fields", {})
+                                if not ipath:
+                                    ipath = fields.get("System.IterationPath") or ""
+                                if not apath:
+                                    apath = fields.get("System.AreaPath") or ""
+                            except Exception:
+                                pass
                         if ipath:
-                            sprint_leaf = ipath.replace("\\", "/").strip("/").split("/")[-1]
+                            i_parts = ipath.replace("\\", "/").strip("/").split("/")
+                            sprint_leaf = i_parts[-1]
+                            if len(i_parts) >= 3:
+                                extracted_team = i_parts[1]
+                        if not extracted_team and apath:
+                            a_parts = apath.replace("\\", "/").strip("/").split("/")
+                            if len(a_parts) >= 2:
+                                extracted_team = a_parts[1]
             except (ValueError, TypeError):
-                sprint_leaf = str(target).replace("\\", "/").strip("/").split("/")[-1]
+                t_parts = str(target).replace("\\", "/").strip("/").split("/")
+                sprint_leaf = t_parts[-1]
+                if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower():
+                    extracted_team = t_parts[1]
 
+        if not team:
+            team = extracted_team or f"{proj} Team"
+
+        encoded_team = urllib.parse.quote(team, safe="")
         if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root"):
-            return f"{base_url}/{col}/{proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+            return f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
         else:
-            return f"{base_url}/{col}/{proj}/_sprints/taskboard"
+            return f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/taskboard"
 
     @Slot(str)
     @Slot(int)
@@ -3670,6 +3727,7 @@ class DevOpsBackend(QObject):
                 "AZURE_PERSONAL_ACCESS_TOKEN": clean_pat if store_pat else "",
                 "AZURE_PROJECT_ID": clean_pid,
                 "PROJECT_NAME": clean_pname,
+                "AZURE_TEAM": self._tfs_team_name or "",
                 "BASE_FOLDER": base_folder,
                 "WORK_ITEM_DEADLINE_FIELD": deadline_field,
                 "TAGDAY_FILE_MD": tagday_md,

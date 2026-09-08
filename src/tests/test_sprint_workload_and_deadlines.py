@@ -246,33 +246,37 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         import devops_helper
 
         backend = DevOpsBackend()
+        backend._tfs_team_name = ""
         devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"
         devops_helper.AZURE_COLLECTION = "DefaultCollection"
         devops_helper.AZURE_PROJECT_ID = "MyProject"
 
-        # 1. URL from sprint name
+        # 1. URL from sprint name (default team: "MyProject Team")
         url_sprint = backend.get_sprint_taskboard_url("week-2634")
-        self.assertEqual(url_sprint, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/week-2634")
+        self.assertEqual(url_sprint, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/MyProject%20Team/_sprints/taskboard/week-2634")
 
-        # 2. URL with spaces in sprint name
+        # 2. URL with spaces in sprint name and custom configured team
+        backend._tfs_team_name = "Core Dev Team"
         url_space = backend.get_sprint_taskboard_url("Sprint 2026.1")
-        self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Sprint%202026.1")
+        self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Core%20Dev%20Team/_sprints/taskboard/Sprint%202026.1")
 
-        # 3. URL from work item in cache DB
+        # 3. URL from work item in cache DB with team in iteration path
+        backend._tfs_team_name = ""
         mock_db = MagicMock()
         mock_db.get_work_item.return_value = {
             "id": 999,
             "title": "Test Task",
-            "iteration_path": "MyProject\\Sprint-33",
+            "iteration_path": "MyProject\\Alpha Team\\Sprint-33",
         }
         backend._cache_db = mock_db
         url_wi = backend.get_sprint_taskboard_url(999)
-        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Sprint-33")
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard/Sprint-33")
 
-        # 4. open_sprint_in_browser calls open_url
+        # 4. open_sprint_in_browser calls open_url with team-aware URL
+        backend._tfs_team_name = "Alpha Team"
         with patch.object(backend, "open_url") as mock_open:
             backend.open_sprint_in_browser("week-2634")
-            mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/week-2634")
+            mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard/week-2634")
 
 
 if __name__ == "__main__":
