@@ -1662,6 +1662,19 @@ class AzureDevOpsCache:
             rows = conn.execute(f"SELECT id FROM work_items{filter_deleted} ORDER BY id").fetchall()
             return [r["id"] for r in rows]
 
+    def get_max_work_item_changed_date(self):
+        """
+        Retrieves the latest System.ChangedDate timestamp among all non-deleted cached work items.
+        Used for high-speed incremental synchronization.
+        """
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT MAX(changed_date) as max_date FROM work_items WHERE (deleted = 0 OR deleted IS NULL) AND changed_date IS NOT NULL AND changed_date != ''"
+            ).fetchone()
+            if row and row["max_date"]:
+                return str(row["max_date"]).strip()
+            return None
+
     def get_all_work_items(self, include_deleted=True):
         """
         Retrieves all work items stored in the cache database as structured dictionaries.

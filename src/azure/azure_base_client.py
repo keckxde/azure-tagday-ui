@@ -4,6 +4,7 @@ import urllib.parse
 import json
 import base64
 import ssl
+import re
 
 class AzureBaseClient:
     """
@@ -198,24 +199,37 @@ class AzureBaseClient:
 
         return all_results
 
-    def query_work_item_ids_wiql(self, project_id=None, query=None):
+    def query_work_item_ids_wiql(self, project_id=None, query=None, changed_since=None):
         """
         Queries work item IDs directly using WIQL without needing to know task IDs in advance.
         Supports both flat work item queries (FROM WorkItems) and hierarchical link queries (FROM WorkItemLinks).
+        Supports filtering by changed_since timestamp for high-performance incremental sync.
 
         Args:
             project_id (str, optional): Target project ID or name. Defaults to None.
-            query (str, optional): Custom WIQL query string. If None, queries all work items in project.
+            query (str, optional): Custom WIQL query string. If None, queries work items in project.
+            changed_since (str or datetime, optional): Filter work items where System.ChangedDate >= changed_since.
 
         Returns:
             list: List of integer work item IDs matching the query.
         """
         path = f"{project_id}/_apis/wit/wiql" if project_id else "_apis/wit/wiql"
         if not query:
+            where_clauses = []
             if project_id:
-                query = f"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '{project_id}' ORDER BY [System.Id]"
-            else:
-                query = "SELECT [System.Id] FROM WorkItems ORDER BY [System.Id]"
+                where_clauses.append(f"[System.TeamProject] = '{project_id}'")
+            if changed_since:
+                if hasattr(changed_since, "strftime"):
+                    date_str = changed_since.strftime("%Y-%m-%dT%H:%M:%SZ")
+                else:
+                    date_str = str(changed_since).strip()
+                    date_str = re.sub(r'\.\d+', '', date_str)
+                    if not date_str.endswith("Z") and not ("+" in date_str or "-" in date_str[10:]):
+                        date_str += "Z"
+                where_clauses.append(f"[System.ChangedDate] >= '{date_str}'")
+
+            where_str = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            query = f"SELECT [System.Id] FROM WorkItems{where_str} ORDER BY [System.Id]"
 
         data = {"query": query}
         res, _ = self._request("POST", path, params={"api-version": "6.0"}, data=data)

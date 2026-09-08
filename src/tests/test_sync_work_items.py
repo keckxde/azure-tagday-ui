@@ -319,6 +319,116 @@ class TestSyncWorkItems(unittest.TestCase):
         self.assertTrue(any("batch" in m.lower() for m in msg_texts))
         self.assertTrue(any("completed" in m.lower() for m in msg_texts))
 
+    def test_get_max_work_item_changed_date(self):
+        self.assertIsNone(self.cache.get_max_work_item_changed_date())
+        self.cache.save_work_item(1, "Task 1", "Task", "Active", "Dev", "2026-01-01T10:00:00Z", {"id": 1})
+        self.cache.save_work_item(2, "Task 2", "Task", "Active", "Dev", "2026-03-01T12:00:00Z", {"id": 2})
+        self.cache.save_work_item(3, "Task 3 (deleted)", "Task", "Active", "Dev", "2026-05-01T12:00:00Z", {"id": 3}, deleted=1)
+
+        max_date = self.cache.get_max_work_item_changed_date()
+        self.assertEqual(max_date, "2026-03-01T12:00:00Z")
+
+    def test_query_work_item_ids_wiql_with_changed_since(self):
+        self.handler._request = MagicMock(return_value=({"workItems": [{"id": 10}, {"id": 20}]}, 200))
+
+        ids = self.handler.query_work_item_ids_wiql("MY_PROJ", changed_since="2026-03-01T10:00:00Z")
+        self.assertEqual(ids, [10, 20])
+
+        self.handler._request.assert_called_once_with(
+            "POST", "MY_PROJ/_apis/wit/wiql", params={"api-version": "6.0"},
+            data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MY_PROJ' AND [System.ChangedDate] >= '2026-03-01T10:00:00Z' ORDER BY [System.Id]"}
+        )
+
+    def test_incremental_sync_skips_unchanged_work_items(self):
+        """Tests that only modified items are fetched when existing cached items have not changed."""
+        # Seed 5 items in cache with ChangedDate
+        for i in range(1, 6):
+            self.cache.save_work_item(
+                i, f"Task {i}", "Task", "Active", "Dev", "2026-03-01T10:00:00Z",
+                {"id": i, "fields": {"System.ChangedDate": "2026-03-01T10:00:00Z"}}
+            )
+
+        # Mock query_work_item_ids_wiql:
+        # Full query returns all 5 items [1, 2, 3, 4, 5]
+        # Changed query (with changed_since) returns ONLY item 3 (modified)
+        def mock_wiql(project_id=None, query=None, changed_since=None):
+            if changed_since:
+                return [3]
+            return [1, 2, 3, 4, 5]
+
+        self.handler.query_work_item_ids_wiql = MagicMock(side_effect=mock_wiql)
+
+        # Mock batch fetch: should only be called for [3]
+        mock_batch = MagicMock(return_value=[
+            {
+                "id": 3,
+                "fields": {
+                    "System.Title": "Task 3 Modified",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Closed",
+                    "System.AssignedTo": {"displayName": "Dev"},
+                    "System.ChangedDate": "2026-03-02T15:00:00Z"
+                }
+            }
+        ])
+        self.handler.get_work_items_batch = mock_batch
+
+        summary = self.handler.sync_work_items(self.cache, project_id="MY_PROJ")
+
+        # Verify only item 3 was fetched in batch
+        mock_batch.assert_called_once_with([3], expand="all", chunk_size=200)
+        self.assertEqual(summary["synced"], 1)
+        self.assertEqual(summary["unchanged"], 4)
+        self.assertEqual(summary["deleted"], 0)
+
+        # Verify item 3 is updated in cache
+        wi3 = self.cache.get_work_item(3)
+        self.assertEqual(wi3["Title"], "Task 3 Modified")
+        self.assertEqual(wi3["State"], "Closed")
+
+    def test_incremental_sync_fetches_new_items_and_reconciles_deletions(self):
+        """Tests that new items and deleted items are reconciled alongside unchanged items."""
+        # Database has items 10 and 20
+        self.cache.save_work_item(10, "Task 10", "Task", "Active", "Dev", "2026-03-01T10:00:00Z", {"id": 10})
+        self.cache.save_work_item(20, "Task 20 (will be deleted)", "Task", "Active", "Dev", "2026-03-01T10:00:00Z", {"id": 20})
+
+        # Remote has items 10 (unchanged) and 30 (brand new item). Item 20 is gone from remote.
+        def mock_wiql(project_id=None, query=None, changed_since=None):
+            if changed_since:
+                return []  # No existing items modified
+            return [10, 30]
+
+        self.handler.query_work_item_ids_wiql = MagicMock(side_effect=mock_wiql)
+
+        mock_batch = MagicMock(return_value=[
+            {
+                "id": 30,
+                "fields": {
+                    "System.Title": "Task 30 New",
+                    "System.WorkItemType": "Bug",
+                    "System.State": "New",
+                    "System.AssignedTo": {"displayName": "Tester"},
+                    "System.ChangedDate": "2026-03-05T10:00:00Z"
+                }
+            }
+        ])
+        self.handler.get_work_items_batch = mock_batch
+
+        summary = self.handler.sync_work_items(self.cache, project_id="MY_PROJ")
+
+        # Batch was called ONLY for new item [30]
+        mock_batch.assert_called_once_with([30], expand="all", chunk_size=200)
+        self.assertEqual(summary["synced"], 1)   # Item 30
+        self.assertEqual(summary["deleted"], 1)  # Item 20 marked deleted
+        self.assertEqual(summary["unchanged"], 1) # Item 10 was skipped
+
+        wi20 = self.cache.get_work_item(20)
+        self.assertTrue(wi20["deleted"])
+
+        wi30 = self.cache.get_work_item(30)
+        self.assertIsNotNone(wi30)
+        self.assertEqual(wi30["Title"], "Task 30 New")
+
 
 if __name__ == "__main__":
     unittest.main()

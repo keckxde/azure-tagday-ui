@@ -184,23 +184,27 @@ class AzureInfoHandler(AzureBaseClient):
                     logger.error(" - GetTFSWorkItems: #%s err %s", task_id, e)
         return work_item_list
 
-    def sync_work_items(self, cache_db, project_id=None, chunk_size=200, progress_callback=None):
+    def sync_work_items(self, cache_db, project_id=None, chunk_size=200, progress_callback=None, force_full_sync=False):
         """
         Synchronizes all work items in the SQLite database cache with the TFS API.
-        Always queries the TFS API directly using WIQL:
-        1. Directly queries all available work items from the TFS API using WIQL.
-        2. Retrieves all work items in high-speed batches using POST _apis/wit/workitemsbatch.
-        3. Updates/inserts active work items with deleted=0.
-        4. Any previously cached work item in the database that is no longer returned by the API is marked as deleted=1.
+        Optimized with high-performance incremental timestamp-based sync:
+        1. Queries all remote work item IDs using a fast flat WIQL query.
+        2. Reconciles deletions immediately: cached items no longer on server are marked deleted=1.
+        3. Checks latest System.ChangedDate timestamp in cache. If available and force_full_sync=False,
+           executes a WIQL filter [System.ChangedDate] >= watermark to retrieve only new/modified items.
+        4. Downloads full details only for new and modified work items using batch requests.
+        5. Recursively resolves missing parent/ancestor work items for complete hierarchy.
+        6. Pre-fills major milestones.
 
         Args:
             cache_db (AzureDevOpsCache): Database cache instance.
             project_id (str, optional): Project ID or name. Defaults to None.
-            chunk_size (int, optional): Max IDs per batch request (Azure DevOps / TFS limit is 200). Defaults to 200.
+            chunk_size (int, optional): Max IDs per batch request (TFS limit is 200). Defaults to 200.
             progress_callback (callable, optional): Callback function(msg: str, current: int, total: int) for live progress updates.
+            force_full_sync (bool, optional): If True, re-downloads all work items regardless of timestamp. Defaults to False.
 
         Returns:
-            dict: Summary of synced, deleted, and error counts.
+            dict: Summary of synced, deleted, unchanged, and error counts.
         """
         def _notify(msg, current=0, total=0):
             logger.info(msg)
@@ -212,34 +216,83 @@ class AzureInfoHandler(AzureBaseClient):
                 except Exception as ex:
                     logger.debug("Progress callback exception: %s", ex)
 
-        summary = {"synced": 0, "deleted": 0, "errors": 0}
-        db_ids = set(cache_db.get_all_work_item_ids(include_deleted=True))
-
+        summary = {"synced": 0, "deleted": 0, "unchanged": 0, "errors": 0}
         target_proj = project_id or getattr(self, "project_id", "") or "default"
-        _notify(f"Executing WIQL query to fetch all work items for project '{target_proj}'...", 0, 0)
+        _notify(f"Executing WIQL query to discover work items for project '{target_proj}'...", 0, 0)
 
-        # Always query the API directly without needing known task IDs
+        # 1. Discover all remote work items in the project
         try:
-            remote_ids = self.query_work_item_ids_wiql(project_id)
-            target_ids = list(set(remote_ids) | db_ids)
-            _notify(
-                f"WIQL query complete: discovered {len(remote_ids)} remote items ({len(target_ids)} total to reconcile with cache)",
-                0, len(target_ids)
-            )
+            remote_all_ids_list = self.query_work_item_ids_wiql(project_id)
+            remote_all_ids = set(remote_all_ids_list)
         except Exception as wiql_err:
             logger.warning("WIQL query failed (%s), falling back to cached DB IDs", wiql_err)
-            target_ids = list(db_ids)
-            _notify(f"WIQL query failed ({wiql_err}), falling back to {len(target_ids)} cached database IDs", 0, len(target_ids))
+            remote_all_ids_list = cache_db.get_all_work_item_ids(include_deleted=True)
+            remote_all_ids = set(remote_all_ids_list)
+
+        # 2. Check cached DB IDs
+        active_db_ids = set(cache_db.get_all_work_item_ids(include_deleted=False))
+
+        # 3. Mark deleted items (items in active cache that no longer exist on remote)
+        missing_on_remote = active_db_ids - remote_all_ids
+        for did in missing_on_remote:
+            cache_db.mark_work_item_deleted(did)
+            summary["deleted"] += 1
+            if did in active_db_ids:
+                active_db_ids.remove(did)
+
+        # 4. Determine items that need fetching (incremental vs full)
+        new_or_restored_ids = remote_all_ids - active_db_ids
+        max_changed_date = None if force_full_sync else (
+            cache_db.get_max_work_item_changed_date() if hasattr(cache_db, "get_max_work_item_changed_date") else None
+        )
+
+        items_to_fetch = set()
+
+        if max_changed_date and not force_full_sync and active_db_ids:
+            # Incremental sync: compute watermark with a 5-minute safety buffer
+            watermark_str = max_changed_date
+            dt_obj = parse_iso_datetime(max_changed_date)
+            if dt_obj:
+                safe_dt = dt_obj - timedelta(minutes=5)
+                watermark_str = safe_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            try:
+                modified_ids_list = self.query_work_item_ids_wiql(project_id, changed_since=watermark_str)
+                modified_ids = set(modified_ids_list) & remote_all_ids
+                items_to_fetch = (new_or_restored_ids | modified_ids) & remote_all_ids
+                unchanged_count = len(remote_all_ids) - len(items_to_fetch)
+                summary["unchanged"] = max(0, unchanged_count)
+                _notify(
+                    f"Incremental WIQL sync: found {len(items_to_fetch)} modified/new item(s) since {watermark_str} "
+                    f"({len(remote_all_ids)} total in project, {summary['unchanged']} up-to-date, {summary['deleted']} deleted)",
+                    0, len(items_to_fetch)
+                )
+            except Exception as inc_err:
+                logger.warning("Incremental WIQL query failed (%s), falling back to full sync", inc_err)
+                items_to_fetch = remote_all_ids
+        else:
+            # Full sync or first sync
+            items_to_fetch = remote_all_ids
+            _notify(
+                f"Full sync: discovered {len(remote_all_ids)} total work items for project '{target_proj}'",
+                0, len(remote_all_ids)
+            )
 
         clean_ids = []
-        for tid in target_ids:
+        for tid in sorted(items_to_fetch):
             try:
                 clean_ids.append(int(str(tid).lstrip("#")))
             except (ValueError, TypeError):
                 continue
 
         if not clean_ids:
-            _notify("No work items found to synchronize.", 0, 0)
+            _notify("All work items are up-to-date. No modifications detected.", 0, 0)
+            # Auto-discover and pre-fill major milestones
+            try:
+                if hasattr(cache_db, "discover_and_prefill_milestones_from_work_items"):
+                    cache_db.discover_and_prefill_milestones_from_work_items()
+            except Exception:
+                pass
             return summary
 
         total_items = len(clean_ids)
@@ -403,8 +456,9 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as ms_err:
             logger.debug("Could not prefill milestones from work item tags: %s", ms_err)
 
+        unchanged_str = f", {summary.get('unchanged', 0)} already up-to-date" if summary.get("unchanged") else ""
         _notify(
-            f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted, {summary.get('errors', 0)} errors",
+            f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted{unchanged_str}, {summary.get('errors', 0)} errors",
             total_items, total_items
         )
 
