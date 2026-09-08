@@ -336,7 +336,7 @@ class TestSyncWorkItems(unittest.TestCase):
 
         self.handler._request.assert_called_once_with(
             "POST", "MY_PROJ/_apis/wit/wiql", params={"api-version": "6.0"},
-            data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MY_PROJ' AND [System.ChangedDate] >= '2026-03-01T10:00:00Z' ORDER BY [System.Id]"}
+            data={"query": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MY_PROJ' AND [System.ChangedDate] >= '2026-03-01 10:00:00' ORDER BY [System.Id]"}
         )
 
     def test_incremental_sync_skips_unchanged_work_items(self):

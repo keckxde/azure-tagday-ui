@@ -254,7 +254,7 @@ class AzureInfoHandler(AzureBaseClient):
             dt_obj = parse_iso_datetime(max_changed_date)
             if dt_obj:
                 safe_dt = dt_obj - timedelta(minutes=5)
-                watermark_str = safe_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                watermark_str = safe_dt.strftime("%Y-%m-%d %H:%M:%S")
 
             try:
                 modified_ids_list = self.query_work_item_ids_wiql(project_id, changed_since=watermark_str)

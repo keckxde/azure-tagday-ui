@@ -220,12 +220,14 @@ class AzureBaseClient:
                 where_clauses.append(f"[System.TeamProject] = '{project_id}'")
             if changed_since:
                 if hasattr(changed_since, "strftime"):
-                    date_str = changed_since.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    date_str = changed_since.strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    date_str = str(changed_since).strip()
-                    date_str = re.sub(r'\.\d+', '', date_str)
-                    if not date_str.endswith("Z") and not ("+" in date_str or "-" in date_str[10:]):
-                        date_str += "Z"
+                    date_str = str(changed_since).replace("T", " ").replace("Z", "").strip()
+                    if "." in date_str:
+                        date_str = date_str.split(".")[0]
+                    if "+" in date_str:
+                        date_str = date_str.split("+")[0]
+                    date_str = re.sub(r'-\d{2}:?\d{2}$', '', date_str).strip()
                 where_clauses.append(f"[System.ChangedDate] >= '{date_str}'")
 
             where_str = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
