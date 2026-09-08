@@ -179,29 +179,24 @@ def addCategoriesToRepos(repos, config_path=None, cache_db=None, auto_save_missi
         repos (dict): Dictionary of repositories keyed by repository ID or name.
                       Each repository entry is expected to be a dict containing an "info" dict with "name",
                       or have a "name" attribute directly.
-        config_path (str, optional): Explicit path to `repo_categories.yaml`. If None,
-                                     searches standard configuration locations.
+        config_path (str, optional): Legacy parameter retained for backward compatibility (ignored).
         cache_db (AzureDevOpsCache, optional): Cache database instance.
         auto_save_missing (bool, optional): If True, automatically persists newly discovered
-                                            repositories to database / config. Defaults to True.
+                                            repositories to database. Defaults to True.
 
     Returns:
         dict: The updated `repos` dictionary with the "category" attribute populated for each repository.
     """
-    # Load config: prefer DB directly, fall back to YAML only when no cache_db
     if cache_db and hasattr(cache_db, "get_full_repo_category_config"):
         try:
             config = cache_db.get_full_repo_category_config()
-            resolved_path = "database"
         except Exception:
             config = None
-            resolved_path = None
     else:
         config = None
-        resolved_path = None
 
     if not config:
-        config, resolved_path = utils.load_repo_categories(cache_db=cache_db, custom_path=config_path)
+        config, _ = utils.load_repo_categories(cache_db=cache_db)
 
     default_cat = config.get("default_category", "OTHERS")
     prefix_rules = config.get("prefix_rules", {})
@@ -231,20 +226,14 @@ def addCategoriesToRepos(repos, config_path=None, cache_db=None, auto_save_missi
 
         repos[key]["category"] = category
 
-    # Persist newly discovered repositories
-    if missing_repos and auto_save_missing:
-        if cache_db and resolved_path == "database":
-            # Save to DB override table — keep YAML untouched
-            try:
-                for rname, rcat in missing_repos.items():
-                    cache_db.save_repo_category_override(rname, rcat)
-                logger.debug(f"Saved {len(missing_repos)} new repo categories to database")
-            except Exception as e:
-                logger.warning(f"Could not save new repo categories to database: {e}")
-        elif resolved_path and resolved_path != "database":
-            # Legacy YAML path (CLI usage without DB)
-            config["repositories"] = {**repo_map, **missing_repos}
-            utils.save_repo_categories(config, resolved_path)
+    # Persist newly discovered repositories to database
+    if missing_repos and auto_save_missing and cache_db and hasattr(cache_db, "save_repo_category_override"):
+        try:
+            for rname, rcat in missing_repos.items():
+                cache_db.save_repo_category_override(rname, rcat)
+            logger.debug(f"Saved {len(missing_repos)} new repo categories to database")
+        except Exception as e:
+            logger.warning(f"Could not save new repo categories to database: {e}")
 
     return repos
 

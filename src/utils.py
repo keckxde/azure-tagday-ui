@@ -250,15 +250,15 @@ def load_status_icons(section=None, custom_path=None):
 
 def load_repo_categories(cache_db=None, custom_path=None):
     """
-    Locates and loads repository category mappings from the database cache or YAML configuration.
-    Falls back to safe default prefix rules if database or file is not found.
+    Loads repository category mappings from the database cache.
+    Falls back to safe default prefix rules if database is not available.
 
     Args:
         cache_db (AzureDevOpsCache, optional): Database instance containing repo category tables.
-        custom_path (str, optional): Explicit file path to repo_categories.yaml.
+        custom_path (str, optional): Legacy parameter retained for backward compatibility (ignored).
 
     Returns:
-        tuple: (config_dict, resolved_file_path)
+        tuple: (config_dict, resolved_source)
     """
     if cache_db and hasattr(cache_db, "get_full_repo_category_config"):
         try:
@@ -283,67 +283,24 @@ def load_repo_categories(cache_db=None, custom_path=None):
             "OTHERS": "#6e7681",
         },
     }
-
-    resolved_path = None
-    config = None
-
-    if custom_path and os.path.exists(custom_path):
-        resolved_path = custom_path
-        config = parseYAMLFile(custom_path)
-
-    if not config:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        candidates = [
-            os.path.join(os.path.dirname(current_dir), "config", "repo_categories.yaml"),
-            os.path.join(os.path.dirname(current_dir), "config", "repo_categories.yml"),
-            os.path.join(current_dir, "config", "repo_categories.yaml"),
-            os.path.join(os.path.dirname(current_dir), "repo_categories.yaml"),
-            os.path.join(current_dir, "repo_categories.yaml"),
-            os.path.join(os.path.dirname(os.path.dirname(current_dir)), "scripts", "config", "repo_categories.yaml"),
-            os.path.join(os.path.dirname(os.path.dirname(current_dir)), "config", "repo_categories.yaml"),
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                config = parseYAMLFile(c)
-                if config:
-                    resolved_path = c
-                    break
-
-    if not config or not isinstance(config, dict):
-        config = default_config
-        if not resolved_path:
-            # Set default target path to scripts/config/repo_categories.yaml if existing
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            default_target = os.path.join(os.path.dirname(current_dir), "config", "repo_categories.yaml")
-            resolved_path = default_target
-
-    if "default_category" not in config:
-        config["default_category"] = "OTHERS"
-    if "prefix_rules" not in config:
-        config["prefix_rules"] = default_config["prefix_rules"]
-    if "repositories" not in config:
-        config["repositories"] = {}
-    if "category_colors" not in config:
-        config["category_colors"] = default_config["category_colors"]
-
-    return config, resolved_path
+    return default_config, "database"
 
 
 def get_category_color(category, config=None, cache_db=None, config_path=None):
     """
-    Returns the hex color code for a repository category from database configuration or YAML.
+    Returns the hex color code for a repository category from database configuration or dictionary.
 
     Args:
         category (str): Category name (e.g. 'CORE', 'GENERIC', 'OTHERS').
         config (dict, optional): Parsed repo_categories configuration.
         cache_db (AzureDevOpsCache, optional): Cache database instance.
-        config_path (str, optional): Custom path to repo_categories.yaml.
+        config_path (str, optional): Legacy parameter retained for backward compatibility (ignored).
 
     Returns:
         str: Hex color code (e.g. '#1f6feb'). Defaults to '#6e7681' (gray).
     """
     if config is None:
-        config, _ = load_repo_categories(cache_db=cache_db, custom_path=config_path)
+        config, _ = load_repo_categories(cache_db=cache_db)
 
     colors = config.get("category_colors", {}) if isinstance(config, dict) else {}
     if category in colors:
@@ -351,31 +308,25 @@ def get_category_color(category, config=None, cache_db=None, config_path=None):
     return colors.get("OTHERS", "#6e7681")
 
 
-def save_repo_categories(config, file_path):
+def save_repo_categories(config, file_path=None, cache_db=None):
     """
-    Saves repository categories configuration dictionary to a YAML file.
+    Saves repository categories configuration to database cache.
 
     Args:
         config (dict): Configuration dictionary to persist.
-        file_path (str): Destination file path.
+        file_path (str, optional): Legacy file path parameter (ignored).
+        cache_db (AzureDevOpsCache, optional): Database instance.
 
     Returns:
         bool: True if save succeeded, False otherwise.
     """
-    try:
-        import yaml
-        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
-        log.info(f"Saved repository categories to {file_path}")
-        return True
-    except Exception as e:
-        log.error(f"Error saving YAML configuration to {file_path}: {e}")
-        return False
+    if cache_db and hasattr(cache_db, "save_full_repo_category_config"):
+        return cache_db.save_full_repo_category_config(config)
+    return True
 
 
 def categorize_repository(repo_name, config=None, cache_db=None, config_path=None):
-    """Categorizes repository using the database configuration or repo_categories configuration file.
+    """Categorizes repository using the database configuration or default configuration.
 
     Evaluation order:
     1. Explicit repository mapping (`repositories: { <repo_name>: <category> }`).
@@ -383,7 +334,7 @@ def categorize_repository(repo_name, config=None, cache_db=None, config_path=Non
     3. Default category fallback (`default_category`, defaults to 'OTHERS').
     """
     if config is None:
-        config, _ = load_repo_categories(cache_db=cache_db, custom_path=config_path)
+        config, _ = load_repo_categories(cache_db=cache_db)
 
     default_cat = config.get("default_category", "OTHERS")
     repo_map = config.get("repositories", {})

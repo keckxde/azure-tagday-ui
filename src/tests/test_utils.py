@@ -172,21 +172,18 @@ artifact_status:
                 os.remove(tmp_path)
 
     def test_load_and_save_repo_categories(self):
-        custom_content = """
-default_category: "CUSTOM_OTHER"
-prefix_rules:
-  test-: "TEST"
-repositories:
-  custom-repo: "SPECIAL"
-"""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
-            tmp.write(custom_content)
-            tmp_path = tmp.name
+        from azure.azure_db import AzureDevOpsCache
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "test_cats.db")
+            cache = AzureDevOpsCache(db_path)
+            cache.save_repo_category("SPECIAL", "#ff0000")
+            cache.save_repo_prefix_rule("test-", "SPECIAL")
+            cache.save_repo_category_override("custom-repo", "SPECIAL")
 
-        try:
-            config, resolved = utils.load_repo_categories(custom_path=tmp_path)
-            self.assertEqual(config["default_category"], "CUSTOM_OTHER")
+            config, resolved = utils.load_repo_categories(cache_db=cache)
+            self.assertEqual(resolved, "database")
             self.assertEqual(config["repositories"].get("custom-repo"), "SPECIAL")
+            self.assertEqual(config["prefix_rules"].get("test-"), "SPECIAL")
 
             import devops_helper
             repos = {
@@ -194,19 +191,16 @@ repositories:
                 "2": {"info": {"name": "test-module"}},
                 "3": {"info": {"name": "unknown-repo"}},
             }
-            devops_helper.addCategoriesToRepos(repos, config_path=tmp_path, auto_save_missing=True)
+            devops_helper.addCategoriesToRepos(repos, cache_db=cache, auto_save_missing=True)
 
             self.assertEqual(repos["1"]["category"], "SPECIAL")
-            self.assertEqual(repos["2"]["category"], "TEST")
-            self.assertEqual(repos["3"]["category"], "CUSTOM_OTHER")
+            self.assertEqual(repos["2"]["category"], "SPECIAL")
+            self.assertEqual(repos["3"]["category"], "OTHERS")
 
-            # Verify that missing repos were persisted to the YAML file
-            reloaded, _ = utils.load_repo_categories(custom_path=tmp_path)
-            self.assertEqual(reloaded["repositories"].get("unknown-repo"), "CUSTOM_OTHER")
-            self.assertEqual(reloaded["repositories"].get("test-module"), "TEST")
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+            # Verify that missing repos were persisted to the database overrides
+            reloaded, _ = utils.load_repo_categories(cache_db=cache)
+            self.assertEqual(reloaded["repositories"].get("unknown-repo"), "OTHERS")
+            self.assertEqual(reloaded["repositories"].get("test-module"), "SPECIAL")
 
     def test_get_category_color(self):
         custom_config = {

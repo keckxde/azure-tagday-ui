@@ -416,37 +416,6 @@ class AzureDevOpsCache:
                     INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
                     VALUES (?, ?)
                     """, default_rules)
-
-                    # Merge any additional categories or rules from existing YAML file
-                    try:
-                        import utils
-                        cfg, _ = utils.load_repo_categories()
-                        if cfg and isinstance(cfg, dict):
-                            colors = cfg.get("category_colors", {})
-                            prefix_rules = cfg.get("prefix_rules", {})
-                            repos_map = cfg.get("repositories", {})
-
-                            order = 10
-                            for cname, col in colors.items():
-                                conn.execute("""
-                                INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
-                                VALUES (?, ?, ?, ?, 0)
-                                """, (cname, col, "", order))
-                                order += 1
-
-                            for pfx, cname in prefix_rules.items():
-                                conn.execute("""
-                                INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
-                                VALUES (?, ?)
-                                """, (pfx, cname))
-
-                            for rname, cname in repos_map.items():
-                                conn.execute("""
-                                INSERT OR IGNORE INTO repo_category_overrides (repo_name, category)
-                                VALUES (?, ?)
-                                """, (rname, cname))
-                    except Exception:
-                        pass
             except Exception:
                 pass
 
