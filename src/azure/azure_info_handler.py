@@ -19,6 +19,30 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _enrich_pr(pr, normalize_pr_status):
+    """
+    Enriches a raw PR dict with formatted date strings and a human-readable statusStr.
+    Modifies the dict in-place.
+
+    Args:
+        pr (dict): Pull request dict from the TFS API.
+        normalize_pr_status (callable): Function that normalises a raw status string.
+    """
+    pr["closedDateStr"] = UpdateDateString(pr.get("closedDate"))
+    pr["creationDateStr"] = UpdateDateString(pr.get("creationDate"))
+    norm_status = normalize_pr_status(pr.get("status"))
+    pr["status"] = norm_status
+    if norm_status == "active":
+        pr["statusStr"] = f"OPN {pr['creationDateStr']}"
+    elif norm_status == "completed":
+        pr["statusStr"] = f"DON {pr['closedDateStr']}"
+    elif norm_status == "abandoned":
+        pr["statusStr"] = f"ABANDONED {pr['closedDateStr']}"
+    else:
+        pr["statusStr"] = f"REJECTED {pr['closedDateStr']}"
+
+
 class AzureInfoHandler(AzureBaseClient):
     """
     A high-level client helper to query, fetch, and aggregate project and repository data from Azure DevOps (TFS).
@@ -527,48 +551,75 @@ class AzureInfoHandler(AzureBaseClient):
                 if remote_push_id is not None and remote_push_id == cached_push_id:
                     cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                     if cached_repo:
-                        # Check if any active PRs in DB for this repo have changed status in TFS
-                        active_db_prs = cache_db.get_active_pull_requests(repo_id)
-                        if active_db_prs:
-                            try:
-                                live_active = self.get_pull_requests(project_id, repo_id, status="active")
-                                live_active_ids = {str(p.get("pullRequestId") or p.get("id")) for p in live_active}
-                                from utils import normalize_pr_status
-                                has_status_changes = False
-                                for db_pr in active_db_prs:
-                                    pr_id_str = str(db_pr.get("id"))
-                                    if pr_id_str not in live_active_ids:
-                                        # PR was closed/completed/abandoned! Fetch updated details
-                                        try:
-                                            updated_pr = self.get_pull_request(pr_id_str)
-                                            if updated_pr:
-                                                updated_pr["closedDateStr"] = UpdateDateString(updated_pr.get("closedDate"))
-                                                updated_pr["creationDateStr"] = UpdateDateString(updated_pr.get("creationDate"))
-                                                st_norm = normalize_pr_status(updated_pr.get("status"))
-                                                updated_pr["status"] = st_norm
-                                                if st_norm == "completed":
-                                                    updated_pr["statusStr"] = f"DON {updated_pr['closedDateStr']}"
-                                                elif st_norm == "abandoned":
-                                                    updated_pr["statusStr"] = f"ABANDONED {updated_pr['closedDateStr']}"
-                                                else:
-                                                    updated_pr["statusStr"] = f"OPN {updated_pr['creationDateStr']}"
-                                                cache_db.save_single_pull_request(updated_pr)
-                                                has_status_changes = True
-                                                logger.info("  -- PR #%s in %s status updated: %s", pr_id_str, repo_name, st_norm)
-                                        except Exception as ex:
-                                            logger.warning("Could not refresh closed PR #%s: %s", pr_id_str, ex)
-                                
-                                if has_status_changes:
-                                    cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
-                            except Exception as e:
-                                logger.warning("  -- Failed to check active PRs for %s during delta sync: %s", repo_name, e)
-
+                        # Always re-sync all active PRs even when branches/commits are unchanged:
+                        # PRs can be updated (title, reviewers, votes) or newly opened without a push.
+                        has_changes = self._refresh_active_prs(project_id, repo_id, repo_name, cache_db)
+                        if has_changes:
+                            cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                         logger.info("  -- Repo %s is up to date (Push ID: %s). Skipping remote query.", repo_name, remote_push_id)
                         return cached_repo, remote_push_id
                 return None, remote_push_id
         except Exception as e:
             logger.warning("  -- Failed to check push ID for %s: %s", repo_name, e)
         return None, None
+
+    def _refresh_active_prs(self, project_id, repo_id, repo_name, cache_db):
+        """
+        Re-syncs all active pull requests for a repository from TFS into the cache DB.
+
+        This is called even when the push ID has not changed because:
+        - Active PRs may have been updated (title, reviewers, votes) without a new push.
+        - New PRs may have been opened against an existing commit (e.g. draft PRs).
+        - Active PRs may have been closed/abandoned since the last full sync.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            repo_name (str): The repository name (for logging).
+            cache_db: The database cache instance.
+
+        Returns:
+            bool: True if any PR was added or updated in the cache.
+        """
+        from utils import normalize_pr_status
+        has_changes = False
+        try:
+            # Fetch the current live-active PR list from TFS (one cheap list call)
+            live_active = self.get_pull_requests(project_id, repo_id, status="active")
+            live_active_ids = {str(p.get("pullRequestId") or p.get("id")) for p in live_active}
+
+            # 1. Re-fetch every PR currently stored as active in the DB.
+            #    This covers status changes (completed/abandoned) as well as metadata updates.
+            active_db_prs = cache_db.get_active_pull_requests(repo_id)
+            db_active_ids = set()
+            for db_pr in active_db_prs:
+                pr_id_str = str(db_pr.get("id"))
+                db_active_ids.add(pr_id_str)
+                try:
+                    updated_pr = self.get_pull_request(pr_id_str)
+                    if updated_pr:
+                        _enrich_pr(updated_pr, normalize_pr_status)
+                        cache_db.save_single_pull_request(updated_pr)
+                        has_changes = True
+                        logger.info("  -- PR #%s in %s refreshed: %s", pr_id_str, repo_name, updated_pr["status"])
+                except Exception as ex:
+                    logger.warning("Could not refresh PR #%s: %s", pr_id_str, ex)
+
+            # 2. Discover new active PRs from TFS that are not yet recorded in the DB.
+            for pr_id_str in live_active_ids - db_active_ids:
+                try:
+                    new_pr = self.get_pull_request(pr_id_str)
+                    if new_pr:
+                        _enrich_pr(new_pr, normalize_pr_status)
+                        cache_db.save_single_pull_request(new_pr)
+                        has_changes = True
+                        logger.info("  -- New active PR #%s discovered in %s", pr_id_str, repo_name)
+                except Exception as ex:
+                    logger.warning("Could not fetch new PR #%s: %s", pr_id_str, ex)
+
+        except Exception as e:
+            logger.warning("  -- Failed to refresh active PRs for %s: %s", repo_name, e)
+        return has_changes
 
     def _process_branches(self, project_id, repo, branches):
         """Processes branch references, updates latest commit details, and returns whether 'dev' exists."""
@@ -708,21 +759,7 @@ class AzureInfoHandler(AzureBaseClient):
         for pr_id in prs_list:
             try:
                 pr = self.get_pull_request(pr_id)
-                pr["closedDateStr"] = UpdateDateString(pr.get("closedDate"))
-                pr["creationDateStr"] = UpdateDateString(pr.get("creationDate"))
-
-                status_val = pr.get("status")
-                norm_status = normalize_pr_status(status_val)
-                pr["status"] = norm_status
-                if norm_status == "active":
-                    pr["statusStr"] = f"OPN {pr['creationDateStr']}"
-                elif norm_status == "completed":
-                    pr["statusStr"] = f"DON {pr['closedDateStr']}"
-                elif norm_status == "abandoned":
-                    pr["statusStr"] = f"ABANDONED {pr['closedDateStr']}"
-                else:
-                    pr["statusStr"] = f"REJECTED {pr['closedDateStr']}"
-
+                _enrich_pr(pr, normalize_pr_status)
                 if "dev" in pr.get("targetRefName", ""):
                     dev_prs.append(pr)
                 else:
