@@ -164,5 +164,36 @@ class TestAzureInfoBaseClient(unittest.TestCase):
         mock_db.mark_artifact_deleted.assert_called_once_with(5001, "drop")
 
 
+class TestAzureInfoHandlerTags(unittest.TestCase):
+
+    def setUp(self):
+        from azure.azure_info_handler import AzureInfoHandler
+        self.handler = AzureInfoHandler("https://tfs.example.com/tfs", "dummy-pat")
+
+    @patch.object(AzureInfoBaseClient, "get_repository_refs")
+    @patch.object(AzureInfoBaseClient, "get_annotated_tag")
+    def test_process_tags_filtering_and_classification(self, mock_get_annotated, mock_get_refs):
+        mock_get_refs.return_value = [
+            {"name": "refs/tags/v1.00.0", "objectId": "obj1"},
+            {"name": "refs/tags/v1.01.0", "objectId": "obj2"},
+            {"name": "refs/tags/v1.02.0", "objectId": "obj3"},
+            {"name": "refs/tags/invalid_tag", "objectId": "obj4"},
+        ]
+        mock_get_annotated.return_value = {
+            "taggedObject": {"objectId": "abcdef123456"},
+            "taggedBy": {"name": "Dev", "date": "2026-03-01T10:00:00Z"},
+            "message": "Release v1.02.0"
+        }
+        repo = {"id": "repo-123", "name": "Repo1"}
+
+        tags, last_stable, last_unstable = self.handler._process_tags("proj-1", repo, filter_version_tags_format=True)
+
+        self.assertEqual(len(tags), 3)
+        self.assertEqual(last_stable, "v1.02.0")
+        self.assertEqual(last_unstable, "v1.01.0")
+        self.assertIn("LatestTag", repo)
+        self.assertEqual(repo["LatestTag"]["FriendlyName"], "v1.02.0")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -670,7 +670,7 @@ class AzureInfoHandler(AzureBaseClient):
         return b_we_have_dev_branch
 
     def _process_tags(self, project_id, repo, filter_version_tags_format):
-        """Processes repository tags, annotated tag details, and determines stable/unstable tags."""
+        """Filters tags, extracts annotated tag information, and returns stable/unstable lists."""
         tags_filtered = []
         last_stable_tag = ""
         last_unstable_tag = ""
@@ -682,29 +682,77 @@ class AzureInfoHandler(AzureBaseClient):
             tags = self.get_repository_refs(project_id, repo_id, "tags/")
         except Exception as e:
             logger.error("Error fetching tags for %s: %s", repo_name, e)
+            return tags_filtered, last_stable_tag, last_unstable_tag
 
         for tag in tags:
             tag["FriendlyName"] = tag.get("name", "").replace("refs/tags/", "")
+            if filter_version_tags_format and not tag["FriendlyName"].startswith("v"):
+                logger.debug("  -- Ignore Tag %s -> missing 'v'", tag['name'])
+                continue
 
-            if filter_version_tags_format:
-                try:
-                    is_valid, _ = check_tag_format(tag["FriendlyName"])
-                    if not is_valid:
-                        continue
-                except ValueError:
-                    continue
+            version_parts = tag["FriendlyName"].split(".")
+            if filter_version_tags_format and len(version_parts) < 3:
+                logger.debug("  -- Ignore Tag %s -> wrong version number %d", tag['FriendlyName'], len(version_parts))
+                continue
 
+            if filter_version_tags_format and len(version_parts[1]) < 2:
+                logger.debug("  -- Ignore Tag %s -> wrong MINOR version number %s", tag['FriendlyName'], version_parts[1])
+                continue
+
+            if len(version_parts) == 3:
                 try:
-                    if check_tag_unstable(tag["FriendlyName"]):
+                    minor = int(version_parts[1])
+                    if minor % 2:
                         tag["unstable"] = True
+                        tag["stable"] = False
                         if not last_unstable_tag or tag["FriendlyName"] > last_unstable_tag:
                             last_unstable_tag = tag["FriendlyName"]
-                    elif check_tag_stable(tag["FriendlyName"]):
+                    else:
+                        tag["unstable"] = False
                         tag["stable"] = True
                         if not last_stable_tag or tag["FriendlyName"] > last_stable_tag:
                             last_stable_tag = tag["FriendlyName"]
                 except ValueError:
                     pass
+
+            try:
+                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag['objectId'])
+                if tag["addinfo"]:
+                    try:
+                        tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
+                    except Exception:
+                        logger.warning("Ignore error - cannot work with taggedObject %s, %s", repo_id, tag['objectId'])
+            except Exception:
+                tag["addinfo"] = None
+
+            if tag.get("CommitId") and tag.get("addinfo"):
+                try:
+                    date_str = tag["addinfo"]["taggedBy"]["date"]
+                    tag_date_obj = parse_iso_datetime(date_str)
+                    if tag_date_obj:
+                        tag_date_obj = tag_date_obj + timedelta(hours=1)
+                        tag["CommitDateObj"] = tag_date_obj
+                        tag["CommitDate"] = UpdateDateString(tag_date_obj)
+                    tag["Committer"] = tag["addinfo"]["taggedBy"]["name"]
+                    tag["CommentComplete"] = tag["addinfo"].get("message", "").replace("\n", " ")
+                    if len(tag["CommentComplete"]) > 50:
+                        tag["Comment"] = tag["CommentComplete"][:46] + "..."
+                    else:
+                        tag["Comment"] = tag["CommentComplete"]
+                except Exception as e:
+                    logger.error("Error parsing annotated tag info for %s: %s", tag['FriendlyName'], e)
+
+            tags_filtered.append(tag)
+
+        tags_filtered.reverse()
+        tags_filtered = tags_filtered[:10]
+
+        if tags_filtered:
+            repo["LatestTag"] = tags_filtered[0]
+        else:
+            repo["LatestTag"] = {"FriendlyName": "", "CommitDate": ""}
+
+        return tags_filtered, last_stable_tag, last_unstable_tag
 
     def _process_pushes_and_prs(self, project_id, repo, cache_db=None):
         """Scans push events and fetches all active and merged Pull Requests."""
