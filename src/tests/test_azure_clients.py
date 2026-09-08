@@ -194,6 +194,27 @@ class TestAzureInfoHandlerTags(unittest.TestCase):
         self.assertIn("LatestTag", repo)
         self.assertEqual(repo["LatestTag"]["FriendlyName"], "v1.02.0")
 
+    def test_process_branches_with_get_diff(self):
+        repo = {"id": "repo-123", "name": "Repo1", "defaultBranch": "refs/heads/main"}
+        branches = [
+            {"name": "refs/heads/main", "objectId": "sha1111111"},
+            {"name": "refs/heads/dev", "objectId": "sha2222222"}
+        ]
+        self.handler.get_commit = MagicMock(return_value={
+            "committer": {"name": "Alice", "date": "2026-03-01T10:00:00Z"},
+            "comment": "Dev commit"
+        })
+        self.handler.get_diff = MagicMock(return_value={"aheadCount": 3, "behindCount": 1})
+
+        has_dev = self.handler._process_branches("proj-1", repo, branches)
+
+        self.assertTrue(has_dev)
+        dev_branch = next(b for b in branches if b["FriendlyName"] == "dev")
+        self.assertEqual(dev_branch["Ahead"], 3)
+        self.assertEqual(dev_branch["Behind"], 1)
+        self.assertEqual(dev_branch["Stats"]["aheadCount"], 3)
+        self.assertEqual(dev_branch["Stats"]["behindCount"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

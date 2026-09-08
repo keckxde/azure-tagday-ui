@@ -592,7 +592,10 @@ class AzureInfoHandler(AzureBaseClient):
         return False
 
     def _get_cached_repo_if_up_to_date(self, project_id, repo, cache_db):
-        """Checks if cached repository details are up to date via latest push ID comparison."""
+        """
+        Checks if cached repository details are up to date via latest push ID comparison.
+        Always synchronizes and updates PR states first before retrieving and returning the cached repo.
+        """
         if cache_db is None:
             return None, None
         repo_id = repo["id"]
@@ -603,13 +606,10 @@ class AzureInfoHandler(AzureBaseClient):
                 remote_push_id = pushes[0].get("pushId")
                 cached_push_id = cache_db.get_last_push_id(repo_id)
                 if remote_push_id is not None and remote_push_id == cached_push_id:
+                    # Check and synchronize PR states (open PR updates, new PRs) before loading cached state
+                    self._refresh_active_prs(project_id, repo_id, repo_name, cache_db)
                     cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                     if cached_repo:
-                        # Always re-sync all active PRs even when branches/commits are unchanged:
-                        # PRs can be updated (title, reviewers, votes) or newly opened without a push.
-                        has_changes = self._refresh_active_prs(project_id, repo_id, repo_name, cache_db)
-                        if has_changes:
-                            cached_repo = cache_db.get_cached_repository(repo_id, repo_name)
                         logger.info("  -- Repo %s is up to date (Push ID: %s). Skipping remote query.", repo_name, remote_push_id)
                         return cached_repo, remote_push_id
                 return None, remote_push_id
@@ -748,19 +748,35 @@ class AzureInfoHandler(AzureBaseClient):
                 if branch["FriendlyName"] != default_branch:
                     try:
                         diff = self.get_diff(project_id, repo_id, default_branch, branch['FriendlyName'])
-                        branch["Ahead"] = diff.get("aheadCount", 0)
-                        branch["Behind"] = diff.get("behindCount", 0)
+                        ahead = diff.get("aheadCount", 0)
+                        behind = diff.get("behindCount", 0)
+                        branch["Ahead"] = ahead
+                        branch["Behind"] = behind
+                        branch["Stats"] = {"aheadCount": ahead, "behindCount": behind}
                     except Exception as e:
                         logger.error("Error getting diff for branch %s against %s: %s", branch['FriendlyName'], default_branch, e)
                         branch["Ahead"] = 0
                         branch["Behind"] = 0
+                        branch["Stats"] = {"aheadCount": -1, "behindCount": -1}
                 else:
                     branch["Ahead"] = 0
                     branch["Behind"] = 0
+                    branch["Stats"] = {"aheadCount": 0, "behindCount": 0}
             else:
                 branch["Ahead"] = 0
                 branch["Behind"] = 0
+                branch["Stats"] = {"aheadCount": 0, "behindCount": 0}
 
+            last_commit_raw_date = repo.get("LastCommitRawDate")
+            commit_date_obj = branch["CommitDateObj"]
+            if commit_date_obj and (not last_commit_raw_date or commit_date_obj > last_commit_raw_date):
+                repo["LastCommitRawDate"] = commit_date_obj
+                repo["LatestCommit"] = branch["CommitId"]
+                repo["CommitDate"] = branch["CommitDate"]
+                repo["Committer"] = branch["Committer"]
+                repo["Comment"] = branch["Comment"]
+
+        branches.sort(key=lambda x: x.get("CommitDate", ""))
         return b_we_have_dev_branch
 
     def _process_tags(self, project_id, repo, filter_version_tags_format):

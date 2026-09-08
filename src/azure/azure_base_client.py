@@ -435,6 +435,30 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/stats/branches/{quoted_branch}", params={"api-version": "6.0"})
         return res
 
+    def get_diff(self, project_id, repo_id, base_version, target_version):
+        """
+        Retrieves branch diff/stats between base and target branch versions.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            base_version (str): The base branch name.
+            target_version (str): The target branch name.
+
+        Returns:
+            dict: Diff or branch stats dictionary.
+        """
+        try:
+            return self.get_branch_stats(project_id, repo_id, target_version)
+        except Exception:
+            params = {
+                "api-version": "6.0",
+                "baseVersion": base_version,
+                "targetVersion": target_version
+            }
+            res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/diffs/commits", params=params)
+            return res
+
     def get_annotated_tag(self, project_id, repo_id, object_id):
         """
         Retrieves details of an annotated tag.
