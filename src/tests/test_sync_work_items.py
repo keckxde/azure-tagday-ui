@@ -294,6 +294,31 @@ class TestSyncWorkItems(unittest.TestCase):
         self.assertEqual(self.cache.get_work_item(500)["Title"], "Parent Story 500")
         self.assertEqual(self.cache.get_work_item(400)["Title"], "Grandparent Epic 400")
 
+    def test_sync_work_items_progress_callback(self):
+        """Tests that sync_work_items invokes progress_callback with informative progress messages."""
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[1001, 1002, 1003])
+        all_mock_items = {
+            1001: {"id": 1001, "fields": {"System.Title": "Item 1", "System.WorkItemType": "Task", "System.State": "Active"}},
+            1002: {"id": 1002, "fields": {"System.Title": "Item 2", "System.WorkItemType": "Task", "System.State": "Active"}},
+            1003: {"id": 1003, "fields": {"System.Title": "Item 3", "System.WorkItemType": "Task", "System.State": "Active"}},
+        }
+        self.handler.get_work_items_batch = MagicMock(side_effect=lambda ids, **kwargs: [all_mock_items[i] for i in ids if i in all_mock_items])
+
+        messages = []
+        def on_progress(msg, current=0, total=0):
+            messages.append((msg, current, total))
+
+        summary = self.handler.sync_work_items(self.cache, project_id="TEST_PROJECT", chunk_size=2, progress_callback=on_progress)
+
+        self.assertEqual(summary["synced"], 3)
+        self.assertGreaterEqual(len(messages), 4, "Progress callback should be called multiple times across sync stages")
+        
+        # Check that messages contain WIQL start, discovery count, batch progress, and completion
+        msg_texts = [m[0] for m in messages]
+        self.assertTrue(any("WIQL" in m for m in msg_texts))
+        self.assertTrue(any("batch" in m.lower() for m in msg_texts))
+        self.assertTrue(any("completed" in m.lower() for m in msg_texts))
+
 
 if __name__ == "__main__":
     unittest.main()

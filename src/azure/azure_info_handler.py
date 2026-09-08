@@ -160,7 +160,7 @@ class AzureInfoHandler(AzureBaseClient):
                     logger.error(" - GetTFSWorkItems: #%s err %s", task_id, e)
         return work_item_list
 
-    def sync_work_items(self, cache_db, project_id=None, chunk_size=200):
+    def sync_work_items(self, cache_db, project_id=None, chunk_size=200, progress_callback=None):
         """
         Synchronizes all work items in the SQLite database cache with the TFS API.
         Always queries the TFS API directly using WIQL:
@@ -173,22 +173,39 @@ class AzureInfoHandler(AzureBaseClient):
             cache_db (AzureDevOpsCache): Database cache instance.
             project_id (str, optional): Project ID or name. Defaults to None.
             chunk_size (int, optional): Max IDs per batch request (Azure DevOps / TFS limit is 200). Defaults to 200.
+            progress_callback (callable, optional): Callback function(msg: str, current: int, total: int) for live progress updates.
 
         Returns:
             dict: Summary of synced, deleted, and error counts.
         """
+        def _notify(msg, current=0, total=0):
+            logger.info(msg)
+            if callable(progress_callback):
+                try:
+                    progress_callback(msg, current, total)
+                except TypeError:
+                    progress_callback(msg)
+                except Exception as ex:
+                    logger.debug("Progress callback exception: %s", ex)
+
         summary = {"synced": 0, "deleted": 0, "errors": 0}
         db_ids = set(cache_db.get_all_work_item_ids(include_deleted=True))
+
+        target_proj = project_id or getattr(self, "project_id", "") or "default"
+        _notify(f"Executing WIQL query to fetch all work items for project '{target_proj}'...", 0, 0)
 
         # Always query the API directly without needing known task IDs
         try:
             remote_ids = self.query_work_item_ids_wiql(project_id)
-            logger.info("WIQL discovered %d available work items in TFS", len(remote_ids))
-            # Combine remote IDs with any IDs previously stored in DB to check for deletions
             target_ids = list(set(remote_ids) | db_ids)
+            _notify(
+                f"WIQL query complete: discovered {len(remote_ids)} remote items ({len(target_ids)} total to reconcile with cache)",
+                0, len(target_ids)
+            )
         except Exception as wiql_err:
             logger.warning("WIQL query failed (%s), falling back to cached DB IDs", wiql_err)
             target_ids = list(db_ids)
+            _notify(f"WIQL query failed ({wiql_err}), falling back to {len(target_ids)} cached database IDs", 0, len(target_ids))
 
         clean_ids = []
         for tid in target_ids:
@@ -198,7 +215,12 @@ class AzureInfoHandler(AzureBaseClient):
                 continue
 
         if not clean_ids:
+            _notify("No work items found to synchronize.", 0, 0)
             return summary
+
+        total_items = len(clean_ids)
+        total_batches = (total_items + chunk_size - 1) // chunk_size
+        _notify(f"Downloading {total_items} work items in {total_batches} batch(es) of up to {chunk_size} items...", 0, total_items)
 
         found_ids = set()
         all_parent_ids = set()
@@ -226,6 +248,14 @@ class AzureInfoHandler(AzureBaseClient):
 
         for i in range(0, len(clean_ids), chunk_size):
             chunk = clean_ids[i:i + chunk_size]
+            batch_num = (i // chunk_size) + 1
+            batch_start = i + 1
+            batch_end = min(i + len(chunk), total_items)
+            pct = round((batch_end / total_items) * 100) if total_items > 0 else 0
+            _notify(
+                f"Syncing work items batch [{batch_num}/{total_batches}] (#{batch_start}-#{batch_end} of {total_items}, {pct}%)...",
+                batch_end, total_items
+            )
             try:
                 batch_items = self.get_work_items_batch(chunk, expand="all", chunk_size=chunk_size)
                 for wi in batch_items:
@@ -257,8 +287,10 @@ class AzureInfoHandler(AzureBaseClient):
                         summary["deleted"] += 1
 
             except Exception as batch_err:
-                logger.warning(" - sync_work_items: batch request failed (%s). Falling back to individual requests.", batch_err)
-                for task_id in chunk:
+                _notify(f"Batch #{batch_num} failed ({batch_err}), falling back to individual requests...", batch_end, total_items)
+                for idx, task_id in enumerate(chunk):
+                    if (idx + 1) % 25 == 0 or idx == len(chunk) - 1:
+                        _notify(f"Batch #{batch_num} individual fallback: querying item {idx + 1}/{len(chunk)}...", batch_end, total_items)
                     try:
                         wi = self.get_work_item(task_id)
                         if wi and isinstance(wi, dict) and "id" in wi:
@@ -310,6 +342,7 @@ class AzureInfoHandler(AzureBaseClient):
             depth += 1
             p_chunk = list(missing_parents)[:chunk_size]
             next_level_parents = set()
+            _notify(f"Resolving work item hierarchy (Level {depth}): fetching {len(p_chunk)} parent containers...", total_items, total_items)
             try:
                 p_items = self.get_work_items_batch(p_chunk, expand="all", chunk_size=chunk_size)
                 for p_wi in p_items:
@@ -343,8 +376,13 @@ class AzureInfoHandler(AzureBaseClient):
         try:
             if hasattr(cache_db, "discover_and_prefill_milestones_from_work_items"):
                 cache_db.discover_and_prefill_milestones_from_work_items()
-        except Exception as e:
-            logger.warning(" - sync_work_items: error pre-filling milestones: %s", e)
+        except Exception as ms_err:
+            logger.debug("Could not prefill milestones from work item tags: %s", ms_err)
+
+        _notify(
+            f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted, {summary.get('errors', 0)} errors",
+            total_items, total_items
+        )
 
         return summary
 

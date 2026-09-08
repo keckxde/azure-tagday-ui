@@ -1334,7 +1334,7 @@ class DevOpsBackend(QObject):
     # Async Operations
     @Slot()
     def sync_work_items_async(self):
-        """Triggers direct TFS API WIQL sync for work items."""
+        """Triggers direct TFS API WIQL sync for work items with real-time progress logging."""
         if self._is_busy:
             return
 
@@ -1344,11 +1344,13 @@ class DevOpsBackend(QObject):
             if not azHandler:
                 raise RuntimeError("Failed to create Azure/TFS client. Check .env variables.")
 
-            worker.log_message.emit(f"Querying all work items for project '{devops_helper.AZURE_PROJECT_ID}' via WIQL...")
-            summary = azHandler.sync_work_items(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
-            worker.log_message.emit(
-                f"Sync complete: {summary.get('synced', 0)} synced, "
-                f"{summary.get('deleted', 0)} deleted, {summary.get('errors', 0)} errors"
+            def _progress_cb(msg, current=0, total=0):
+                worker.log_message.emit(msg)
+
+            summary = azHandler.sync_work_items(
+                self._cache_db,
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                progress_callback=_progress_cb
             )
             return summary
 
@@ -1378,7 +1380,7 @@ class DevOpsBackend(QObject):
 
     @Slot()
     def sync_all_async(self):
-        """Triggers full sync of repos, work items, and pull requests."""
+        """Triggers full sync of repos, work items, and pull requests with live progress reporting."""
         if self._is_busy:
             return
 
@@ -1391,7 +1393,11 @@ class DevOpsBackend(QObject):
                     "Please check your .env file or Settings view."
                 )
             worker.log_message.emit("Starting full Azure DevOps sync (repositories, work items, pull requests)...")
-            devops_helper.sync(force_sync=True)
+
+            def _progress_cb(msg, current=0, total=0):
+                worker.log_message.emit(msg)
+
+            devops_helper.sync(force_sync=True, progress_callback=_progress_cb)
             return "Full synchronization finished successfully"
 
         self._run_worker(_work, "Running full sync...")

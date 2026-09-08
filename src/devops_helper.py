@@ -604,12 +604,14 @@ def main(run_templates: bool = False) -> None:
     """Entry point for devops sync operations. Does not generate reports by default."""
     sync(run_templates_flag=run_templates)
 
-def sync(force_sync: bool = False, run_templates_flag: bool = False) -> None:
-    """Synchronize Azure DevOps repositories, work items, and pull requests to SQLite cache.
+def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
+    """
+    Synchronizes repositories, branches, tags, PRs, and work items from TFS to SQLite.
 
     Args:
         force_sync (bool): If True, bypass file recency checks and force a full sync. Defaults to False.
         run_templates_flag (bool): If True, render Tag Day templates after sync. Defaults to False.
+        progress_callback (callable, optional): Optional callback for live progress updates.
     """
     azHandler = _getHandler()
     if not azHandler:
@@ -663,7 +665,10 @@ def sync(force_sync: bool = False, run_templates_flag: bool = False) -> None:
         logger.info(f"Syncing all work items from TFS API for project {AZURE_PROJECT_ID}...")
         if azHandler:
             if hasattr(azHandler, "sync_work_items"):
-                summary = azHandler.sync_work_items(cache_db, project_id=AZURE_PROJECT_ID)
+                if progress_callback:
+                    summary = azHandler.sync_work_items(cache_db, project_id=AZURE_PROJECT_ID, progress_callback=progress_callback)
+                else:
+                    summary = azHandler.sync_work_items(cache_db, project_id=AZURE_PROJECT_ID)
             else:
                 wi_ids = cache_db.get_all_work_item_ids()
                 summary = {"synced": 0, "deleted": 0, "errors": 0}
