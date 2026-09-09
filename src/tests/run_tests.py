@@ -15,8 +15,10 @@ def main():
     # Set base directory
     test_dir = os.path.dirname(os.path.abspath(__file__))
     py_dir = os.path.dirname(test_dir)
-    if py_dir not in sys.path:
-        sys.path.insert(0, py_dir)
+    root_dir = os.path.dirname(py_dir)
+    for p in (root_dir, py_dir):
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
     print(f"============================================================")
     print(f"Running Azure DevOps Python Unit Tests")

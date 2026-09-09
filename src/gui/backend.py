@@ -1509,6 +1509,9 @@ class DevOpsBackend(QObject):
                 "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
             }
             self.statsChanged.emit()
+            self.iterationShiftsChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.load_interactive_reports()
 
         except Exception as e:
             logger.error(f"Error refreshing cache data: {e}", exc_info=True)
@@ -1645,6 +1648,7 @@ class DevOpsBackend(QObject):
                     "artifacts_list": []
                 }
             self.storageDataChanged.emit()
+            self.iterationShiftsChanged.emit()
 
         except Exception as e:
             logger.error(f"Error loading interactive reports data: {e}", exc_info=True)

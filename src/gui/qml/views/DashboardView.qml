@@ -52,6 +52,34 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    // Refresh Button
+                    Button {
+                        text: "↻ Refresh"
+                        enabled: backend ? !backend.isBusy : false
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Reload dashboard stats and metrics from local database"
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#f0f6fc"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 34
+                            implicitWidth: 85
+                            radius: 6
+                            color: parent.hovered ? "#30363d" : "#21262d"
+                            border.color: "#30363d"
+                        }
+                        onClicked: {
+                            if (backend)
+                                backend.refresh_all_data();
+                        }
+                    }
+
                     // Live Status Badge
                     Rectangle {
                         height: 34

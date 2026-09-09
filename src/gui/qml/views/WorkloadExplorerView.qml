@@ -410,7 +410,12 @@ Item {
                     color: parent.hovered ? "#30363d" : "#21262d"
                     border.color: "#30363d"
                 }
-                onClicked: root.refreshMatrix()
+                onClicked: {
+                    if (backend) {
+                        backend.refresh_all_data();
+                    }
+                    root.refreshMatrix();
+                }
             }
 
             // Prepare Sprints Button

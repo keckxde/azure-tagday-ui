@@ -6,9 +6,11 @@
 
 - only use the .env or environment file mechanism, when really needed, or triggered through CLI, but not as default. By default we consider the settings to be within our databasee
 
-### Synchronization
+### UI Related
 
-- The refresh report buttons on the top right on different pages does not seem to work
+- Update Milestone Information does a direct synchronous synch with TFS, that is blocking the UI
+- The workload explorer Task view is not updated, when it was shown, and a background synch was run
+- Allow a scheduled synchronisatin, e.g. every 5 minutes, but allow also manual syncs
 
 ### Milestone Information
 
@@ -31,3 +33,4 @@
 - Prepare weekly iterations already in advance, and continue the schematics up until a given deadline
 - Jump from Workitem Explorer directly into the current teams sprint view of the item (considering the API provides the right team and iteration info)
 - Fix WIQL query HTTP 400 caused by date precision on System.ChangedDate (added timePrecision=true and automatic date-only fallback) and debug logging
+- Fixed top-right refresh buttons across all pages (Reports, Workload Explorer, Work Items, Dashboard, Repos, Pull Requests) to reload cache, storage/tagday reports, sprint analytics, and trigger reactive UI updates.

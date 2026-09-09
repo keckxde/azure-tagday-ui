@@ -110,6 +110,47 @@ class TestArtifactsReport(unittest.TestCase):
         self.assertTrue(os.path.exists(self.md_path))
         self.assertTrue(os.path.exists(self.csv_path))
 
+    def test_backend_load_interactive_reports_and_refresh_signals(self):
+        from gui.backend import DevOpsBackend
+
+        backend = DevOpsBackend()
+        backend._db_path = self.db_path
+        backend._cache_db = self.cache
+
+        # Seed test build and artifact data
+        with self.cache._connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO projects (id, name) VALUES (?, ?)", ("TEST_PROJ", "Test Project"))
+            conn.execute("""
+                INSERT OR REPLACE INTO builds (id, project_id, build_number, status, result, queue_time, start_time, finish_time)
+                VALUES (1, 'TEST_PROJ', '20260901.1', 'completed', 'succeeded', '2026-09-01 10:00:00', '2026-09-01 10:01:00', '2026-09-01 10:05:00')
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO artifacts (id, build_id, name, type, size_bytes, size_mb, download_url, url, is_deleted)
+                VALUES (101, 1, 'art1.zip', 'Container', 10485760, 10.0, 'http://tfs/art1.zip', 'http://tfs/art1', 0)
+            """)
+
+        storage_signals = []
+        shifts_signals = []
+        matrix_signals = []
+        stats_signals = []
+
+        backend.storageDataChanged.connect(lambda: storage_signals.append(True))
+        backend.iterationShiftsChanged.connect(lambda: shifts_signals.append(True))
+        backend.workloadMatrixChanged.connect(lambda: matrix_signals.append(True))
+        backend.statsChanged.connect(lambda: stats_signals.append(True))
+
+        # Test load_interactive_reports
+        backend.load_interactive_reports()
+        self.assertGreaterEqual(len(storage_signals), 1)
+        self.assertGreaterEqual(len(shifts_signals), 1)
+        self.assertGreaterEqual(backend.storageData["total_artifacts"], 1)
+
+        # Test refresh_all_data
+        backend.refresh_all_data()
+        self.assertGreaterEqual(len(stats_signals), 1)
+        self.assertGreaterEqual(len(matrix_signals), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

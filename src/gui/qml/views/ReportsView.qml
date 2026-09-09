@@ -145,8 +145,10 @@ Item {
                 }
                 onClicked: {
                     if (backend) {
+                        backend.refresh_all_data();
                         backend.load_interactive_reports();
                     }
+                    root.refreshSprintReport();
                 }
             }
         }

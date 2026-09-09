@@ -392,6 +392,32 @@ Item {
             }
 
             Button {
+                text: "↻ Refresh"
+                enabled: backend ? !backend.isBusy : false
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: "Reload work items cache directly from local database"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 34
+                    implicitWidth: 85
+                    radius: 6
+                    color: parent.hovered ? "#30363d" : "#21262d"
+                    border.color: "#30363d"
+                }
+                onClicked: {
+                    if (backend)
+                        backend.refresh_all_data();
+                }
+            }
+
+            Button {
                 text: "⚡ Sync WIQL"
                 enabled: backend ? !backend.isBusy : false
                 font.weight: Font.DemiBold
