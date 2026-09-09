@@ -7,6 +7,7 @@ import sys
 import json
 import logging
 import re
+import threading
 import urllib.parse
 from datetime import datetime
 from PySide6.QtCore import QObject, Signal, Slot, Property
@@ -2604,14 +2605,15 @@ class DevOpsBackend(QObject):
     @Slot(int, str, result=dict)
     def update_work_item_deadline(self, work_item_id, new_date_str):
         """
-        Updates the target deadline for a work item both in local SQLite cache and via TFS REST Web API.
+        Updates the target deadline for a work item immediately in local SQLite cache & memory,
+        and asynchronously synchronizes via TFS REST Web API in a background thread to prevent UI blocking.
 
         Args:
             work_item_id (int): Work item ID.
             new_date_str (str): Target date (YYYY-MM-DD or empty string to clear).
 
         Returns:
-            dict: {"success": bool, "message": str, "deadline": str, "urgency_badge": str, "urgency_color": str, "api_synced": bool}
+            dict: {"success": bool, "message": str, "deadline": str, "urgency_badge": str, "urgency_color": str, "api_synced": bool, "syncing": bool}
         """
         try:
             clean_id = int(work_item_id)
@@ -2623,26 +2625,12 @@ class DevOpsBackend(QObject):
 
         logger.info(f"Updating deadline for Work Item #{clean_id} -> '{clean_date}' (Field: {field_to_update})")
 
-        # 1. Update local SQLite DB cache
+        # 1. Update local SQLite DB cache immediately
         db_ok = False
         if self._cache_db:
             db_ok = self._cache_db.update_work_item_deadline(clean_id, clean_date, field_name=field_to_update)
 
-        # 2. Synchronize to Azure DevOps / TFS Web API (if handler available)
-        api_synced = False
-        api_err = None
-        try:
-            azHandler = devops_helper._getHandler()
-            if azHandler and hasattr(azHandler, "update_work_item_field"):
-                val_to_send = f"{clean_date}T17:00:00Z" if clean_date and "T" not in clean_date else (clean_date or None)
-                azHandler.update_work_item_field(clean_id, field_to_update, val_to_send, project_id=devops_helper.AZURE_PROJECT_ID)
-                api_synced = True
-                logger.info(f"Work item #{clean_id} deadline successfully synchronized with TFS API.")
-        except Exception as e:
-            api_err = str(e)
-            logger.warning(f"Could not push deadline update for #{clean_id} to TFS API: {e}")
-
-        # 3. Recalculate and refresh memory cache
+        # 2. Recalculate and refresh memory cache immediately for instantaneous UI response
         self.refresh_all_data()
 
         # Find updated work item to return fresh urgency badge
@@ -2650,14 +2638,31 @@ class DevOpsBackend(QObject):
         badge = updated_wi.get("urgency_badge", "—") if updated_wi else "—"
         color = updated_wi.get("urgency_color", "#8b949e") if updated_wi else "#8b949e"
 
-        msg = f"Deadline set to {clean_date or 'Cleared'}"
-        if api_synced:
-            msg += " (Synchronized with TFS Web API)"
-        elif api_err:
-            msg += f" (Cached locally; TFS API: {api_err})"
-        else:
-            msg += " (Cached in local SQLite database)"
+        # 3. Synchronize to Azure DevOps / TFS Web API asynchronously in background thread
+        def _sync_deadline_to_tfs_async(item_id, field_name, date_val):
+            try:
+                azHandler = devops_helper._getHandler()
+                if azHandler and hasattr(azHandler, "update_work_item_field"):
+                    val_to_send = f"{date_val}T17:00:00Z" if date_val and "T" not in date_val else (date_val or None)
+                    azHandler.update_work_item_field(item_id, field_name, val_to_send, project_id=devops_helper.AZURE_PROJECT_ID)
+                    msg_ok = f"✅ [Work Item #{item_id}] Deadline successfully synchronized with TFS API ({field_name}={date_val or 'Cleared'})"
+                    logger.info(msg_ok)
+                    self.logMessage.emit(msg_ok)
+                else:
+                    logger.warning(f"TFS API handler not available for work item #{item_id} deadline sync.")
+            except Exception as e:
+                err_msg = f"⚠️ [Work Item #{item_id}] Could not push deadline update to TFS API: {e}"
+                logger.warning(err_msg)
+                self.logMessage.emit(err_msg)
 
+        threading.Thread(
+            target=_sync_deadline_to_tfs_async,
+            args=(clean_id, field_to_update, clean_date),
+            daemon=True,
+            name=f"TFS-DeadlineSync-#{clean_id}"
+        ).start()
+
+        msg = f"Deadline set to {clean_date or 'Cleared'} (Saved locally; syncing with TFS in background...)"
         self.logMessage.emit(f"[Work Item #{clean_id}] {msg}")
         return {
             "success": True,
@@ -2665,21 +2670,23 @@ class DevOpsBackend(QObject):
             "deadline": clean_date,
             "urgency_badge": badge,
             "urgency_color": color,
-            "api_synced": api_synced,
+            "api_synced": False,
+            "syncing": True,
             "message": msg
         }
 
     @Slot(int, str, result=dict)
     def update_work_item_iteration(self, work_item_id, new_iteration):
         """
-        Updates the iteration path of a work item, logs the shift event, and syncs to TFS via REST API.
+        Updates the iteration path of a work item immediately in local SQLite cache & memory,
+        logs the shift event, and asynchronously syncs to TFS via REST API in background.
 
         Args:
             work_item_id (int): Work item ID.
             new_iteration (str): Target sprint name (e.g. 'week-2634') or full iteration path.
 
         Returns:
-            dict: {"success": bool, "message": str, "iteration": str, "api_synced": bool}
+            dict: {"success": bool, "message": str, "iteration": str, "full_path": str, "api_synced": bool, "syncing": bool}
         """
         try:
             clean_id = int(work_item_id)
@@ -2694,44 +2701,48 @@ class DevOpsBackend(QObject):
 
         logger.info(f"Rescheduling Work Item #{clean_id} -> Iteration '{full_path}'")
 
-        # 1. Update SQLite DB & log shift event
+        # 1. Update SQLite DB & log shift event immediately
         db_ok = False
         if self._cache_db:
             db_ok = self._cache_db.update_work_item_iteration(clean_id, full_path, source="gui_manual")
 
-        # 2. Sync to TFS / Azure DevOps API
-        api_synced = False
-        api_err = None
-        try:
-            azHandler = devops_helper._getHandler()
-            if azHandler and hasattr(azHandler, "update_work_item_field"):
-                azHandler.update_work_item_field(clean_id, "System.IterationPath", full_path, project_id=devops_helper.AZURE_PROJECT_ID)
-                api_synced = True
-                logger.info(f"Work item #{clean_id} iteration successfully synced to TFS API.")
-        except Exception as e:
-            api_err = str(e)
-            logger.warning(f"Could not push iteration update for #{clean_id} to TFS API: {e}")
-
-        # 3. Refresh UI & models
+        # 2. Refresh UI & models immediately for instant user feedback
         self.refresh_all_data()
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
 
-        msg = f"Iteration moved to '{clean_iter or 'Unplanned'}'"
-        if api_synced:
-            msg += " (Synchronized with TFS Web API)"
-        elif api_err:
-            msg += f" (Cached locally; TFS API: {api_err})"
-        else:
-            msg += " (Cached in local SQLite database)"
+        # 3. Synchronize to Azure DevOps / TFS API asynchronously in background thread
+        def _sync_iteration_to_tfs_async(item_id, iter_path):
+            try:
+                azHandler = devops_helper._getHandler()
+                if azHandler and hasattr(azHandler, "update_work_item_field"):
+                    azHandler.update_work_item_field(item_id, "System.IterationPath", iter_path, project_id=devops_helper.AZURE_PROJECT_ID)
+                    msg_ok = f"✅ [Work Item #{item_id}] Iteration successfully synchronized with TFS API ({iter_path})"
+                    logger.info(msg_ok)
+                    self.logMessage.emit(msg_ok)
+                else:
+                    logger.warning(f"TFS API handler not available for work item #{item_id} iteration sync.")
+            except Exception as e:
+                err_msg = f"⚠️ [Work Item #{item_id}] Could not push iteration update to TFS API: {e}"
+                logger.warning(err_msg)
+                self.logMessage.emit(err_msg)
 
+        threading.Thread(
+            target=_sync_iteration_to_tfs_async,
+            args=(clean_id, full_path),
+            daemon=True,
+            name=f"TFS-IterationSync-#{clean_id}"
+        ).start()
+
+        msg = f"Iteration moved to '{clean_iter or 'Unplanned'}' (Saved locally; syncing with TFS in background...)"
         self.logMessage.emit(f"[Work Item #{clean_id}] {msg}")
         return {
             "success": True,
             "work_item_id": clean_id,
             "iteration": clean_iter,
             "full_path": full_path,
-            "api_synced": api_synced,
+            "api_synced": False,
+            "syncing": True,
             "message": msg
         }
 

@@ -108,6 +108,91 @@ class TestDeadlineApiAndEditing(unittest.TestCase):
         raw_cleared = json.loads(wi_cleared["raw_json"])
         self.assertNotIn("Custom.Milestone", raw_cleared["fields"])
 
+    def test_backend_update_work_item_deadline_async(self):
+        from gui.backend import DevOpsBackend
+        import time
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        raw_wi = {
+            "id": 1001,
+            "fields": {
+                "System.Title": "Item for async deadline update",
+                "System.WorkItemType": "User Story",
+                "System.State": "Active",
+                "Microsoft.VSTS.Scheduling.TargetDate": "2026-07-01"
+            }
+        }
+        self.cache.save_work_item(1001, "Item for async deadline update", "User Story", "Active", "Bob", "2026-07-01", raw_wi)
+        backend.refresh_all_data()
+
+        mock_handler = MagicMock()
+        with patch("devops_helper._getHandler", return_value=mock_handler):
+            res = backend.update_work_item_deadline(1001, "2026-09-15")
+
+            # Check immediate return value (optimistic UI update)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["deadline"], "2026-09-15")
+            self.assertTrue(res["syncing"])
+
+            # Check SQLite DB was updated immediately
+            wi_db = self.cache.get_work_item(1001)
+            raw_db = json.loads(wi_db["raw_json"])
+            self.assertEqual(raw_db["fields"]["Microsoft.VSTS.Scheduling.TargetDate"], "2026-09-15")
+
+            # Wait briefly for daemon thread to complete
+            time.sleep(0.1)
+            mock_handler.update_work_item_field.assert_called_once()
+            call_args = mock_handler.update_work_item_field.call_args
+            self.assertEqual(call_args[0][0], 1001)
+            self.assertEqual(call_args[0][1], "Microsoft.VSTS.Scheduling.TargetDate")
+            self.assertEqual(call_args[0][2], "2026-09-15T17:00:00Z")
+
+    def test_backend_update_work_item_iteration_async(self):
+        from gui.backend import DevOpsBackend
+        import time
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        raw_wi = {
+            "id": 1002,
+            "fields": {
+                "System.Title": "Item for async iteration update",
+                "System.WorkItemType": "Task",
+                "System.State": "Active",
+                "System.IterationPath": "Project\\week-2630"
+            }
+        }
+        self.cache.save_work_item(1002, "Item for async iteration update", "Task", "Active", "Charlie", "2026-07-01", raw_wi)
+        backend.refresh_all_data()
+
+        mock_handler = MagicMock()
+        with patch("devops_helper._getHandler", return_value=mock_handler), \
+             patch("devops_helper.AZURE_PROJECT_ID", "MyProject"):
+            res = backend.update_work_item_iteration(1002, "week-2635")
+
+            # Check immediate return value (optimistic UI update)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["iteration"], "week-2635")
+            self.assertEqual(res["full_path"], "MyProject\\week-2635")
+            self.assertTrue(res["syncing"])
+
+            # Check SQLite DB was updated immediately
+            wi_db = self.cache.get_work_item(1002)
+            raw_db = json.loads(wi_db["raw_json"])
+            self.assertEqual(raw_db["fields"]["System.IterationPath"], "MyProject\\week-2635")
+
+            # Wait briefly for daemon thread to complete
+            time.sleep(0.1)
+            mock_handler.update_work_item_field.assert_called_once()
+            call_args = mock_handler.update_work_item_field.call_args
+            self.assertEqual(call_args[0][0], 1002)
+            self.assertEqual(call_args[0][1], "System.IterationPath")
+            self.assertEqual(call_args[0][2], "MyProject\\week-2635")
+
 
 if __name__ == "__main__":
     unittest.main()
+

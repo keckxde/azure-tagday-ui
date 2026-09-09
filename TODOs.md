@@ -8,9 +8,8 @@
 
 ### UI Related
 
-- Update Milestone Information does a direct synchronous synch with TFS, that is blocking the UI
 - The workload explorer Task view is not updated, when it was shown, and a background synch was run
-- Allow a scheduled synchronisatin, e.g. every 5 minutes, but allow also manual syncs
+- Allow a scheduled synchronisation, e.g. every 5 minutes, but allow also manual syncs
 
 ### Milestone Information
 
@@ -22,6 +21,7 @@
 
 ## DONE
 
+- Asynchronous TFS / Azure DevOps API synchronization for milestone deadlines and iteration shifts: local SQLite cache and memory update instantaneously with optimistic UI feedback, while REST API updates run in background daemon threads without freezing the Qt Quick interface.
 - Strict sprint filtering for Sprint report generation (GUI preview, Markdown wiki, and CSV exports), strictly isolating work items assigned to the target sprint instead of matching any item modified during the calendar week.
 - TFS / Azure DevOps Sprint View linking with team resolution and direct item modal focusing (`?workitem={id}` or `_sprints/taskboard?workitem={id}` for active current sprint fallback).
 - High-performance parallel repository synchronization via `ThreadPoolExecutor` and direct bulk REST PR discovery (`status=all&$top=100`), eliminating sequential push/PR round trips.
