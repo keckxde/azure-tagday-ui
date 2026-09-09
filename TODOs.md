@@ -2,13 +2,9 @@
 
 ## OPEN
 
-### Repository Related
+### Configuration
 
-- Is there a mechanism to improve the sync of repository / git / PR data? (we are missing quite a lot of PRs and the update takes very long - this could be improved)
-
-### PR Related
-
-- The PR list still is not updated, I seem to be stuck at a specific time, and no PRs after are shown or updated in the PR-list or updated in the repo view
+- only use the .env or environment file mechanism, when really needed, or triggered through CLI, but not as default. By default we consider the settings to be within our databasee
 
 ### Sprint related
 
@@ -16,7 +12,6 @@
 
 ### Synchronization
 
-- The sync display does not show a progress, and cannot be aborted
 - The refresh report buttons on the top right on different pages does not seem to work
 
 ### Milestone Information
@@ -33,6 +28,9 @@
 
 ## DONE
 
+- High-performance parallel repository synchronization via `ThreadPoolExecutor` and direct bulk REST PR discovery (`status=all&$top=100`), eliminating sequential push/PR round trips.
+- Fixed missing PRs and stuck PR timestamp caused by non-monotonic collection-wide PR IDs breaking pagination prematurely and `DELETE FROM pull_requests` dropping inactive records.
+- Real-time sync progress reporting (% bar and status message) with live cancellation token support (`TaskWorker.cancel()` and UI "⏹️ Abort Sync" button).
 - Prepare weekly iterations already in advance, and continue the schematics up until a given deadline
 - Jump from Workitem Explorer directly into the current teams sprint view of the item (considering the API provides the right team and iteration info)
 - Fix WIQL query HTTP 400 caused by date precision on System.ChangedDate (added timePrecision=true and automatic date-only fallback) and debug logging

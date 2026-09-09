@@ -1536,6 +1536,8 @@ class DevOpsBackend(QObject):
 
             def _progress_cb(msg, current=0, total=0):
                 worker.log_message.emit(msg)
+                if total > 0:
+                    worker.report_progress(int((current / total) * 100), msg)
 
             summary = azHandler.sync_work_items(
                 self._cache_db,
@@ -1558,11 +1560,25 @@ class DevOpsBackend(QObject):
             if not azHandler:
                 raise RuntimeError("Failed to create Azure/TFS client. Check .env variables.")
 
-            worker.log_message.emit("Reconciling active pull requests with TFS...")
-            summary = azHandler.sync_pull_requests(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
+            worker.log_message.emit("Reconciling active and new pull requests with TFS...")
+
+            def _progress_cb(pct_or_msg, msg=""):
+                if isinstance(pct_or_msg, int):
+                    worker.report_progress(pct_or_msg, msg)
+                    if msg:
+                        worker.log_message.emit(msg)
+                else:
+                    worker.log_message.emit(str(pct_or_msg))
+
+            summary = azHandler.sync_pull_requests(
+                self._cache_db,
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                progress_callback=_progress_cb,
+                cancel_token=worker.is_cancelled
+            )
             worker.log_message.emit(
                 f"PR sync complete: {summary.get('synced', 0)} verified, "
-                f"{summary.get('updated', 0)} status updated, {summary.get('errors', 0)} errors"
+                f"{summary.get('updated', 0)} status updated, {summary.get('new', 0)} new, {summary.get('errors', 0)} errors"
             )
             return summary
 
@@ -1584,10 +1600,19 @@ class DevOpsBackend(QObject):
                 )
             worker.log_message.emit("Starting full Azure DevOps sync (repositories, work items, pull requests)...")
 
-            def _progress_cb(msg, current=0, total=0):
-                worker.log_message.emit(msg)
+            def _progress_cb(pct_or_msg, msg=""):
+                if isinstance(pct_or_msg, int):
+                    worker.report_progress(pct_or_msg, msg)
+                    if msg:
+                        worker.log_message.emit(msg)
+                else:
+                    worker.log_message.emit(str(pct_or_msg))
 
-            devops_helper.sync(force_sync=True, progress_callback=_progress_cb)
+            devops_helper.sync(
+                force_sync=True,
+                progress_callback=_progress_cb,
+                cancel_token=worker.is_cancelled
+            )
             return "Full synchronization finished successfully"
 
         self._run_worker(_work, "Running full sync...")
@@ -3000,16 +3025,28 @@ class DevOpsBackend(QObject):
 
     def _run_worker(self, task_func, busy_msg):
         logger.info(f"Starting background task: {busy_msg}")
+        self._progress = 0
+        self.progressChanged.emit()
         self._set_busy(True, busy_msg)
         self._worker = TaskWorker(task_func)
+        self._worker.progress.connect(self._on_worker_progress)
         self._worker.log_message.connect(self._on_worker_log)
         self._worker.finished_task.connect(self._on_worker_finished)
         self._worker.start()
+
+    def _on_worker_progress(self, percent, message):
+        self._progress = percent
+        self.progressChanged.emit()
+        if message:
+            self._status_message = message
+            self.statusMessageChanged.emit()
 
     def _on_worker_log(self, msg):
         logger.info(msg)
 
     def _on_worker_finished(self, success, result_msg):
+        self._progress = 100 if success else 0
+        self.progressChanged.emit()
         self._set_busy(False, "Ready")
         self.refresh_all_data()
         if success:
@@ -3017,6 +3054,20 @@ class DevOpsBackend(QObject):
         else:
             logger.error(f"[FAILED] {result_msg}")
         self._worker = None
+
+    @Slot()
+    def abort_sync(self):
+        """Cancels the currently running background synchronization or task."""
+        if self._worker and self._worker.isRunning():
+            logger.info("User requested task cancellation via GUI.")
+            self._worker.cancel()
+            self._status_message = "⏹️ Aborting sync..."
+            self.statusMessageChanged.emit()
+
+    @Slot()
+    def cancel_active_task(self):
+        """Alias for abort_sync."""
+        self.abort_sync()
 
     @Slot()
     def open_db_folder(self):

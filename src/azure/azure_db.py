@@ -1163,14 +1163,18 @@ class AzureDevOpsCache:
 
     def save_pull_requests(self, repo_id, prs):
         """
-        Saves PRs for a repository. Clears old PRs of this repo first.
+        Saves or updates PRs for a repository in the database without deleting previously cached PRs.
         """
+        if not prs:
+            return
         from utils import normalize_pr_status
         with self._connection() as conn:
-            conn.execute("DELETE FROM pull_requests WHERE repo_id = ?", (repo_id,))
             for pr in prs:
-                created_by = pr.get("createdBy", {}).get("displayName", "")
-                closed_by = pr.get("closedBy", {}).get("displayName", "") if pr.get("closedBy") else ""
+                pr_id = pr.get("pullRequestId") or pr.get("id")
+                if not pr_id:
+                    continue
+                created_by = pr.get("createdBy", {}).get("displayName", "") if isinstance(pr.get("createdBy"), dict) else str(pr.get("createdBy") or "")
+                closed_by = pr.get("closedBy", {}).get("displayName", "") if isinstance(pr.get("closedBy"), dict) else str(pr.get("closedBy") or "")
                 closed_date = pr.get("closedDateStr", "")
                 creation_date = pr.get("creationDateStr", "")
                 norm_status = normalize_pr_status(pr.get("status"))
@@ -1187,7 +1191,15 @@ class AzureDevOpsCache:
                 conn.execute("""
                 INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pr["pullRequestId"], repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+                """, (int(pr_id), repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+
+    def get_pr_ids_for_repo(self, repo_id):
+        """
+        Retrieves a set of all integer PR IDs currently stored in SQLite for a repository.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("SELECT id FROM pull_requests WHERE repo_id = ?", (repo_id,)).fetchall()
+            return {int(r["id"]) for r in rows if r["id"] is not None}
 
     def get_active_pull_requests(self, repo_id=None):
         """

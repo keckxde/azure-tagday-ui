@@ -304,11 +304,17 @@ class TestPullRequestsViewData(unittest.TestCase):
             repo = {"id": "repo-200", "name": "EngineCore"}
             cache_db.save_repository("proj-1", repo)
 
-            # DB has PR 450 (active) and PR 500 (completed)
+            # DB has PR 450 (active), PR 499 (completed), and PR 500 (completed)
             cache_db.save_single_pull_request({
                 "pullRequestId": 450,
                 "title": "Old Active Feature",
                 "status": "active",
+                "repository": repo
+            })
+            cache_db.save_single_pull_request({
+                "pullRequestId": 499,
+                "title": "Old PR 499",
+                "status": "completed",
                 "repository": repo
             })
             cache_db.save_single_pull_request({
@@ -370,8 +376,8 @@ class TestPullRequestsViewData(unittest.TestCase):
             self.assertIn(502, pr_map)
             self.assertIn(501, pr_map)
 
-            # Verify PR 499 was NOT inserted since scan stopped at 500
-            self.assertNotIn(499, pr_map)
+            # Verify PR 499 (known) is preserved in DB
+            self.assertIn(499, pr_map)
 
         finally:
             if os.path.exists(db_path):

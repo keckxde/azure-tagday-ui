@@ -593,7 +593,7 @@ def main(run_templates: bool = False) -> None:
     """Entry point for devops sync operations. Does not generate reports by default."""
     sync(run_templates_flag=run_templates)
 
-def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
+def sync(force_sync=False, run_templates_flag=False, progress_callback=None, cancel_token=None):
     """
     Synchronizes repositories, branches, tags, PRs, and work items from TFS to SQLite.
 
@@ -601,6 +601,7 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
         force_sync (bool): If True, bypass file recency checks and force a full sync. Defaults to False.
         run_templates_flag (bool): If True, render Tag Day templates after sync. Defaults to False.
         progress_callback (callable, optional): Optional callback for live progress updates.
+        cancel_token (callable/object, optional): Cancellation token / predicate.
     """
     azHandler = _getHandler()
     if not azHandler:
@@ -628,7 +629,9 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
             AZURE_PROJECT_ID,
             filter_version_tags_format=FILTER_VERSION_TAGS_FORMAT,
             filter_repos=FILTER_REPOS,
-            cache_db=cache_db
+            cache_db=cache_db,
+            progress_callback=progress_callback,
+            cancel_token=cancel_token
         )
         try:
             # Force update of DB file mtime so it is marked recent
@@ -649,19 +652,39 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
             logger.info("TFS state was recently synced. Skipping task/PR updates.")
             return
         
+    def _is_cancelled():
+        if not cancel_token:
+            return False
+        if callable(cancel_token):
+            return cancel_token()
+        return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+    if _is_cancelled():
+        logger.info("Sync aborted by user before work items sync.")
+        return
+
     # Sync all work items with TFS API directly without needing task IDs in advance
     try:
         logger.info(f"Syncing all work items from TFS API for project {AZURE_PROJECT_ID}...")
         if azHandler:
             if hasattr(azHandler, "sync_work_items"):
                 if progress_callback:
-                    summary = azHandler.sync_work_items(cache_db, project_id=AZURE_PROJECT_ID, progress_callback=progress_callback)
+                    azHandler.sync_work_items(
+                        cache_db,
+                        project_id=AZURE_PROJECT_ID,
+                        progress_callback=progress_callback
+                    )
                 else:
-                    summary = azHandler.sync_work_items(cache_db, project_id=AZURE_PROJECT_ID)
+                    azHandler.sync_work_items(
+                        cache_db,
+                        project_id=AZURE_PROJECT_ID
+                    )
             else:
                 wi_ids = cache_db.get_all_work_item_ids()
                 summary = {"synced": 0, "deleted": 0, "errors": 0}
                 for wid in wi_ids:
+                    if _is_cancelled():
+                        break
                     try:
                         wi = azHandler.get_work_item(wid)
                         if wi and isinstance(wi, dict) and "id" in wi:
@@ -685,15 +708,24 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None):
                     except Exception:
                         cache_db.mark_work_item_deleted(wid)
                         summary["deleted"] += 1
-            logger.info(f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted, {summary.get('errors', 0)} errors")
+                logger.info(f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted, {summary.get('errors', 0)} errors")
     except Exception as e:
         logger.error(f"Error syncing work items to SQLite: {e}")
+
+    if _is_cancelled():
+        logger.info("Sync aborted by user before pull requests sync.")
+        return
 
     # Reconcile pull request statuses (ensure active PRs closed/abandoned in TFS are updated)
     try:
         if azHandler and hasattr(azHandler, "sync_pull_requests"):
             logger.info("Synchronizing and reconciling pull request statuses with TFS...")
-            azHandler.sync_pull_requests(cache_db, project_id=AZURE_PROJECT_ID)
+            azHandler.sync_pull_requests(
+                cache_db,
+                project_id=AZURE_PROJECT_ID,
+                progress_callback=progress_callback,
+                cancel_token=cancel_token
+            )
     except Exception as e:
         logger.warning(f"Error reconciling pull request statuses: {e}")
 

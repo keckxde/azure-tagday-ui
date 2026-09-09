@@ -444,6 +444,72 @@ ApplicationWindow {
                                     backend.sync_work_items_async();
                             }
                         }
+
+                        // Progress Bar & Abort Button (Visible during active sync / tasks)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 18
+                            visible: backend ? backend.isBusy : false
+                            color: "#161b22"
+                            radius: 4
+                            border.color: "#30363d"
+                            border.width: 1
+                            clip: true
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: parent.width * (Math.max(0, Math.min(100, backend ? backend.progress : 0)) / 100.0)
+                                radius: 3
+                                color: "#1f6feb"
+
+                                Behavior on width {
+                                    NumberAnimation { duration: 150 }
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: (backend ? backend.progress : 0) + "%"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                color: "#ffffff"
+                            }
+                        }
+
+                        Button {
+                            Layout.fillWidth: true
+                            implicitHeight: 28
+                            visible: backend ? backend.isBusy : false
+                            font.weight: Font.DemiBold
+                            contentItem: Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: "⏹️"
+                                    font.pixelSize: 10
+                                }
+                                Text {
+                                    text: "Abort Sync"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#ff7b72"
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 6
+                                color: parent.hovered ? "#490202" : "#210909"
+                                border.color: parent.hovered ? "#f85149" : "#da3633"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend)
+                                    backend.abort_sync();
+                            }
+                        }
                     }
                 }
 

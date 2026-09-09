@@ -620,28 +620,42 @@ class AzureInfoHandler(AzureBaseClient):
             logger.warning("  -- Failed to check push ID for %s: %s", repo_name, e)
         return None, None
 
-    def _fetch_new_prs_incremental(self, project_id, repo, cache_db):
+    def _fetch_new_prs_incremental(self, project_id, repo, cache_db, cancel_token=None, top=100):
         """
-        Incrementally discovers new PRs for a repository from TFS by querying PRs
-        in descending order and stopping as soon as pr_id <= max_known_pr_id.
+        Incrementally discovers new or updated PRs for a repository from TFS by querying PRs
+        and upserting them to the SQLite database cache.
 
         Args:
             project_id (str): The project ID or name.
             repo (dict): Repository metadata dictionary (must contain 'id').
             cache_db: The database cache instance.
+            cancel_token (callable/object, optional): Cancellation check.
+            top (int, optional): Page size. Defaults to 100.
 
         Returns:
-            int: Number of new PRs saved to the database cache.
+            int: Number of new or updated PRs saved to the database cache.
         """
         from utils import normalize_pr_status
         repo_id = repo["id"]
         repo_name = repo.get("name", "")
-        max_known_id = cache_db.get_max_pr_id(repo_id) if cache_db else 0
+        known_ids = set()
+        if cache_db:
+            try:
+                known_ids = set(cache_db.get_pr_ids_for_repo(repo_id))
+            except Exception:
+                known_ids = set()
+
         new_count = 0
         skip = 0
-        top = 100
+        consecutive_all_known_pages = 0
 
         while True:
+            if cancel_token:
+                is_cancelled = cancel_token() if callable(cancel_token) else getattr(cancel_token, "is_cancelled", lambda: False)()
+                if is_cancelled:
+                    logger.info("Cancellation requested during PR sync for repo %s", repo_name)
+                    break
+
             try:
                 page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
             except Exception as e:
@@ -651,25 +665,39 @@ class AzureInfoHandler(AzureBaseClient):
             if not page:
                 break
 
-            stop_pagination = False
+            page_new_or_active = 0
             for pr in page:
                 pr_id = int(pr.get("pullRequestId") or pr.get("id") or 0)
-                if max_known_id > 0 and pr_id <= max_known_id:
-                    stop_pagination = True
-                    break
-
                 if not pr.get("repository"):
                     pr["repository"] = repo
 
                 _enrich_pr(pr, normalize_pr_status)
+
+                is_new = pr_id not in known_ids
+                if is_new:
+                    known_ids.add(pr_id)
+                    new_count += 1
+                    page_new_or_active += 1
+                elif pr.get("status") == "active":
+                    page_new_or_active += 1
+
                 if cache_db:
                     cache_db.save_single_pull_request(pr)
-                new_count += 1
-                logger.info("  -- Discovered new PR #%s in %s (%s)", pr_id, repo_name, pr.get("status"))
 
-            if stop_pagination or len(page) < top:
+            if len(page) < top:
                 break
+
+            if page_new_or_active == 0:
+                consecutive_all_known_pages += 1
+                if consecutive_all_known_pages >= 2:
+                    # We've paged through consecutive known closed/abandoned PRs without any active or new PRs.
+                    break
+            else:
+                consecutive_all_known_pages = 0
+
             skip += len(page)
+            if skip >= 2000:
+                break
 
         return new_count
 
@@ -868,84 +896,148 @@ class AzureInfoHandler(AzureBaseClient):
         return tags_filtered, last_stable_tag, last_unstable_tag
 
     def _process_pushes_and_prs(self, project_id, repo, cache_db=None):
-        """Scans push events and fetches all active and merged Pull Requests."""
+        """
+        Fetches active and merged/completed Pull Requests directly in bulk via Azure DevOps REST API.
+        Eliminates individual per-push and per-PR HTTP roundtrips.
+        """
         dev_prs = []
         stable_prs = []
         repo_id = repo["id"]
         repo_name = repo.get("name", "")
-        prs_list = []
 
-        # 1. If database cache is available, re-check any PRs currently recorded as active
+        from utils import normalize_pr_status
+        all_prs = []
+        skip = 0
+        top = 100
+        seen_ids = set()
+
+        # 1. Bulk fetch PRs directly with status="all" using pagination
+        while True:
+            try:
+                page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
+            except Exception as e:
+                logger.error("Error fetching pull requests for %s (skip=%s): %s", repo_name, skip, e)
+                break
+
+            if not page:
+                break
+
+            for pr in page:
+                pr_id = str(pr.get("pullRequestId") or pr.get("id") or "")
+                if pr_id:
+                    seen_ids.add(pr_id)
+                if not pr.get("repository"):
+                    pr["repository"] = repo
+                _enrich_pr(pr, normalize_pr_status)
+                all_prs.append(pr)
+
+            if len(page) < top:
+                break
+            skip += len(page)
+            if skip >= 2000:
+                break
+
+        # 2. Check pushes / active DB cache for any extra PR references not returned by bulk query
+        extra_pr_ids = []
         if cache_db is not None:
             try:
                 active_db_prs = cache_db.get_active_pull_requests(repo_id)
                 for db_pr in active_db_prs:
                     p_id_str = str(db_pr.get("id"))
-                    if p_id_str and p_id_str not in prs_list:
-                        prs_list.append(p_id_str)
+                    if p_id_str and p_id_str not in seen_ids and p_id_str not in extra_pr_ids:
+                        extra_pr_ids.append(p_id_str)
             except Exception as e:
                 logger.debug("Could not query active PRs from DB for %s: %s", repo_name, e)
 
-        # 2. Scan push details for merged PRs
-        pushes = []
         try:
             pushes = self.get_pushes(project_id, repo_id)
-        except Exception as e:
-            logger.error("Error fetching pushes for %s: %s", repo_name, e)
+            for push_meta in (pushes or []):
+                try:
+                    push_detail = self.get_push_detail(project_id, repo_id, push_meta['pushId'])
+                    ref_updates = push_detail.get("refUpdates", [])
+                    for ref_up in ref_updates:
+                        match = re.search(r"refs/pull/(\d+)/merge", ref_up.get("name", ""))
+                        if match:
+                            pr_id_str = match.group(1)
+                            if pr_id_str not in seen_ids and pr_id_str not in extra_pr_ids:
+                                extra_pr_ids.append(pr_id_str)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-        for push_meta in pushes:
+        for extra_id in extra_pr_ids:
             try:
-                push_detail = self.get_push_detail(project_id, repo_id, push_meta['pushId'])
-                ref_updates = push_detail.get("refUpdates", [])
-                for ref_up in ref_updates:
-                    match = re.search(r"refs/pull/(\d+)/merge", ref_up.get("name", ""))
-                    if match:
-                        pr_id = match.group(1)
-                        if pr_id not in prs_list:
-                            prs_list.append(pr_id)
+                extra_pr = self.get_pull_request(extra_id)
+                if extra_pr:
+                    if not extra_pr.get("repository"):
+                        extra_pr["repository"] = repo
+                    _enrich_pr(extra_pr, normalize_pr_status)
+                    all_prs.append(extra_pr)
+                    seen_ids.add(str(extra_id))
             except Exception as e:
-                logger.error("Error retrieving push detail for %s: %s", repo_name, e)
+                logger.debug("Error fetching extra PR %s: %s", extra_id, e)
 
-        # 3. Also fetch all PRs that have not been closed yet (active PRs)
-        try:
-            active_prs = self.get_pull_requests(project_id, repo_id, status="active")
-            for a_pr in active_prs:
-                a_id = str(a_pr.get("pullRequestId") or a_pr.get("id") or "")
-                if a_id and a_id not in prs_list:
-                    prs_list.append(a_id)
-        except Exception as e:
-            logger.error("Error fetching active pull requests for %s: %s", repo_name, e)
-
-        from utils import normalize_pr_status
-        for pr_id in prs_list:
+        # Fallback to local DB cache if API returned nothing or had an error
+        if not all_prs and cache_db is not None:
             try:
-                pr = self.get_pull_request(pr_id)
-                _enrich_pr(pr, normalize_pr_status)
-                if "dev" in pr.get("targetRefName", ""):
-                    dev_prs.append(pr)
-                else:
-                    stable_prs.append(pr)
+                cached_prs = cache_db.get_prs_for_repo(repo_id)
+                for pr in cached_prs:
+                    _enrich_pr(pr, normalize_pr_status)
+                    all_prs.append(pr)
             except Exception as e:
-                logger.error("Error fetching PR %s details: %s", pr_id, e)
+                logger.debug("Could not read cached PRs for %s: %s", repo_name, e)
+
+        for pr in all_prs:
+            target_ref = pr.get("targetRefName", "").lower()
+            if "dev" in target_ref:
+                dev_prs.append(pr)
+            else:
+                stable_prs.append(pr)
 
         return dev_prs, stable_prs
 
-    def sync_pull_requests(self, cache_db, project_id=None, filter_repos=""):
+    def sync_pull_requests(self, cache_db, project_id=None, filter_repos="", progress_callback=None, cancel_token=None):
         """
         Directly synchronizes pull request states between TFS and SQLite database.
         Phase 1: Refreshes all PRs currently recorded as active in SQLite (detects completion/abandonment).
-        Phase 2: Incrementally scans for new PRs across all repositories, stopping at max_known_pr_id.
+        Phase 2: Incrementally scans for new/updated PRs across all repositories.
         """
         if not cache_db:
             return {"synced": 0, "updated": 0, "new": 0, "errors": 0}
-        
+
+        def _is_cancelled():
+            if not cancel_token:
+                return False
+            if callable(cancel_token):
+                return cancel_token()
+            return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+        def _report(pct, msg):
+            if not progress_callback:
+                return
+            try:
+                progress_callback(pct, msg)
+            except TypeError:
+                try:
+                    progress_callback(msg)
+                except Exception:
+                    pass
+
         proj = project_id or getattr(self, "project_id", "")
         summary = {"synced": 0, "updated": 0, "new": 0, "errors": 0}
         from utils import normalize_pr_status
-        
+
         # Phase 1: Re-check all PRs currently stored in SQLite as active
         active_db_prs = cache_db.get_active_pull_requests()
-        for db_pr in active_db_prs:
+        total_active = len(active_db_prs)
+        _report(5, f"Reconciling {total_active} active pull requests...")
+
+        for idx, db_pr in enumerate(active_db_prs):
+            if _is_cancelled():
+                logger.info("Cancellation requested in sync_pull_requests Phase 1")
+                return summary
+
             pr_id = str(db_pr.get("id"))
             try:
                 live_pr = self.get_pull_request(pr_id)
@@ -955,32 +1047,54 @@ class AzureInfoHandler(AzureBaseClient):
                     if old_st != live_pr["status"]:
                         logger.info("PR #%s status changed: %s -> %s", pr_id, old_st, live_pr["status"])
                         summary["updated"] += 1
-                    
+
                     cache_db.save_single_pull_request(live_pr)
                     summary["synced"] += 1
             except Exception as e:
                 logger.warning("Could not sync status for active PR #%s: %s", pr_id, e)
                 summary["errors"] += 1
 
+            if total_active > 0:
+                pct = int(5 + (idx / total_active) * 25)
+                _report(pct, f"Reconciling active PRs ({idx + 1}/{total_active})...")
+
         # Phase 2: Incremental Scan for New PRs across enabled repositories
-        if proj:
+        if proj and not _is_cancelled():
             try:
                 repos = self.get_repositories(proj)
-                for repo in repos:
-                    if self._should_skip_repo(repo, filter_repos):
-                        continue
-                    new_count = self._fetch_new_prs_incremental(proj, repo, cache_db)
+                enabled = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
+                total_repos = len(enabled)
+                for idx, repo in enumerate(enabled):
+                    if _is_cancelled():
+                        logger.info("Cancellation requested in sync_pull_requests Phase 2")
+                        return summary
+
+                    repo_name = repo.get("name", "")
+                    pct = int(30 + (idx / total_repos) * 65) if total_repos > 0 else 50
+                    _report(pct, f"Scanning new PRs for repo {repo_name} ({idx + 1}/{total_repos})...")
+
+                    new_count = self._fetch_new_prs_incremental(proj, repo, cache_db, cancel_token=cancel_token)
                     summary["new"] += new_count
                     summary["synced"] += new_count
             except Exception as e:
                 logger.warning("Could not incrementally fetch new PRs for project %s: %s", proj, e)
                 summary["errors"] += 1
-        
+
+        _report(100, "PR synchronization finished")
         return summary
 
-    def GetTFSRepositories(self, project_id, filter_version_tags_format=False, filter_repos="", cache_db=None):
+    def GetTFSRepositories(
+        self,
+        project_id,
+        filter_version_tags_format=False,
+        filter_repos="",
+        cache_db=None,
+        progress_callback=None,
+        cancel_token=None,
+        max_workers=6
+    ):
         """
-        Retrieves all repositories, branches, tags, pushes, pull requests, and submodules for a project,
+        Retrieves all repositories, branches, tags, pushes, pull requests, and submodules for a project in parallel,
         aggregating them into a structured dict. Uses SQLite cache database for fast sync.
 
         Args:
@@ -988,6 +1102,9 @@ class AzureInfoHandler(AzureBaseClient):
             filter_version_tags_format (bool, optional): If True, filters out tags not matching tag philosophy. Defaults to False.
             filter_repos (str/list, optional): Filter repositories list. Defaults to "".
             cache_db (AzureDevOpsCache, optional): The database cache manager. Defaults to None.
+            progress_callback (callable, optional): Callback with (percent, message) or (message, current, total).
+            cancel_token (callable/object, optional): Cancellation check.
+            max_workers (int, optional): Max parallel threads. Defaults to 6.
 
         Returns:
             dict: A detailed map of repository names to their aggregated info (branches, tags, PRs, submodules, etc.).
@@ -998,27 +1115,41 @@ class AzureInfoHandler(AzureBaseClient):
             logger.error("Error fetching repositories: %s", e)
             return {}
 
-        result = {}
-        for repo in repos:
-            if self._should_skip_repo(repo, filter_repos):
-                continue
+        enabled_repos = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
+        total = len(enabled_repos)
+        if total == 0:
+            return {}
 
+        def _is_cancelled():
+            if not cancel_token:
+                return False
+            if callable(cancel_token):
+                return cancel_token()
+            return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+        def _report_prog(current, repo_name):
+            if not progress_callback:
+                return
+            pct = int((current / total) * 100) if total > 0 else 0
+            msg = f"Syncing repo {repo_name} ({current}/{total})..."
+            try:
+                progress_callback(pct, msg)
+            except TypeError:
+                try:
+                    progress_callback(msg, current, total)
+                except Exception:
+                    pass
+
+        def _fetch_repo_worker(repo):
+            if _is_cancelled():
+                return None
             repo_name = repo.get("name", "")
             repo_id = repo["id"]
-            logger.info("-- Repo: %s ENABLED", repo_name)
 
             # Delta Sync Check
             cached_repo, remote_push_id = self._get_cached_repo_if_up_to_date(project_id, repo, cache_db)
             if cached_repo:
-                result[repo_name] = cached_repo
-                continue
-
-            # Load submodules
-            submodules = []
-            #try:
-            #    submodules = self.ParseSubmodules(repo, project_id)
-            #except Exception as e:
-            #    logger.error("Error parsing submodules for %s: %s", repo_name, e)
+                return (repo_name, cached_repo, None)
 
             # Load branches
             branches = []
@@ -1034,10 +1165,11 @@ class AzureInfoHandler(AzureBaseClient):
                 project_id, repo, filter_version_tags_format
             )
 
-            # Load pushes and PRs (including active unclosed PRs)
+            # Load PRs directly in bulk
             dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo, cache_db=cache_db)
 
-            result[repo_name] = {
+            submodules = []
+            repo_data = {
                 "info": repo,
                 "branches": branches,
                 "tags": tags_filtered,
@@ -1048,15 +1180,52 @@ class AzureInfoHandler(AzureBaseClient):
                 "UnstableTag": last_unstable_tag
             }
 
-            if cache_db is not None:
+            db_payload = {
+                "project_id": project_id,
+                "repo": repo,
+                "repo_id": repo_id,
+                "remote_push_id": remote_push_id,
+                "branches": branches,
+                "tags": tags_filtered,
+                "submodules": submodules,
+                "prs": dev_prs + stable_prs
+            }
+
+            return (repo_name, repo_data, db_payload)
+
+        result = {}
+        completed_count = 0
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, total))) as executor:
+            future_to_repo = {executor.submit(_fetch_repo_worker, repo): repo for repo in enabled_repos}
+            for future in as_completed(future_to_repo):
+                if _is_cancelled():
+                    logger.info("Cancellation requested in GetTFSRepositories. Stopping execution.")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+
+                repo = future_to_repo[future]
+                repo_name = repo.get("name", "")
+                completed_count += 1
+                _report_prog(completed_count, repo_name)
+
                 try:
-                    cache_db.save_repository(project_id, repo, remote_push_id)
-                    cache_db.save_branches(repo_id, branches)
-                    cache_db.save_tags(repo_id, tags_filtered)
-                    cache_db.save_submodules(repo_id, submodules)
-                    cache_db.save_pull_requests(repo_id, dev_prs + stable_prs)
+                    res = future.result()
+                    if res:
+                        r_name, r_data, db_payload = res
+                        result[r_name] = r_data
+                        if cache_db is not None and db_payload is not None:
+                            try:
+                                cache_db.save_repository(db_payload["project_id"], db_payload["repo"], db_payload["remote_push_id"])
+                                cache_db.save_branches(db_payload["repo_id"], db_payload["branches"])
+                                cache_db.save_tags(db_payload["repo_id"], db_payload["tags"])
+                                cache_db.save_submodules(db_payload["repo_id"], db_payload["submodules"])
+                                cache_db.save_pull_requests(db_payload["repo_id"], db_payload["prs"])
+                            except Exception as e:
+                                logger.error("  -- Failed to write %s cache to database: %s", r_name, e)
                 except Exception as e:
-                    logger.error("  -- Failed to write %s cache to database: %s", repo_name, e)
+                    logger.error("Error processing repository %s: %s", repo_name, e)
 
         return result
 
