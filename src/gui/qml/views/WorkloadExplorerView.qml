@@ -167,10 +167,35 @@ Item {
         return res;
     }
 
+    function formatCellObject(c) {
+        if (!c) return null;
+        return {
+            assignee: c.assignee || "Team Member",
+            sprint_name: c.sprint_name || "",
+            total_count: c.total_count || 0,
+            stories_count: c.stories_count || 0,
+            bugs_count: c.bugs_count || 0,
+            tasks_count: c.tasks_count || 0,
+            tasks_not_started_count: c.tasks_not_started_count || 0,
+            tasks_active_count: c.tasks_active_count || 0,
+            tasks_closed_count: c.tasks_closed_count || 0,
+            tasks_closed_percent: c.tasks_closed_percent !== undefined ? c.tasks_closed_percent : (c.tasks_count > 0 ? Math.round(((c.tasks_closed_count || 0) / c.tasks_count) * 100) : 0),
+            not_started_count: c.not_started_count || 0,
+            active_count: c.active_count || 0,
+            overdue_count: c.overdue_count || 0,
+            completed_count: c.completed_count || 0,
+            grouped_containers: c.grouped_containers || [],
+            items: c.items || []
+        };
+    }
+
     function refreshMatrix() {
-        if (!backend) return
-        refreshHierarchyLists()
-        matrixData = backend.getWorkloadMatrix(
+        if (!backend) return;
+        refreshHierarchyLists();
+        var prevAssignee = root.selectedCell ? root.selectedCell.assignee : null;
+        var prevSprint = root.selectedCell ? root.selectedCell.sprint_name : null;
+
+        var newData = backend.getWorkloadMatrix(
             root.selectedHorizon,
             root.filterLevel1 || "ALL",
             root.filterLevel2 || "ALL",
@@ -181,7 +206,49 @@ Item {
             root.historyOffset,
             root.filterMilestone || "ALL",
             !!root.overdueOnly
-        )
+        );
+        matrixData = newData;
+
+        if (prevAssignee && prevSprint) {
+            var foundCell = null;
+            if (newData && newData.rows) {
+                for (var r = 0; r < newData.rows.length; r++) {
+                    var row = newData.rows[r];
+                    if (row.assignee === prevAssignee && row.cells) {
+                        for (var c = 0; c < row.cells.length; c++) {
+                            var cell = row.cells[c];
+                            if (cell.sprint_name === prevSprint) {
+                                foundCell = cell;
+                                break;
+                            }
+                        }
+                    }
+                    if (foundCell) break;
+                }
+            }
+            if (foundCell) {
+                root.selectedCell = formatCellObject(foundCell);
+            } else {
+                root.selectedCell = formatCellObject({
+                    assignee: prevAssignee,
+                    sprint_name: prevSprint,
+                    total_count: 0,
+                    stories_count: 0,
+                    bugs_count: 0,
+                    tasks_count: 0,
+                    tasks_not_started_count: 0,
+                    tasks_active_count: 0,
+                    tasks_closed_count: 0,
+                    tasks_closed_percent: 0,
+                    not_started_count: 0,
+                    active_count: 0,
+                    overdue_count: 0,
+                    completed_count: 0,
+                    grouped_containers: [],
+                    items: []
+                });
+            }
+        }
     }
 
     property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.overdueOnly || root.searchQuery !== ""
@@ -1616,24 +1683,7 @@ Item {
                                                         cursorShape: hasItems ? Qt.PointingHandCursor : Qt.ArrowCursor
                                                         onClicked: {
                                                             if (hasItems) {
-                                                                root.selectedCell = {
-                                                                    assignee: modelData.assignee || "Team Member",
-                                                                    sprint_name: modelData.sprint_name,
-                                                                    total_count: modelData.total_count || 0,
-                                                                    stories_count: modelData.stories_count || 0,
-                                                                    bugs_count: modelData.bugs_count || 0,
-                                                                    tasks_count: modelData.tasks_count || 0,
-                                                                    tasks_not_started_count: modelData.tasks_not_started_count || 0,
-                                                                    tasks_active_count: modelData.tasks_active_count || 0,
-                                                                    tasks_closed_count: modelData.tasks_closed_count || 0,
-                                                                    tasks_closed_percent: modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100),
-                                                                    not_started_count: modelData.not_started_count || 0,
-                                                                    active_count: modelData.active_count || 0,
-                                                                    overdue_count: modelData.overdue_count || 0,
-                                                                    completed_count: modelData.completed_count || 0,
-                                                                    grouped_containers: modelData.grouped_containers || [],
-                                                                    items: modelData.items || []
-                                                                }
+                                                                root.selectedCell = root.formatCellObject(modelData);
                                                             }
                                                         }
                                                     }
