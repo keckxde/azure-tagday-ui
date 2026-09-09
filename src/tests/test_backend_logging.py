@@ -70,6 +70,19 @@ class TestBackendLogging(unittest.TestCase):
         self.assertIn("UniqueSearchableLogString12345", all_text)
         self.assertIn("[INFO]", all_text)
 
+    def test_progress_property_and_signal(self):
+        emitted = []
+        self.backend.progressChanged.connect(lambda: emitted.append(True))
+        self.assertEqual(self.backend.progress, 0)
+        
+        self.backend._progress = 42
+        self.backend.progressChanged.emit()
+        self.app.processEvents()
+        
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(self.backend.progress, 42)
+
 
 if __name__ == "__main__":
     unittest.main()
+

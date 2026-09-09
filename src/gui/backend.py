@@ -224,7 +224,7 @@ class DevOpsBackend(QObject):
     syncLogsChanged = Signal()
     busyChanged = Signal()
     statusMessageChanged = Signal()
-    progressChanged = Signal(int)
+    progressChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
