@@ -1419,11 +1419,14 @@ class DevOpsBackend(QObject):
                         pass
 
                 closed_date = pr.get("closed_date") or ""
-                creation_date = raw_dict.get("creationDate") or ""
-                created_date_clean = creation_date.replace("T", " ").split(".")[0].replace("Z", "") if creation_date else ""
+                if not closed_date and raw_dict.get("closedDate"):
+                    closed_date = utils.UpdateDateString(raw_dict.get("closedDate"))
+
+                creation_date = raw_dict.get("creationDate") or pr.get("creation_date") or ""
+                created_date_clean = utils.UpdateDateString(creation_date) if creation_date else ""
                 
-                # Normalize sort timestamp (YYYY-MM-DD HH:MM:SS)
-                sort_time = closed_date if closed_date else created_date_clean
+                # Normalize sort timestamp (YYYY-MM-DD HH:MM:SS) - for completed PRs use closed date; for active use creation date
+                sort_time = closed_date if (status != "active" and closed_date) else (created_date_clean or closed_date)
 
                 source_branch = (pr.get("source_branch") or raw_dict.get("sourceRefName") or "").replace("refs/heads/", "")
                 target_branch = (pr.get("target_branch") or raw_dict.get("targetRefName") or "").replace("refs/heads/", "")

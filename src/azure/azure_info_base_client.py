@@ -499,16 +499,26 @@ class AzureBaseClient:
         res, _ = self._request("GET", "_apis/wit/workitems/recents", params={"api-version": "6.0"})
         return res.get("value", [])
 
-    def get_pull_request(self, pr_id):
+    def get_pull_request(self, pr_id, project_id=None, repo_id=None):
         """
-        Retrieves details of a specific pull request by ID.
+        Retrieves details of a specific pull request by ID. Supports repository-scoped and collection-level endpoints.
 
         Args:
             pr_id (int/str): The ID of the pull request.
+            project_id (str, optional): The target project ID or name.
+            repo_id (str, optional): The target repository ID or name.
 
         Returns:
             dict: Pull request details dictionary.
         """
+        if project_id and repo_id:
+            try:
+                res, status = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}", params={"api-version": "6.0"})
+                if res and status == 200:
+                    return res
+            except Exception as e:
+                logger.debug("Failed repo-level get_pull_request for PR %s (project=%s, repo=%s): %s", pr_id, project_id, repo_id, e)
+
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
 

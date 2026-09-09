@@ -622,8 +622,8 @@ class AzureInfoHandler(AzureBaseClient):
 
     def _fetch_new_prs_incremental(self, project_id, repo, cache_db, cancel_token=None, top=100):
         """
-        Incrementally discovers new or updated PRs for a repository from TFS by querying PRs
-        and upserting them to the SQLite database cache.
+        Incrementally discovers new or updated PRs for a repository from TFS by querying active,
+        recently completed, and remaining PRs, and upserting them to the SQLite database cache.
 
         Args:
             project_id (str): The project ID or name.
@@ -646,60 +646,127 @@ class AzureInfoHandler(AzureBaseClient):
                 known_ids = set()
 
         new_count = 0
+
+        def _is_cancelled():
+            if not cancel_token:
+                return False
+            if callable(cancel_token):
+                return cancel_token()
+            return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+        # 1. Fetch all ACTIVE PRs (ensures newly opened PRs and open PR state changes are captured)
         skip = 0
-        consecutive_all_known_pages = 0
-
-        while True:
-            if cancel_token:
-                is_cancelled = cancel_token() if callable(cancel_token) else getattr(cancel_token, "is_cancelled", lambda: False)()
-                if is_cancelled:
-                    logger.info("Cancellation requested during PR sync for repo %s", repo_name)
-                    break
-
+        while not _is_cancelled():
             try:
-                page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
+                page = self.get_pull_requests(project_id, repo_id, status="active", top=top, skip=skip)
             except Exception as e:
-                logger.warning("  -- Error querying pull requests for repo %s (skip=%s): %s", repo_name, skip, e)
+                logger.debug("Error querying active PRs for repo %s (skip=%s): %s", repo_name, skip, e)
                 break
 
             if not page:
                 break
 
-            page_new_or_active = 0
             for pr in page:
                 pr_id = int(pr.get("pullRequestId") or pr.get("id") or 0)
                 if not pr.get("repository"):
                     pr["repository"] = repo
+                _enrich_pr(pr, normalize_pr_status)
+                if pr_id not in known_ids:
+                    known_ids.add(pr_id)
+                    new_count += 1
+                if cache_db:
+                    cache_db.save_single_pull_request(pr)
 
+            if len(page) < top:
+                break
+            skip += len(page)
+            if skip >= 1000:
+                break
+
+        # 2. Fetch COMPLETED PRs ordered by completion date desc (ensures PRs merged recently are captured)
+        skip = 0
+        consecutive_known_completed_pages = 0
+        while not _is_cancelled():
+            try:
+                page = self.get_pull_requests(project_id, repo_id, status="completed", top=top, skip=skip)
+            except Exception as e:
+                logger.debug("Error querying completed PRs for repo %s (skip=%s): %s", repo_name, skip, e)
+                break
+
+            if not page:
+                break
+
+            page_new_or_updated = 0
+            for pr in page:
+                pr_id = int(pr.get("pullRequestId") or pr.get("id") or 0)
+                if not pr.get("repository"):
+                    pr["repository"] = repo
                 _enrich_pr(pr, normalize_pr_status)
 
                 is_new = pr_id not in known_ids
                 if is_new:
                     known_ids.add(pr_id)
                     new_count += 1
-                    page_new_or_active += 1
-                elif pr.get("status") == "active":
-                    page_new_or_active += 1
-
+                    page_new_or_updated += 1
                 if cache_db:
                     cache_db.save_single_pull_request(pr)
 
             if len(page) < top:
                 break
 
-            if page_new_or_active == 0:
-                consecutive_all_known_pages += 1
-                if consecutive_all_known_pages >= 2:
-                    # We've paged through consecutive known closed/abandoned PRs without any active or new PRs.
+            if page_new_or_updated == 0:
+                consecutive_known_completed_pages += 1
+                if consecutive_known_completed_pages >= 2:
                     break
             else:
-                consecutive_all_known_pages = 0
+                consecutive_known_completed_pages = 0
 
             skip += len(page)
             if skip >= 2000:
                 break
 
+        # 3. Fallback scan for any status="all" PRs if repository was empty or for initial sync
+        if len(known_ids) == 0:
+            skip = 0
+            while not _is_cancelled():
+                try:
+                    page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
+                except Exception as e:
+                    logger.debug("Error querying all PRs for repo %s (skip=%s): %s", repo_name, skip, e)
+                    break
+
+                if not page:
+                    break
+
+                for pr in page:
+                    pr_id = int(pr.get("pullRequestId") or pr.get("id") or 0)
+                    if not pr.get("repository"):
+                        pr["repository"] = repo
+                    _enrich_pr(pr, normalize_pr_status)
+                    if pr_id not in known_ids:
+                        known_ids.add(pr_id)
+                        new_count += 1
+                    if cache_db:
+                        cache_db.save_single_pull_request(pr)
+
+                if len(page) < top:
+                    break
+                skip += len(page)
+                if skip >= 2000:
+                    break
+
         return new_count
+
+    def _safe_get_pr(self, pr_id, project_id=None, repo_id=None):
+        """
+        Safely invokes get_pull_request with repo-level args and falls back to single-arg call for mock compatibility.
+        """
+        if project_id and repo_id:
+            try:
+                return self.get_pull_request(pr_id, project_id=project_id, repo_id=repo_id)
+            except TypeError:
+                pass
+        return self.get_pull_request(pr_id)
 
     def _refresh_active_prs(self, project_id, repo_id, repo_name, cache_db):
         """
@@ -724,7 +791,7 @@ class AzureInfoHandler(AzureBaseClient):
             for db_pr in active_db_prs:
                 pr_id_str = str(db_pr.get("id"))
                 try:
-                    updated_pr = self.get_pull_request(pr_id_str)
+                    updated_pr = self._safe_get_pr(pr_id_str, project_id=project_id, repo_id=repo_id)
                     if updated_pr:
                         if not updated_pr.get("repository"):
                             updated_pr["repository"] = {"id": repo_id, "name": repo_name}
@@ -898,7 +965,7 @@ class AzureInfoHandler(AzureBaseClient):
     def _process_pushes_and_prs(self, project_id, repo, cache_db=None):
         """
         Fetches active and merged/completed Pull Requests directly in bulk via Azure DevOps REST API.
-        Eliminates individual per-push and per-PR HTTP roundtrips.
+        Queries active and recently completed PRs directly to avoid missing recent merges.
         """
         dev_prs = []
         stable_prs = []
@@ -907,16 +974,16 @@ class AzureInfoHandler(AzureBaseClient):
 
         from utils import normalize_pr_status
         all_prs = []
-        skip = 0
-        top = 100
         seen_ids = set()
+        top = 100
 
-        # 1. Bulk fetch PRs directly with status="all" using pagination
+        # 1. Fetch all active PRs
+        skip = 0
         while True:
             try:
-                page = self.get_pull_requests(project_id, repo_id, status="all", top=top, skip=skip)
+                page = self.get_pull_requests(project_id, repo_id, status="active", top=top, skip=skip)
             except Exception as e:
-                logger.error("Error fetching pull requests for %s (skip=%s): %s", repo_name, skip, e)
+                logger.debug("Error fetching active pull requests for %s (skip=%s): %s", repo_name, skip, e)
                 break
 
             if not page:
@@ -924,20 +991,47 @@ class AzureInfoHandler(AzureBaseClient):
 
             for pr in page:
                 pr_id = str(pr.get("pullRequestId") or pr.get("id") or "")
-                if pr_id:
+                if pr_id and pr_id not in seen_ids:
                     seen_ids.add(pr_id)
-                if not pr.get("repository"):
-                    pr["repository"] = repo
-                _enrich_pr(pr, normalize_pr_status)
-                all_prs.append(pr)
+                    if not pr.get("repository"):
+                        pr["repository"] = repo
+                    _enrich_pr(pr, normalize_pr_status)
+                    all_prs.append(pr)
 
             if len(page) < top:
                 break
             skip += len(page)
-            if skip >= 2000:
+            if skip >= 1000:
                 break
 
-        # 2. Check pushes / active DB cache for any extra PR references not returned by bulk query
+        # 2. Fetch recently completed PRs
+        skip = 0
+        while True:
+            try:
+                page = self.get_pull_requests(project_id, repo_id, status="completed", top=top, skip=skip)
+            except Exception as e:
+                logger.debug("Error fetching completed pull requests for %s (skip=%s): %s", repo_name, skip, e)
+                break
+
+            if not page:
+                break
+
+            for pr in page:
+                pr_id = str(pr.get("pullRequestId") or pr.get("id") or "")
+                if pr_id and pr_id not in seen_ids:
+                    seen_ids.add(pr_id)
+                    if not pr.get("repository"):
+                        pr["repository"] = repo
+                    _enrich_pr(pr, normalize_pr_status)
+                    all_prs.append(pr)
+
+            if len(page) < top:
+                break
+            skip += len(page)
+            if skip >= 1000:
+                break
+
+        # 3. Check pushes / active DB cache for any extra PR references not returned by bulk query
         extra_pr_ids = []
         if cache_db is not None:
             try:
@@ -968,7 +1062,7 @@ class AzureInfoHandler(AzureBaseClient):
 
         for extra_id in extra_pr_ids:
             try:
-                extra_pr = self.get_pull_request(extra_id)
+                extra_pr = self._safe_get_pr(extra_id, project_id=project_id, repo_id=repo_id)
                 if extra_pr:
                     if not extra_pr.get("repository"):
                         extra_pr["repository"] = repo
@@ -1039,8 +1133,9 @@ class AzureInfoHandler(AzureBaseClient):
                 return summary
 
             pr_id = str(db_pr.get("id"))
+            repo_id = db_pr.get("repo_id")
             try:
-                live_pr = self.get_pull_request(pr_id)
+                live_pr = self._safe_get_pr(pr_id, project_id=proj, repo_id=repo_id)
                 if live_pr:
                     _enrich_pr(live_pr, normalize_pr_status)
                     old_st = normalize_pr_status(db_pr.get("status"))

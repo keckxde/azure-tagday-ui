@@ -313,14 +313,54 @@ Item {
                 }
             }
 
-            // Quick Refresh Button
+            // Direct Sync PRs Button (Calls TFS API)
+            Button {
+                id: syncPrsBtn
+                text: backend && backend.isBusy ? "⏳ Syncing..." : "⚡ Sync PRs"
+                enabled: backend ? !backend.isBusy : false
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: "Synchronize pull requests directly with TFS / Azure DevOps API (reconciles active & newly merged PRs)"
+                contentItem: Row {
+                    anchors.centerIn: parent
+                    spacing: 5
+                    Text {
+                        text: backend && backend.isBusy ? "⏳" : "⚡"
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        text: backend && backend.isBusy ? "Syncing..." : "Sync PRs"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: parent.parent.enabled ? "#ffffff" : "#8b949e"
+                    }
+                }
+                background: Rectangle {
+                    implicitHeight: 30
+                    implicitWidth: 100
+                    radius: 6
+                    color: parent.enabled ? (parent.hovered ? "#1f6feb" : "#1158c7") : "#21262d"
+                    border.color: parent.enabled ? "#58a6ff" : "#30363d"
+                }
+                onClicked: {
+                    if (backend) backend.sync_pull_requests_async();
+                }
+            }
+
+            // Quick Refresh Button (Reloads from SQLite DB)
             Button {
                 text: "↻ Refresh"
                 font.pixelSize: 12
+                ToolTip.visible: hovered
+                ToolTip.text: "Reload pull requests from local SQLite database cache"
                 contentItem: Text {
                     text: parent.text
                     font: parent.font
                     color: "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
                     implicitHeight: 30

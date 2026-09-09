@@ -445,6 +445,39 @@ ApplicationWindow {
                             }
                         }
 
+                        // Secondary: Sync Pull Requests
+                        Button {
+                            Layout.fillWidth: true
+                            implicitHeight: 32
+                            enabled: backend ? !backend.isBusy : false
+                            font.weight: Font.DemiBold
+                            contentItem: Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: backend && backend.isBusy ? "⏳" : "🔀"
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: backend && backend.isBusy ? "Syncing PRs..." : "Sync Pull Requests"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    color: parent.parent.enabled ? (parent.parent.hovered ? "#a371f7" : "#bc8cff") : "#8b949e"
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 6
+                                color: parent.enabled ? (parent.hovered ? Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.15) : "#161b22") : "#161b22"
+                                border.color: parent.enabled ? (parent.hovered ? "#bc8cff" : "#8957e5") : "#30363d"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend)
+                                    backend.sync_pull_requests_async();
+                            }
+                        }
+
                         // Progress Bar & Abort Button (Visible during active sync / tasks)
                         Rectangle {
                             Layout.fillWidth: true

@@ -17,8 +17,9 @@
 
 ## DONE
 
-- Milestone Dialog Default Historic Filter: Milestones whose target or end dates have elapsed are automatically filtered out by default when opening the Major Milestones dialog. A dedicated filter bar with instant search and a "Hide Historic" toggle switch/badge allows users to quickly view all past milestones or active ones on demand.
+- Pull Request (PR) Multi-Status Sync & TFS On-Premise Endpoint Fix: Fixed PR list becoming stuck on older PRs. Refactored PR synchronization to query both `status="active"` (capturing 100% of open PRs) and `status="completed"` (capturing newly merged PRs ordered by completion date descending, preventing pagination cutoff from older creation dates). Fixed on-premise TFS 404 errors by adding repository-scoped API endpoints (`{project}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}`) with dual-endpoint fallback. Added direct "⚡ Sync PRs" button in Pull Requests view toolbar and a dedicated sidebar sync button under DATA SYNC.
 
+- Milestone Dialog Default Historic Filter: Milestones whose target or end dates have elapsed are automatically filtered out by default when opening the Major Milestones dialog. A dedicated filter bar with instant search and a "Hide Historic" toggle switch/badge allows users to quickly view all past milestones or active ones on demand.
 
 - Major Milestones Import & Export (Excel, CSV, JSON): Full roundtrip synchronization of milestones with associated team assignments, start/end dates, duration, descriptions, and ISO sprint week-range schematics (`week-YYWW`), featuring native file browser integration, flexible header mapping, and live SQLite database synchronization.
 

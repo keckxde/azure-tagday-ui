@@ -196,6 +196,78 @@ class TestFastRepoAndPRSync(unittest.TestCase):
         active_after = self.cache_db.get_active_pull_requests()
         self.assertEqual(len(active_after), 0)
 
+    def test_fetch_new_prs_incremental_captures_recent_completed_and_active_prs(self):
+        """
+        Verifies _fetch_new_prs_incremental captures both newly created active PRs
+        and PRs created weeks ago but completed/merged recently.
+        """
+        repo = {"id": "repo-uuid-4", "name": "RepoFour"}
+        self.cache_db.save_repository("ProjA", repo)
+
+        # SQLite has PR 100 stored as active from 2 weeks ago
+        self.cache_db.save_single_pull_request({
+            "pullRequestId": 100,
+            "id": 100,
+            "title": "Old Branch Feature",
+            "status": "active",
+            "repository": repo,
+            "creationDate": "2026-08-20T10:00:00Z"
+        })
+
+        # Mock get_pull_requests:
+        # Active query returns PR 105 (new PR created yesterday)
+        # Completed query returns PR 100 (merged yesterday)
+        def mock_get_prs(project_id, repo_id, status=None, top=None, skip=None):
+            if status == "active":
+                return [{
+                    "pullRequestId": 105,
+                    "title": "Brand New Active PR",
+                    "status": "active",
+                    "creationDate": "2026-09-08T11:00:00Z",
+                    "repository": repo
+                }]
+            elif status == "completed":
+                return [{
+                    "pullRequestId": 100,
+                    "title": "Old Branch Feature",
+                    "status": "completed",
+                    "creationDate": "2026-08-20T10:00:00Z",
+                    "closedDate": "2026-09-08T16:00:00Z",
+                    "repository": repo
+                }]
+            return []
+
+        self.handler.get_pull_requests = MagicMock(side_effect=mock_get_prs)
+
+        new_count = self.handler._fetch_new_prs_incremental("ProjA", repo, self.cache_db)
+
+        # PR 105 is new
+        self.assertEqual(new_count, 1)
+
+        # Check DB state
+        active_prs = self.cache_db.get_active_pull_requests("repo-uuid-4")
+        self.assertEqual(len(active_prs), 1)
+        self.assertEqual(active_prs[0]["id"], 105)
+
+        # Check PR 100 updated to completed
+        all_prs = self.cache_db.get_prs_for_repo("repo-uuid-4")
+        pr_100 = next(p for p in all_prs if p["id"] == 100)
+        self.assertEqual(pr_100["status"], "completed")
+
+    def test_get_pull_request_with_repo_and_project_scoping(self):
+        """
+        Verifies get_pull_request queries repo-level URL first when project_id and repo_id are supplied.
+        """
+        self.handler._request = MagicMock(return_value=({"pullRequestId": 777, "title": "Repo PR"}, 200))
+        pr = self.handler.get_pull_request(777, project_id="ProjA", repo_id="repo-1")
+
+        self.assertEqual(pr["pullRequestId"], 777)
+        self.handler._request.assert_called_with(
+            "GET",
+            "ProjA/_apis/git/repositories/repo-1/pullrequests/777",
+            params={"api-version": "6.0"}
+        )
+
     def test_task_worker_cancellation(self):
         """
         Verifies TaskWorker cancellation method and flag.

@@ -1327,6 +1327,14 @@ class AzureDevOpsCache:
             rows = conn.execute("SELECT id FROM pull_requests WHERE repo_id = ?", (repo_id,)).fetchall()
             return {int(r["id"]) for r in rows if r["id"] is not None}
 
+    def get_prs_for_repo(self, repo_id):
+        """
+        Retrieves all cached pull requests for a specific repository.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY id DESC", (repo_id,)).fetchall()
+            return [dict(r) for r in rows]
+
     def get_active_pull_requests(self, repo_id=None):
         """
         Retrieves all PRs currently stored in the database with active status ('active', '1', 'open', or 'OPN%').
