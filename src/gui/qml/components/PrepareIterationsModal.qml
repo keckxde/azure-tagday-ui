@@ -254,7 +254,7 @@ Dialog {
                                 font.pixelSize: 11
                                 font.weight: Font.Bold
                                 color: "#58a6ff"
-                                implicitWidth: 80
+                                Layout.preferredWidth: 80
                             }
 
                             Text {

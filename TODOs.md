@@ -1,9 +1,5 @@
 # TODOs
 
-## BUGS
-
-- PrepareIterationsModal.qml:257:48: Invalid property assignment: "implicitWidth" is a read-only property
-
 ## OPEN
 
 ### Configuration
