@@ -37,80 +37,154 @@ from utils import (
 logger = logging.getLogger("sprint_report")
 
 
+def is_work_item_in_sprint(wi, sprint_name):
+    """
+    Determines if a work item belongs to the specified sprint.
+    Supports weekly sprint codes (e.g. week-2633, week-2615), full iteration paths,
+    and named iterations (e.g. Sprint 1).
+    """
+    if not sprint_name or not wi:
+        return False
+
+    if wi.get("deleted") or wi.get("is_deleted"):
+        return False
+
+    sprint_clean = sprint_name.strip().lower()
+    y_s, w_s, base_s = parse_sprint_week(sprint_clean)
+
+    # 1. Weekly sprint matching (week-YYWW)
+    if base_s:
+        # Check sprint_week_name if already enriched
+        s_name = wi.get("sprint_week_name")
+        if s_name:
+            _, _, base_i = parse_sprint_week(s_name)
+            if base_i == base_s:
+                return True
+
+        # Check iteration_name
+        iter_n = wi.get("iteration_name")
+        if iter_n:
+            _, _, base_i = parse_sprint_week(iter_n)
+            if base_i == base_s:
+                return True
+
+        # Check iteration_path
+        iter_p = wi.get("iteration_path")
+        if iter_p:
+            _, _, base_i = parse_sprint_week(iter_p)
+            if base_i == base_s:
+                return True
+
+        # Check raw_json iteration path
+        if wi.get("raw_json"):
+            try:
+                raw = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+                fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+                raw_ip = fields.get("System.IterationPath") or ""
+                if raw_ip:
+                    _, _, base_i = parse_sprint_week(raw_ip)
+                    if base_i == base_s:
+                        return True
+            except Exception:
+                pass
+
+        return False
+
+    # 2. Named sprints (e.g. "Sprint 1", "Release 2")
+    iter_name = (wi.get("iteration_name") or "").strip().lower()
+    if iter_name and iter_name == sprint_clean:
+        return True
+
+    iter_path = (wi.get("iteration_path") or "").replace("\\", "/").strip("/")
+    if not iter_path and wi.get("raw_json"):
+        try:
+            raw = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+            fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+            iter_path = (fields.get("System.IterationPath") or "").replace("\\", "/").strip("/")
+        except Exception:
+            pass
+
+    if iter_path:
+        norm_path = iter_path.lower()
+        parts = [p.strip().lower() for p in norm_path.split("/") if p.strip()]
+        if parts:
+            leaf = parts[-1]
+            if leaf == sprint_clean:
+                return True
+        if norm_path == sprint_clean or norm_path.endswith("/" + sprint_clean):
+            return True
+
+    return False
+
+
 def filter_work_items_for_timeframe(work_items, sprint_name=None, start_date=None, end_date=None):
     """
     Filters work items matching the given sprint name or falling within a specific date range.
 
     Args:
-        work_items (list): List of work item dictionaries from SQLite cache.
-        sprint_name (str, optional): Target sprint name (e.g. 'week-2633', 'week-2615').
-        start_date (date/str, optional): Start date boundary.
-        end_date (date/str, optional): End date boundary.
+        work_items (list): List of work item dictionaries from SQLite cache or DevOpsBackend.
+        sprint_name (str, optional): Target sprint name (e.g. 'week-2633', 'week-2615', 'Sprint 1').
+        start_date (date/str, optional): Start date boundary for custom date-range queries.
+        end_date (date/str, optional): End date boundary for custom date-range queries.
 
     Returns:
         list: Filtered and enriched work item records.
     """
-    sprint_clean = (sprint_name or "").strip().lower()
+    sprint_clean = (sprint_name or "").strip()
     start_d = datetime.strptime(start_date, "%Y-%m-%d").date() if isinstance(start_date, str) else start_date
     end_d = datetime.strptime(end_date, "%Y-%m-%d").date() if isinstance(end_date, str) else end_date
 
     matched = []
     for wi in work_items:
-        if wi.get("deleted"):
+        if wi.get("deleted") or wi.get("is_deleted"):
             continue
 
-        iter_path = str(wi.get("iteration_path") or wi.get("iteration_name") or "")
-        iter_lower = iter_path.lower()
-
-        # Sprint matching
-        sprint_match = False
         if sprint_clean:
-            if sprint_clean in iter_lower:
-                sprint_match = True
-            else:
-                # Compare parsed base names
-                y_s, w_s, base_s = parse_sprint_week(sprint_clean)
-                y_i, w_i, base_i = parse_sprint_week(iter_lower)
-                if base_s and base_i and base_s == base_i:
-                    sprint_match = True
-
-        # Date matching (ChangedDate or ClosedDate falling in timeframe)
-        date_match = False
-        if start_d or end_d:
+            # Sprint-targeted report: work item MUST belong to the requested sprint
+            if is_work_item_in_sprint(wi, sprint_clean):
+                matched.append(wi)
+        elif start_d or end_d:
+            # Custom date timeframe query
             c_date_raw = wi.get("changed_date") or ""
+            if not c_date_raw and wi.get("raw_json"):
+                try:
+                    raw = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+                    fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+                    c_date_raw = fields.get("System.ChangedDate") or fields.get("System.CreatedDate") or ""
+                except Exception:
+                    pass
             dt = parse_iso_datetime(c_date_raw) if c_date_raw else None
             if dt:
                 item_d = dt.date()
                 in_start = (item_d >= start_d) if start_d else True
                 in_end = (item_d <= end_d) if end_d else True
                 if in_start and in_end:
-                    date_match = True
-
-        if sprint_name and (start_date or end_date):
-            if sprint_match or date_match:
-                matched.append(wi)
-        elif sprint_name:
-            if sprint_match:
-                matched.append(wi)
-        elif start_date or end_date:
-            if date_match:
-                matched.append(wi)
+                    matched.append(wi)
         else:
-            # If no filters specified, include all planned items
-            if wi.get("is_iteration_planned"):
+            # No sprint or date bounds specified: include all planned items
+            is_planned = wi.get("is_iteration_planned")
+            if is_planned is None:
+                _, _, b_name = parse_sprint_week(wi.get("iteration_path") or wi.get("iteration_name") or "")
+                is_planned = bool(b_name)
+            if is_planned:
                 matched.append(wi)
 
     return matched
 
 
-def generate_sprint_report_data(cache_db, sprint_name=None, start_date=None, end_date=None, now_dt=None):
+def generate_sprint_report_data(cache_db, sprint_name=None, start_date=None, end_date=None, now_dt=None, work_items=None):
     """
     Analyzes work items in cache and produces aggregated sprint metrics and category lists.
 
     Returns:
         dict: Structured sprint report data.
     """
-    all_wis = cache_db.get_all_work_items(include_deleted=False)
+    if work_items is not None:
+        all_wis = work_items
+    elif cache_db:
+        all_wis = cache_db.get_all_work_items(include_deleted=False)
+    else:
+        all_wis = []
 
     # Determine sprint time bounds if sprint_name provided
     sprint_label = sprint_name or "Custom Timeframe"
@@ -129,8 +203,8 @@ def generate_sprint_report_data(cache_db, sprint_name=None, start_date=None, end
     matched_wis = filter_work_items_for_timeframe(
         all_wis,
         sprint_name=sprint_name,
-        start_date=start_date,
-        end_date=end_date
+        start_date=start_date if not sprint_name else None,
+        end_date=end_date if not sprint_name else None
     )
 
     stories = []
@@ -146,10 +220,24 @@ def generate_sprint_report_data(cache_db, sprint_name=None, start_date=None, end
         wi_type = (wi.get("type") or wi.get("WorkItemType") or "Task").strip()
         wi_state = (wi.get("state") or wi.get("State") or "Active").strip()
         assignee = (wi.get("assigned_to") or "Unassigned").strip()
-        is_done = wi_state.lower() in ("closed", "done", "resolved", "completed", "cut")
+        is_done = wi_state.lower() in ("closed", "done", "resolved", "completed", "removed", "cut")
 
         # Deadline resolution
         deadline_raw = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date")
+        if not deadline_raw and wi.get("raw_json"):
+            try:
+                raw = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+                fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+                deadline_raw = (
+                    fields.get("Microsoft.VSTS.Scheduling.TargetDate")
+                    or fields.get("Microsoft.VSTS.Scheduling.DueDate")
+                    or fields.get("Microsoft.VSTS.Scheduling.FinishDate")
+                    or fields.get("Custom.TargetDate")
+                    or fields.get("Custom.DueDate")
+                )
+            except Exception:
+                pass
+
         if not deadline_raw and sprint_end_str:
             deadline_raw = sprint_end_str
         urgency = calculate_deadline_urgency(deadline_raw, is_completed=is_done, now_dt=now_dt)
@@ -161,6 +249,7 @@ def generate_sprint_report_data(cache_db, sprint_name=None, start_date=None, end
         item_enriched["is_done"] = is_done
         item_enriched["urgency"] = urgency
         item_enriched["deadline_str"] = urgency.get("deadline_str", "")
+        item_enriched["tfs_url"] = wi.get("tfs_url") or wi.get("htmlLink") or wi.get("url") or ""
 
         t_lower = wi_type.lower()
         if t_lower in ("requirement", "user story", "story"):
@@ -324,11 +413,11 @@ def export_sprint_csv(data, csv_path):
             })
 
 
-def generate_sprint_report(cache_db, sprint_name=None, start_date=None, end_date=None, output_md=None, output_csv=None, now_dt=None):
+def generate_sprint_report(cache_db, sprint_name=None, start_date=None, end_date=None, output_md=None, output_csv=None, now_dt=None, work_items=None):
     """
     High-level orchestrator to generate both Markdown report and CSV file.
     """
-    data = generate_sprint_report_data(cache_db, sprint_name=sprint_name, start_date=start_date, end_date=end_date, now_dt=now_dt)
+    data = generate_sprint_report_data(cache_db, sprint_name=sprint_name, start_date=start_date, end_date=end_date, now_dt=now_dt, work_items=work_items)
     md_content = render_sprint_markdown(data)
 
     if output_md:

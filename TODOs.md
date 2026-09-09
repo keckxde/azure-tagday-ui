@@ -20,12 +20,9 @@
 
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
-### Report Generation
-
-- Sprint report generation does not seem to be filtered by sprint - if find way to many entries
-
 ## DONE
 
+- Strict sprint filtering for Sprint report generation (GUI preview, Markdown wiki, and CSV exports), strictly isolating work items assigned to the target sprint instead of matching any item modified during the calendar week.
 - TFS / Azure DevOps Sprint View linking with team resolution and direct item modal focusing (`?workitem={id}` or `_sprints/taskboard?workitem={id}` for active current sprint fallback).
 - High-performance parallel repository synchronization via `ThreadPoolExecutor` and direct bulk REST PR discovery (`status=all&$top=100`), eliminating sequential push/PR round trips.
 - Fixed missing PRs and stuck PR timestamp caused by non-monotonic collection-wide PR IDs breaking pagination prematurely and `DELETE FROM pull_requests` dropping inactive records.

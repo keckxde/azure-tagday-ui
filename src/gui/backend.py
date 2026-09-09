@@ -2538,7 +2538,13 @@ class DevOpsBackend(QObject):
             return {}
         try:
             import generate_sprint_report
-            return generate_sprint_report.generate_sprint_report_data(self._cache_db, sprint_name=sprint_name)
+            clean_sprint = (sprint_name or "").strip()
+            if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
+                clean_sprint = self.availableSprintList[0]
+            work_items = self._work_items if self._work_items else None
+            return generate_sprint_report.generate_sprint_report_data(
+                self._cache_db, sprint_name=clean_sprint, work_items=work_items
+            )
         except Exception as e:
             logger.error(f"Error generating sprint report data: {e}", exc_info=True)
             return {"error": str(e)}
@@ -2552,7 +2558,12 @@ class DevOpsBackend(QObject):
         if self._is_busy:
             return
 
-        clean_sprint = (sprint_name or "latest").strip()
+        clean_sprint = (sprint_name or "").strip()
+        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
+            clean_sprint = self.availableSprintList[0]
+        elif not clean_sprint:
+            clean_sprint = "latest"
+
         if not md_path:
             md_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
         if not csv_path:
@@ -2561,11 +2572,13 @@ class DevOpsBackend(QObject):
         def _work(worker):
             worker.log_message.emit(f"Generating Sprint Report for '{clean_sprint}'...")
             import generate_sprint_report
+            work_items = self._work_items if self._work_items else None
             data, md_text = generate_sprint_report.generate_sprint_report(
                 self._cache_db,
                 sprint_name=clean_sprint,
                 output_md=md_path,
-                output_csv=csv_path
+                output_csv=csv_path,
+                work_items=work_items
             )
             self.sprintReportGenerated.emit(data, md_text)
             worker.log_message.emit(f"Sprint report saved: {md_path} and {csv_path}")
@@ -2577,7 +2590,11 @@ class DevOpsBackend(QObject):
     @Slot(str)
     def open_sprint_report_file(self, sprint_name=""):
         """Opens generated sprint report markdown in default editor."""
-        clean_sprint = (sprint_name or "latest").strip()
+        clean_sprint = (sprint_name or "").strip()
+        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
+            clean_sprint = self.availableSprintList[0]
+        elif not clean_sprint:
+            clean_sprint = "latest"
         path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)

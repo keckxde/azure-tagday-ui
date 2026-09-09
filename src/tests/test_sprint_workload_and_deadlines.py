@@ -200,6 +200,99 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 self.assertIn("Alice", content)
                 self.assertIn("Bob", content)
 
+    def test_sprint_report_strict_filtering_excludes_other_sprints_and_backlog(self):
+        """
+        Verify that sprint report generation does not pull in items from other sprints
+        or unplanned backlog items even if their changed_date falls within the sprint calendar week.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test_sprint_filter.db")
+            cache = AzureDevOpsCache(db_path)
+
+            wis = [
+                # In target sprint (week-2633)
+                {
+                    "id": 2001,
+                    "title": "Target Sprint Story",
+                    "type": "User Story",
+                    "state": "Active",
+                    "assigned_to": "Alice",
+                    "iteration_path": "Project\\TeamA\\week-2633",
+                    "changed_date": "2026-08-11T12:00:00Z",
+                    "fields": {"System.IterationPath": "Project\\TeamA\\week-2633"}
+                },
+                # In past sprint (week-2630), but modified during week-2633 calendar dates
+                {
+                    "id": 2002,
+                    "title": "Old Sprint Bug Modified In W33",
+                    "type": "Bug",
+                    "state": "Resolved",
+                    "assigned_to": "Bob",
+                    "iteration_path": "Project\\TeamA\\week-2630",
+                    "changed_date": "2026-08-12T10:00:00Z",
+                    "fields": {"System.IterationPath": "Project\\TeamA\\week-2630"}
+                },
+                # In future sprint (week-2635), but created/modified during week-2633
+                {
+                    "id": 2003,
+                    "title": "Future Sprint Task",
+                    "type": "Task",
+                    "state": "New",
+                    "assigned_to": "Charlie",
+                    "iteration_path": "Project\\TeamA\\week-2635",
+                    "changed_date": "2026-08-13T15:00:00Z",
+                    "fields": {"System.IterationPath": "Project\\TeamA\\week-2635"}
+                },
+                # Unplanned backlog item modified during week-2633
+                {
+                    "id": 2004,
+                    "title": "Backlog Item Modified In W33",
+                    "type": "User Story",
+                    "state": "Active",
+                    "assigned_to": "Alice",
+                    "iteration_path": "Project\\Backlog",
+                    "changed_date": "2026-08-14T09:00:00Z",
+                    "fields": {"System.IterationPath": "Project\\Backlog"}
+                },
+            ]
+
+            for w in wis:
+                cache.save_work_item(
+                    wi_id=w["id"],
+                    title=w["title"],
+                    type_str=w["type"],
+                    state=w["state"],
+                    assigned_to=w["assigned_to"],
+                    changed_date=w["changed_date"],
+                    raw_json_obj=w
+                )
+
+            data = generate_sprint_report.generate_sprint_report_data(
+                cache,
+                sprint_name="week-2633"
+            )
+
+            # Only item 2001 should be included; 2002, 2003, and 2004 must be excluded
+            self.assertEqual(data["total_items"], 1)
+            story_ids = [s["id"] for s in data["stories"]]
+            self.assertEqual(story_ids, [2001])
+            self.assertEqual(len(data["bugs"]), 0)
+            self.assertEqual(len(data["tasks"]), 0)
+
+    def test_sprint_report_named_sprint_leaf_matching(self):
+        """Verify non-weekly named sprint matching (e.g. Sprint 1 does not match Sprint 10)."""
+        items = [
+            {"id": 3001, "type": "Task", "state": "Active", "iteration_path": "Project\\TeamA\\Sprint 1"},
+            {"id": 3002, "type": "Task", "state": "Active", "iteration_path": "Project\\TeamA\\Sprint 10"},
+            {"id": 3003, "type": "Task", "state": "Active", "iteration_path": "Project\\TeamA\\Sprint 12"},
+        ]
+
+        matched_sprint1 = generate_sprint_report.filter_work_items_for_timeframe(items, sprint_name="Sprint 1")
+        self.assertEqual([w["id"] for w in matched_sprint1], [3001])
+
+        matched_sprint10 = generate_sprint_report.filter_work_items_for_timeframe(items, sprint_name="Sprint 10")
+        self.assertEqual([w["id"] for w in matched_sprint10], [3002])
+
     def test_workload_matrix_overdue_only_filter(self):
         from src.gui.backend import DevOpsBackend
         backend = DevOpsBackend()
