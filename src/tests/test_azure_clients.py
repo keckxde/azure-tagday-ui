@@ -97,6 +97,28 @@ class TestAzureBaseClient(unittest.TestCase):
             params={"api-version": "6.0", "searchCriteria.status": "active"}
         )
 
+    @patch.object(AzureBaseClient, "_request")
+    def test_get_project_teams_and_iterations(self, mock_request):
+        mock_request.return_value = ({"value": [{"id": "team-guid-1", "name": "Alpha Team"}]}, 200)
+        teams = self.client.get_project_teams("proj-1")
+        self.assertEqual(len(teams), 1)
+        self.assertEqual(teams[0]["name"], "Alpha Team")
+        mock_request.assert_called_once_with("GET", "_apis/projects/proj-1/teams", params={"api-version": "6.0"})
+
+        mock_request.reset_mock()
+        mock_request.return_value = (
+            {"value": [{"id": "iter-1", "name": "week-2634", "attributes": {"timeFrame": "current"}}]},
+            200
+        )
+        iters = self.client.get_team_iterations("proj-1", "Alpha Team", timeframe="current")
+        self.assertEqual(len(iters), 1)
+        self.assertEqual(iters[0]["name"], "week-2634")
+        mock_request.assert_called_once_with(
+            "GET",
+            "proj-1/Alpha%20Team/_apis/work/teamsettings/iterations",
+            params={"api-version": "6.0", "$timeframe": "current"}
+        )
+
 
 class TestAzureInfoBaseClient(unittest.TestCase):
 

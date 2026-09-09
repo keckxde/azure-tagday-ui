@@ -2243,9 +2243,9 @@ Item {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
                                                 if (backend) {
-                                                    backend.open_sprint_in_browser(sTarget);
+                                                    backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                 }
                                             }
                                         }
@@ -2528,9 +2528,9 @@ Item {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
                                                 if (backend) {
-                                                    backend.open_sprint_in_browser(sTarget);
+                                                    backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                 }
                                             }
                                         }
@@ -2691,8 +2691,8 @@ Item {
                                             MenuItem {
                                                 text: "🏃 Open Sprint Taskboard (TFS)"
                                                 onTriggered: {
-                                                    var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
-                                                    if (backend) backend.open_sprint_in_browser(sTarget);
+                                                    var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
+                                                    if (backend) backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                 }
                                             }
                                             MenuItem {
@@ -2713,8 +2713,8 @@ Item {
                                             MenuItem {
                                                 text: "📋 Filter in Work Items Tab"
                                                 onTriggered: {
-                                                    if (typeof window !== "undefined" && typeof window.navigateToWorkItem === "function") {
-                                                        window.navigateToWorkItem(modelData.id);
+                                                    if (typeof window !== "undefined" && typeof window.filterByWorkItem === "function") {
+                                                        window.filterByWorkItem(modelData.id);
                                                     }
                                                 }
                                             }
@@ -2751,8 +2751,8 @@ Item {
                                                 text: "🔗 Copy Sprint Taskboard URL"
                                                 onTriggered: {
                                                     if (backend) {
-                                                        var sTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
-                                                        var sUrl = backend.get_sprint_taskboard_url(sTarget);
+                                                        var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
+                                                        var sUrl = backend.get_sprint_taskboard_url(modelData.id || sName, sName);
                                                         if (sUrl) backend.copy_to_clipboard(sUrl);
                                                     }
                                                 }
@@ -2770,9 +2770,9 @@ Item {
                                                     taskContextMenu.popup();
                                                 } else {
                                                     // Main Left Click on Task Row: Directly jump into Sprint View in TFS
-                                                    var sprintTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                    var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
                                                     if (backend) {
-                                                        backend.open_sprint_in_browser(sprintTarget);
+                                                        backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                     }
                                                 }
                                             }
@@ -2894,9 +2894,9 @@ Item {
                                                     hoverEnabled: true
                                                     cursorShape: Qt.PointingHandCursor
                                                     onClicked: {
-                                                        var sprintTarget = modelData.iteration_path || (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.id;
+                                                        var sName = (root.selectedCell ? root.selectedCell.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
                                                         if (backend) {
-                                                            backend.open_sprint_in_browser(sprintTarget);
+                                                            backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                         }
                                                     }
                                                 }

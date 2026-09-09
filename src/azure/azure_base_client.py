@@ -109,6 +109,39 @@ class AzureBaseClient:
         res, _ = self._request("GET", "_apis/distributedtask/tasks", params={"api-version": "6.0"})
         return res.get("value", [])
 
+    def get_project_teams(self, project_id):
+        """
+        Retrieves all teams configured in a TFS / Azure DevOps project.
+
+        Args:
+            project_id (str): The target project ID or name.
+
+        Returns:
+            list: List of team dictionaries (each containing id, name, description, etc.).
+        """
+        res, _ = self._request("GET", f"_apis/projects/{project_id}/teams", params={"api-version": "6.0"})
+        return res.get("value", [])
+
+    def get_team_iterations(self, project_id, team_id_or_name, timeframe=None):
+        """
+        Retrieves sprint iterations assigned to a specific team in TFS / Azure DevOps.
+
+        Args:
+            project_id (str): The target project ID or name.
+            team_id_or_name (str): Team name or GUID.
+            timeframe (str, optional): Filter by timeframe ('current', 'past', 'future'). Defaults to None.
+
+        Returns:
+            list: List of team iteration dictionaries.
+        """
+        encoded_team = urllib.parse.quote(str(team_id_or_name), safe="")
+        path = f"{project_id}/{encoded_team}/_apis/work/teamsettings/iterations"
+        params = {"api-version": "6.0"}
+        if timeframe:
+            params["$timeframe"] = timeframe
+        res, _ = self._request("GET", path, params=params)
+        return res.get("value", [])
+
     def get_classification_nodes(self, project_id, structure_group="iterations", depth=4):
         """
         Retrieves the classification nodes tree (e.g. Iterations or Areas) for a project.

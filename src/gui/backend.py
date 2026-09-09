@@ -1326,25 +1326,18 @@ class DevOpsBackend(QObject):
                 norm_ap = area_path.replace("\\", "/").strip("/") if area_path else ""
                 ap_parts = [p for p in norm_ap.split("/") if p]
                 team_name = ""
-                if len(ap_parts) > 1:
+                if self._tfs_team_name:
+                    team_name = self._tfs_team_name
+                elif len(ap_parts) > 1:
                     team_name = ap_parts[-1]
                 elif len(ip_parts) > 2:
                     team_name = ip_parts[1]
+                else:
+                    team_name = f"{tfs_proj} Team"
 
-                # Construct team sprint taskboard URL
+                # Construct team sprint taskboard URL linking directly to this work item
                 sprint_leaf = (base_sprint_name or iter_name or "").strip()
-                tfs_sprint_url = ""
-                if tfs_base and tfs_col and tfs_proj:
-                    if team_name:
-                        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
-                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/{urllib.parse.quote(team_name)}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
-                        else:
-                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/{urllib.parse.quote(team_name)}/_sprints/taskboard"
-                    else:
-                        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog"):
-                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
-                        else:
-                            tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard"
+                tfs_sprint_url = self.get_sprint_taskboard_url(wi_id, sprint_leaf, team_name)
 
                 wi_list.append({
                     "id": wi_id,
@@ -2853,21 +2846,28 @@ class DevOpsBackend(QObject):
 
     @Slot(str, result=str)
     @Slot(result=str)
-    @Slot(str, result=str)
     @Slot(int, result=str)
     @Slot(str, str, result=str)
     @Slot(int, str, result=str)
-    def get_sprint_taskboard_url(self, target="", sprint_name=""):
+    @Slot(str, str, str, result=str)
+    @Slot(int, str, str, result=str)
+    @Slot(str, str, str, str, result=str)
+    @Slot(int, str, str, str, result=str)
+    def get_sprint_taskboard_url(self, target="", sprint_name="", team_name="", view_mode="taskboard"):
         """
-        Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item or sprint name.
+        Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item, sprint name, or current sprint.
 
         The URL format requires a team name:
-          {base_url}/{collection}/{project}/{team}/_sprints/taskboard/{sprint_leaf}
+          {base_url}/{collection}/{project}/{team}/_sprints/{view_mode}/{sprint_leaf}?workitem={id}
+        or for current sprint:
+          {base_url}/{collection}/{project}/{team}/_sprints/{view_mode}?workitem={id}
 
         The team name is determined by:
-          1. Configured TFS Team Name in settings/project config (if set)
-          2. Extracted team segment from the work item's iteration/area path (e.g. 'Project\\Team\\Sprint')
-          3. Default Azure DevOps team convention: '{project} Team'
+          1. Explicitly passed `team_name`
+          2. Configured TFS Team Name in settings/project config (`self._tfs_team_name`)
+          3. Extracted team segment from the work item's area path (e.g. 'Project\\Team')
+          4. Extracted team segment from the iteration path (e.g. 'Project\\Team\\Sprint')
+          5. Default Azure DevOps team convention: '{project} Team'
         """
         import urllib.parse
         base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
@@ -2876,16 +2876,12 @@ class DevOpsBackend(QObject):
         if not (base_url and col and proj):
             return ""
 
-        team = (self._tfs_team_name or "").strip()
+        team = (team_name or self._tfs_team_name or "").strip()
         extracted_team = ""
         sprint_leaf = ""
+        clean_id = None
 
-        if sprint_name:
-            s_parts = str(sprint_name).replace("\\", "/").strip("/").split("/")
-            sprint_leaf = s_parts[-1]
-            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower():
-                extracted_team = s_parts[1]
-        elif target:
+        if target is not None and str(target).strip() != "":
             try:
                 clean_id = int(str(target).lstrip("#"))
                 if self._cache_db:
@@ -2919,24 +2915,43 @@ class DevOpsBackend(QObject):
                 if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower():
                     extracted_team = t_parts[1]
 
+        if sprint_name:
+            s_parts = str(sprint_name).replace("\\", "/").strip("/").split("/")
+            sprint_leaf = s_parts[-1]
+            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team:
+                extracted_team = s_parts[1]
+
         if not team:
             team = extracted_team or f"{proj} Team"
 
         encoded_team = urllib.parse.quote(team, safe="")
-        if sprint_leaf and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root"):
-            return f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/taskboard/{urllib.parse.quote(sprint_leaf)}"
+        v_mode = view_mode if view_mode in ("taskboard", "backlog", "iteration") else "taskboard"
+
+        has_specific_sprint = (
+            sprint_leaf
+            and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
+        )
+
+        if has_specific_sprint:
+            base_sprint_url = f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/{v_mode}/{urllib.parse.quote(sprint_leaf)}"
         else:
-            return f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/taskboard"
+            base_sprint_url = f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/{v_mode}"
+
+        if clean_id is not None:
+            return f"{base_sprint_url}?workitem={clean_id}"
+        return base_sprint_url
 
     @Slot(str)
     @Slot(int)
     @Slot(str, str)
     @Slot(int, str)
-    def open_sprint_in_browser(self, target="", sprint_name=""):
+    @Slot(str, str, str)
+    @Slot(int, str, str)
+    def open_sprint_in_browser(self, target="", sprint_name="", team_name=""):
         """
         Opens the TFS / Azure DevOps Sprint Taskboard page in the system web browser.
         """
-        url = self.get_sprint_taskboard_url(target, sprint_name)
+        url = self.get_sprint_taskboard_url(target, sprint_name, team_name)
         if url:
             s_label = sprint_name or str(target)
             logger.info(f"Opening Sprint Taskboard in browser: {url}")

@@ -3707,9 +3707,9 @@ Item {
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        var sTarget = modelData.iteration_path || root.selectedSprintReport || modelData.id;
+                                        var sName = modelData.iteration_name || modelData.iteration_path || root.selectedSprintReport || "";
                                         if (backend) {
-                                            backend.open_sprint_in_browser(sTarget);
+                                            backend.open_sprint_in_browser(modelData.id || sName, sName);
                                         }
                                     }
                                 }
@@ -3836,9 +3836,9 @@ Item {
                                         ToolTip.visible: hovered
                                         ToolTip.text: "Open Sprint Taskboard in TFS Browser"
                                         onClicked: {
-                                            var sTarget = modelData.iteration_path || root.selectedSprintReport || modelData.id;
+                                            var sName = modelData.iteration_name || modelData.iteration_path || root.selectedSprintReport || "";
                                             if (backend) {
-                                                backend.open_sprint_in_browser(sTarget);
+                                                backend.open_sprint_in_browser(modelData.id || sName, sName);
                                             }
                                         }
                                     }

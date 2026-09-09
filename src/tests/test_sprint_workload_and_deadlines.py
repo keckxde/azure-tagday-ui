@@ -260,7 +260,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         url_space = backend.get_sprint_taskboard_url("Sprint 2026.1")
         self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Core%20Dev%20Team/_sprints/taskboard/Sprint%202026.1")
 
-        # 3. URL from work item in cache DB with team in iteration path
+        # 3. URL from work item in cache DB with team in iteration path (includes ?workitem=ID)
         backend._tfs_team_name = ""
         mock_db = MagicMock()
         mock_db.get_work_item.return_value = {
@@ -270,9 +270,19 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         }
         backend._cache_db = mock_db
         url_wi = backend.get_sprint_taskboard_url(999)
-        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard/Sprint-33")
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard/Sprint-33?workitem=999")
 
-        # 4. open_sprint_in_browser calls open_url with team-aware URL
+        # 4. URL for unplanned work item falling back to current sprint taskboard
+        mock_db.get_work_item.return_value = {
+            "id": 1001,
+            "title": "Unplanned Task",
+            "iteration_path": "MyProject\\Unplanned",
+            "area_path": "MyProject\\Alpha Team",
+        }
+        url_current = backend.get_sprint_taskboard_url(1001)
+        self.assertEqual(url_current, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_sprints/taskboard?workitem=1001")
+
+        # 5. open_sprint_in_browser calls open_url with team-aware URL
         backend._tfs_team_name = "Alpha Team"
         with patch.object(backend, "open_url") as mock_open:
             backend.open_sprint_in_browser("week-2634")
@@ -325,7 +335,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             self.assertEqual(wi["area_path"], "MyProject\\AlphaTeam")
             self.assertEqual(
                 wi["tfs_sprint_url"],
-                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/AlphaTeam/_sprints/taskboard/week-2635"
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/AlphaTeam/_sprints/taskboard/week-2635?workitem=1234"
             )
         finally:
             if os.path.exists(tmp_db.name):

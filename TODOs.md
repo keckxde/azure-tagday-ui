@@ -1,14 +1,14 @@
 # TODOs
 
+## BUGS
+
+- PrepareIterationsModal.qml:257:48: Invalid property assignment: "implicitWidth" is a read-only property
+
 ## OPEN
 
 ### Configuration
 
 - only use the .env or environment file mechanism, when really needed, or triggered through CLI, but not as default. By default we consider the settings to be within our databasee
-
-### Sprint related
-
-- Links to Sprint view still fail can you check the TFS API to properly set up the link to an item in the current sprint?
 
 ### Synchronization
 
@@ -28,6 +28,7 @@
 
 ## DONE
 
+- TFS / Azure DevOps Sprint View linking with team resolution and direct item modal focusing (`?workitem={id}` or `_sprints/taskboard?workitem={id}` for active current sprint fallback).
 - High-performance parallel repository synchronization via `ThreadPoolExecutor` and direct bulk REST PR discovery (`status=all&$top=100`), eliminating sequential push/PR round trips.
 - Fixed missing PRs and stuck PR timestamp caused by non-monotonic collection-wide PR IDs breaking pagination prematurely and `DELETE FROM pull_requests` dropping inactive records.
 - Real-time sync progress reporting (% bar and status message) with live cancellation token support (`TaskWorker.cancel()` and UI "⏹️ Abort Sync" button).
