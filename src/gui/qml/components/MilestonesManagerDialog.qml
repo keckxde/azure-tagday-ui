@@ -22,11 +22,13 @@ Dialog {
 
     property var milestonesList: (backend && backend.milestones) ? backend.milestones : []
     property var categoriesList: (backend && backend.milestoneCategories) ? backend.milestoneCategories : []
+    property var availableTeams: (backend && backend.getAvailableTeams) ? backend.getAvailableTeams() : []
     property int currentTab: 0 // 0: Milestones, 1: Categories
 
     // Editing state for milestone
     property int editingMilestoneId: 0
     property string editingMilestoneName: ""
+    property string editingMilestoneTeam: ""
     property string editingMilestoneDate: ""
     property string editingMilestoneEndDate: ""
     property bool isMultiDay: false
@@ -166,18 +168,21 @@ Dialog {
         if (backend) {
             milestonesList = backend.get_milestones() || [];
             categoriesList = backend.get_milestone_categories() || [];
+            if (backend.getAvailableTeams) availableTeams = backend.getAvailableTeams() || [];
         }
     }
 
     function resetMilestoneForm() {
         editingMilestoneId = 0;
         editingMilestoneName = "";
+        editingMilestoneTeam = "";
         editingMilestoneDate = "";
         editingMilestoneEndDate = "";
         isMultiDay = false;
         editingMilestoneCat = categoriesList.length > 0 ? categoriesList[0].id : "ddqs";
         editingMilestoneDesc = "";
         mNameInput.text = "";
+        if (mTeamInput) mTeamInput.text = "";
         mDateInput.text = "";
         mEndDateInput.text = "";
         mDescInput.text = "";
@@ -187,12 +192,14 @@ Dialog {
     function editMilestone(m) {
         editingMilestoneId = m.id;
         editingMilestoneName = m.name;
+        editingMilestoneTeam = m.team || "";
         editingMilestoneDate = m.target_date;
         editingMilestoneEndDate = m.end_date || "";
         isMultiDay = !!(m.is_multi_day || (m.end_date && m.end_date !== m.target_date));
         editingMilestoneCat = m.category_id;
         editingMilestoneDesc = m.description || "";
         mNameInput.text = m.name;
+        if (mTeamInput) mTeamInput.text = m.team || "";
         mDateInput.text = m.target_date;
         mEndDateInput.text = isMultiDay ? (m.end_date || m.target_date) : "";
         mDescInput.text = m.description || "";
@@ -440,10 +447,67 @@ Dialog {
                                 Text { text: "PROJECT MILESTONES"; font.pixelSize: 11; font.weight: Font.Bold; color: "#8b949e" }
                                 Item { Layout.fillWidth: true }
                                 Button {
-                                    text: "🔍 Pre-fill from Tags"
+                                    text: "📤 Export Excel"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text { text: parent.text; font: parent.font; color: "#7ee787"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    background: Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: 105
+                                        radius: 4
+                                        color: parent.hovered ? "#162b20" : "#0d1b12"
+                                        border.color: parent.hovered ? "#3fb950" : "#238636"
+                                    }
+                                    onClicked: {
+                                        if (backend) {
+                                            var p = backend.browseMilestoneExportPath();
+                                            if (p) {
+                                                var res = backend.exportMilestonesToExcel(p);
+                                                if (res && res.success) {
+                                                    root.feedbackMsg = res.message || ("Exported to " + res.file_path);
+                                                    root.feedbackType = "success";
+                                                } else if (res && res.error) {
+                                                    root.feedbackMsg = res.message || res.error;
+                                                    root.feedbackType = "error";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Button {
+                                    text: "📥 Import File"
                                     font.pixelSize: 11
                                     font.weight: Font.DemiBold
                                     contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    background: Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: 95
+                                        radius: 4
+                                        color: parent.hovered ? "#16243b" : "#0d1b2e"
+                                        border.color: parent.hovered ? "#58a6ff" : "#388bfd"
+                                    }
+                                    onClicked: {
+                                        if (backend) {
+                                            var p = backend.browseMilestoneImportFile();
+                                            if (p) {
+                                                var res = backend.importMilestonesFromExcel(p, false);
+                                                root.refreshData();
+                                                if (res && res.success) {
+                                                    root.feedbackMsg = res.message;
+                                                    root.feedbackType = "success";
+                                                } else if (res && res.error) {
+                                                    root.feedbackMsg = res.message || res.error;
+                                                    root.feedbackType = "error";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Button {
+                                    text: "🔍 Pre-fill from Tags"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text { text: parent.text; font: parent.font; color: "#79c0ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                     background: Rectangle {
                                         implicitHeight: 22
                                         implicitWidth: 135
@@ -487,7 +551,7 @@ Dialog {
                                 spacing: 4
                                 delegate: Rectangle {
                                     width: parent.width - 16
-                                    height: 52
+                                    height: 54
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     radius: 6
                                     color: (root.editingMilestoneId === modelData.id) ? "#1f242c" : (mItemMa.containsMouse ? "#161b22" : "#0d1117")
@@ -538,6 +602,23 @@ Dialog {
                                                         color: modelData.category_color || "#79c0ff"
                                                     }
                                                 }
+                                                // Team Badge (if present)
+                                                Rectangle {
+                                                    visible: !!(modelData.team && modelData.team.trim() !== "")
+                                                    implicitHeight: 16
+                                                    implicitWidth: teamLabel.implicitWidth + 8
+                                                    radius: 8
+                                                    color: "#1c2128"
+                                                    border.color: "#484f58"
+                                                    Text {
+                                                        id: teamLabel
+                                                        anchors.centerIn: parent
+                                                        text: "👥 " + (modelData.team || "")
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: "#c9d1d9"
+                                                    }
+                                                }
                                             }
                                             RowLayout {
                                                 Layout.fillWidth: true
@@ -549,6 +630,23 @@ Dialog {
                                                     color: "#8b949e"
                                                     elide: Text.ElideRight
                                                     Layout.fillWidth: true
+                                                }
+                                                // Week Range chip
+                                                Rectangle {
+                                                    visible: !!(modelData.week_range && modelData.week_range.trim() !== "")
+                                                    implicitHeight: 16
+                                                    implicitWidth: weekRangeTxt.implicitWidth + 8
+                                                    radius: 8
+                                                    color: "#16243b"
+                                                    border.color: "#388bfd"
+                                                    Text {
+                                                        id: weekRangeTxt
+                                                        anchors.centerIn: parent
+                                                        text: "🏷️ " + (modelData.week_range || "")
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.Bold
+                                                        color: "#58a6ff"
+                                                    }
                                                 }
                                                 // Multi-day duration badge
                                                 Rectangle {
@@ -641,6 +739,62 @@ Dialog {
                                 placeholderText: "e.g. DDQS M1 Gate, QIAV Gateway A"
                                 placeholderTextColor: "#484f58"
                                 background: Rectangle { color: "#0d1117"; radius: 4; border.color: mNameInput.activeFocus ? "#58a6ff" : "#30363d" }
+                            }
+                        }
+
+                        // Team / Assigned Group
+                        ColumnLayout {
+                            Layout.fillWidth: true; spacing: 4
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: "TEAM / ASSIGNED GROUP"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e" }
+                                Item { Layout.fillWidth: true }
+                                Text { text: "(Leave blank for All Teams)"; font.pixelSize: 9; color: "#6e7681" }
+                            }
+                            TextField {
+                                id: mTeamInput
+                                Layout.fillWidth: true
+                                implicitHeight: 32
+                                font.pixelSize: 12
+                                color: "#f0f6fc"
+                                placeholderText: "e.g. Core Team, Alpha Team, Chassis (or blank)"
+                                placeholderTextColor: "#484f58"
+                                background: Rectangle { color: "#0d1117"; radius: 4; border.color: mTeamInput.activeFocus ? "#58a6ff" : "#30363d" }
+                                onTextChanged: root.editingMilestoneTeam = text
+                            }
+                            // Quick team suggestion chips
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                visible: root.availableTeams && root.availableTeams.length > 0
+                                Text { text: "Quick:"; font.pixelSize: 9; color: "#6e7681" }
+                                Repeater {
+                                    model: root.availableTeams.slice(0, 4)
+                                    Rectangle {
+                                        implicitHeight: 18
+                                        implicitWidth: teamChipTxt.implicitWidth + 8
+                                        radius: 4
+                                        color: chipMa.containsMouse ? "#21262d" : "#0d1117"
+                                        border.color: "#30363d"
+                                        Text {
+                                            id: teamChipTxt
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.pixelSize: 9
+                                            color: chipMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                        }
+                                        MouseArea {
+                                            id: chipMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                mTeamInput.text = modelData;
+                                                root.editingMilestoneTeam = modelData;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1036,6 +1190,7 @@ Dialog {
                                 background: Rectangle { radius: 6; color: parent.hovered ? "#2ea043" : "#238636"; border.color: "#3fb950" }
                                 onClicked: {
                                     var n = mNameInput.text.trim();
+                                    var tm = mTeamInput.text.trim();
                                     var d = mDateInput.text.trim();
                                     var endD = root.isMultiDay ? mEndDateInput.text.trim() : "";
                                     var catObj = root.categoriesList[mCatCombo.currentIndex];
@@ -1045,7 +1200,7 @@ Dialog {
                                     if (!n || !d) return;
 
                                     if (backend) {
-                                        var res = backend.save_milestone(n, d, catId, desc, root.editingMilestoneId, endD);
+                                        var res = backend.save_milestone(n, d, catId, desc, root.editingMilestoneId, endD, tm);
                                         if (res && res.success) {
                                             root.resetMilestoneForm();
                                         }

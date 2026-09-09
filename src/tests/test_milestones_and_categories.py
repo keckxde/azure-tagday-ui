@@ -564,6 +564,148 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertNotIn("Bob", unplanned_assignees)
         self.assertIn("Charlie", unplanned_assignees)
 
+    def test_milestone_team_and_week_range(self):
+        # 1. Create milestone with team and multi-day range
+        m_id = self.cache.save_milestone(
+            name="DDQS Release Gate",
+            target_date="2026-07-20",
+            end_date="2026-08-14",
+            category_id="ddqs",
+            description="Team-wide quality gate",
+            team="Chassis Team"
+        )
+        self.assertGreater(m_id, 0)
+
+        milestones = self.cache.get_milestones()
+        self.assertEqual(len(milestones), 1)
+        m = milestones[0]
+        self.assertEqual(m["name"], "DDQS Release Gate")
+        self.assertEqual(m["team"], "Chassis Team")
+        self.assertEqual(m["start_date"], "2026-07-20")
+        self.assertEqual(m["end_date"], "2026-08-14")
+        self.assertTrue(m["is_multi_day"])
+        self.assertEqual(m["start_week"], "week-2630")
+        self.assertEqual(m["end_week"], "week-2633")
+        self.assertEqual(m["week_range"], "week-2630 – week-2633")
+
+    def test_milestones_excel_export_and_import(self):
+        # Setup sample milestones
+        self.cache.save_milestone(
+            name="M1 Gate",
+            target_date="2026-07-20",
+            end_date="2026-07-24",
+            category_id="ddqs",
+            description="Phase 1 signoff",
+            team="Alpha Team"
+        )
+        self.cache.save_milestone(
+            name="M2 Scenario Demo",
+            target_date="2026-08-10",
+            end_date="2026-08-21",
+            category_id="scenario",
+            description="Scenario integration",
+            team="Beta Team"
+        )
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        export_path = os.path.join(self.test_dir, "milestones_export_test.xlsx")
+        res_export = backend.exportMilestonesToExcel(export_path)
+        self.assertTrue(res_export["success"])
+        self.assertTrue(os.path.exists(export_path))
+        self.assertEqual(res_export["count"], 2)
+
+        # Verify Excel content with openpyxl
+        import openpyxl
+        wb = openpyxl.load_workbook(export_path)
+        ws = wb.active
+        self.assertEqual(ws.title, "Milestones")
+        rows = list(ws.iter_rows(values_only=True))
+        self.assertEqual(len(rows), 3)  # Header + 2 rows
+        header = rows[0]
+        self.assertIn("Milestone Name", header)
+        self.assertIn("Team", header)
+        self.assertIn("Category", header)
+        self.assertIn("Start Date", header)
+        self.assertIn("End Date", header)
+        self.assertIn("Week Range", header)
+
+        # Import into fresh database
+        new_db_path = os.path.join(self.test_dir, "new_import_cache.db")
+        new_cache = AzureDevOpsCache(db_path=new_db_path)
+        new_backend = DevOpsBackend()
+        new_backend._cache_db = new_cache
+
+        res_import = new_backend.importMilestonesFromExcel(export_path)
+        self.assertTrue(res_import["success"])
+        self.assertEqual(res_import["total"], 2)
+
+        imported_m = new_cache.get_milestones()
+        self.assertEqual(len(imported_m), 2)
+        m1 = next(item for item in imported_m if item["name"] == "M1 Gate")
+        self.assertEqual(m1["team"], "Alpha Team")
+        self.assertEqual(m1["start_date"], "2026-07-20")
+        self.assertEqual(m1["end_date"], "2026-07-24")
+
+        m2 = next(item for item in imported_m if item["name"] == "M2 Scenario Demo")
+        self.assertEqual(m2["team"], "Beta Team")
+        self.assertEqual(m2["start_date"], "2026-08-10")
+        self.assertEqual(m2["end_date"], "2026-08-21")
+        self.assertEqual(m2["week_range"], "week-2633 – week-2634")
+
+    def test_milestone_csv_import_with_week_ranges(self):
+        # Create a CSV with week-range schematics
+        csv_path = os.path.join(self.test_dir, "milestones_input.csv")
+        with open(csv_path, mode="w", encoding="utf-8") as f:
+            f.write("Milestone Name,Team,Category,Week Range,Description\n")
+            f.write("QIAV Sprint Gateway,Robotics,qiav,week-2630 – week-2633,Gateway review\n")
+            f.write("Single Week Gate,Core Dev,release,week-2635,Final verification\n")
+
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        res_import = backend.importMilestonesFromExcel(csv_path)
+        self.assertTrue(res_import["success"])
+        self.assertEqual(res_import["total"], 2)
+
+        milestones = self.cache.get_milestones()
+        self.assertEqual(len(milestones), 2)
+
+        qiav = next(m for m in milestones if m["name"] == "QIAV Sprint Gateway")
+        self.assertEqual(qiav["team"], "Robotics")
+        self.assertEqual(qiav["start_date"], "2026-07-20")  # Monday of week-2630
+        self.assertEqual(qiav["end_date"], "2026-08-14")    # Friday of week-2633
+        self.assertEqual(qiav["week_range"], "week-2630 – week-2633")
+
+        single = next(m for m in milestones if m["name"] == "Single Week Gate")
+        self.assertEqual(single["team"], "Core Dev")
+        self.assertEqual(single["start_date"], "2026-08-24")  # Monday of week-2635
+        self.assertEqual(single["end_date"], "2026-08-28")    # Friday of week-2635
+        self.assertEqual(single["week_range"], "week-2635")
+
+    def test_get_available_teams(self):
+        backend = DevOpsBackend()
+        backend._tfs_team_name = "Core Dev Team"
+        backend._work_items = [
+            {"id": 1, "team_name": "Alpha Team"},
+            {"id": 2, "team_name": "Beta Team"},
+            {"id": 3, "team_name": "Alpha Team"},
+        ]
+        self.cache.save_milestone(
+            name="Gamma Milestone",
+            target_date="2026-08-10",
+            category_id="general",
+            team="Gamma Team"
+        )
+        backend._cache_db = self.cache
+
+        teams = backend.getAvailableTeams()
+        self.assertIn("Alpha Team", teams)
+        self.assertIn("Beta Team", teams)
+        self.assertIn("Core Dev Team", teams)
+        self.assertIn("Gamma Team", teams)
+
 
 if __name__ == "__main__":
     unittest.main()

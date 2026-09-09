@@ -12,13 +12,15 @@
 
 ### Milestone Information
 
-- I would like to import/export the milestones (which include the team + week-range) to/from a file, e.g. Excel, to allow for easier modification and synchronization
+- Milestone Dialog: Filter historic Milestones by default
 
 ### Performance improvements
 
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
 ## DONE
+
+- Major Milestones Import & Export (Excel, CSV, JSON): Full roundtrip synchronization of milestones with associated team assignments, start/end dates, duration, descriptions, and ISO sprint week-range schematics (`week-YYWW`), featuring native file browser integration, flexible header mapping, and live SQLite database synchronization.
 
 - Dynamic state synchronization for the Workload Explorer Task view / details drawer: when background synchronizations, deadline edits, or iteration updates complete, the active cell view automatically refreshes its task breakdown and parent container items against the new matrix dataset without losing user selection.
 - Asynchronous TFS / Azure DevOps API synchronization for milestone deadlines and iteration shifts: local SQLite cache and memory update instantaneously with optimistic UI feedback, while REST API updates run in background daemon threads without freezing the Qt Quick interface.

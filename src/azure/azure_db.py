@@ -337,6 +337,7 @@ class AzureDevOpsCache:
                 name TEXT NOT NULL,
                 target_date TEXT NOT NULL,
                 end_date TEXT,
+                team TEXT DEFAULT '',
                 category_id TEXT NOT NULL,
                 description TEXT,
                 created_at TEXT NOT NULL,
@@ -347,6 +348,10 @@ class AzureDevOpsCache:
             # Schema migration for existing milestones table
             try:
                 conn.execute("ALTER TABLE milestones ADD COLUMN end_date TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE milestones ADD COLUMN team TEXT DEFAULT ''")
             except Exception:
                 pass
 
@@ -694,6 +699,7 @@ class AzureDevOpsCache:
                     m.name,
                     m.target_date,
                     COALESCE(m.end_date, m.target_date) AS end_date,
+                    COALESCE(m.team, '') AS team,
                     m.category_id,
                     m.description,
                     m.created_at,
@@ -713,6 +719,8 @@ class AzureDevOpsCache:
                     end_d = (item.get("end_date") or start_d).strip()
                     item["start_date"] = start_d
                     item["end_date"] = end_d
+                    item["team"] = (item.get("team") or "").strip()
+                    item["team_name"] = item["team"]
 
                     is_multi = False
                     duration = 1
@@ -732,17 +740,45 @@ class AzureDevOpsCache:
                         item["date_display"] = f"{start_d} – {end_d}"
                     else:
                         item["date_display"] = start_d
+
+                    # Calculate ISO week range (e.g. week-2630 – week-2633)
+                    start_w = ""
+                    end_w = ""
+                    try:
+                        s_dt = datetime.strptime(start_d.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                        s_y, s_num, _ = s_dt.isocalendar()
+                        start_w = f"week-{str(s_y)[-2:]}{s_num:02d}"
+                    except Exception:
+                        pass
+
+                    try:
+                        e_dt = datetime.strptime(end_d.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                        e_y, e_num, _ = e_dt.isocalendar()
+                        end_w = f"week-{str(e_y)[-2:]}{e_num:02d}"
+                    except Exception:
+                        pass
+
+                    if start_w and end_w and start_w != end_w:
+                        item["week_range"] = f"{start_w} – {end_w}"
+                    elif start_w:
+                        item["week_range"] = start_w
+                    else:
+                        item["week_range"] = ""
+
+                    item["start_week"] = start_w
+                    item["end_week"] = end_w or start_w
                     results.append(item)
                 return results
         except Exception:
             return []
 
-    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date=""):
-        """Creates or updates a milestone, supporting single-day or multi-day date ranges."""
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date="", team=""):
+        """Creates or updates a milestone, supporting single-day or multi-day date ranges and team assignment."""
         now_str = datetime.now().isoformat()
         clean_name = (name or "").strip()
         clean_date = (target_date or "").strip()
         clean_end_date = (end_date or "").strip()
+        clean_team = (team or "").strip()
         clean_cat = (category_id or "general").strip()
         clean_desc = (description or "").strip()
 
@@ -761,16 +797,101 @@ class AzureDevOpsCache:
             if milestone_id and int(milestone_id) > 0:
                 conn.execute("""
                 UPDATE milestones
-                SET name = ?, target_date = ?, end_date = ?, category_id = ?, description = ?, updated_at = ?
+                SET name = ?, target_date = ?, end_date = ?, team = ?, category_id = ?, description = ?, updated_at = ?
                 WHERE id = ?
-                """, (clean_name, clean_date, clean_end_date, clean_cat, clean_desc, now_str, int(milestone_id)))
+                """, (clean_name, clean_date, clean_end_date, clean_team, clean_cat, clean_desc, now_str, int(milestone_id)))
                 return int(milestone_id)
             else:
                 cursor = conn.execute("""
-                INSERT INTO milestones (name, target_date, end_date, category_id, description, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (clean_name, clean_date, clean_end_date, clean_cat, clean_desc, now_str, now_str))
+                INSERT INTO milestones (name, target_date, end_date, team, category_id, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (clean_name, clean_date, clean_end_date, clean_team, clean_cat, clean_desc, now_str, now_str))
                 return cursor.lastrowid
+
+    def bulk_import_milestones(self, milestones_data, clear_existing=False):
+        """
+        Bulk imports a list of milestone dictionaries into SQLite.
+        
+        Args:
+            milestones_data (list of dict): List of milestone dicts.
+            clear_existing (bool): Whether to purge existing milestones prior to import.
+            
+        Returns:
+            dict: {"created": int, "updated": int, "total": int}
+        """
+        if not milestones_data or not isinstance(milestones_data, list):
+            return {"created": 0, "updated": 0, "total": 0}
+
+        created = 0
+        updated = 0
+
+        with self._connection() as conn:
+            if clear_existing:
+                conn.execute("DELETE FROM milestones")
+
+            for m in milestones_data:
+                name = (m.get("name") or m.get("milestone_name") or m.get("title") or "").strip()
+                if not name:
+                    continue
+
+                target_date = (m.get("target_date") or m.get("start_date") or m.get("date") or "").strip()
+                end_date = (m.get("end_date") or "").strip()
+                team = (m.get("team") or m.get("team_name") or "").strip()
+                raw_cat = (m.get("category_id") or m.get("category") or m.get("category_name") or "general").strip()
+                desc = (m.get("description") or m.get("notes") or "").strip()
+                m_id = m.get("id") or 0
+
+                # Validate date range
+                if not end_date:
+                    end_date = target_date
+                elif not target_date:
+                    target_date = end_date
+
+                if not target_date:
+                    continue
+
+                # Ensure category exists or default to general
+                cat_id = raw_cat.lower()
+                cat_exists = conn.execute("SELECT id FROM milestone_categories WHERE id = ?", (cat_id,)).fetchone()
+                if not cat_exists:
+                    cat_by_name = conn.execute("SELECT id FROM milestone_categories WHERE LOWER(name) = ?", (raw_cat.lower(),)).fetchone()
+                    if cat_by_name:
+                        cat_id = cat_by_name["id"]
+                    else:
+                        # Auto-create custom category if needed
+                        cat_id = re.sub(r'[^a-z0-9_]+', '_', raw_cat.lower()).strip('_') or "general"
+                        conn.execute("""
+                        INSERT INTO milestone_categories (id, name, color, bg_color, icon, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO NOTHING
+                        """, (cat_id, raw_cat, "#79c0ff", "#16243b", "🚩", 10))
+
+                now_str = datetime.now().isoformat()
+
+                target_row = None
+                if m_id and int(m_id) > 0:
+                    target_row = conn.execute("SELECT id FROM milestones WHERE id = ?", (int(m_id),)).fetchone()
+                if not target_row:
+                    target_row = conn.execute(
+                        "SELECT id FROM milestones WHERE LOWER(name) = ? AND LOWER(COALESCE(team, '')) = ?",
+                        (name.lower(), team.lower())
+                    ).fetchone()
+
+                if target_row:
+                    conn.execute("""
+                    UPDATE milestones
+                    SET name = ?, target_date = ?, end_date = ?, team = ?, category_id = ?, description = ?, updated_at = ?
+                    WHERE id = ?
+                    """, (name, target_date, end_date, team, cat_id, desc, now_str, target_row["id"]))
+                    updated += 1
+                else:
+                    conn.execute("""
+                    INSERT INTO milestones (name, target_date, end_date, team, category_id, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (name, target_date, end_date, team, cat_id, desc, now_str, now_str))
+                    created += 1
+
+        return {"created": created, "updated": updated, "total": created + updated}
 
     def delete_milestone(self, milestone_id):
         """Deletes a milestone by ID."""

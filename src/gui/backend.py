@@ -9,7 +9,7 @@ import logging
 import re
 import threading
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, date
 from PySide6.QtCore import QObject, Signal, Slot, Property
 
 # Ensure scripts/py is in sys.path
@@ -3210,6 +3210,48 @@ class DevOpsBackend(QObject):
             logger.error(f"Error opening save file dialog: {e}")
             return ""
 
+    @Slot(result=str)
+    def browse_milestone_import_file(self):
+        """Opens native file dialog to select an Excel/CSV/JSON milestone file to import."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Select Milestones File to Import", initial_dir,
+                "Milestones Files (*.xlsx *.xls *.csv *.json);;Excel Spreadsheets (*.xlsx *.xls);;CSV Files (*.csv);;JSON Files (*.json);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening import file dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseMilestoneImportFile(self):
+        """CamelCase alias for browse_milestone_import_file."""
+        return self.browse_milestone_import_file()
+
+    @Slot(result=str)
+    def browse_milestone_export_path(self):
+        """Opens native file dialog to select save destination for Excel milestone export."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_path = os.path.join(initial_dir, f"MILESTONES_EXPORT_{timestamp}.xlsx")
+            file_path, _ = QFileDialog.getSaveFileName(
+                None, "Export Milestones to Excel", default_path,
+                "Excel Spreadsheet (*.xlsx);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening export file dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseMilestoneExportPath(self):
+        """CamelCase alias for browse_milestone_export_path."""
+        return self.browse_milestone_export_path()
+
     @Slot(str, result=bool)
     def switch_database(self, new_db_path):
         """Switches active database to selected path and reloads data."""
@@ -3355,23 +3397,48 @@ class DevOpsBackend(QObject):
             return self._cache_db.get_milestones()
         return []
 
+    @Slot(result=list)
+    def getAvailableTeams(self):
+        """Returns a sorted list of unique team names across work items, config, and milestones."""
+        teams = set()
+        if self._tfs_team_name:
+            teams.add(self._tfs_team_name.strip())
+        if self._work_items:
+            for wi in self._work_items:
+                t = (wi.get("team_name") or "").strip()
+                if t:
+                    teams.add(t)
+        if self._cache_db:
+            for m in self._cache_db.get_milestones():
+                t = (m.get("team") or "").strip()
+                if t:
+                    teams.add(t)
+        return sorted([t for t in teams if t])
+
+    @Slot(result=list)
+    def get_available_teams(self):
+        """Snake_case alias for getAvailableTeams."""
+        return self.getAvailableTeams()
+
+    @Slot(str, str, str, str, int, str, str, result=dict)
     @Slot(str, str, str, str, int, str, result=dict)
     @Slot(str, str, str, str, int, result=dict)
     @Slot(str, str, str, str, result=dict)
-    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date=""):
-        """Creates or updates a milestone, supporting single-day or multi-day date ranges."""
+    def save_milestone(self, name, target_date, category_id, description="", milestone_id=0, end_date="", team=""):
+        """Creates or updates a milestone, supporting single-day or multi-day date ranges and team assignment."""
         if not self._cache_db:
             return {"success": False, "error": "No database connected"}
         clean_name = (name or "").strip()
         clean_date = (target_date or "").strip()
         clean_end_date = (end_date or "").strip()
+        clean_team = (team or "").strip()
         if not clean_name:
             return {"success": False, "error": "Milestone name is required"}
         if not clean_date:
             return {"success": False, "error": "Target date is required"}
 
         try:
-            m_id = self._cache_db.save_milestone(clean_name, clean_date, category_id, description, milestone_id, clean_end_date)
+            m_id = self._cache_db.save_milestone(clean_name, clean_date, category_id, description, milestone_id, clean_end_date, clean_team)
             self._enrich_work_items_with_milestones()
             self.milestonesChanged.emit()
             self.workloadMatrixChanged.emit()
@@ -3415,6 +3482,416 @@ class DevOpsBackend(QObject):
     def prefill_milestones_from_work_items(self):
         """Snake_case alias for prefillMilestonesFromWorkItems."""
         return self.prefillMilestonesFromWorkItems()
+
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def exportMilestonesToExcel(self, file_path=""):
+        """
+        Exports all project milestones (with Team, Category, Start/End Dates, and Week Range) to an Excel (.xlsx) file.
+        """
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+
+            milestones = self.get_milestones() or []
+            target_path = file_path or ""
+            if target_path.startswith("file:///"):
+                target_path = target_path.replace("file:///", "")
+                if os.name == "nt" and target_path.startswith("/"):
+                    target_path = target_path[1:]
+
+            if not target_path:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                target_dir = devops_helper.BASE_FOLDER if os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+                target_path = os.path.join(target_dir, f"MILESTONES_EXPORT_{timestamp}.xlsx")
+
+            target_path = os.path.abspath(target_path)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Milestones"
+            ws.views.sheetView[0].showGridLines = True
+
+            headers = [
+                "ID",
+                "Milestone Name",
+                "Team",
+                "Category",
+                "Start Date",
+                "End Date",
+                "Start Week",
+                "End Week",
+                "Week Range",
+                "Duration (Days)",
+                "Description"
+            ]
+            ws.append(headers)
+
+            # Header styling
+            header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center", wrap_text=False)
+            thin_border = Border(
+                left=Side(style="thin", color="D0D7DE"),
+                right=Side(style="thin", color="D0D7DE"),
+                top=Side(style="thin", color="D0D7DE"),
+                bottom=Side(style="thin", color="D0D7DE")
+            )
+
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+                cell.border = thin_border
+            ws.row_dimensions[1].height = 28
+
+            data_font = Font(name="Segoe UI", size=10)
+            id_font = Font(name="Segoe UI", size=10, bold=True, color="0969DA")
+            zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+            for row_idx, m in enumerate(milestones, start=2):
+                m_id = m.get("id") or ""
+                m_name = m.get("name") or ""
+                m_team = m.get("team") or m.get("team_name") or ""
+                m_cat = m.get("category_name") or m.get("category_id") or "General"
+                m_start = m.get("start_date") or m.get("target_date") or ""
+                m_end = m.get("end_date") or m_start
+                m_start_w = m.get("start_week") or ""
+                m_end_w = m.get("end_week") or m_start_w
+                m_week_range = m.get("week_range") or m_start_w
+                m_duration = m.get("duration_days") or 1
+                m_desc = m.get("description") or ""
+
+                row_vals = [
+                    m_id,
+                    m_name,
+                    m_team,
+                    m_cat,
+                    m_start,
+                    m_end,
+                    m_start_w,
+                    m_end_w,
+                    m_week_range,
+                    m_duration,
+                    m_desc
+                ]
+                ws.append(row_vals)
+
+                is_even = (row_idx % 2 == 0)
+                row_fill = zebra_fill if is_even else None
+
+                for col_idx in range(1, len(row_vals) + 1):
+                    c = ws.cell(row=row_idx, column=col_idx)
+                    c.font = id_font if col_idx == 1 else data_font
+                    c.border = thin_border
+                    if row_fill:
+                        c.fill = row_fill
+
+                    # Alignment
+                    if col_idx == 1:
+                        c.alignment = Alignment(horizontal="center")
+                    elif col_idx in [3, 4, 5, 6, 7, 8, 9, 10]:
+                        c.alignment = Alignment(horizontal="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left")
+
+                ws.row_dimensions[row_idx].height = 22
+
+            # Auto-fit columns
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    val_str = str(cell.value or "")
+                    if len(val_str) > max_len:
+                        max_len = len(val_str)
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+            wb.save(target_path)
+            logger.info(f"Exported {len(milestones)} milestones to Excel: {target_path}")
+            return {
+                "success": True,
+                "file_path": target_path,
+                "count": len(milestones),
+                "message": f"Successfully exported {len(milestones)} milestone(s) to Excel."
+            }
+        except Exception as e:
+            logger.error(f"Error exporting milestones to Excel: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to export milestones: {str(e)}"
+            }
+
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def export_milestones_to_excel(self, file_path=""):
+        """Snake_case alias for exportMilestonesToExcel."""
+        return self.exportMilestonesToExcel(file_path)
+
+    def _normalize_date_str(self, raw_val, is_end=False):
+        """Normalizes an import value (date, ISO week, or date string) to YYYY-MM-DD format."""
+        if not raw_val:
+            return ""
+        if isinstance(raw_val, (datetime, date)):
+            return raw_val.strftime("%Y-%m-%d")
+        
+        s = str(raw_val).strip()
+        if not s:
+            return ""
+
+        # Check if already YYYY-MM-DD
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', s):
+            return s
+
+        # Try ISO week e.g. week-2630 or week-2026-30
+        y, w, _ = utils.parse_sprint_week(s)
+        if y and w:
+            start_d, end_d, s_str, e_str = utils.get_sprint_date_range(y, w)
+            return e_str if is_end else s_str
+
+        # Try common date formats
+        for fmt in ["%Y/%m/%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"]:
+            try:
+                dt = datetime.strptime(s.split(".")[0], fmt)
+                return dt.strftime("%Y-%m-%d")
+            except Exception:
+                continue
+
+        # Try ISO datetime parse
+        dt = utils.parse_iso_datetime(s)
+        if dt:
+            return dt.strftime("%Y-%m-%d")
+
+        return s
+
+    def _parse_milestone_import_dict(self, d):
+        """Extracts and normalizes milestone fields from an imported row dictionary."""
+        # Name
+        name = ""
+        for k in ["name", "milestonename", "milestone", "title", "milestonetitle", "item"]:
+            if k in d and d[k]:
+                name = str(d[k]).strip()
+                break
+
+        # Team
+        team = ""
+        for k in ["team", "teamname", "assignedteam", "group"]:
+            if k in d and d[k]:
+                team = str(d[k]).strip()
+                if team.lower() == "all teams":
+                    team = ""
+                break
+
+        # Category
+        cat = "general"
+        for k in ["category", "categoryname", "categoryid", "cat", "type"]:
+            if k in d and d[k]:
+                cat = str(d[k]).strip()
+                break
+
+        # Description
+        desc = ""
+        for k in ["description", "desc", "details", "notes", "scope", "comment"]:
+            if k in d and d[k]:
+                desc = str(d[k]).strip()
+                break
+
+        # ID
+        m_id = 0
+        for k in ["id", "milestoneid", "key"]:
+            if k in d and d[k]:
+                try:
+                    m_id = int(d[k])
+                except Exception:
+                    pass
+                break
+
+        # Start Date / End Date / Week Range
+        start_d = ""
+        end_d = ""
+        for k in ["startdate", "start", "targetdate", "target", "date", "startday", "from"]:
+            if k in d and d[k]:
+                start_d = self._normalize_date_str(d[k], is_end=False)
+                break
+
+        for k in ["enddate", "end", "targetenddate", "targetend", "to", "until"]:
+            if k in d and d[k]:
+                end_d = self._normalize_date_str(d[k], is_end=True)
+                break
+
+        # Check Week Range if dates are missing
+        if not start_d or not end_d:
+            week_val = ""
+            for k in ["weekrange", "week", "sprintrange", "sprint", "sprints", "weeks", "iterationrange", "iteration"]:
+                if k in d and d[k]:
+                    week_val = str(d[k]).strip()
+                    break
+
+            if week_val:
+                # Find all sprint weeks or dates in the week_val (e.g. "week-2630 – week-2633")
+                found_sprints = re.findall(r'(?:week|sprint)[-_]?\d{2,4}[-_]?[wW]?\d{1,2}|\b\d{4}[-_]\d{2}[-_]\d{2}\b|\b\d{4}\b', week_val, re.IGNORECASE)
+                if len(found_sprints) >= 2:
+                    if not start_d:
+                        start_d = self._normalize_date_str(found_sprints[0], is_end=False)
+                    if not end_d:
+                        end_d = self._normalize_date_str(found_sprints[1], is_end=True)
+                elif len(found_sprints) == 1:
+                    if not start_d:
+                        start_d = self._normalize_date_str(found_sprints[0], is_end=False)
+                    if not end_d:
+                        end_d = self._normalize_date_str(found_sprints[0], is_end=True)
+                else:
+                    parts = re.split(r'\s+(?:–|-|to|->|→|until)\s+|\s*–\s*', week_val)
+                    if len(parts) >= 2:
+                        s_w = parts[0].strip()
+                        e_w = parts[1].strip()
+                        if not start_d:
+                            start_d = self._normalize_date_str(s_w, is_end=False)
+                        if not end_d:
+                            end_d = self._normalize_date_str(e_w, is_end=True)
+                    elif len(parts) == 1 and not start_d:
+                        start_d = self._normalize_date_str(parts[0].strip(), is_end=False)
+                        if not end_d:
+                            end_d = self._normalize_date_str(parts[0].strip(), is_end=True)
+
+        if not end_d:
+            end_d = start_d
+        if not start_d:
+            start_d = end_d
+
+        return {
+            "id": m_id,
+            "name": name,
+            "team": team,
+            "category": cat,
+            "category_id": cat,
+            "start_date": start_d,
+            "target_date": start_d,
+            "end_date": end_d,
+            "description": desc
+        }
+
+    @Slot(str, bool, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    def importMilestonesFromExcel(self, file_path, clear_existing=False):
+        """
+        Imports milestones from an Excel (.xlsx/.xls), CSV (.csv), or JSON (.json) file.
+        Supports Team and Week-Range (e.g. week-2630 – week-2633).
+        """
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected", "message": "Database not connected."}
+
+        clean_path = (file_path or "").strip()
+        if clean_path.startswith("file:///"):
+            clean_path = clean_path.replace("file:///", "")
+            if os.name == "nt" and clean_path.startswith("/"):
+                clean_path = clean_path[1:]
+
+        if not os.path.exists(clean_path):
+            return {"success": False, "error": f"File not found: {clean_path}", "message": f"File not found: {clean_path}"}
+
+        parsed_milestones = []
+        ext = os.path.splitext(clean_path)[1].lower()
+
+        try:
+            if ext in [".xlsx", ".xls"]:
+                import openpyxl
+                wb = openpyxl.load_workbook(clean_path, data_only=True)
+                ws = wb.active
+                rows = list(ws.iter_rows(values_only=True))
+                if not rows:
+                    return {"success": False, "error": "Empty Excel sheet", "message": "Excel file is empty."}
+
+                header_row = [str(h or "").strip().lower().replace(" ", "").replace("_", "").replace("-", "") for h in rows[0]]
+                for r in rows[1:]:
+                    if not any(r):
+                        continue
+                    row_dict = {}
+                    for col_idx, h in enumerate(header_row):
+                        if col_idx < len(r):
+                            row_dict[h] = r[col_idx]
+                    parsed_milestones.append(self._parse_milestone_import_dict(row_dict))
+
+            elif ext == ".csv":
+                import csv
+                raw_rows = []
+                for enc in ["utf-8-sig", "utf-8", "latin-1"]:
+                    try:
+                        with open(clean_path, mode="r", encoding=enc, newline="") as f:
+                            reader = csv.DictReader(f)
+                            for r in reader:
+                                norm_dict = {
+                                    k.strip().lower().replace(" ", "").replace("_", "").replace("-", ""): v
+                                    for k, v in r.items() if k
+                                }
+                                raw_rows.append(norm_dict)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                for rd in raw_rows:
+                    parsed_milestones.append(self._parse_milestone_import_dict(rd))
+
+            elif ext == ".json":
+                with open(clean_path, mode="r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                norm_dict = {
+                                    k.strip().lower().replace(" ", "").replace("_", "").replace("-", ""): v
+                                    for k, v in item.items() if k
+                                }
+                                parsed_milestones.append(self._parse_milestone_import_dict(norm_dict))
+                    elif isinstance(data, dict):
+                        norm_dict = {
+                            k.strip().lower().replace(" ", "").replace("_", "").replace("-", ""): v
+                            for k, v in data.items() if k
+                        }
+                        parsed_milestones.append(self._parse_milestone_import_dict(norm_dict))
+            else:
+                return {"success": False, "error": f"Unsupported file type: {ext}", "message": f"Unsupported file extension '{ext}'."}
+
+            # Filter valid milestone items
+            valid_milestones = [m for m in parsed_milestones if m.get("name") and (m.get("target_date") or m.get("start_date"))]
+            if not valid_milestones:
+                return {
+                    "success": False,
+                    "error": "No valid milestones found in file",
+                    "message": "No valid milestones found. Ensure rows have at least a Name and a Date or Sprint/Week range."
+                }
+
+            res = self._cache_db.bulk_import_milestones(valid_milestones, clear_existing=clear_existing)
+            self._enrich_work_items_with_milestones()
+            self.milestonesChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.workItemsChanged.emit()
+
+            msg = f"Successfully imported {res['total']} milestone(s) ({res['created']} created, {res['updated']} updated)."
+            logger.info(f"Imported milestones from {clean_path}: {res}")
+            return {
+                "success": True,
+                "created": res["created"],
+                "updated": res["updated"],
+                "total": res["total"],
+                "message": msg
+            }
+        except Exception as e:
+            logger.error(f"Error importing milestones from {clean_path}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to import milestones: {str(e)}"
+            }
+
+    @Slot(str, bool, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    def import_milestones_from_excel(self, file_path, clear_existing=False):
+        """Snake_case alias for importMilestonesFromExcel."""
+        return self.importMilestonesFromExcel(file_path, clear_existing)
 
     @Slot(list, str, result="QVariantMap")
     @Slot(list, result="QVariantMap")
