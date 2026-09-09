@@ -767,6 +767,11 @@ class AzureDevOpsCache:
 
                     item["start_week"] = start_w
                     item["end_week"] = end_w or start_w
+
+                    today_str = datetime.now().date().isoformat()
+                    effective_end = (end_d or start_d).split("T")[0].split(" ")[0]
+                    item["is_historic"] = bool(effective_end and effective_end < today_str)
+
                     results.append(item)
                 return results
         except Exception:

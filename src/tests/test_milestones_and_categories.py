@@ -706,8 +706,36 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertIn("Core Dev Team", teams)
         self.assertIn("Gamma Team", teams)
 
+    def test_historic_milestone_identification(self):
+        # 1. Past milestone (e.g. year 2020)
+        self.cache.save_milestone(
+            name="Past Milestone",
+            target_date="2020-01-15",
+            end_date="2020-01-20",
+            category_id="ddqs",
+            description="Historic DDQS gate"
+        )
+        # 2. Future milestone (e.g. year 2099)
+        self.cache.save_milestone(
+            name="Future Milestone",
+            target_date="2099-12-01",
+            end_date="2099-12-10",
+            category_id="qiav",
+            description="Future QIAV gate"
+        )
+
+        milestones = self.cache.get_milestones()
+        self.assertEqual(len(milestones), 2)
+
+        past_m = next(m for m in milestones if m["name"] == "Past Milestone")
+        self.assertTrue(past_m["is_historic"])
+
+        future_m = next(m for m in milestones if m["name"] == "Future Milestone")
+        self.assertFalse(future_m["is_historic"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

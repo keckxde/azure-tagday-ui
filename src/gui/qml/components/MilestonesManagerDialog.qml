@@ -25,6 +25,65 @@ Dialog {
     property var availableTeams: (backend && backend.getAvailableTeams) ? backend.getAvailableTeams() : []
     property int currentTab: 0 // 0: Milestones, 1: Categories
 
+    // Filtering and Search state
+    property bool hideHistoric: true // Filter historic milestones by default
+    property string milestoneSearchQuery: ""
+    property var filteredMilestonesList: []
+    property int historicCount: 0
+
+    onMilestonesListChanged: updateFilteredMilestones()
+    onHideHistoricChanged: updateFilteredMilestones()
+    onMilestoneSearchQueryChanged: updateFilteredMilestones()
+
+    function isMilestoneHistoric(m) {
+        if (!m) return false;
+        if (m.is_historic !== undefined) return !!m.is_historic;
+        var today = new Date();
+        var tY = today.getFullYear();
+        var tM = (today.getMonth() + 1 < 10 ? "0" : "") + (today.getMonth() + 1);
+        var tD = (today.getDate() < 10 ? "0" : "") + today.getDate();
+        var todayStr = tY + "-" + tM + "-" + tD;
+        var d = (m.end_date || m.target_date || "").trim();
+        if (!d) return false;
+        var dClean = d.split("T")[0].split(" ")[0];
+        return dClean < todayStr;
+    }
+
+    function updateFilteredMilestones() {
+        var rawList = milestonesList || [];
+        var hCount = 0;
+        for (var i = 0; i < rawList.length; i++) {
+            if (isMilestoneHistoric(rawList[i])) {
+                hCount++;
+            }
+        }
+        historicCount = hCount;
+
+        var query = (milestoneSearchQuery || "").trim().toLowerCase();
+        var res = [];
+        for (var j = 0; j < rawList.length; j++) {
+            var item = rawList[j];
+            var isHist = isMilestoneHistoric(item);
+            if (hideHistoric && isHist) {
+                continue;
+            }
+            if (query) {
+                var name = (item.name || "").toLowerCase();
+                var team = (item.team || "").toLowerCase();
+                var cat = (item.category_name || item.category_id || "").toLowerCase();
+                var desc = (item.description || "").toLowerCase();
+                var wr = (item.week_range || "").toLowerCase();
+                var dt = (item.date_display || item.target_date || "").toLowerCase();
+                if (name.indexOf(query) === -1 && team.indexOf(query) === -1 && cat.indexOf(query) === -1 &&
+                    desc.indexOf(query) === -1 && wr.indexOf(query) === -1 && dt.indexOf(query) === -1) {
+                    continue;
+                }
+            }
+            res.push(item);
+        }
+        filteredMilestonesList = res;
+    }
+
     // Editing state for milestone
     property int editingMilestoneId: 0
     property string editingMilestoneName: ""
@@ -157,6 +216,8 @@ Dialog {
     }
 
     function openDialog() {
+        hideHistoric = true;
+        milestoneSearchQuery = "";
         refreshData();
         resetMilestoneForm();
         resetCategoryForm();
@@ -170,6 +231,7 @@ Dialog {
             categoriesList = backend.get_milestone_categories() || [];
             if (backend.getAvailableTeams) availableTeams = backend.getAvailableTeams() || [];
         }
+        updateFilteredMilestones();
     }
 
     function resetMilestoneForm() {
@@ -325,7 +387,7 @@ Dialog {
                     Text {
                         id: tab1Text
                         anchors.centerIn: parent
-                        text: "🎯 Major Milestones (" + root.milestonesList.length + ")"
+                        text: "🎯 Major Milestones (" + root.filteredMilestonesList.length + (root.hideHistoric && root.historicCount > 0 ? " · " + root.historicCount + " hidden" : "") + ")"
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 12
                         font.weight: root.currentTab === 0 ? Font.Bold : Font.Normal
@@ -535,167 +597,343 @@ Dialog {
                                     contentItem: Text { text: parent.text; font: parent.font; color: "#3fb950"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                     background: Rectangle { implicitHeight: 22; implicitWidth: 60; radius: 4; color: parent.hovered ? "#162b20" : "transparent"; border.color: "#238636" }
                                     onClicked: root.resetMilestoneForm()
+                                          }
+
+                        // Search & Filter Subheader
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 38
+                            color: "#0d1117"
+                            border.color: "#30363d"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                // Search Box
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 26
+                                    radius: 4
+                                    color: "#161b22"
+                                    border.color: mSearchInput.activeFocus ? "#58a6ff" : "#30363d"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 6
+                                        spacing: 6
+
+                                        Text {
+                                            text: "🔍"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        TextInput {
+                                            id: mSearchInput
+                                            Layout.fillWidth: true
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#f0f6fc"
+                                            selectByMouse: true
+                                            clip: true
+                                            onTextChanged: root.milestoneSearchQuery = text
+
+                                            Text {
+                                                anchors.fill: parent
+                                                text: "Filter milestones, teams, categories..."
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                color: "#484f58"
+                                                visible: !mSearchInput.text && !mSearchInput.activeFocus
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
+
+                                        Text {
+                                            visible: mSearchInput.text !== ""
+                                            text: "✕"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    mSearchInput.text = "";
+                                                    root.milestoneSearchQuery = "";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Hide Historic Toggle Button / Pill (Filter Historic by default)
+                                Rectangle {
+                                    id: hideHistPill
+                                    implicitHeight: 26
+                                    implicitWidth: hideHistRow.implicitWidth + 16
+                                    radius: 4
+                                    color: root.hideHistoric ? "#16243b" : (histMa.containsMouse ? "#21262d" : "#161b22")
+                                    border.color: root.hideHistoric ? "#388bfd" : "#30363d"
+
+                                    RowLayout {
+                                        id: hideHistRow
+                                        anchors.centerIn: parent
+                                        spacing: 5
+
+                                        Text {
+                                            text: root.hideHistoric ? "☑" : "☐"
+                                            font.pixelSize: 12
+                                            color: root.hideHistoric ? "#58a6ff" : "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: root.hideHistoric ? ("Hide Historic" + (root.historicCount > 0 ? " (" + root.historicCount + ")" : "")) : "Show All (" + root.milestonesList.length + ")"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: root.hideHistoric ? Font.DemiBold : Font.Normal
+                                            color: root.hideHistoric ? "#79c0ff" : "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: histMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.hideHistoric = !root.hideHistoric
+                                    }
                                 }
                             }
                         }
 
                         // List of Milestones
-                        ScrollView {
+                        Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            clip: true
 
-                            ListView {
-                                width: parent.width
-                                model: root.milestonesList
-                                spacing: 4
-                                delegate: Rectangle {
-                                    width: parent.width - 16
-                                    height: 54
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    radius: 6
-                                    color: (root.editingMilestoneId === modelData.id) ? "#1f242c" : (mItemMa.containsMouse ? "#161b22" : "#0d1117")
-                                    border.color: (root.editingMilestoneId === modelData.id) ? "#58a6ff" : "#30363d"
+                            ScrollView {
+                                anchors.fill: parent
+                                clip: true
 
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        spacing: 10
+                                ListView {
+                                    width: parent.width
+                                    model: root.filteredMilestonesList
+                                    spacing: 4
+                                    delegate: Rectangle {
+                                        width: parent.width - 16
+                                        height: 54
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        radius: 6
+                                        opacity: (root.isMilestoneHistoric(modelData) && root.editingMilestoneId !== modelData.id) ? 0.8 : 1.0
+                                        color: (root.editingMilestoneId === modelData.id) ? "#1f242c" : (mItemMa.containsMouse ? "#161b22" : "#0d1117")
+                                        border.color: (root.editingMilestoneId === modelData.id) ? "#58a6ff" : (root.isMilestoneHistoric(modelData) ? "#44351a" : "#30363d")
 
-                                        // Category Icon Pill
-                                        Rectangle {
-                                            implicitWidth: 32; implicitHeight: 32; radius: 6
-                                            color: modelData.category_bg_color || "#16243b"
-                                            border.color: modelData.category_color || "#388bfd"
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: modelData.category_icon || "🚩"
-                                                font.pixelSize: 15
-                                            }
-                                        }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 10
 
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 2
-                                            RowLayout {
-                                                spacing: 6
+                                            // Category Icon Pill
+                                            Rectangle {
+                                                implicitWidth: 32; implicitHeight: 32; radius: 6
+                                                color: modelData.category_bg_color || "#16243b"
+                                                border.color: modelData.category_color || "#388bfd"
                                                 Text {
-                                                    text: modelData.name
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 12
-                                                    font.weight: Font.Bold
-                                                    color: "#f0f6fc"
-                                                }
-                                                // Category Badge
-                                                Rectangle {
-                                                    implicitHeight: 16
-                                                    implicitWidth: catLabel.implicitWidth + 8
-                                                    radius: 8
-                                                    color: modelData.category_bg_color || "#16243b"
-                                                    border.color: modelData.category_color || "#388bfd"
-                                                    Text {
-                                                        id: catLabel
-                                                        anchors.centerIn: parent
-                                                        text: modelData.category_name || "General"
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.Bold
-                                                        color: modelData.category_color || "#79c0ff"
-                                                    }
-                                                }
-                                                // Team Badge (if present)
-                                                Rectangle {
-                                                    visible: !!(modelData.team && modelData.team.trim() !== "")
-                                                    implicitHeight: 16
-                                                    implicitWidth: teamLabel.implicitWidth + 8
-                                                    radius: 8
-                                                    color: "#1c2128"
-                                                    border.color: "#484f58"
-                                                    Text {
-                                                        id: teamLabel
-                                                        anchors.centerIn: parent
-                                                        text: "👥 " + (modelData.team || "")
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.DemiBold
-                                                        color: "#c9d1d9"
-                                                    }
+                                                    anchors.centerIn: parent
+                                                    text: modelData.category_icon || "🚩"
+                                                    font.pixelSize: 15
                                                 }
                                             }
-                                            RowLayout {
+
+                                            ColumnLayout {
                                                 Layout.fillWidth: true
-                                                spacing: 6
-                                                Text {
-                                                    text: "📅 " + (modelData.date_display || modelData.target_date) + (modelData.description ? (" · " + modelData.description) : "")
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 11
-                                                    color: "#8b949e"
-                                                    elide: Text.ElideRight
-                                                    Layout.fillWidth: true
-                                                }
-                                                // Week Range chip
-                                                Rectangle {
-                                                    visible: !!(modelData.week_range && modelData.week_range.trim() !== "")
-                                                    implicitHeight: 16
-                                                    implicitWidth: weekRangeTxt.implicitWidth + 8
-                                                    radius: 8
-                                                    color: "#16243b"
-                                                    border.color: "#388bfd"
+                                                spacing: 2
+                                                RowLayout {
+                                                    spacing: 6
                                                     Text {
-                                                        id: weekRangeTxt
-                                                        anchors.centerIn: parent
-                                                        text: "🏷️ " + (modelData.week_range || "")
-                                                        font.pixelSize: 9
+                                                        text: modelData.name
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 12
                                                         font.weight: Font.Bold
-                                                        color: "#58a6ff"
+                                                        color: root.isMilestoneHistoric(modelData) ? "#c9d1d9" : "#f0f6fc"
+                                                    }
+                                                    // Category Badge
+                                                    Rectangle {
+                                                        implicitHeight: 16
+                                                        implicitWidth: catLabel.implicitWidth + 8
+                                                        radius: 8
+                                                        color: modelData.category_bg_color || "#16243b"
+                                                        border.color: modelData.category_color || "#388bfd"
+                                                        Text {
+                                                            id: catLabel
+                                                            anchors.centerIn: parent
+                                                            text: modelData.category_name || "General"
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.Bold
+                                                            color: modelData.category_color || "#79c0ff"
+                                                        }
+                                                    }
+                                                    // Team Badge (if present)
+                                                    Rectangle {
+                                                        visible: !!(modelData.team && modelData.team.trim() !== "")
+                                                        implicitHeight: 16
+                                                        implicitWidth: teamLabel.implicitWidth + 8
+                                                        radius: 8
+                                                        color: "#1c2128"
+                                                        border.color: "#484f58"
+                                                        Text {
+                                                            id: teamLabel
+                                                            anchors.centerIn: parent
+                                                            text: "👥 " + (modelData.team || "")
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.DemiBold
+                                                            color: "#c9d1d9"
+                                                        }
+                                                    }
+                                                    // Historic Milestone Badge
+                                                    Rectangle {
+                                                        visible: root.isMilestoneHistoric(modelData)
+                                                        implicitHeight: 16
+                                                        implicitWidth: histBadgeText.implicitWidth + 8
+                                                        radius: 8
+                                                        color: "#271c10"
+                                                        border.color: "#d29922"
+                                                        Text {
+                                                            id: histBadgeText
+                                                            anchors.centerIn: parent
+                                                            text: "🕒 Historic"
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.DemiBold
+                                                            color: "#e3b341"
+                                                        }
                                                     }
                                                 }
-                                                // Multi-day duration badge
-                                                Rectangle {
-                                                    visible: !!modelData.is_multi_day
-                                                    implicitHeight: 16
-                                                    implicitWidth: multiDayTxt.implicitWidth + 8
-                                                    radius: 8
-                                                    color: "#1f2d3d"
-                                                    border.color: "#388bfd"
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 6
                                                     Text {
-                                                        id: multiDayTxt
-                                                        anchors.centerIn: parent
-                                                        text: "📆 " + (modelData.duration_days ? (modelData.duration_days + "d") : "Multi-day")
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.Bold
-                                                        color: "#79c0ff"
+                                                        text: "📅 " + (modelData.date_display || modelData.target_date) + (modelData.description ? (" · " + modelData.description) : "")
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 11
+                                                        color: "#8b949e"
+                                                        elide: Text.ElideRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    // Week Range chip
+                                                    Rectangle {
+                                                        visible: !!(modelData.week_range && modelData.week_range.trim() !== "")
+                                                        implicitHeight: 16
+                                                        implicitWidth: weekRangeTxt.implicitWidth + 8
+                                                        radius: 8
+                                                        color: "#16243b"
+                                                        border.color: "#388bfd"
+                                                        Text {
+                                                            id: weekRangeTxt
+                                                            anchors.centerIn: parent
+                                                            text: "🏷️ " + (modelData.week_range || "")
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.Bold
+                                                            color: "#58a6ff"
+                                                        }
+                                                    }
+                                                    // Multi-day duration badge
+                                                    Rectangle {
+                                                        visible: !!modelData.is_multi_day
+                                                        implicitHeight: 16
+                                                        implicitWidth: multiDayTxt.implicitWidth + 8
+                                                        radius: 8
+                                                        color: "#1f2d3d"
+                                                        border.color: "#388bfd"
+                                                        Text {
+                                                            id: multiDayTxt
+                                                            anchors.centerIn: parent
+                                                            text: "📆 " + (modelData.duration_days ? (modelData.duration_days + "d") : "Multi-day")
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.Bold
+                                                            color: "#79c0ff"
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Edit Button
+                                            Button {
+                                                text: "✏️"
+                                                font.pixelSize: 11
+                                                background: Rectangle { implicitWidth: 26; implicitHeight: 26; radius: 4; color: parent.hovered ? "#30363d" : "transparent" }
+                                                onClicked: root.editMilestone(modelData)
+                                            }
+
+                                            // Delete Button
+                                            Button {
+                                                text: "🗑️"
+                                                font.pixelSize: 11
+                                                background: Rectangle { implicitWidth: 26; implicitHeight: 26; radius: 4; color: parent.hovered ? "#3c1e1e" : "transparent" }
+                                                onClicked: {
+                                                    if (backend) {
+                                                        backend.delete_milestone(modelData.id);
+                                                        if (root.editingMilestoneId === modelData.id) root.resetMilestoneForm();
                                                     }
                                                 }
                                             }
                                         }
 
-                                        // Edit Button
-                                        Button {
-                                            text: "✏️"
-                                            font.pixelSize: 11
-                                            background: Rectangle { implicitWidth: 26; implicitHeight: 26; radius: 4; color: parent.hovered ? "#30363d" : "transparent" }
+                                        MouseArea {
+                                            id: mItemMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            propagateComposedEvents: true
                                             onClicked: root.editMilestone(modelData)
                                         }
+                                    }
+                                }
+                            }
 
-                                        // Delete Button
-                                        Button {
-                                            text: "🗑️"
-                                            font.pixelSize: 11
-                                            background: Rectangle { implicitWidth: 26; implicitHeight: 26; radius: 4; color: parent.hovered ? "#3c1e1e" : "transparent" }
-                                            onClicked: {
-                                                if (backend) {
-                                                    backend.delete_milestone(modelData.id);
-                                                    if (root.editingMilestoneId === modelData.id) root.resetMilestoneForm();
-                                                }
-                                            }
-                                        }
+                            // Empty State / All Filtered placeholder
+                            Item {
+                                anchors.fill: parent
+                                visible: root.filteredMilestonesList.length === 0
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 8
+
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        text: "🎯"
+                                        font.pixelSize: 28
                                     }
 
-                                    MouseArea {
-                                        id: mItemMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        propagateComposedEvents: true
-                                        onClicked: root.editMilestone(modelData)
+                                    Text {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        text: root.milestonesList.length === 0 ? "No milestones defined yet." :
+                                              (root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery) ?
+                                              ("All " + root.historicCount + " milestone(s) are historic (past).") : "No matching milestones found."
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        color: "#8b949e"
+                                    }
+
+                                    Button {
+                                        visible: root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        text: "Show " + root.historicCount + " historic milestone" + (root.historicCount > 1 ? "s" : "")
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        background: Rectangle {
+                                            implicitHeight: 26
+                                            implicitWidth: 190
+                                            radius: 4
+                                            color: parent.hovered ? "#16243b" : "#0d1b2e"
+                                            border.color: "#388bfd"
+                                        }
+                                        onClicked: root.hideHistoric = false
                                     }
                                 }
                             }

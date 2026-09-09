@@ -9,16 +9,16 @@
 ### UI Related
 
 - Allow a scheduled synchronisation, e.g. every 5 minutes, but allow also manual syncs
-
-### Milestone Information
-
-- Milestone Dialog: Filter historic Milestones by default
+- Progress on the sidebar bottoom is sufficient, no need for information top right
 
 ### Performance improvements
 
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
 ## DONE
+
+- Milestone Dialog Default Historic Filter: Milestones whose target or end dates have elapsed are automatically filtered out by default when opening the Major Milestones dialog. A dedicated filter bar with instant search and a "Hide Historic" toggle switch/badge allows users to quickly view all past milestones or active ones on demand.
+
 
 - Major Milestones Import & Export (Excel, CSV, JSON): Full roundtrip synchronization of milestones with associated team assignments, start/end dates, duration, descriptions, and ISO sprint week-range schematics (`week-YYWW`), featuring native file browser integration, flexible header mapping, and live SQLite database synchronization.
 
