@@ -1,5 +1,13 @@
 # TODOs
 
+## ERROR
+
+- URL for Sprint Taskboard is like the following one
+
+    http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem=5634858
+
+---
+
 ## OPEN
 
 ### Configuration
@@ -9,7 +17,7 @@
 ### UI Related
 
 - Allow a scheduled synchronisation, e.g. every 5 minutes, but allow also manual syncs
-- Progress on the sidebar bottoom is sufficient, no need for information top right
+- Progress on the sidebar bottom is sufficient, no need for information top right
 
 ### Performance improvements
 
