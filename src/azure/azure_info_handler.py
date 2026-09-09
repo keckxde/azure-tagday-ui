@@ -11,7 +11,7 @@ for p in (py_dir, parent_dir):
         sys.path.insert(0, p)
 
 
-from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple
+from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple, generate_weekly_iterations_advance, parse_sprint_week
 try:
     from .azure_info_base_client import AzureBaseClient
 except ImportError:
@@ -1123,4 +1123,97 @@ class AzureInfoHandler(AzureBaseClient):
             })
 
         return results
+
+    def prepare_weekly_iterations(self, project_id, deadline=None, start_from=None, parent_path=None, sync_to_tfs=True, cache_db=None):
+        """
+        Prepares weekly iterations following the 'week-YYWW' schematic in advance up until
+        a given deadline or milestone date. Optionally creates missing classification nodes on TFS/Azure DevOps
+        and saves them into the local SQLite cache database.
+
+        Args:
+            project_id (str): The project ID or name.
+            deadline (date/datetime/str, optional): Target deadline date/week.
+            start_from (date/datetime/str, optional): Start date/week. Defaults to current week.
+            parent_path (str, optional): Parent iteration path for nested iterations.
+            sync_to_tfs (bool, optional): Whether to create nodes on TFS. Defaults to True.
+            cache_db (AzureDevOpsCache, optional): SQLite cache DB instance.
+
+        Returns:
+            dict: Summary containing generated iterations and server creation results.
+        """
+        generated = generate_weekly_iterations_advance(
+            start_date_or_week=start_from,
+            deadline=deadline
+        )
+        if not generated:
+            return {"total_generated": 0, "created_on_server": 0, "iterations": []}
+
+        existing_names = set()
+        if sync_to_tfs:
+            try:
+                tree = self.get_classification_nodes(project_id, structure_group="iterations")
+                def _collect_names(node):
+                    if not node or not isinstance(node, dict):
+                        return
+                    if "name" in node:
+                        existing_names.add(node["name"].strip().lower())
+                    for child in node.get("children", []):
+                        _collect_names(child)
+                _collect_names(tree)
+            except Exception as e:
+                logger.warning("Could not retrieve existing classification nodes for project %s: %s", project_id, e)
+
+        created_count = 0
+        results = []
+
+        for item in generated:
+            name = item["sprint_name"]
+            is_synced = 0
+            if sync_to_tfs:
+                if name.lower() not in existing_names:
+                    try:
+                        res = self.create_classification_node(
+                            project_id,
+                            name,
+                            structure_group="iterations",
+                            start_date=item["start_date"],
+                            finish_date=item["end_date"],
+                            parent_path=parent_path
+                        )
+                        created_count += 1
+                        is_synced = 1
+                        existing_names.add(name.lower())
+                        logger.info("Created iteration node %s on server for project %s", name, project_id)
+                    except Exception as e:
+                        logger.error("Failed to create iteration node %s on TFS: %s", name, e)
+                else:
+                    is_synced = 1
+
+            full_path = f"{project_id}\\{name}" if not parent_path else f"{project_id}\\{parent_path.strip('/')}\\{name}"
+            item["iteration_path"] = full_path
+            item["is_server_synced"] = is_synced
+
+            if cache_db:
+                try:
+                    cache_db.save_cached_iteration(
+                        project=project_id,
+                        name=name,
+                        path=full_path,
+                        start_date=item["start_date"],
+                        end_date=item["end_date"],
+                        year=item["year"],
+                        week=item["week"],
+                        is_synced=is_synced
+                    )
+                except Exception as e:
+                    logger.error("Failed to save cached iteration %s: %s", name, e)
+
+            results.append(item)
+
+        return {
+            "total_generated": len(results),
+            "created_on_server": created_count,
+            "iterations": results
+        }
+
 

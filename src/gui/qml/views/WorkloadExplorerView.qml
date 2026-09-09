@@ -412,6 +412,30 @@ Item {
                 }
                 onClicked: root.refreshMatrix()
             }
+
+            // Prepare Sprints Button
+            Button {
+                text: "🗓️ Prepare Sprints..."
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: "Prepare weekly iterations in advance up to a milestone deadline"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "#58a6ff"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 30
+                    implicitWidth: 135
+                    radius: 6
+                    color: parent.hovered ? "#0d2344" : "#161b22"
+                    border.color: "#1f6feb"
+                }
+                onClicked: workloadPrepareModal.openForPreparation("", "")
+            }
         }
 
         // ====================== Time Navigation Bar ======================
@@ -3082,5 +3106,13 @@ Item {
             root.refreshMatrix();
         }
     }
+
+    PrepareIterationsModal {
+        id: workloadPrepareModal
+        onIterationsPrepared: function(result) {
+            root.refreshMatrix();
+        }
+    }
 }
+
 

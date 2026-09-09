@@ -393,8 +393,14 @@ def parse_sprint_week(iteration_str):
     if not iteration_str or not isinstance(iteration_str, str):
         return None, None, None
 
+    clean_str = iteration_str.strip()
+
+    # Do not match date strings (e.g. 2026-08-14 or 2026-08-14T12:00:00Z)
+    if re.match(r'^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}', clean_str):
+        return None, None, None
+
     # Match 4-digit year: 'sprint-2026-W30' or 'week-2026-33'
-    m_full = re.search(r'\b(?:week|sprint)[-_]?(\d{4})[-_]?[wW]?(\d{1,2})\b', iteration_str, re.IGNORECASE)
+    m_full = re.search(r'\b(?:week|sprint)[-_]?(\d{4})[-_]?[wW]?(\d{1,2})\b', clean_str, re.IGNORECASE)
     if m_full:
         yyyy = int(m_full.group(1))
         ww = int(m_full.group(2))
@@ -402,7 +408,7 @@ def parse_sprint_week(iteration_str):
             return yyyy, ww, f"week-{str(yyyy)[-2:]}{ww:02d}"
 
     # Match 'week-YYWW' or 'week_YYWW' or 'Sprint-YYWW'
-    m = re.search(r'\b(?:week|sprint)[-_]?(\d{2})(\d{2})\b', iteration_str, re.IGNORECASE)
+    m = re.search(r'\b(?:week|sprint)[-_]?(\d{2})(\d{2})\b', clean_str, re.IGNORECASE)
     if m:
         yy = int(m.group(1))
         ww = int(m.group(2))
@@ -410,8 +416,8 @@ def parse_sprint_week(iteration_str):
         if 1 <= ww <= 53:
             return year, ww, f"week-{yy:02d}{ww:02d}"
 
-    # Also match 4-digit '2633' if surrounded by word boundaries
-    m2 = re.search(r'\b(\d{2})(\d{2})\b', iteration_str)
+    # Also match 4-digit '2633' if surrounded by word boundaries (and not part of a date)
+    m2 = re.search(r'(?<![-/.])\b(\d{2})(\d{2})\b(?![-/.])', clean_str)
     if m2:
         yy = int(m2.group(1))
         ww = int(m2.group(2))
@@ -453,6 +459,141 @@ def format_sprint_range_label(year, week):
     start_fmt = start_d.strftime("%b %d")
     end_fmt = end_d.strftime("%b %d") if start_d.month == end_d.month else end_d.strftime("%b %d")
     return f"week-{str(year)[-2:]}{week:02d} ({start_fmt} – {end_fmt})"
+
+
+def generate_weekly_iterations_advance(start_date_or_week=None, deadline=None, weeks_count=None, prefix="week-"):
+    """
+    Generates a continuous sequence of weekly iterations following the 'week-YYWW'
+    schematic in advance up until a given deadline date/week or for a specified count of weeks.
+    
+    Correctly handles ISO year boundaries and 52/53-week calendar rollovers.
+
+    Args:
+        start_date_or_week (date/datetime/str/tuple, optional): Start date, sprint name (e.g. 'week-2633'),
+            or (year, week) tuple. If None, defaults to the current week's Monday.
+        deadline (date/datetime/str/tuple, optional): Target deadline date, milestone deadline,
+            or target sprint name. If specified, iterations are generated up to the week containing this deadline.
+        weeks_count (int, optional): Number of consecutive weekly iterations to generate if deadline is not set.
+        prefix (str, optional): Prefix for iteration names (default: 'week-').
+
+    Returns:
+        list[dict]: List of iteration dictionaries with keys:
+            - 'sprint_name' (str): e.g. 'week-2633'
+            - 'year' (int): e.g. 2026
+            - 'week' (int): e.g. 33
+            - 'start_date' (str): Monday YYYY-MM-DD
+            - 'end_date' (str): Friday YYYY-MM-DD
+            - 'label' (str): e.g. 'week-2633 (Aug 10 – Aug 14)'
+            - 'short_label' (str): e.g. 'W33'
+    """
+    from datetime import date, datetime, timedelta
+
+    # 1. Resolve start Monday date
+    start_monday = None
+    if start_date_or_week is None:
+        today = date.today()
+        iso_y, iso_w, _ = today.isocalendar()
+        start_monday = date.fromisocalendar(iso_y, iso_w, 1)
+    elif isinstance(start_date_or_week, (date, datetime)):
+        dt = start_date_or_week if isinstance(start_date_or_week, date) else start_date_or_week.date()
+        iso_y, iso_w, _ = dt.isocalendar()
+        start_monday = date.fromisocalendar(iso_y, iso_w, 1)
+    elif isinstance(start_date_or_week, tuple) and len(start_date_or_week) >= 2:
+        y, w = int(start_date_or_week[0]), int(start_date_or_week[1])
+        y = 2000 + y if y < 100 else y
+        start_monday = date.fromisocalendar(y, w, 1)
+    elif isinstance(start_date_or_week, str):
+        y, w, _ = parse_sprint_week(start_date_or_week)
+        if y and w:
+            start_monday = date.fromisocalendar(y, w, 1)
+        else:
+            dt = parse_iso_datetime(start_date_or_week)
+            if dt:
+                d = dt.date()
+                iso_y, iso_w, _ = d.isocalendar()
+                start_monday = date.fromisocalendar(iso_y, iso_w, 1)
+            else:
+                try:
+                    d = datetime.strptime(start_date_or_week.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                    iso_y, iso_w, _ = d.isocalendar()
+                    start_monday = date.fromisocalendar(iso_y, iso_w, 1)
+                except Exception:
+                    today = date.today()
+                    iso_y, iso_w, _ = today.isocalendar()
+                    start_monday = date.fromisocalendar(iso_y, iso_w, 1)
+
+    # 2. Resolve target end Monday date
+    end_monday = None
+    if deadline is not None:
+        if isinstance(deadline, (date, datetime)):
+            dt = deadline if isinstance(deadline, date) else deadline.date()
+            iso_y, iso_w, _ = dt.isocalendar()
+            end_monday = date.fromisocalendar(iso_y, iso_w, 1)
+        elif isinstance(deadline, tuple) and len(deadline) >= 2:
+            y, w = int(deadline[0]), int(deadline[1])
+            y = 2000 + y if y < 100 else y
+            end_monday = date.fromisocalendar(y, w, 1)
+        elif isinstance(deadline, str):
+            y, w, _ = parse_sprint_week(deadline)
+            if y and w:
+                end_monday = date.fromisocalendar(y, w, 1)
+            else:
+                dt = parse_iso_datetime(deadline)
+                if dt:
+                    d = dt.date()
+                    iso_y, iso_w, _ = d.isocalendar()
+                    end_monday = date.fromisocalendar(iso_y, iso_w, 1)
+                else:
+                    try:
+                        d = datetime.strptime(deadline.split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                        iso_y, iso_w, _ = d.isocalendar()
+                        end_monday = date.fromisocalendar(iso_y, iso_w, 1)
+                    except Exception:
+                        end_monday = None
+
+    if end_monday is None:
+        count = int(weeks_count) if weeks_count and int(weeks_count) > 0 else 4
+        end_monday = start_monday + timedelta(days=(count - 1) * 7)
+    elif weeks_count is not None and int(weeks_count) > 0:
+        min_end_monday = start_monday + timedelta(days=(int(weeks_count) - 1) * 7)
+        if min_end_monday > end_monday:
+            end_monday = min_end_monday
+
+    # If end_monday is before start_monday, at least return start_monday
+    if end_monday < start_monday:
+        end_monday = start_monday
+
+    iterations = []
+    curr = start_monday
+    while curr <= end_monday:
+        y, w, _ = curr.isocalendar()
+        s_d, e_d, start_str, end_str = get_sprint_date_range(y, w)
+        sprint_name = f"{prefix}{str(y)[-2:]}{w:02d}"
+        label = format_sprint_range_label(y, w)
+        iterations.append({
+            "sprint_name": sprint_name,
+            "year": y,
+            "week": w,
+            "start_date": start_str,
+            "end_date": end_str,
+            "label": label,
+            "short_label": f"W{w:02d}",
+        })
+        curr += timedelta(days=7)
+
+    return iterations
+
+
+def get_iterations_up_to_deadline(current_or_latest_iter=None, deadline_date_or_str=None, default_weeks=12):
+    """
+    Determines and returns the sequence of weekly iterations continuing up to
+    the given deadline or horizon.
+    """
+    return generate_weekly_iterations_advance(
+        start_date_or_week=current_or_latest_iter,
+        deadline=deadline_date_or_str,
+        weeks_count=default_weeks if not deadline_date_or_str else None,
+    )
 
 
 def calculate_deadline_urgency(deadline_val, is_completed=False, now_dt=None):

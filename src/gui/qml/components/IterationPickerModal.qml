@@ -188,18 +188,39 @@ Dialog {
                 color: "#8b949e"
             }
 
-            TextField {
-                id: searchFilter
+            RowLayout {
                 Layout.fillWidth: true
-                implicitHeight: 30
-                placeholderText: "Filter sprint iterations (e.g. 2633)..."
-                placeholderTextColor: "#484f58"
-                font.pixelSize: 11
-                color: "#f0f6fc"
-                background: Rectangle {
-                    color: "#0d1117"
-                    radius: 4
-                    border.color: searchFilter.activeFocus ? "#58a6ff" : "#30363d"
+                spacing: 8
+
+                TextField {
+                    id: searchFilter
+                    Layout.fillWidth: true
+                    implicitHeight: 30
+                    placeholderText: "Filter sprint iterations (e.g. 2633)..."
+                    placeholderTextColor: "#484f58"
+                    font.pixelSize: 11
+                    color: "#f0f6fc"
+                    background: Rectangle {
+                        color: "#0d1117"
+                        radius: 4
+                        border.color: searchFilter.activeFocus ? "#58a6ff" : "#30363d"
+                    }
+                }
+
+                Button {
+                    text: "➕ Advance..."
+                    font.pixelSize: 11
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Prepare weekly iterations in advance up to a deadline"
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 90
+                        radius: 4
+                        color: parent.hovered ? "#0d2344" : "#161b22"
+                        border.color: "#1f6feb"
+                    }
+                    onClicked: prepareModal.openForPreparation("", "")
                 }
             }
 
@@ -338,6 +359,13 @@ Dialog {
                     root.close();
                 }
             }
+        }
+    }
+
+    PrepareIterationsModal {
+        id: prepareModal
+        onIterationsPrepared: function(res) {
+            // Re-bind or refresh
         }
     }
 }

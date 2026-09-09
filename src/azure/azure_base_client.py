@@ -109,6 +109,53 @@ class AzureBaseClient:
         res, _ = self._request("GET", "_apis/distributedtask/tasks", params={"api-version": "6.0"})
         return res.get("value", [])
 
+    def get_classification_nodes(self, project_id, structure_group="iterations", depth=4):
+        """
+        Retrieves the classification nodes tree (e.g. Iterations or Areas) for a project.
+
+        Args:
+            project_id (str): The project ID or name.
+            structure_group (str, optional): 'iterations' or 'areas'. Defaults to 'iterations'.
+            depth (int, optional): Depth of children to retrieve. Defaults to 4.
+
+        Returns:
+            dict: The classification node hierarchy dictionary.
+        """
+        path = f"{project_id}/_apis/wit/classificationnodes/{structure_group}"
+        params = {"$depth": depth, "api-version": "6.0"}
+        res, _ = self._request("GET", path, params=params)
+        return res
+
+    def create_classification_node(self, project_id, name, structure_group="iterations", start_date=None, finish_date=None, parent_path=None):
+        """
+        Creates a new classification node (e.g., an iteration / sprint) in Azure DevOps / TFS.
+
+        Args:
+            project_id (str): The target project ID or name.
+            name (str): The name of the node (e.g. 'week-2635').
+            structure_group (str, optional): 'iterations' or 'areas'. Defaults to 'iterations'.
+            start_date (str, optional): Start date string (ISO format or YYYY-MM-DD).
+            finish_date (str, optional): Finish/end date string (ISO format or YYYY-MM-DD).
+            parent_path (str, optional): Path of parent node if creating a sub-iteration.
+
+        Returns:
+            dict: The created node definition returned by the API.
+        """
+        base_path = f"{project_id}/_apis/wit/classificationnodes/{structure_group}"
+        path = f"{base_path}/{parent_path.strip('/')}" if parent_path else base_path
+        
+        data = {"name": name}
+        attributes = {}
+        if start_date:
+            attributes["startDate"] = f"{start_date.split('T')[0]}T00:00:00Z" if "T" not in str(start_date) else str(start_date)
+        if finish_date:
+            attributes["finishDate"] = f"{finish_date.split('T')[0]}T23:59:59Z" if "T" not in str(finish_date) else str(finish_date)
+        if attributes:
+            data["attributes"] = attributes
+
+        res, _ = self._request("POST", path, params={"api-version": "6.0"}, data=data)
+        return res
+
     def get_pipelines(self, project_id):
         """
         Retrieves pipeline definitions for a specific project.

@@ -427,6 +427,24 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_repo ON tags(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submodules_repo ON submodules(parent_repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_repo ON pull_requests(repo_id)")
+            
+            # Table: cached_iterations (stores advance prepared weekly iterations)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS cached_iterations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project TEXT,
+                iteration_name TEXT NOT NULL,
+                iteration_path TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                year INTEGER,
+                week INTEGER,
+                is_server_synced INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(project, iteration_name)
+            )""")
+
+            # Indices
             conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_builds_project ON builds(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_builds_repo ON builds(repo_id)")
@@ -434,6 +452,8 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_build ON artifacts(build_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_wi ON iteration_shifts(work_item_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_date ON iteration_shifts(recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_proj ON cached_iterations(project)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_name ON cached_iterations(iteration_name)")
 
             # View: v_branches
             conn.execute("""
@@ -2539,6 +2559,66 @@ class AzureDevOpsCache:
                         users[str(r_id)] = r_name
 
         return users, tasks, repos, prs
+
+    def save_cached_iteration(self, project, name, path=None, start_date=None, end_date=None, year=None, week=None, is_synced=0):
+        """
+        Saves or updates a prepared weekly iteration in SQLite cache.
+        """
+        proj = (project or "").strip()
+        iter_name = str(name).strip()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connection() as conn:
+            conn.execute("""
+                INSERT INTO cached_iterations (project, iteration_name, iteration_path, start_date, end_date, year, week, is_server_synced, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project, iteration_name) DO UPDATE SET
+                    iteration_path = excluded.iteration_path,
+                    start_date = excluded.start_date,
+                    end_date = excluded.end_date,
+                    year = excluded.year,
+                    week = excluded.week,
+                    is_server_synced = excluded.is_server_synced
+            """, (proj, iter_name, path or iter_name, start_date, end_date, year, week, int(is_synced), now_str))
+
+    def get_cached_iterations(self, project=None):
+        """
+        Retrieves all cached prepared iterations, optionally filtered by project, sorted chronologically.
+        """
+        query = "SELECT * FROM cached_iterations"
+        params = []
+        if project:
+            query += " WHERE project = ? OR project = '' OR project IS NULL"
+            params.append(project.strip())
+        query += " ORDER BY year ASC, week ASC, id ASC"
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_cached_iteration(self, iteration_name, project=None):
+        """
+        Deletes a specific cached iteration by name.
+        """
+        query = "DELETE FROM cached_iterations WHERE iteration_name = ?"
+        params = [iteration_name.strip()]
+        if project:
+            query += " AND (project = ? OR project = '' OR project IS NULL)"
+            params.append(project.strip())
+        with self._connection() as conn:
+            conn.execute(query, params)
+
+    def clear_cached_iterations(self, project=None):
+        """
+        Clears cached iterations for a project or all cached iterations if project is None.
+        """
+        query = "DELETE FROM cached_iterations"
+        params = []
+        if project:
+            query += " WHERE project = ? OR project = '' OR project IS NULL"
+            params.append(project.strip())
+        with self._connection() as conn:
+            conn.execute(query, params)
+
 
 
 

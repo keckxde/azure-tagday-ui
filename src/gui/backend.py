@@ -763,7 +763,7 @@ class DevOpsBackend(QObject):
 
     @Property(list, notify=workItemsChanged)
     def availableSprintList(self):
-        """Returns the chronologically sorted list of all week-YYWW sprint names in cache."""
+        """Returns the chronologically sorted list of all week-YYWW sprint names in cache and advance prepared iterations."""
         seen = set()
         for wi in self._work_items:
             s_name = wi.get("sprint_week_name")
@@ -773,6 +773,15 @@ class DevOpsBackend(QObject):
                 y, w, b_name = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
                 if b_name:
                     seen.add(b_name)
+        if self._cache_db:
+            try:
+                cached_iters = self._cache_db.get_cached_iterations(project=self.selectedProject)
+                for ci in cached_iters:
+                    cname = ci.get("iteration_name")
+                    if cname:
+                        seen.add(cname)
+            except Exception:
+                pass
         def sort_key(s):
             y, w, _ = utils.parse_sprint_week(s)
             return (y or 0, w or 0)
@@ -1767,6 +1776,23 @@ class DevOpsBackend(QObject):
                 if y and w and b_name:
                     sprint_keys.add((y, w, b_name))
 
+        if self._cache_db:
+            try:
+                cached_iters = self._cache_db.get_cached_iterations(project=self.selectedProject)
+                for ci in cached_iters:
+                    cname = ci.get("iteration_name")
+                    if cname:
+                        y, w, b_name = utils.parse_sprint_week(cname)
+                        if y and w and b_name:
+                            sprint_keys.add((y, w, b_name))
+            except Exception:
+                pass
+
+        if not sprint_keys:
+            adv = utils.generate_weekly_iterations_advance(weeks_count=horizon_weeks)
+            for it in adv:
+                sprint_keys.add((it["year"], it["week"], it["sprint_name"]))
+
         # Sort sprints chronologically ascending
         sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
 
@@ -2669,6 +2695,92 @@ class DevOpsBackend(QObject):
             "api_synced": api_synced,
             "message": msg
         }
+
+    @Slot(str, str, bool, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def prepareWeeklyIterations(self, deadline: str = "", start_from: str = "", sync_to_tfs: bool = False):
+        """
+        Prepares weekly iterations following the 'week-YYWW' schematic in advance up until
+        a given deadline or milestone date. Saves them to local cache and optionally syncs with TFS.
+        """
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        tfs_client = None
+        if sync_to_tfs and self.tfsUrl and self.tfsToken:
+            try:
+                from azure.azure_info_handler import AzureInfoHandler
+                tfs_client = AzureInfoHandler(self.tfsUrl, self.tfsToken)
+            except Exception as e:
+                self.logMessage.emit(f"Warning: Failed to initialize TFS client for iteration sync: {e}")
+
+        # If deadline is not given, check if there is an active milestone deadline
+        dl = deadline.strip() if deadline else ""
+        if not dl:
+            milestones = self.get_milestones()
+            future_ms = [m.get("target_date") for m in milestones if m.get("target_date")]
+            if future_ms:
+                dl = max(future_ms)
+
+        if tfs_client:
+            res = tfs_client.prepare_weekly_iterations(
+                project_id=proj,
+                deadline=dl or None,
+                start_from=start_from.strip() or None,
+                sync_to_tfs=True,
+                cache_db=self._cache_db
+            )
+        else:
+            generated = utils.generate_weekly_iterations_advance(
+                start_date_or_week=start_from.strip() or None,
+                deadline=dl or None
+            )
+            for item in generated:
+                full_path = f"{proj}\\{item['sprint_name']}" if proj else item['sprint_name']
+                item["iteration_path"] = full_path
+                item["is_server_synced"] = 0
+                if self._cache_db:
+                    try:
+                        self._cache_db.save_cached_iteration(
+                            project=proj,
+                            name=item["sprint_name"],
+                            path=full_path,
+                            start_date=item["start_date"],
+                            end_date=item["end_date"],
+                            year=item["year"],
+                            week=item["week"],
+                            is_synced=0
+                        )
+                    except Exception as e:
+                        self.logMessage.emit(f"Error saving cached iteration {item['sprint_name']}: {e}")
+            res = {
+                "total_generated": len(generated),
+                "created_on_server": 0,
+                "iterations": generated
+            }
+
+        self.workItemsChanged.emit()
+        self.workloadMatrixChanged.emit()
+        self.logMessage.emit(f"Prepared {res['total_generated']} weekly iterations up to deadline {dl or 'default'} (created {res['created_on_server']} on server).")
+        return res
+
+    @Slot(str, str, result=list)
+    @Slot(str, result=list)
+    @Slot(result=list)
+    def getProjectedWeeklyIterations(self, deadline: str = "", start_from: str = ""):
+        """
+        Returns projected weekly iterations list up to the deadline for UI preview.
+        """
+        dl = deadline.strip() if deadline else ""
+        if not dl:
+            milestones = self.get_milestones()
+            future_ms = [m.get("target_date") for m in milestones if m.get("target_date")]
+            if future_ms:
+                dl = max(future_ms)
+        return utils.generate_weekly_iterations_advance(
+            start_date_or_week=start_from.strip() or None,
+            deadline=dl or None
+        )
 
     @Slot(int)
     @Slot(str)
