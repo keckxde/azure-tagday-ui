@@ -2893,9 +2893,9 @@ class DevOpsBackend(QObject):
         Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item, sprint name, or current sprint.
 
         The URL format requires a team name:
-          {base_url}/{collection}/{project}/{team}/_sprints/{view_mode}/{sprint_leaf}?workitem={id}
+          {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}?workitem={id}
         or for current sprint:
-          {base_url}/{collection}/{project}/{team}/_sprints/{view_mode}?workitem={id}
+          {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}?workitem={id}
 
         The team name is determined by:
           1. Explicitly passed `team_name`
@@ -2914,6 +2914,7 @@ class DevOpsBackend(QObject):
         team = (team_name or self._tfs_team_name or "").strip()
         extracted_team = ""
         sprint_leaf = ""
+        iteration_subpath_parts = []
         clean_id = None
 
         if target is not None and str(target).strip() != "":
@@ -2935,25 +2936,32 @@ class DevOpsBackend(QObject):
                                     apath = fields.get("System.AreaPath") or ""
                             except Exception:
                                 pass
-                        if ipath:
-                            i_parts = ipath.replace("\\", "/").strip("/").split("/")
-                            sprint_leaf = i_parts[-1]
-                            if len(i_parts) >= 3:
-                                extracted_team = i_parts[1]
-                        if not extracted_team and apath:
-                            a_parts = apath.replace("\\", "/").strip("/").split("/")
+                        if apath:
+                            a_parts = [p for p in apath.replace("\\", "/").strip("/").split("/") if p]
                             if len(a_parts) >= 2:
-                                extracted_team = a_parts[1]
+                                extracted_team = a_parts[-1]
+                        if ipath:
+                            i_parts = [p for p in ipath.replace("\\", "/").strip("/").split("/") if p]
+                            if i_parts:
+                                sprint_leaf = i_parts[-1]
+                                iteration_subpath_parts = i_parts
+                            if not extracted_team and len(i_parts) >= 3 and i_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
+                                extracted_team = i_parts[1]
             except (ValueError, TypeError):
-                t_parts = str(target).replace("\\", "/").strip("/").split("/")
-                sprint_leaf = t_parts[-1]
-                if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower():
+                t_parts = [p for p in str(target).replace("\\", "/").strip("/").split("/") if p]
+                if t_parts:
+                    sprint_leaf = t_parts[-1]
+                    iteration_subpath_parts = t_parts
+                if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower() and t_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
                     extracted_team = t_parts[1]
 
         if sprint_name:
-            s_parts = str(sprint_name).replace("\\", "/").strip("/").split("/")
-            sprint_leaf = s_parts[-1]
-            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team:
+            s_parts = [p for p in str(sprint_name).replace("\\", "/").strip("/").split("/") if p]
+            if s_parts:
+                sprint_leaf = s_parts[-1]
+                if not iteration_subpath_parts:
+                    iteration_subpath_parts = s_parts
+            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team and s_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
                 extracted_team = s_parts[1]
 
         if not team:
@@ -2967,10 +2975,13 @@ class DevOpsBackend(QObject):
             and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
         )
 
-        if has_specific_sprint:
-            base_sprint_url = f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/{v_mode}/{urllib.parse.quote(sprint_leaf)}"
+        if has_specific_sprint and iteration_subpath_parts:
+            encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in iteration_subpath_parts)
+            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{encoded_sprint_path}"
+        elif has_specific_sprint and sprint_leaf:
+            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{urllib.parse.quote(sprint_leaf, safe='')}"
         else:
-            base_sprint_url = f"{base_url}/{col}/{proj}/{encoded_team}/_sprints/{v_mode}"
+            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}"
 
         if clean_id is not None:
             return f"{base_sprint_url}?workitem={clean_id}"

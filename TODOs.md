@@ -1,13 +1,5 @@
 # TODOs
 
-## ERROR
-
-- URL for Sprint Taskboard is like the following one
-
-    http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem=5634858
-
----
-
 ## OPEN
 
 ### Configuration
@@ -24,6 +16,8 @@
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
 ## DONE
+
+- TFS / Azure DevOps Sprint Taskboard URL Format Fix: Corrected URL routing structure to `http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem={id}` (and current sprint fallback `_sprints/taskboard/<TEAM>?workitem={id}`), ensuring `_sprints/{view_mode}` precedes the team name, full iteration path hierarchy is preserved, and area paths/iteration paths are accurately mapped to target teams without collision with iteration folder names.
 
 - Pull Request (PR) Multi-Status Sync & TFS On-Premise Endpoint Fix: Fixed PR list becoming stuck on older PRs. Refactored PR synchronization to query both `status="active"` (capturing 100% of open PRs) and `status="completed"` (capturing newly merged PRs ordered by completion date descending, preventing pagination cutoff from older creation dates). Fixed on-premise TFS 404 errors by adding repository-scoped API endpoints (`{project}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}`) with dual-endpoint fallback. Added direct "⚡ Sync PRs" button in Pull Requests view toolbar and a dedicated sidebar sync button under DATA SYNC.
 
