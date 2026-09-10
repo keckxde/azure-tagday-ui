@@ -17,6 +17,9 @@
 
 ## DONE
 
+- Repositories & Pull Requests UI Refresh Fix: Resolved an `UnboundLocalError` in [`DevOpsBackend.refresh_all_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py#L1418-L1445) where `status` was referenced in the PR timestamp sorting logic before assignment. This silent exception prevented the PR list, PR repository list, PR statistics (`prs_count`, `prs_open_count`, `prs_completed_count`), and overall dashboard statistics from being updated in the UI after background syncs completed.
+
+
 - TFS / Azure DevOps Sprint Taskboard URL Format Fix: Corrected URL routing structure to `http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem={id}` (and current sprint fallback `_sprints/taskboard/<TEAM>?workitem={id}`), ensuring `_sprints/{view_mode}` precedes the team name, full iteration path hierarchy is preserved, and area paths/iteration paths are accurately mapped to target teams without collision with iteration folder names.
 
 - Pull Request (PR) Multi-Status Sync & TFS On-Premise Endpoint Fix: Fixed PR list becoming stuck on older PRs. Refactored PR synchronization to query both `status="active"` (capturing 100% of open PRs) and `status="completed"` (capturing newly merged PRs ordered by completion date descending, preventing pagination cutoff from older creation dates). Fixed on-premise TFS 404 errors by adding repository-scoped API endpoints (`{project}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}`) with dual-endpoint fallback. Added direct "⚡ Sync PRs" button in Pull Requests view toolbar and a dedicated sidebar sync button under DATA SYNC.

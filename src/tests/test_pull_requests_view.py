@@ -383,6 +383,46 @@ class TestPullRequestsViewData(unittest.TestCase):
             if os.path.exists(db_path):
                 os.remove(db_path)
 
+    def test_backend_refresh_all_data_pull_requests_and_repos(self):
+        """Tests that backend.refresh_all_data properly loads pull requests, emits pullRequestsChanged, and updates stats."""
+        from gui.backend import DevOpsBackend
+
+        backend = DevOpsBackend()
+        backend._db_path = self.db_path
+        backend._cache_db = self.cache
+
+        pr_signals = []
+        repo_signals = []
+        stats_signals = []
+
+        backend.pullRequestsChanged.connect(lambda: pr_signals.append(True))
+        backend.repositoriesChanged.connect(lambda: repo_signals.append(True))
+        backend.statsChanged.connect(lambda: stats_signals.append(True))
+
+        backend.refresh_all_data()
+
+        self.assertGreaterEqual(len(pr_signals), 1, "pullRequestsChanged should have been emitted")
+        self.assertGreaterEqual(len(repo_signals), 1, "repositoriesChanged should have been emitted")
+        self.assertGreaterEqual(len(stats_signals), 1, "statsChanged should have been emitted")
+
+        # Verify PRs in backend
+        prs = backend.pullRequests
+        self.assertEqual(len(prs), 3)
+        self.assertEqual(backend.stats["prs_count"], 3)
+        self.assertEqual(backend.stats["prs_open_count"], 1)
+        self.assertEqual(backend.stats["prs_completed_count"], 2)
+        self.assertEqual(backend.stats["prs_abandoned_count"], 0)
+
+        # Verify repos in backend
+        self.assertIn("cmake-scripts", backend.prRepositories)
+        self.assertIn("repo-alpha", backend.prRepositories)
+
+        # Verify active PR details
+        active_pr = next(p for p in prs if p["id"] == 1003)
+        self.assertEqual(active_pr["status"], "active")
+        self.assertEqual(active_pr["repo_name"], "cmake-scripts")
+
 
 if __name__ == "__main__":
     unittest.main()
+

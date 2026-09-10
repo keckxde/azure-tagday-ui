@@ -1418,6 +1418,10 @@ class DevOpsBackend(QObject):
                     except Exception:
                         pass
 
+                title = pr.get("title") or ""
+                description = raw_dict.get("description") or ""
+                status = utils.normalize_pr_status(pr.get("status") or raw_dict.get("status") or "unknown")
+
                 closed_date = pr.get("closed_date") or ""
                 if not closed_date and raw_dict.get("closedDate"):
                     closed_date = utils.UpdateDateString(raw_dict.get("closedDate"))
@@ -1438,10 +1442,6 @@ class DevOpsBackend(QObject):
                 closed_by = pr.get("closed_by") or ""
                 if not closed_by and isinstance(raw_dict.get("closedBy"), dict):
                     closed_by = raw_dict["closedBy"].get("displayName") or ""
-
-                title = pr.get("title") or ""
-                description = raw_dict.get("description") or ""
-                status = utils.normalize_pr_status(pr.get("status") or raw_dict.get("status") or "unknown")
 
                 web_url = f"{base_url}/{collection}/{project_id}/_git/{rname}/pullrequest/{pr_id}" if base_url else ""
                 tasks = self._extract_pr_tasks(pr)
