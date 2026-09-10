@@ -636,6 +636,16 @@ Item {
                         font.pixelSize: 12
                     }
 
+                    Timer {
+                        id: prSearchDebounceTimer
+                        interval: 150
+                        repeat: false
+                        onTriggered: {
+                            root.searchQuery = searchInput.text;
+                            root.currentPage = 1;
+                        }
+                    }
+
                     TextInput {
                         id: searchInput
                         Layout.fillWidth: true
@@ -646,6 +656,16 @@ Item {
                         selectByMouse: true
                         text: root.searchQuery
                         onTextChanged: {
+                            if (text === "") {
+                                prSearchDebounceTimer.stop();
+                                root.searchQuery = "";
+                                root.currentPage = 1;
+                            } else {
+                                prSearchDebounceTimer.restart();
+                            }
+                        }
+                        onAccepted: {
+                            prSearchDebounceTimer.stop();
                             root.searchQuery = text;
                             root.currentPage = 1;
                         }

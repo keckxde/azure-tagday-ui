@@ -2430,7 +2430,7 @@ Item {
         var matched = []
         for (var i = 0; i < list.length; i++) {
             var item = list[i]
-            var matchesQuery = !q ||
+            var matchesQuery = !q || (item._search_text ? (item._search_text.indexOf(q) !== -1) : (
                 (item.id || 0).toString().indexOf(q) !== -1 ||
                 (item.title || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.assigned_to || "").toLowerCase().indexOf(q) !== -1 ||
@@ -2445,6 +2445,7 @@ Item {
                 (item.milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.effective_milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
                 (item.milestone_category || "").toLowerCase().indexOf(q) !== -1
+            ))
 
             var matchesState = true
             if (st === "ALL") {

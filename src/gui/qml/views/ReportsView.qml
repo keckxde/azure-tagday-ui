@@ -2385,6 +2385,13 @@ Item {
                                                         font.pixelSize: 10
                                                     }
 
+                                                    Timer {
+                                                        id: reportPrDebounceTimer
+                                                        interval: 150
+                                                        repeat: false
+                                                        onTriggered: allPrsSubTabItem.prSearchQuery = allPrSearchField.text
+                                                    }
+
                                                     TextInput {
                                                         id: allPrSearchField
                                                         Layout.fillWidth: true
@@ -2393,7 +2400,18 @@ Item {
                                                         color: "#e6edf3"
                                                         clip: true
                                                         selectByMouse: true
-                                                        onTextChanged: allPrsSubTabItem.prSearchQuery = text
+                                                        onTextChanged: {
+                                                            if (text === "") {
+                                                                reportPrDebounceTimer.stop();
+                                                                allPrsSubTabItem.prSearchQuery = "";
+                                                            } else {
+                                                                reportPrDebounceTimer.restart();
+                                                            }
+                                                        }
+                                                        onAccepted: {
+                                                            reportPrDebounceTimer.stop();
+                                                            allPrsSubTabItem.prSearchQuery = text;
+                                                        }
 
                                                         Text {
                                                             anchors.fill: parent

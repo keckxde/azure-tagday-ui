@@ -424,14 +424,24 @@ class AzureDevOpsCache:
             except Exception:
                 pass
 
-            # Indexes for faster joins and queries
+            # Indexes for faster joins, searches, and queries
             conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_date ON milestones(target_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_cat ON milestones(category_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_repos_project ON repositories(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_repo ON tags(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_commit ON tags(commit_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submodules_repo ON submodules(parent_repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_repo ON pull_requests(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_status ON pull_requests(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_id ON work_items(id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_deleted ON work_items(deleted)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_state ON work_items(state)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_type ON work_items(type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_assigned ON work_items(assigned_to)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_iteration_shifts_wi ON iteration_shifts(work_item_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_iteration_shifts_status ON iteration_shifts(review_status)")
             
             # Table: cached_iterations (stores advance prepared weekly iterations)
             conn.execute("""
@@ -1428,30 +1438,77 @@ class AzureDevOpsCache:
         result = {}
         with self._connection() as conn:
             repos = conn.execute("SELECT * FROM repositories WHERE project_id = ? AND is_disabled = 0", (project_id,)).fetchall()
+            if not repos:
+                return result
+
+            repo_ids = [r["id"] for r in repos]
+            placeholders = ",".join(["?"] * len(repo_ids))
+
+            # Reconstruct branches in bulk
+            branches_by_repo = {r_id: [] for r_id in repo_ids}
+            branches_rows = conn.execute(f"SELECT repo_id, branch_name, commit_id, raw_json FROM v_branches WHERE repo_id IN ({placeholders})", repo_ids).fetchall()
+            for b in branches_rows:
+                if b["raw_json"]:
+                    try:
+                        branches_by_repo[b["repo_id"]].append(json.loads(b["raw_json"]))
+                    except Exception:
+                        branches_by_repo[b["repo_id"]].append({"name": b["branch_name"], "objectId": b["commit_id"]})
+                else:
+                    branches_by_repo[b["repo_id"]].append({"name": b["branch_name"], "objectId": b["commit_id"]})
+
+            # Reconstruct tags in bulk
+            tags_by_repo = {r_id: [] for r_id in repo_ids}
+            tags_rows = conn.execute(f"SELECT repo_id, name, commit_id, is_stable, is_unstable, raw_json FROM tags WHERE repo_id IN ({placeholders})", repo_ids).fetchall()
+            for t in tags_rows:
+                if t["raw_json"]:
+                    try:
+                        tags_by_repo[t["repo_id"]].append(json.loads(t["raw_json"]))
+                    except Exception:
+                        tags_by_repo[t["repo_id"]].append({"name": t["name"], "FriendlyName": t["name"], "objectId": t["commit_id"], "stable": bool(t["is_stable"]), "unstable": bool(t["is_unstable"])})
+                else:
+                    tags_by_repo[t["repo_id"]].append({"name": t["name"], "FriendlyName": t["name"], "objectId": t["commit_id"], "stable": bool(t["is_stable"]), "unstable": bool(t["is_unstable"])})
+
+            # Reconstruct submodules in bulk
+            submodules_by_repo = {r_id: [] for r_id in repo_ids}
+            submodules_rows = conn.execute(f"SELECT parent_repo_id, path, url, raw_json FROM submodules WHERE parent_repo_id IN ({placeholders})", repo_ids).fetchall()
+            for s in submodules_rows:
+                if s["raw_json"]:
+                    try:
+                        submodules_by_repo[s["parent_repo_id"]].append(json.loads(s["raw_json"]))
+                    except Exception:
+                        submodules_by_repo[s["parent_repo_id"]].append({"path": s["path"], "url": s["url"]})
+                else:
+                    submodules_by_repo[s["parent_repo_id"]].append({"path": s["path"], "url": s["url"]})
+
+            # Reconstruct PRs in bulk
+            prs_by_repo = {r_id: [] for r_id in repo_ids}
+            pr_rows = conn.execute(f"SELECT repo_id, id, title, status, target_branch, source_branch, raw_json FROM pull_requests WHERE repo_id IN ({placeholders})", repo_ids).fetchall()
+            for p in pr_rows:
+                if p["raw_json"]:
+                    try:
+                        prs_by_repo[p["repo_id"]].append(json.loads(p["raw_json"]))
+                    except Exception:
+                        prs_by_repo[p["repo_id"]].append({"pullRequestId": p["id"], "title": p["title"], "status": p["status"], "targetRefName": p["target_branch"]})
+                else:
+                    prs_by_repo[p["repo_id"]].append({"pullRequestId": p["id"], "title": p["title"], "status": p["status"], "targetRefName": p["target_branch"]})
+
             for r_row in repos:
                 repo_id = r_row["id"]
                 repo_name = r_row["name"]
-                repo_info = json.loads(r_row["raw_json"])
+                repo_info = json.loads(r_row["raw_json"]) if r_row["raw_json"] else {
+                    "id": repo_id,
+                    "name": repo_name,
+                    "defaultBranch": r_row["default_branch"],
+                    "webUrl": r_row["web_url"]
+                }
 
-                # Reconstruct branches
-                branches_rows = conn.execute("SELECT * FROM v_branches WHERE repo_id = ?", (repo_id,)).fetchall()
-                branches = [json.loads(b["raw_json"]) for b in branches_rows]
+                branches = branches_by_repo.get(repo_id, [])
+                tags = tags_by_repo.get(repo_id, [])
+                submodules = submodules_by_repo.get(repo_id, [])
 
-                # Reconstruct tags
-                tags_rows = conn.execute("SELECT * FROM tags WHERE repo_id = ?", (repo_id,)).fetchall()
-                tags = [json.loads(t["raw_json"]) for t in tags_rows]
-
-                # Reconstruct submodules
-                submodules_rows = conn.execute("SELECT * FROM submodules WHERE parent_repo_id = ?", (repo_id,)).fetchall()
-                submodules = [json.loads(s["raw_json"]) for s in submodules_rows]
-
-                # Reconstruct PRs
-                pr_rows = conn.execute("SELECT * FROM pull_requests WHERE repo_id = ?", (repo_id,)).fetchall()
                 dev_prs = []
                 stable_prs = []
-                for p in pr_rows:
-                    pr_data = json.loads(p["raw_json"])
-                    # Check whether dev or stable PR (based on targetRefName)
+                for pr_data in prs_by_repo.get(repo_id, []):
                     target = pr_data.get("targetRefName", "")
                     if "dev" in target:
                         dev_prs.append(pr_data)
@@ -1459,9 +1516,9 @@ class AzureDevOpsCache:
                         stable_prs.append(pr_data)
 
                 # Determine Stable/Unstable tag names
-                stable_tags = [t["FriendlyName"] for t in tags if t.get("stable")]
-                unstable_tags = [t["FriendlyName"] for t in tags if t.get("unstable")]
-                
+                stable_tags = [t["FriendlyName"] for t in tags if t.get("stable") and "FriendlyName" in t]
+                unstable_tags = [t["FriendlyName"] for t in tags if t.get("unstable") and "FriendlyName" in t]
+
                 last_stable_tag = max(stable_tags) if stable_tags else ""
                 last_unstable_tag = max(unstable_tags) if unstable_tags else ""
 
@@ -1881,6 +1938,8 @@ class AzureDevOpsCache:
                     "deleted": is_del,
                     "is_deleted": 1 if is_del else 0,
                     "raw_json": row["raw_json"],
+                    "fields": fields,
+                    "raw_dict": raw,
                 })
             return result
 

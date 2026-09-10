@@ -2,18 +2,24 @@
 
 ## OPEN
 
-### Performance improvements
+### Workload Viewer
 
-- The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
+- Current Date / Show the current week in the timeline at a glance
 
 ## DONE
+
+- High-Performance UI Loading, Search Responsiveness & Database Optimization:
+  - **Debounced Search Inputs**: Integrated a 150ms debounce `Timer` across all search fields ([`SearchBar.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/components/SearchBar.qml), [`PullRequestsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/PullRequestsView.qml), and [`ReportsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/ReportsView.qml)), eliminating synchronous full matrix recalculations, UI stutter, and costly string allocations on every keystroke.
+  - **Fast Project & Database Discovery**: Replaced heavy `AzureDevOpsCache` instantiations in [`DevOpsBackend.get_available_databases()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) with lightweight read-only `sqlite3` queries and an in-memory cache keyed by file path, timestamp, and size. This bypasses DDL migrations and table setup when discovering available databases.
+  - **Precalculated Search Indices**: Added an upfront `_search_text` index computation to work items during data loading ([`DevOpsBackend._enrich_work_items_with_milestones()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py)). QML filtering in [`WorkItemsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/WorkItemsView.qml) and Python matrix filtering in `getWorkloadMatrix()` now perform single-pass substring checks against `_search_text` rather than running 12+ `.toLowerCase()` string allocations per work item per character.
+  - **Bulk Repository Cache Queries**: Refactored [`AzureDevOpsCache.get_all_cached_repositories()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/azure/azure_db.py) from an $O(4N)$ per-repo query loop to 4 bulk queries (`v_branches`, `tags`, `submodules`, `pull_requests`) grouped in memory.
+  - **SQLite Indexing & JSON Deserialization Reduction**: Added database indexes on `work_items` (`id`, `deleted`, `state`, `type`, `assigned_to`), `pull_requests` (`status`), `tags` (`name`, `commit_id`), and `iteration_shifts` (`work_item_id`). Returned parsed `fields` and `raw_dict` in `get_all_work_items()` to avoid repetitive JSON deserialization during initial page loads.
 
 - Scheduled Background Synchronization & Sidebar Progress Streamlining: Added configurable scheduled background synchronization (with preset intervals for 1, 2, 5, 10, 15, 30, and 60 minutes, configurable sync scopes for Full Sync / Work Items / Pull Requests, and live countdown timer) powered by a non-blocking `QTimer` in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py). Manual syncs continue to work seamlessly at any time and automatically reset the scheduled countdown so syncs are neatly spaced. Configured settings persist across restarts in `user_settings.yaml` and SQLite database `project_config`. Cleaned up the user interface by removing the redundant top-right floating background task pill in [`Main.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/Main.qml), while enhancing the sidebar bottom and DATA SYNC section with live auto-sync badges, animated progress bars, abort buttons, and expandable sync logs.
 
 - Database-First Configuration Architecture & Optional CLI .env Mechanism: Refactored configuration loading across the application to consider the local SQLite database (`project_config` table) and active project user settings as the primary, default source of truth. Removed unconditional module-level `load_dotenv()` execution on import. Environment files (`.env`) are now loaded only when explicitly requested or triggered via CLI flags (`--env-file <path>` or `--load-env`). Configuration resolution in [`GetEnvVariable()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/utils.py) prioritizes active database properties first before falling back to ambient process environment variables, with clean logging that eliminates noisy `.env` file warning prompts.
 
 - Repositories & Pull Requests UI Refresh Fix: Resolved an `UnboundLocalError` in [`DevOpsBackend.refresh_all_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py#L1418-L1445) where `status` was referenced in the PR timestamp sorting logic before assignment. This silent exception prevented the PR list, PR repository list, PR statistics (`prs_count`, `prs_open_count`, `prs_completed_count`), and overall dashboard statistics from being updated in the UI after background syncs completed.
-
 
 - TFS / Azure DevOps Sprint Taskboard URL Format Fix: Corrected URL routing structure to `http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem={id}` (and current sprint fallback `_sprints/taskboard/<TEAM>?workitem={id}`), ensuring `_sprints/{view_mode}` precedes the team name, full iteration path hierarchy is preserved, and area paths/iteration paths are accurately mapped to target teams without collision with iteration folder names.
 

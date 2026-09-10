@@ -1312,13 +1312,17 @@ class DevOpsBackend(QObject):
             for wi in raw_wis:
                 ipath = wi.get("iteration_path") or ""
                 if not ipath:
-                    raw_s = wi.get("raw_json")
-                    if raw_s and isinstance(raw_s, str):
-                        try:
-                            raw_data = json.loads(raw_s)
-                            ipath = raw_data.get("fields", {}).get("System.IterationPath") or ""
-                        except Exception:
-                            pass
+                    raw_fields = wi.get("fields")
+                    if raw_fields and isinstance(raw_fields, dict):
+                        ipath = raw_fields.get("System.IterationPath") or ""
+                    else:
+                        raw_s = wi.get("raw_json")
+                        if raw_s and isinstance(raw_s, str):
+                            try:
+                                raw_data = json.loads(raw_s)
+                                ipath = raw_data.get("fields", {}).get("System.IterationPath") or ""
+                            except Exception:
+                                pass
                 if ipath:
                     all_iter_paths.add(ipath)
 
@@ -1390,17 +1394,23 @@ class DevOpsBackend(QObject):
 
                 # Iteration and Deadline parsing
                 iter_path = wi.get("iteration_path") or ""
-                target_date = ""
-                raw_fields = {}
-                raw_s = wi.get("raw_json")
-                if raw_s and isinstance(raw_s, str):
-                    try:
-                        raw_data = json.loads(raw_s)
-                        raw_fields = raw_data.get("fields", {})
-                        if not iter_path:
-                            iter_path = raw_fields.get("System.IterationPath") or ""
-                    except Exception:
-                        pass
+                raw_fields = wi.get("fields")
+                raw_data = wi.get("raw_dict")
+                if raw_fields is None or raw_data is None:
+                    raw_s = wi.get("raw_json")
+                    if raw_s and isinstance(raw_s, str):
+                        try:
+                            raw_data = json.loads(raw_s)
+                            raw_fields = raw_data.get("fields", {})
+                        except Exception:
+                            raw_fields = {}
+                            raw_data = {}
+                    else:
+                        raw_fields = {}
+                        raw_data = {}
+
+                if not iter_path:
+                    iter_path = raw_fields.get("System.IterationPath") or ""
 
                 target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=self._custom_deadline_field)
                 if not target_date:
@@ -2171,16 +2181,20 @@ class DevOpsBackend(QObject):
 
             # 7. Search Query Filter
             if sq_raw:
-                matches_search = (
-                    sq_raw in assignee.lower()
-                    or sq_raw in (wi.get("title") or "").lower()
-                    or sq_raw in str(wi.get("id") or "")
-                    or sq_raw in (wi.get("type") or "").lower()
-                    or sq_raw in (wi.get("prio_tag") or "").lower()
-                    or sq_raw in (wi.get("tags") or "").lower()
-                    or sq_raw in m_name.lower()
-                    or sq_raw in m_cat.lower()
-                )
+                stext = wi.get("_search_text")
+                if stext is not None:
+                    matches_search = sq_raw in stext
+                else:
+                    matches_search = (
+                        sq_raw in assignee.lower()
+                        or sq_raw in (wi.get("title") or "").lower()
+                        or sq_raw in str(wi.get("id") or "")
+                        or sq_raw in (wi.get("type") or "").lower()
+                        or sq_raw in (wi.get("prio_tag") or "").lower()
+                        or sq_raw in (wi.get("tags") or "").lower()
+                        or sq_raw in m_name.lower()
+                        or sq_raw in m_cat.lower()
+                    )
                 if not matches_search:
                     continue
 
@@ -3304,7 +3318,10 @@ class DevOpsBackend(QObject):
 
     @Slot(result=list)
     def get_available_databases(self):
-        """Scans workspace directory for SQLite cache databases."""
+        """Scans workspace directory for SQLite cache databases quickly."""
+        if not hasattr(self, "_db_scan_cache"):
+            self._db_scan_cache = {}
+
         search_dirs = [devops_helper.BASE_FOLDER, os.getcwd()]
         found = {}
         for sdir in search_dirs:
@@ -3315,25 +3332,51 @@ class DevOpsBackend(QObject):
                     if fname.endswith(".db"):
                         full_path = os.path.abspath(os.path.join(sdir, fname))
                         if full_path not in found:
-                            size_bytes = os.path.getsize(full_path)
-                            mtime = os.path.getmtime(full_path)
-                            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-                            proj_name = ""
                             try:
-                                temp_cache = AzureDevOpsCache(full_path)
-                                with temp_cache._connection() as conn:
-                                    p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
-                                    if p_row and p_row["name"]:
-                                        proj_name = p_row["name"]
-                            except Exception:
-                                pass
+                                size_bytes = os.path.getsize(full_path)
+                                mtime = os.path.getmtime(full_path)
+                            except OSError:
+                                continue
 
-                            if not proj_name:
-                                bname = os.path.splitext(fname)[0]
-                                if bname.startswith("tfs_cache_"):
-                                    proj_name = bname.replace("tfs_cache_", "")
-                                else:
-                                    proj_name = "Custom Database"
+                            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                            cache_key = (full_path, mtime, size_bytes)
+                            
+                            if cache_key in self._db_scan_cache:
+                                proj_name = self._db_scan_cache[cache_key]
+                            else:
+                                proj_name = ""
+                                try:
+                                    import sqlite3
+                                    conn = sqlite3.connect(full_path, timeout=0.5)
+                                    conn.row_factory = sqlite3.Row
+                                    cur = conn.cursor()
+                                    cur.execute("PRAGMA busy_timeout=500")
+                                    # Try to fetch project name from projects or project_config table
+                                    try:
+                                        p_row = cur.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
+                                        if p_row and p_row["name"]:
+                                            proj_name = p_row["name"]
+                                    except sqlite3.OperationalError:
+                                        pass
+                                    if not proj_name:
+                                        try:
+                                            cfg_row = cur.execute("SELECT value FROM project_config WHERE key = 'project_name' LIMIT 1").fetchone()
+                                            if cfg_row and cfg_row["value"]:
+                                                proj_name = cfg_row["value"]
+                                        except sqlite3.OperationalError:
+                                            pass
+                                    conn.close()
+                                except Exception:
+                                    pass
+
+                                if not proj_name:
+                                    bname = os.path.splitext(fname)[0]
+                                    if bname.startswith("tfs_cache_"):
+                                        proj_name = bname.replace("tfs_cache_", "")
+                                    else:
+                                        proj_name = "Custom Database"
+
+                                self._db_scan_cache[cache_key] = proj_name
 
                             is_active = (os.path.abspath(self._db_path) == full_path) if self._db_path else False
                             found[full_path] = {
@@ -3560,6 +3603,33 @@ class DevOpsBackend(QObject):
                         item["is_milestone_inherited"] = True
                         break
                     curr_pid = p_item.get("parent_id")
+
+        # Third pass: precalculate lowercase search text index for fast QML and backend filtering
+        for item in self._work_items:
+            search_parts = [
+                str(item.get("id") or ""),
+                item.get("title") or "",
+                item.get("state") or "",
+                item.get("type") or "",
+                item.get("assigned_to") or "",
+                item.get("tags") or "",
+                item.get("iteration_name") or "",
+                item.get("iteration_path") or "",
+                item.get("area_path") or "",
+                item.get("team_name") or "",
+                item.get("milestone_name") or "",
+                item.get("effective_milestone_name") or "",
+                item.get("milestone_category") or "",
+                item.get("pbs_code") or "",
+                item.get("pbs_category") or "",
+                item.get("level1_display") or "",
+                item.get("level2_display") or "",
+                item.get("prio_tag") or "",
+                item.get("target_date") or "",
+                item.get("parent_title") or "",
+                str(item.get("parent_id") or "")
+            ]
+            item["_search_text"] = " ".join(p for p in search_parts if p).lower()
 
     @Slot(result=list)
     def get_milestones(self):

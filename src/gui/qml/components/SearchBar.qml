@@ -5,6 +5,7 @@ Rectangle {
     id: root
     property alias text: input.text
     property string placeholder: "Search..."
+    property int debounceMs: 150
     signal searchUpdated(string query)
 
     implicitHeight: 36
@@ -13,6 +14,13 @@ Rectangle {
     radius: 6
     border.color: input.activeFocus ? "#58a6ff" : "#30363d"
     border.width: 1
+
+    Timer {
+        id: debounceTimer
+        interval: root.debounceMs
+        repeat: false
+        onTriggered: root.searchUpdated(input.text)
+    }
 
     Row {
         anchors.fill: parent
@@ -47,7 +55,19 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
             }
 
-            onTextChanged: root.searchUpdated(input.text)
+            onTextChanged: {
+                if (input.text === "") {
+                    debounceTimer.stop()
+                    root.searchUpdated("")
+                } else {
+                    debounceTimer.restart()
+                }
+            }
+
+            onAccepted: {
+                debounceTimer.stop()
+                root.searchUpdated(input.text)
+            }
         }
     }
 }
