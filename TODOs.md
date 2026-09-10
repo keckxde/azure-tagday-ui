@@ -2,11 +2,13 @@
 
 ## OPEN
 
-### Workload Viewer
-
-- Current Date / Show the current week in the timeline at a glance
-
 ## DONE
+
+- Workload Viewer Timeline & Current Date at a Glance:
+  - **Live Today & Current Week Indicator**: Added an active timeline status card in [`WorkloadExplorerView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/WorkloadExplorerView.qml) displaying the current calendar date (`Today: Thu, Sep 10, 2026`) and ISO current sprint (`⚡ week-2637`) with a pulsating live status beacon.
+  - **1-Click "Focus Current Week" Navigation**: Added a quick navigation action that automatically resets historic lookbacks and centers the horizontal matrix timeline scroll directly on the active sprint column.
+  - **Matrix Header & Swimlane Highlighting**: Current week column headers now feature a prominent `● THIS WEEK` pill badge, luminous top accent bar (`#58a6ff`), and highlighted date ranges. Down the entire matrix, team member cells feature an unbroken vertical swimlane highlight tint and accent guides for instant at-a-glance workload recognition.
+  - **Backend Date & Timeline Metadata**: Enhanced [`DevOpsBackend.getWorkloadMatrix()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) and added `getCurrentDateInfo()` to deliver ISO calendar year/week/weekday calculations, `is_current`, `is_past`, `is_future`, `day_progress`, and column indices across sprint headers, assignee cells, and column totals.
 
 - High-Performance UI Loading, Search Responsiveness & Database Optimization:
   - **Debounced Search Inputs**: Integrated a 150ms debounce `Timer` across all search fields ([`SearchBar.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/components/SearchBar.qml), [`PullRequestsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/PullRequestsView.qml), and [`ReportsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/ReportsView.qml)), eliminating synchronous full matrix recalculations, UI stutter, and costly string allocations on every keystroke.

@@ -41,6 +41,17 @@ Item {
         }
     }
 
+    function jumpToCurrentWeek() {
+        if (root.historyOffset !== 0) {
+            root.historyOffset = 0;
+        }
+        if (root.matrixData && root.matrixData.current_sprint_index >= 0) {
+            var idx = root.matrixData.current_sprint_index;
+            var targetX = Math.max(0, Math.min(root.maxMatrixScrollX, (idx * root.sprintColWidth) - (root.sprintViewportWidth - root.sprintColWidth) / 2));
+            root.matrixContentX = targetX;
+        }
+    }
+
     function refreshHierarchyLists() {
         if (!backend) return;
         var l1 = backend.workItemLevel1List || [];
@@ -510,12 +521,12 @@ Item {
             }
         }
 
-        // ====================== Time Navigation Bar ======================
+        // ====================== Time Navigation & Timeline Status Bar ======================
         Rectangle {
             Layout.fillWidth: true
-            height: 42
+            height: 48
             radius: 8
-            color: root.historyOffset > 0 ? "#1c1a0e" : "#161b22"
+            color: root.historyOffset > 0 ? "#1c180a" : "#161b22"
             border.color: root.historyOffset > 0 ? "#d29922" : "#30363d"
             border.width: 1
 
@@ -523,13 +534,15 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 12
                 anchors.rightMargin: 12
-                spacing: 10
+                spacing: 12
 
                 // ◀ Past button
                 Button {
                     text: "◀  Past"
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Shift view " + root.selectedHorizon + " sprints back in time"
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
@@ -538,7 +551,7 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        implicitHeight: 28
+                        implicitHeight: 30
                         implicitWidth: 80
                         radius: 6
                         color: parent.hovered ? "#21262d" : "transparent"
@@ -547,19 +560,105 @@ Item {
                     onClicked: root.historyOffset += root.selectedHorizon
                 }
 
-                // Sprint range label
+                // ================= Center Timeline & Today Card =================
                 RowLayout {
-                    spacing: 8
+                    spacing: 10
                     Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
 
                     Item { Layout.fillWidth: true }
 
-                    // "Viewing past N weeks" indicator
+                    // Current Date & Week Pill Card
+                    Rectangle {
+                        implicitHeight: 32
+                        implicitWidth: currentInfoRow.implicitWidth + 24
+                        radius: 16
+                        color: root.historyOffset > 0 ? "#2a220b" : "#0d2036"
+                        border.color: root.historyOffset > 0 ? "#d29922" : "#1f6feb"
+                        border.width: 1
+
+                        Row {
+                            id: currentInfoRow
+                            anchors.centerIn: parent
+                            spacing: 8
+
+                            // Beacon Pulse Dot
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: root.historyOffset > 0 ? "#f0883e" : "#3fb950"
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                SequentialAnimation on opacity {
+                                    loops: Animation.Infinite
+                                    running: true
+                                    NumberAnimation { from: 1.0; to: 0.35; duration: 900; easing.type: Easing.InOutQuad }
+                                    NumberAnimation { from: 0.35; to: 1.0; duration: 900; easing.type: Easing.InOutQuad }
+                                }
+                            }
+
+                            // Current Date Text
+                            Text {
+                                text: root.matrixData && root.matrixData.current_date_label ? ("Today: " + root.matrixData.current_date_label) : "Today"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: "#e6edf3"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: "·"
+                                font.pixelSize: 12
+                                font.weight: Font.Bold
+                                color: "#8b949e"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            // Current Sprint Tag
+                            Text {
+                                text: "⚡ " + (root.matrixData && root.matrixData.current_sprint_name ? root.matrixData.current_sprint_name : "")
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.Bold
+                                color: root.historyOffset > 0 ? "#f0883e" : "#58a6ff"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                    }
+
+                    // Jump to Current Week / Today Button
+                    Button {
+                        text: root.historyOffset > 0 ? "🔴  Back to Current" : "🎯  Focus Current Week"
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        ToolTip.visible: hovered
+                        ToolTip.text: root.historyOffset > 0 ? "Return to the current calendar window" : "Scroll & center current week in the timeline view"
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: root.historyOffset > 0 ? "#ff7b72" : "#79c0ff"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 30
+                            implicitWidth: 160
+                            radius: 15
+                            color: parent.hovered ? (root.historyOffset > 0 ? "#3d0c0c" : "#13315c") : (root.historyOffset > 0 ? "#21262d" : "#0d2344")
+                            border.color: root.historyOffset > 0 ? "#da3633" : "#1f6feb"
+                            border.width: 1
+                        }
+                        onClicked: root.jumpToCurrentWeek()
+                    }
+
+                    // "Viewing past N weeks" indicator badge
                     Rectangle {
                         visible: root.historyOffset > 0
-                        implicitHeight: 22
+                        implicitHeight: 24
                         implicitWidth: historyBadgeText.implicitWidth + 16
-                        radius: 11
+                        radius: 12
                         color: "#3d2e00"
                         border.color: "#d29922"
                         border.width: 1
@@ -574,50 +673,30 @@ Item {
                     }
 
                     // Sprint range display
-                    Text {
-                        text: {
-                            if (!root.matrixData || !root.matrixData.sprint_columns || root.matrixData.sprint_columns.length === 0)
-                                return "No data"
-                            var cols = root.matrixData.sprint_columns
-                            var first = cols[0].label || cols[0].short_label || cols[0].sprint_name
-                            var last = cols[cols.length - 1].label || cols[cols.length - 1].short_label || cols[cols.length - 1].sprint_name
-                            return first + "  →  " + last
-                        }
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                        color: root.historyOffset > 0 ? "#d29922" : "#8b949e"
-                    }
+                    Rectangle {
+                        implicitHeight: 28
+                        implicitWidth: sprintRangeText.implicitWidth + 16
+                        radius: 6
+                        color: "#161b22"
+                        border.color: "#30363d"
+                        border.width: 1
 
-                    // Back to current button (only when viewing history)
-                    Button {
-                        visible: root.historyOffset > 0
-                        text: "🔴  Back to Current"
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: "#f85149"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 24
-                            implicitWidth: backCurrentText.implicitWidth + 20
-                            radius: 12
-                            color: parent.hovered ? "#3d0c0c" : "#211515"
-                            border.color: "#da3633"
-                            border.width: 1
-                            Text {
-                                id: backCurrentText
-                                text: "🔴  Back to Current"
-                                font.pixelSize: 10
-                                font.weight: Font.DemiBold
-                                visible: false
+                        Text {
+                            id: sprintRangeText
+                            anchors.centerIn: parent
+                            text: {
+                                if (!root.matrixData || !root.matrixData.sprint_columns || root.matrixData.sprint_columns.length === 0)
+                                    return "No data"
+                                var cols = root.matrixData.sprint_columns
+                                var first = cols[0].label || cols[0].short_label || cols[0].sprint_name
+                                var last = cols[cols.length - 1].label || cols[cols.length - 1].short_label || cols[cols.length - 1].sprint_name
+                                return first + "  →  " + last
                             }
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            color: root.historyOffset > 0 ? "#d29922" : "#8b949e"
                         }
-                        onClicked: root.historyOffset = 0
                     }
 
                     Item { Layout.fillWidth: true }
@@ -629,6 +708,8 @@ Item {
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
                     enabled: root.historyOffset > 0
+                    ToolTip.visible: hovered && root.historyOffset > 0
+                    ToolTip.text: "Shift view forward towards current/future sprints"
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
@@ -637,7 +718,7 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        implicitHeight: 28
+                        implicitHeight: 30
                         implicitWidth: 80
                         radius: 6
                         color: parent.hovered && root.historyOffset > 0 ? "#21262d" : "transparent"
@@ -1295,16 +1376,69 @@ Item {
                                             width: root.sprintColWidth
                                             height: sprintHeaderRow.height
 
+                                            property bool isCurrent: !!modelData.is_current
+
+                                            // Highlight background for current week
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: 1
+                                                color: isCurrent ? "#12253d" : "transparent"
+                                                border.color: isCurrent ? "#1f6feb" : "transparent"
+                                                border.width: 1
+                                                radius: 4
+                                            }
+
+                                            // Top indicator accent bar for current week
+                                            Rectangle {
+                                                visible: isCurrent
+                                                anchors.top: parent.top
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: 3
+                                                color: "#58a6ff"
+                                                radius: 1
+                                            }
+
                                             ColumnLayout {
                                                 anchors.centerIn: parent
                                                 spacing: 2
 
+                                                // "● THIS WEEK" pill badge if current week
+                                                Rectangle {
+                                                    visible: isCurrent
+                                                    Layout.alignment: Qt.AlignHCenter
+                                                    implicitHeight: 15
+                                                    implicitWidth: curBadgeRow.implicitWidth + 8
+                                                    radius: 7.5
+                                                    color: "#0d419d"
+                                                    border.color: "#388bfd"
+                                                    border.width: 1
+
+                                                    Row {
+                                                        id: curBadgeRow
+                                                        anchors.centerIn: parent
+                                                        spacing: 3
+                                                        Text {
+                                                            text: "●"
+                                                            font.pixelSize: 7
+                                                            color: "#79c0ff"
+                                                        }
+                                                        Text {
+                                                            text: "THIS WEEK"
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 8
+                                                            font.weight: Font.Bold
+                                                            color: "#ffffff"
+                                                        }
+                                                    }
+                                                }
+
                                                 Text {
                                                     text: modelData.short_label || modelData.sprint_name
                                                     font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 12
+                                                    font.pixelSize: isCurrent ? 13 : 12
                                                     font.weight: Font.Bold
-                                                    color: "#f0f6fc"
+                                                    color: isCurrent ? "#79c0ff" : "#f0f6fc"
                                                     horizontalAlignment: Text.AlignHCenter
                                                     Layout.alignment: Qt.AlignHCenter
                                                 }
@@ -1313,7 +1447,8 @@ Item {
                                                     text: modelData.start_date ? (modelData.start_date.substring(5) + " · " + modelData.end_date.substring(5)) : ""
                                                     font.family: "Segoe UI, sans-serif"
                                                     font.pixelSize: 10
-                                                    color: "#8b949e"
+                                                    font.weight: isCurrent ? Font.DemiBold : Font.Normal
+                                                    color: isCurrent ? "#a5d6ff" : "#8b949e"
                                                     horizontalAlignment: Text.AlignHCenter
                                                     Layout.alignment: Qt.AlignHCenter
                                                 }
@@ -1548,7 +1683,16 @@ Item {
 
                                                 property bool hasItems: modelData.total_count > 0
                                                 property bool hasOverdue: modelData.overdue_count > 0
+                                                property bool isCurrent: !!modelData.is_current
                                                 property bool isSelected: root.selectedCell && root.selectedCell.assignee === modelData.assignee && root.selectedCell.sprint_name === modelData.sprint_name
+
+                                                // Column swimlane background guide for current week
+                                                Rectangle {
+                                                    anchors.fill: parent
+                                                    visible: isCurrent
+                                                    color: "#0a1628"
+                                                    opacity: 0.5
+                                                }
 
                                                 Rectangle {
                                                     anchors.fill: parent
@@ -1556,20 +1700,21 @@ Item {
                                                     radius: 6
                                                     color: {
                                                         if (isSelected) return "#1f6feb"
-                                                        if (cellMa.containsMouse) return "#262c36"
-                                                        if (!hasItems) return "transparent"
+                                                        if (cellMa.containsMouse) return isCurrent ? "#1c3558" : "#262c36"
+                                                        if (!hasItems) return isCurrent ? "#0d1b2e" : "transparent"
                                                         if (hasOverdue) return "#381e1e"
                                                         if (modelData.total_count >= 8) return "#0d3525"
                                                         if (modelData.total_count >= 4) return "#0d2344"
-                                                        return "#161b22"
+                                                        return isCurrent ? "#132338" : "#161b22"
                                                     }
                                                     border.color: {
                                                         if (isSelected) return "#58a6ff"
                                                         if (hasOverdue) return "#f85149"
+                                                        if (isCurrent) return "#1f6feb"
                                                         if (hasItems) return "#30363d"
                                                         return "transparent"
                                                     }
-                                                    border.width: 1
+                                                    border.width: isCurrent ? 1.5 : 1
 
                                                     // Cell content
                                                     ColumnLayout {
@@ -1793,6 +1938,17 @@ Item {
                                             width: root.sprintColWidth
                                             height: parent.height
 
+                                            property bool isCurrent: !!modelData.is_current
+
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: 1
+                                                color: isCurrent ? "#12253d" : "transparent"
+                                                border.color: isCurrent ? "#1f6feb" : "transparent"
+                                                border.width: 1
+                                                radius: 4
+                                            }
+
                                             ColumnLayout {
                                                 anchors.centerIn: parent
                                                 spacing: 1
@@ -1800,9 +1956,9 @@ Item {
                                                     Layout.alignment: Qt.AlignHCenter
                                                     text: (modelData.total_count || 0) + " items"
                                                     font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 11
+                                                    font.pixelSize: isCurrent ? 12 : 11
                                                     font.weight: Font.Bold
-                                                    color: "#58a6ff"
+                                                    color: isCurrent ? "#79c0ff" : "#58a6ff"
                                                 }
                                                 Row {
                                                     Layout.alignment: Qt.AlignHCenter
@@ -1813,7 +1969,7 @@ Item {
                                                     Text { text: "✅" + (modelData.tasks_closed_percent !== undefined ? modelData.tasks_closed_percent : Math.round(((modelData.tasks_closed_count || 0) / Math.max(1, modelData.tasks_count || 1)) * 100)) + "%"; font.pixelSize: 9; color: "#3fb950" }
                                                 }
                                             }
-                                            Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
+                                            Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: isCurrent ? "#1f6feb" : "#30363d" }
                                         }
                                     }
                                 }

@@ -1927,6 +1927,31 @@ class DevOpsBackend(QObject):
     @Slot(int, result=dict)
     @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def getCurrentDateInfo(self):
+        """
+        Returns current calendar date, ISO week, and formatted sprint name metadata.
+        """
+        today_obj = date.today()
+        curr_y, curr_w, curr_wd = today_obj.isocalendar()
+        curr_date_str = today_obj.strftime("%Y-%m-%d")
+        curr_date_label = today_obj.strftime("%a, %b %d, %Y")
+        curr_date_full = today_obj.strftime("%A, %B %d, %Y")
+        curr_sprint_name = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+        curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
+        return {
+            "current_date": curr_date_str,
+            "current_date_label": curr_date_label,
+            "current_date_full": curr_date_full,
+            "current_year": curr_y,
+            "current_week": curr_w,
+            "current_weekday": curr_wd,
+            "current_sprint_name": curr_sprint_name,
+            "current_sprint_label": curr_sprint_label,
+        }
+
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
@@ -1996,6 +2021,15 @@ class DevOpsBackend(QObject):
         end_idx = max(start_idx, end_idx)  # guard
         target_sprints = sorted_sprints[start_idx:end_idx]
 
+        # Current date and ISO week determination
+        today_obj = date.today()
+        curr_y, curr_w, curr_wd = today_obj.isocalendar()
+        curr_date_str = today_obj.strftime("%Y-%m-%d")
+        curr_date_label = today_obj.strftime("%a, %b %d, %Y")
+        curr_date_full = today_obj.strftime("%A, %B %d, %Y")
+        curr_sprint_name = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+        curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
+
         # Load configured milestones for sprint header and work item alignment
         all_milestones = self.get_milestones()
         milestones_by_date = {m.get("target_date"): m for m in all_milestones if m.get("target_date")}
@@ -2004,6 +2038,11 @@ class DevOpsBackend(QObject):
         for y, w, s_name in target_sprints:
             s_d, e_d, start_str, end_str = utils.get_sprint_date_range(y, w)
             lbl = utils.format_sprint_range_label(y, w)
+            is_cur = (y, w) == (curr_y, curr_w)
+            is_past = (y, w) < (curr_y, curr_w)
+            is_future = (y, w) > (curr_y, curr_w)
+            day_prog = round(min(1.0, max(0.0, curr_wd / 5.0)), 2) if is_cur else (1.0 if is_past else 0.0)
+
             col_milestones = []
             for m in all_milestones:
                 m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
@@ -2040,6 +2079,10 @@ class DevOpsBackend(QObject):
                 "end_date": end_str,
                 "year": y,
                 "week": w,
+                "is_current": is_cur,
+                "is_past": is_past,
+                "is_future": is_future,
+                "day_progress": day_prog,
                 "milestones": col_milestones,
                 "milestone_count": len(col_milestones),
             })
@@ -2354,6 +2397,9 @@ class DevOpsBackend(QObject):
                 cells.append({
                     "assignee": assignee,
                     "sprint_name": s_name,
+                    "is_current": col.get("is_current", False),
+                    "is_past": col.get("is_past", False),
+                    "is_future": col.get("is_future", False),
                     "total_count": len(items),
                     "stories_count": st_count,
                     "bugs_count": bg_count,
@@ -2395,6 +2441,9 @@ class DevOpsBackend(QObject):
             c_tk_closed_pct = round((c_tk_closed / max(1, c_tk_count)) * 100) if c_tk_count > 0 else 0
             column_totals.append({
                 "sprint_name": s_name,
+                "is_current": col.get("is_current", False),
+                "is_past": col.get("is_past", False),
+                "is_future": col.get("is_future", False),
                 "total_count": len(c_items),
                 "stories_count": sum(1 for it in c_items if it["is_story"]),
                 "bugs_count": sum(1 for it in c_items if it["is_bug"]),
@@ -2411,11 +2460,27 @@ class DevOpsBackend(QObject):
 
         total_tasks_closed_pct = round((total_tasks_closed / max(1, total_matrix_tasks)) * 100) if total_matrix_tasks > 0 else 0
 
+        current_sprint_idx = -1
+        for idx, col in enumerate(sprint_columns):
+            if col.get("is_current"):
+                current_sprint_idx = idx
+                break
+
         return {
             "horizon_weeks": horizon_weeks,
             "sprint_columns": sprint_columns,
             "column_totals": column_totals,
             "assignee_rows": assignee_rows,
+            "current_date": curr_date_str,
+            "current_date_label": curr_date_label,
+            "current_date_full": curr_date_full,
+            "current_year": curr_y,
+            "current_week": curr_w,
+            "current_weekday": curr_wd,
+            "current_sprint_name": curr_sprint_name,
+            "current_sprint_label": curr_sprint_label,
+            "has_current_sprint_in_view": (current_sprint_idx >= 0),
+            "current_sprint_index": current_sprint_idx,
             "total_items": total_matrix_items,
             "total_stories": total_matrix_stories,
             "total_bugs": total_matrix_bugs,
