@@ -67,7 +67,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         dict: Structured datasets for Tag Day report.
     """
     if ignore_repos is None:
-        ignore_str = os.getenv("IGNORE_REPOS", "")
+        db_cfg_val = cache_db.get_config("IGNORE_REPOS") if hasattr(cache_db, "get_config") else None
+        ignore_str = db_cfg_val if db_cfg_val is not None else devops_helper.utils.GetEnvVariable("IGNORE_REPOS", "")
         ignore_repos = ignore_str.split() if ignore_str else []
 
     with cache_db._connection() as conn:

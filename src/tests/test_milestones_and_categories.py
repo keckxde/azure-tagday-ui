@@ -607,6 +607,11 @@ class TestMilestonesAndCategories(unittest.TestCase):
             team="Beta Team"
         )
 
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed in the test environment")
+
         backend = DevOpsBackend()
         backend._cache_db = self.cache
 
@@ -617,7 +622,6 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertEqual(res_export["count"], 2)
 
         # Verify Excel content with openpyxl
-        import openpyxl
         wb = openpyxl.load_workbook(export_path)
         ws = wb.active
         self.assertEqual(ws.title, "Milestones")

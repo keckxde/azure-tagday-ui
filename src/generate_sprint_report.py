@@ -442,8 +442,14 @@ def main():
     parser.add_argument("--db", help="Path to SQLite cache DB")
     parser.add_argument("--out-md", help="Path for output Markdown file")
     parser.add_argument("--out-csv", help="Path for output CSV file")
+    parser.add_argument("--env-file", type=str, default=None, help="Path to .env file to load configuration from (optional, DB used by default)")
+    parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
 
     args = parser.parse_args()
+
+    if args.env_file or args.load_env:
+        import utils
+        utils.load_env_file(args.env_file)
 
     db_path = args.db
     if not db_path:

@@ -19,31 +19,31 @@ from azure import AzureInfoHandler, AzureDevOpsCache
 
 logger = logging.getLogger(__name__)
 
-# Determine BASE_FOLDER based on where .env is located
+# Determine BASE_FOLDER based on configuration or cwd
 cwd = os.getcwd()
-BASE_FOLDER = os.getenv("BASE_FOLDER", cwd)
+BASE_FOLDER = utils.GetEnvVariable("BASE_FOLDER", cwd)
 
 logger.info("Use BASE_FOLDER: %s", BASE_FOLDER)
 
-# Load env variables using the wrapper
+# Load configuration variables (database-first by default)
 AZURE_BASE_URL = utils.GetEnvVariable('AZURE_BASE_URL')
 AZURE_COLLECTION = utils.GetEnvVariable('AZURE_COLLECTION')
 AZURE_PERSONAL_ACCESS_TOKEN = utils.GetEnvVariable('AZURE_PERSONAL_ACCESS_TOKEN')
 AZURE_PROJECT_ID = utils.GetEnvVariable("AZURE_PROJECT_ID")
-IGNORE_REPOS = os.getenv('IGNORE_REPOS', '')
+IGNORE_REPOS = utils.GetEnvVariable('IGNORE_REPOS', '')
 
-TAGDAY_FILE_MD = utils.GetEnvVariable('TAGDAY_FILE_MD',"TAGDAY.md")
-REVISION_FILE_MD = utils.GetEnvVariable('REVISION_FILE_MD',"REVISION.md")
-BUILD_ARTIFACTS_MD = utils.GetEnvVariable('BUILD_ARTIFACTS_MD',"BUILD_ARTIFACTS.md")
-BUILD_ARTIFACTS_CSV = utils.GetEnvVariable('BUILD_ARTIFACTS_CSV',"BUILD_ARTIFACTS.csv")   
+TAGDAY_FILE_MD = utils.GetEnvVariable('TAGDAY_FILE_MD', "TAGDAY.md")
+REVISION_FILE_MD = utils.GetEnvVariable('REVISION_FILE_MD', "REVISION.md")
+BUILD_ARTIFACTS_MD = utils.GetEnvVariable('BUILD_ARTIFACTS_MD', "BUILD_ARTIFACTS.md")
+BUILD_ARTIFACTS_CSV = utils.GetEnvVariable('BUILD_ARTIFACTS_CSV', "BUILD_ARTIFACTS.csv")   
 
-RECENT_DELAY_raw = os.getenv('RECENT_DELAY')
+RECENT_DELAY_raw = utils.GetEnvVariable('RECENT_DELAY', '')
 RECENT_DELAY = int(RECENT_DELAY_raw) if RECENT_DELAY_raw else 60 * 24
 
-FILTER_VERSION_TAGS_FORMAT_raw = os.getenv('FILTER_VERSION_TAGS_FORMAT', 'False')
-FILTER_VERSION_TAGS_FORMAT = FILTER_VERSION_TAGS_FORMAT_raw.lower() == 'true'
+FILTER_VERSION_TAGS_FORMAT_raw = utils.GetEnvVariable('FILTER_VERSION_TAGS_FORMAT', 'False')
+FILTER_VERSION_TAGS_FORMAT = str(FILTER_VERSION_TAGS_FORMAT_raw).lower() == 'true'
 
-FILTER_REPOS = os.getenv('FILTER_REPOS', '')
+FILTER_REPOS = utils.GetEnvVariable('FILTER_REPOS', '')
 
 def ThroughDirectory(directory, ext=".md"):
     """
@@ -981,6 +981,8 @@ if __name__ == "__main__":
     import argparse
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Azure DevOps Sync & Document Generation CLI")
+    parser.add_argument("--env-file", type=str, default=None, help="Path to .env file to load configuration from (optional, DB used by default)")
+    parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
     parser.add_argument("--sync", action="store_true", help="Sync pipelines, repos, and tasks from TFS to local SQLite cache.")
     parser.add_argument("--force", action="store_true", help="Force sync, bypassing file recency checks (use with --sync).")
     parser.add_argument("--templates", action="store_true", help="Render Markdown pages from cached repository data.")
@@ -992,6 +994,9 @@ if __name__ == "__main__":
     parser.add_argument("--untagged-repos", action="store_true", help="List all repositories where the latest pull request is either not closed or untagged.")
 
     args = parser.parse_args()
+
+    if args.env_file or args.load_env:
+        utils.load_env_file(args.env_file)
 
     # If no arguments are provided, print help and exit
     if not any(vars(args).values()):

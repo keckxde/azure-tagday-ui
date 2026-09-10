@@ -1,34 +1,37 @@
 # -*- coding: UTF-8 -*-
-import logging, re, os
+import logging, re, os, sys
 import json
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
-load_dotenv(verbose=True)
-
 
 log = logging.getLogger('azure')
 
-# Return a list with unique values (removing double entries)
-def uniqueList(list):
+
+def uniqueList(lst):
+    """Return a list with unique stripped values preserving insertion order."""
     output = []
-    for x in list:
-        x = x.strip()
+    for x in lst:
+        if isinstance(x, str):
+            x = x.strip()
         if x not in output:
             output.append(x)
     return output
 
-def MatchUniqueRegularExpr(pattern, source):
-    if source == None :
-        log.error(f"no source given with pattern {pattern}")
-    list = []
-    try:
-        list = re.findall(pattern,source)
-    except:
-        log.error(f"error with regex {pattern} {source}")
 
-    return uniqueList(list)
+def MatchUniqueRegularExpr(pattern, source):
+    """Finds all unique regex matches in source."""
+    if source is None:
+        log.error(f"no source given with pattern {pattern}")
+        return []
+    lst = []
+    try:
+        lst = re.findall(pattern, source)
+    except Exception:
+        log.error(f"error with regex {pattern} {source}")
+    return uniqueList(lst)
+
 
 def parseJSONFile(filename):
+    """Parses a JSON file safely."""
     try:
         log.info(f"open {filename}")
         with open(filename, encoding="utf-8") as f:
@@ -36,53 +39,125 @@ def parseJSONFile(filename):
             keys = jsonObj.keys()
             log.info(f"   found {len(keys)} entries")
             return jsonObj
-    except:
+    except Exception:
         log.error(f"error parsing JSON File {filename}")
     return None
 
-def GetEnvVariable(name, default=None):
-    myVar = os.getenv(name)
-    if myVar:
-        return myVar
 
-    # Check user_settings or DB project_config fallback
+def parseYAMLFile(filename):
+    """Parses a YAML file safely."""
     try:
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.yaml")
-        if not os.path.exists(cfg_path):
-            cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.json")
-        if os.path.exists(cfg_path):
-            if cfg_path.endswith(".json"):
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-            else:
-                import yaml
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    cfg = yaml.safe_load(f)
-            if isinstance(cfg, dict):
-                mapping = {
-                    "AZURE_BASE_URL": cfg.get("tfs_url"),
-                    "AZURE_COLLECTION": cfg.get("collection"),
-                    "AZURE_PERSONAL_ACCESS_TOKEN": cfg.get("pat"),
-                    "AZURE_PROJECT_ID": cfg.get("project_id") or cfg.get("project_name"),
-                }
-                if mapping.get(name):
-                    return mapping[name]
-                db_p = cfg.get("db_path")
-                if db_p and os.path.exists(db_p):
-                    from azure.azure_db import AzureDevOpsCache
-                    db = AzureDevOpsCache(db_p)
-                    val = db.get_config(name)
-                    if val is not None and val != "":
-                        return val
+        import yaml
+        with open(filename, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except Exception:
+        log.error(f"error parsing YAML File {filename}")
+    return None
+
+
+def load_env_file(dotenv_path=None, override=False, verbose=False):
+    """
+    Explicitly loads environment variables from a .env file when triggered through CLI
+    or specifically requested. By default, configuration is loaded from the SQLite database.
+    """
+    try:
+        from dotenv import load_dotenv
+        return load_dotenv(dotenv_path=dotenv_path, override=override, verbose=verbose)
+    except Exception as e:
+        log.warning(f"Failed to load .env file: {e}")
+        return False
+
+
+def _get_user_settings_candidates():
+    """Returns candidate file paths for user_settings configuration."""
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(this_dir)
+    candidates = [
+        os.path.join(this_dir, "config", "user_settings.yaml"),
+        os.path.join(this_dir, "config", "user_settings.json"),
+        os.path.join(parent_dir, "config", "user_settings.yaml"),
+        os.path.join(parent_dir, "config", "user_settings.json"),
+    ]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.yaml"))
+        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.json"))
+    return candidates
+
+
+def _load_active_user_settings():
+    """Loads active user settings dict from available candidate config paths."""
+    for path in _get_user_settings_candidates():
+        if os.path.exists(path):
+            try:
+                if path.endswith(".json"):
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                else:
+                    import yaml
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+    return {}
+
+
+def GetEnvVariable(name, default=None, prefer_env=False):
+    """
+    Retrieves configuration values.
+    By default, settings are considered to be within our database / user configuration.
+    Environment variables or .env files are only consulted as a fallback (or when prefer_env=True
+    is explicitly requested via CLI).
+    """
+    # 1. If explicit CLI/env override requested, check os.getenv first
+    if prefer_env:
+        myVar = os.getenv(name)
+        if myVar is not None and myVar != "":
+            return myVar
+
+    # 2. Check active SQLite database (project_config) and user settings
+    try:
+        cfg = _load_active_user_settings()
+        if isinstance(cfg, dict):
+            # Check active SQLite database project_config first
+            db_p = cfg.get("db_path")
+            if db_p and os.path.exists(db_p):
+                from azure.azure_db import AzureDevOpsCache
+                db = AzureDevOpsCache(db_p)
+                val = db.get_config(name)
+                if val is not None and val != "":
+                    return val
+                if name in ("AZURE_PROJECT_ID", "PROJECT_NAME"):
+                    with db._connection() as conn:
+                        p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
+                        if p_row and p_row["name"]:
+                            return p_row["name"]
+
+            mapping = {
+                "AZURE_BASE_URL": cfg.get("tfs_url"),
+                "AZURE_COLLECTION": cfg.get("collection"),
+                "AZURE_PERSONAL_ACCESS_TOKEN": cfg.get("pat"),
+                "AZURE_PROJECT_ID": cfg.get("project_id") or cfg.get("project_name"),
+                "AZURE_TEAM": cfg.get("team") or cfg.get("tfs_team_name"),
+                "WORK_ITEM_DEADLINE_FIELD": cfg.get("custom_deadline_field"),
+            }
+            if mapping.get(name):
+                return mapping[name]
+            if name in cfg and cfg[name] is not None and cfg[name] != "":
+                return str(cfg[name])
     except Exception:
         pass
 
-    if default:
-        log.warning(f"Optional Env-Variable missing {name} - use default {default}\nPlease add to your `.env` file:")
-        log.info(f"{name}={default}")
+    # 3. Fallback: Check process environment variables (or explicitly loaded .env)
+    myVar = os.getenv(name)
+    if myVar is not None and myVar != "":
+        return myVar
+
+    # 4. Return default if supplied
+    if default is not None:
         return default
-    log.error(f"Mandatory Env-Variable missing {name}\nPlease add to your `.env` file:")
-    log.info(f"{name}=value")
+
     return ""
         
 
@@ -712,9 +787,9 @@ def calculate_deadline_urgency(deadline_val, is_completed=False, now_dt=None):
 
 def get_configured_deadline_field():
     """
-    Returns custom configured TFS deadline field name from environment, or default empty string.
+    Returns custom configured TFS deadline field name from database or environment, or default empty string.
     """
-    return os.getenv("WORK_ITEM_DEADLINE_FIELD", "").strip()
+    return GetEnvVariable("WORK_ITEM_DEADLINE_FIELD", "").strip()
 
 
 def extract_work_item_deadline(fields_dict, custom_field=None):

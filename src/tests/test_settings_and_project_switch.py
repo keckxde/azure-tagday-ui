@@ -217,6 +217,81 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_database_is_default_settings_source_over_env(self):
+        """Verify that settings are loaded from SQLite DB / user_settings by default over ambient env vars."""
+        temp_dir = tempfile.mkdtemp()
+        db_file = os.path.join(temp_dir, "db_precedence_test.db")
+        try:
+            import utils
+            cache = AzureDevOpsCache(db_file)
+            cache.set_config("TAGDAY_FILE_MD", "DB_TAGDAY.md")
+            cache.set_config("WORK_ITEM_DEADLINE_FIELD", "Custom.DBDeadline")
+
+            # Point user_settings to this db
+            os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)
+            with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as f:
+                yaml.safe_dump({"db_path": db_file, "project_name": "DB Precedence"}, f)
+
+            # Set conflicting environment variable
+            os.environ["TAGDAY_FILE_MD"] = "ENV_TAGDAY.md"
+            os.environ["WORK_ITEM_DEADLINE_FIELD"] = "Custom.EnvDeadline"
+
+            # Database settings take precedence by default
+            val = utils.GetEnvVariable("TAGDAY_FILE_MD")
+            self.assertEqual(val, "DB_TAGDAY.md")
+
+            deadline_val = utils.get_configured_deadline_field()
+            self.assertEqual(deadline_val, "Custom.DBDeadline")
+
+            # Explicit prefer_env=True uses environment variable
+            env_override_val = utils.GetEnvVariable("TAGDAY_FILE_MD", prefer_env=True)
+            self.assertEqual(env_override_val, "ENV_TAGDAY.md")
+        finally:
+            if "TAGDAY_FILE_MD" in os.environ:
+                del os.environ["TAGDAY_FILE_MD"]
+            if "WORK_ITEM_DEADLINE_FIELD" in os.environ:
+                del os.environ["WORK_ITEM_DEADLINE_FIELD"]
+            if os.path.exists(db_file):
+                try:
+                    os.remove(db_file)
+                except Exception:
+                    pass
+            try:
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
+
+    def test_explicit_load_env_file(self):
+        """Verify .env is only loaded when explicitly triggered via load_env_file."""
+        temp_dir = tempfile.mkdtemp()
+        env_file = os.path.join(temp_dir, ".env_test")
+        test_key = "CUSTOM_CLI_TRIGGERED_KEY"
+        try:
+            import utils
+            with open(env_file, "w", encoding="utf-8") as f:
+                f.write(f"{test_key}=LoadedViaCliTrigger\n")
+
+            # Key is not in os.environ before loading
+            self.assertNotIn(test_key, os.environ)
+
+            # Explicit load triggered
+            res = utils.load_env_file(env_file)
+            self.assertTrue(res)
+            self.assertEqual(os.getenv(test_key), "LoadedViaCliTrigger")
+            self.assertEqual(utils.GetEnvVariable(test_key), "LoadedViaCliTrigger")
+        finally:
+            if test_key in os.environ:
+                del os.environ[test_key]
+            if os.path.exists(env_file):
+                try:
+                    os.remove(env_file)
+                except Exception:
+                    pass
+            try:
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,9 +15,10 @@ try:
     )
 except ImportError:
     patch_pr_title_for_release_notes = None
-    BASE_FOLDER = os.getenv("BASE_FOLDER", os.getcwd())
-    AZURE_PROJECT_ID = os.getenv("AZURE_PROJECT_ID")
-    REVISION_FILE_MD = os.getenv("REVISION_FILE_MD", "doc/04_Development/REVISION.md")
+    import utils
+    BASE_FOLDER = utils.GetEnvVariable("BASE_FOLDER", os.getcwd())
+    AZURE_PROJECT_ID = utils.GetEnvVariable("AZURE_PROJECT_ID")
+    REVISION_FILE_MD = utils.GetEnvVariable("REVISION_FILE_MD", "doc/04_Development/REVISION.md")
 
 from azure import AzureDevOpsCache
 

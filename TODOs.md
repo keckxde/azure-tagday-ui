@@ -2,10 +2,6 @@
 
 ## OPEN
 
-### Configuration
-
-- only use the .env or environment file mechanism, when really needed, or triggered through CLI, but not as default. By default we consider the settings to be within our databasee
-
 ### UI Related
 
 - Allow a scheduled synchronisation, e.g. every 5 minutes, but allow also manual syncs
@@ -16,6 +12,8 @@
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
 ## DONE
+
+- Database-First Configuration Architecture & Optional CLI .env Mechanism: Refactored configuration loading across the application to consider the local SQLite database (`project_config` table) and active project user settings as the primary, default source of truth. Removed unconditional module-level `load_dotenv()` execution on import. Environment files (`.env`) are now loaded only when explicitly requested or triggered via CLI flags (`--env-file <path>` or `--load-env`). Configuration resolution in [`GetEnvVariable()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/utils.py) prioritizes active database properties first before falling back to ambient process environment variables, with clean logging that eliminates noisy `.env` file warning prompts.
 
 - Repositories & Pull Requests UI Refresh Fix: Resolved an `UnboundLocalError` in [`DevOpsBackend.refresh_all_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py#L1418-L1445) where `status` was referenced in the PR timestamp sorting logic before assignment. This silent exception prevented the PR list, PR repository list, PR statistics (`prs_count`, `prs_open_count`, `prs_completed_count`), and overall dashboard statistics from being updated in the UI after background syncs completed.
 

@@ -30,7 +30,13 @@ logger = logging.getLogger("gui.main")
 def main():
     parser = argparse.ArgumentParser(description="DevOps Manager GUI")
     parser.add_argument("--test", action="store_true", help="Run in test mode (load QML, verify bindings, and exit)")
+    parser.add_argument("--env-file", type=str, default=None, help="Path to .env file to load configuration from (optional, DB used by default)")
+    parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
     args = parser.parse_args()
+
+    if args.env_file or args.load_env:
+        import utils
+        utils.load_env_file(args.env_file)
 
     # Set QQuickStyle to Basic so custom background / styling is fully supported
     QQuickStyle.setStyle("Basic")

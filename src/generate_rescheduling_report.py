@@ -265,7 +265,13 @@ if __name__ == "__main__":
     parser.add_argument("--output-md", type=str, default=None, help="Path for output Markdown report.")
     parser.add_argument("--output-csv", type=str, default=None, help="Path for output CSV export.")
     parser.add_argument("--review-status", type=str, default=None, choices=["pending", "accepted", "all"], help="Filter by review status.")
+    parser.add_argument("--env-file", type=str, default=None, help="Path to .env file to load configuration from (optional, DB used by default)")
+    parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
     args = parser.parse_args()
+
+    if args.env_file or args.load_env:
+        import utils
+        utils.load_env_file(args.env_file)
 
     r_stat = None if args.review_status == "all" else args.review_status
     cache = AzureDevOpsCache(args.db) if args.db else None
