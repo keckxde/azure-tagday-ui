@@ -10,7 +10,7 @@ import re
 import threading
 import urllib.parse
 from datetime import datetime, date
-from PySide6.QtCore import QObject, Signal, Slot, Property
+from PySide6.QtCore import QObject, Signal, Slot, Property, QTimer
 
 # Ensure scripts/py is in sys.path
 py_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -220,6 +220,7 @@ class DevOpsBackend(QObject):
     tagCategoriesChanged = Signal()
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
+    autoSyncChanged = Signal()
     logRecord = Signal(str, str, str, str)  # timestamp, level, logger_name, message
     logMessage = Signal(str)                # legacy formatted string signal
     syncLogsChanged = Signal()
@@ -251,6 +252,19 @@ class DevOpsBackend(QObject):
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
         self._tfs_team_name = user_cfg.get("tfs_team_name", "")
+
+        # Auto-Sync / Scheduled Synchronization settings
+        self._auto_sync_enabled = bool(user_cfg.get("auto_sync_enabled", False))
+        self._auto_sync_interval_minutes = int(user_cfg.get("auto_sync_interval_minutes", 5))
+        if self._auto_sync_interval_minutes < 1:
+            self._auto_sync_interval_minutes = 5
+        self._auto_sync_scope = str(user_cfg.get("auto_sync_scope", "all"))
+        self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+
+        self._auto_sync_timer = QTimer(self)
+        self._auto_sync_timer.setInterval(1000)
+        self._auto_sync_timer.timeout.connect(self._on_auto_sync_timer_tick)
+        self._auto_sync_timer.start()
 
         # Sync Logs storage & logger bridge
         self._sync_logs = []
@@ -372,6 +386,15 @@ class DevOpsBackend(QObject):
                 self._bug_hierarchy_mode = db_cfg["bug_behavior"]
             if db_cfg.get("AZURE_TEAM"):
                 self._tfs_team_name = db_cfg["AZURE_TEAM"]
+            if "AUTO_SYNC_ENABLED" in db_cfg:
+                self._auto_sync_enabled = str(db_cfg["AUTO_SYNC_ENABLED"]).lower() in ("true", "1", "yes")
+            if "AUTO_SYNC_INTERVAL_MINUTES" in db_cfg:
+                try:
+                    self._auto_sync_interval_minutes = max(1, int(db_cfg["AUTO_SYNC_INTERVAL_MINUTES"]))
+                except Exception:
+                    pass
+            if "AUTO_SYNC_SCOPE" in db_cfg:
+                self._auto_sync_scope = db_cfg["AUTO_SYNC_SCOPE"]
             if "IGNORE_REPOS" in db_cfg:
                 devops_helper.IGNORE_REPOS = db_cfg["IGNORE_REPOS"]
             if "FILTER_REPOS" in db_cfg:
@@ -477,6 +500,138 @@ class DevOpsBackend(QObject):
 
         self.fontSizeModeChanged.emit(self._font_size_mode, self._ui_scale)
         self.settingsChanged.emit()
+
+    @Property(bool, notify=autoSyncChanged)
+    def autoSyncEnabled(self):
+        return self._auto_sync_enabled
+
+    @Slot(bool)
+    def setAutoSyncEnabled(self, enabled):
+        self._auto_sync_enabled = bool(enabled)
+        self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+        cfg = _load_user_settings()
+        cfg["auto_sync_enabled"] = self._auto_sync_enabled
+        _save_user_settings(cfg)
+        if self._cache_db:
+            try:
+                self._cache_db.set_config("AUTO_SYNC_ENABLED", str(self._auto_sync_enabled))
+            except Exception:
+                pass
+        self.autoSyncChanged.emit()
+        self.settingsChanged.emit()
+
+    @Property(int, notify=autoSyncChanged)
+    def autoSyncIntervalMinutes(self):
+        return self._auto_sync_interval_minutes
+
+    @Slot(int)
+    def setAutoSyncInterval(self, minutes):
+        val = max(1, int(minutes)) if minutes > 0 else 5
+        self._auto_sync_interval_minutes = val
+        self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+        cfg = _load_user_settings()
+        cfg["auto_sync_interval_minutes"] = self._auto_sync_interval_minutes
+        _save_user_settings(cfg)
+        if self._cache_db:
+            try:
+                self._cache_db.set_config("AUTO_SYNC_INTERVAL_MINUTES", str(self._auto_sync_interval_minutes))
+            except Exception:
+                pass
+        self.autoSyncChanged.emit()
+        self.settingsChanged.emit()
+
+    @Property(str, notify=autoSyncChanged)
+    def autoSyncScope(self):
+        return self._auto_sync_scope or "all"
+
+    @Slot(str)
+    def setAutoSyncScope(self, scope):
+        val = (scope or "all").lower()
+        if val not in ("all", "work_items", "pull_requests"):
+            val = "all"
+        self._auto_sync_scope = val
+        cfg = _load_user_settings()
+        cfg["auto_sync_scope"] = self._auto_sync_scope
+        _save_user_settings(cfg)
+        if self._cache_db:
+            try:
+                self._cache_db.set_config("AUTO_SYNC_SCOPE", self._auto_sync_scope)
+            except Exception:
+                pass
+        self.autoSyncChanged.emit()
+        self.settingsChanged.emit()
+
+    @Property(int, notify=autoSyncChanged)
+    def nextAutoSyncSeconds(self):
+        return max(0, self._seconds_until_next_sync)
+
+    @Property(str, notify=autoSyncChanged)
+    def nextAutoSyncText(self):
+        if not self._auto_sync_enabled:
+            return "Off"
+        if self._is_busy:
+            return "Syncing"
+        mm = self._seconds_until_next_sync // 60
+        ss = self._seconds_until_next_sync % 60
+        return f"{mm:02d}:{ss:02d}"
+
+    @Property(str, notify=autoSyncChanged)
+    def autoSyncStatusText(self):
+        if not self._auto_sync_enabled:
+            return "Auto-sync: Off"
+        if self._is_busy:
+            return "Syncing in progress..."
+        mm = self._seconds_until_next_sync // 60
+        ss = self._seconds_until_next_sync % 60
+        if mm > 0:
+            return f"Auto-sync in {mm}m {ss:02d}s (every {self._auto_sync_interval_minutes}m)"
+        return f"Auto-sync in {ss}s (every {self._auto_sync_interval_minutes}m)"
+
+    @Slot()
+    def triggerAutoSyncNow(self):
+        """Immediately triggers synchronization and resets the auto-sync timer."""
+        self.reset_auto_sync_timer()
+        if self._auto_sync_scope == "work_items":
+            self.sync_work_items_async()
+        elif self._auto_sync_scope == "pull_requests":
+            self.sync_pull_requests_async()
+        else:
+            self.sync_all_async()
+
+    def reset_auto_sync_timer(self):
+        """Resets the countdown timer to the full interval duration."""
+        self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+        self.autoSyncChanged.emit()
+
+    def _on_auto_sync_timer_tick(self):
+        """Periodic 1s tick for auto-sync countdown and scheduled execution."""
+        if not self._auto_sync_enabled or self._auto_sync_interval_minutes <= 0:
+            return
+
+        # If currently busy with a sync or task, don't tick countdown past 0; defer
+        if self._is_busy:
+            if self._seconds_until_next_sync <= 0:
+                self._seconds_until_next_sync = 30
+            self.autoSyncChanged.emit()
+            return
+
+        self._seconds_until_next_sync -= 1
+
+        if self._seconds_until_next_sync <= 0:
+            logger.info(
+                f"[Auto-Sync] Interval reached ({self._auto_sync_interval_minutes}m). "
+                f"Starting scheduled synchronization (scope: {self._auto_sync_scope})..."
+            )
+            self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+            self.autoSyncChanged.emit()
+            if self._auto_sync_scope == "work_items":
+                self.sync_work_items_async()
+            elif self._auto_sync_scope == "pull_requests":
+                self.sync_pull_requests_async()
+            else:
+                self.sync_all_async()
+        else:
+            self.autoSyncChanged.emit()
 
     @Property(str, notify=bugHierarchyModeChanged)
     def bugHierarchyMode(self):
@@ -3086,6 +3241,7 @@ class DevOpsBackend(QObject):
 
     def _run_worker(self, task_func, busy_msg):
         logger.info(f"Starting background task: {busy_msg}")
+        self.reset_auto_sync_timer()
         self._progress = 0
         self.progressChanged.emit()
         self._set_busy(True, busy_msg)
@@ -3109,6 +3265,7 @@ class DevOpsBackend(QObject):
         self._progress = 100 if success else 0
         self.progressChanged.emit()
         self._set_busy(False, "Ready")
+        self.reset_auto_sync_timer()
         self.refresh_all_data()
         if success:
             logger.info(f"[COMPLETED] {result_msg}")

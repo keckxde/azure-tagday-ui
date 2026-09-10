@@ -641,6 +641,300 @@ Item {
             }
 
             // ==========================================
+            // Scheduled Synchronization & Auto-Sync Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: autoSyncCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: autoSyncCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "⏱️"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Scheduled Synchronization (Auto-Sync)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Periodically synchronize TFS / Azure DevOps in the background. Manual syncs can still be triggered at any time."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Enable / Disable Switch Pill
+                        Rectangle {
+                            implicitHeight: 28
+                            implicitWidth: autoSyncSwitchLayout.implicitWidth + 20
+                            radius: 14
+                            color: backend && backend.autoSyncEnabled ? "#162b20" : "#21262d"
+                            border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                id: autoSyncSwitchLayout
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: backend && backend.autoSyncEnabled ? "#3fb950" : "#8b949e"
+                                }
+
+                                Text {
+                                    text: backend && backend.autoSyncEnabled ? "Auto-Sync Enabled" : "Auto-Sync Disabled"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: backend && backend.autoSyncEnabled ? "#3fb950" : "#8b949e"
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (backend) {
+                                        backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
+                                        root.bannerMsg = backend.autoSyncEnabled
+                                            ? ("Scheduled synchronization enabled (every " + backend.autoSyncIntervalMinutes + " min).")
+                                            : "Scheduled synchronization disabled.";
+                                        root.bannerType = backend.autoSyncEnabled ? "success" : "info";
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Sync Interval Selection
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Sync Interval:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Repeater {
+                                model: [
+                                    { label: "1 min",  minutes: 1 },
+                                    { label: "2 min",  minutes: 2 },
+                                    { label: "5 min (Default)",  minutes: 5 },
+                                    { label: "10 min", minutes: 10 },
+                                    { label: "15 min", minutes: 15 },
+                                    { label: "30 min", minutes: 30 },
+                                    { label: "60 min", minutes: 60 }
+                                ]
+
+                                Rectangle {
+                                    property bool isCur: backend && backend.autoSyncIntervalMinutes === modelData.minutes
+                                    implicitHeight: 30
+                                    implicitWidth: intervalBtnText.implicitWidth + 16
+                                    radius: 5
+                                    color: isCur ? "#1f6feb" : (intMa.containsMouse ? "#21262d" : "#0d1117")
+                                    border.color: isCur ? "#58a6ff" : (intMa.containsMouse ? "#388bfd" : "#30363d")
+                                    border.width: 1
+
+                                    Text {
+                                        id: intervalBtnText
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: parent.isCur ? Font.Bold : Font.Normal
+                                        color: parent.isCur ? "#ffffff" : "#c9d1d9"
+                                    }
+
+                                    MouseArea {
+                                        id: intMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.setAutoSyncInterval(modelData.minutes);
+                                                root.bannerMsg = "Auto-sync interval set to " + modelData.minutes + " minute(s).";
+                                                root.bannerType = "success";
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+                        }
+                    }
+
+                    // Scope Selection
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Sync Scope:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Repeater {
+                                model: [
+                                    { mode: "all",           label: "🔄 Full Sync (All Repos, WIQL & PRs)", desc: "Synchronizes git repos, work items, and pull requests" },
+                                    { mode: "work_items",    label: "⚡ Work Items (WIQL) Only",           desc: "Fast agile work items and query status sync" },
+                                    { mode: "pull_requests", label: "🔀 Pull Requests Only",               desc: "Lightweight pull requests status sync" }
+                                ]
+
+                                Rectangle {
+                                    property bool isCur: backend && backend.autoSyncScope === modelData.mode
+                                    implicitHeight: 34
+                                    implicitWidth: scopeBtnText.implicitWidth + 20
+                                    radius: 6
+                                    color: isCur ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : (scopeMa.containsMouse ? "#21262d" : "#0d1117")
+                                    border.color: isCur ? "#1f6feb" : (scopeMa.containsMouse ? "#58a6ff" : "#30363d")
+                                    border.width: isCur ? 2 : 1
+
+                                    Text {
+                                        id: scopeBtnText
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: parent.isCur ? Font.Bold : Font.Normal
+                                        color: parent.isCur ? "#58a6ff" : "#c9d1d9"
+                                    }
+
+                                    MouseArea {
+                                        id: scopeMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.setAutoSyncScope(modelData.mode);
+                                                root.bannerMsg = "Auto-sync scope updated.";
+                                                root.bannerType = "success";
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+                        }
+                    }
+
+                    // Live Status & Quick Action Row
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 40
+                        radius: 6
+                        color: "#0d1117"
+                        border.color: "#21262d"
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 12
+
+                            Text {
+                                text: "Live Status:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            Text {
+                                text: backend ? backend.autoSyncStatusText : "N/A"
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: 11
+                                font.weight: Font.Bold
+                                color: backend && backend.autoSyncEnabled ? "#58a6ff" : "#8b949e"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: "Triggering a manual sync automatically resets the countdown timer."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#6e7681"
+                            }
+
+                            Button {
+                                text: "⚡ Trigger Sync Now"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                enabled: backend ? !backend.isBusy : false
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.parent.enabled ? "#ffffff" : "#8b949e"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 26
+                                    implicitWidth: 135
+                                    radius: 4
+                                    color: parent.enabled ? (parent.hovered ? "#1f6feb" : "#238636") : "#21262d"
+                                    border.color: parent.enabled ? "#3fb950" : "#30363d"
+                                }
+                                onClicked: {
+                                    if (backend) {
+                                        backend.triggerAutoSyncNow();
+                                        root.bannerMsg = "Manual synchronization started.";
+                                        root.bannerType = "info";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Agile & Deadline Attribute Configuration Card
             // ==========================================
             Rectangle {

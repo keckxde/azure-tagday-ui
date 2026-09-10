@@ -379,6 +379,84 @@ ApplicationWindow {
                             }
                         }
 
+                        // Auto-Sync Status & Quick Toggle Bar
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 26
+                            radius: 4
+                            color: backend && backend.autoSyncEnabled ? Qt.rgba(31 / 255, 111 / 255, 235 / 255, 0.15) : "#161b22"
+                            border.color: backend && backend.autoSyncEnabled ? "#1f6feb" : "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 6
+
+                                Text {
+                                    text: "⏱️"
+                                    font.pixelSize: 10
+                                }
+
+                                Text {
+                                    text: backend && backend.autoSyncEnabled ? ("Auto: " + backend.nextAutoSyncText) : "Auto-Sync: Off"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: backend && backend.autoSyncEnabled ? "#58a6ff" : "#8b949e"
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Rectangle {
+                                    implicitHeight: 18
+                                    implicitWidth: autoToggleText.implicitWidth + 8
+                                    radius: 3
+                                    color: autoToggleMa.containsMouse ? "#30363d" : (backend && backend.autoSyncEnabled ? "#162b20" : "#21262d")
+                                    border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        id: autoToggleText
+                                        anchors.centerIn: parent
+                                        text: backend && backend.autoSyncEnabled ? "ON" : "OFF"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: backend && backend.autoSyncEnabled ? "#3fb950" : "#6e7681"
+                                    }
+
+                                    MouseArea {
+                                        id: autoToggleMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ToolTip.visible: autoSyncTipMa.containsMouse
+                            ToolTip.text: backend && backend.autoSyncEnabled
+                                ? (backend.autoSyncStatusText + "\nClick to configure in Settings")
+                                : "Scheduled background synchronization is disabled.\nClick to configure in Settings."
+
+                            MouseArea {
+                                id: autoSyncTipMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    window.currentTabIndex = 6; // Go to Settings
+                                }
+                            }
+                        }
+
                         // Primary: Sync All
                         Button {
                             Layout.fillWidth: true
@@ -749,71 +827,6 @@ ApplicationWindow {
                         onCloseRequested: window.isSyncLogDrawerOpen = false
                         onHeightPresetRequested: function(h) {
                             window.syncLogDrawerHeight = Math.max(140, Math.min(Math.round(window.height * 0.85), h));
-                        }
-                    }
-                }
-            }
-
-            // Non-intrusive Floating Background Task Pill (Top Right)
-            // Note: parent Item is mouse-transparent so it cannot block sidebar clicks
-            Rectangle {
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: 16
-                implicitHeight: 36
-                implicitWidth: bgPillLayout.implicitWidth + 24
-                radius: 6
-                color: "#161b22"
-                border.color: "#30363d"
-                border.width: 1
-                visible: backend && backend.isBusy
-                z: 50
-                // Only the pill itself is interactive; never block sidebar
-                enabled: true
-
-                RowLayout {
-                    id: bgPillLayout
-                    anchors.centerIn: parent
-                    spacing: 8
-
-                    BusyIndicator {
-                        running: backend && backend.isBusy
-                        implicitWidth: 16
-                        implicitHeight: 16
-                    }
-
-                    Text {
-                        text: backend ? backend.statusMessage : "Syncing in background..."
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                        color: "#e6edf3"
-                    }
-
-                    Rectangle {
-                        implicitHeight: 22
-                        implicitWidth: pillLogBtnText.implicitWidth + 10
-                        radius: 3
-                        color: pillMa.containsMouse ? "#30363d" : "#21262d"
-                        border.color: "#30363d"
-                        border.width: 1
-
-                        Text {
-                            id: pillLogBtnText
-                            anchors.centerIn: parent
-                            text: "View Log ↗"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 10
-                            font.weight: Font.DemiBold
-                            color: "#58a6ff"
-                        }
-
-                        MouseArea {
-                            id: pillMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: window.isSyncLogDrawerOpen = true
                         }
                     }
                 }

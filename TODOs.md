@@ -2,16 +2,13 @@
 
 ## OPEN
 
-### UI Related
-
-- Allow a scheduled synchronisation, e.g. every 5 minutes, but allow also manual syncs
-- Progress on the sidebar bottom is sufficient, no need for information top right
-
 ### Performance improvements
 
 - The initial load of some pages takes very long, e.g. when loading all projects or when using the search functionality, can you improve the performance?
 
 ## DONE
+
+- Scheduled Background Synchronization & Sidebar Progress Streamlining: Added configurable scheduled background synchronization (with preset intervals for 1, 2, 5, 10, 15, 30, and 60 minutes, configurable sync scopes for Full Sync / Work Items / Pull Requests, and live countdown timer) powered by a non-blocking `QTimer` in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py). Manual syncs continue to work seamlessly at any time and automatically reset the scheduled countdown so syncs are neatly spaced. Configured settings persist across restarts in `user_settings.yaml` and SQLite database `project_config`. Cleaned up the user interface by removing the redundant top-right floating background task pill in [`Main.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/Main.qml), while enhancing the sidebar bottom and DATA SYNC section with live auto-sync badges, animated progress bars, abort buttons, and expandable sync logs.
 
 - Database-First Configuration Architecture & Optional CLI .env Mechanism: Refactored configuration loading across the application to consider the local SQLite database (`project_config` table) and active project user settings as the primary, default source of truth. Removed unconditional module-level `load_dotenv()` execution on import. Environment files (`.env`) are now loaded only when explicitly requested or triggered via CLI flags (`--env-file <path>` or `--load-env`). Configuration resolution in [`GetEnvVariable()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/utils.py) prioritizes active database properties first before falling back to ambient process environment variables, with clean logging that eliminates noisy `.env` file warning prompts.
 
