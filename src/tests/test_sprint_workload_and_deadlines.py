@@ -363,9 +363,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         }
         backend._cache_db = mock_db
         url_wi = backend.get_sprint_taskboard_url(999)
-        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/Alpha%20Team/Sprint-33?workitem=999")
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/Alpha%20Team/Sprint-33?workitem=999")
 
-        # 3b. URL from work item with Project\\sprints\\sprint format (like http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem=5634858)
+        # 3b. URL from work item with Project\\sprints\\sprint format (like http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/sprints/<sprint>?workitem=5634858)
         mock_db.get_work_item.return_value = {
             "id": 5634858,
             "title": "Sprint Task",
@@ -375,7 +375,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         url_sprints_format = backend.get_sprint_taskboard_url(5634858)
         self.assertEqual(
             url_sprints_format,
-            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/sprints/week-2634?workitem=5634858"
+            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/sprints/week-2634?workitem=5634858"
         )
 
         # 4. URL for unplanned work item falling back to current sprint taskboard
@@ -441,7 +441,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             self.assertEqual(wi["area_path"], "MyProject\\AlphaTeam")
             self.assertEqual(
                 wi["tfs_sprint_url"],
-                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/AlphaTeam/MyProject/AlphaTeam/week-2635?workitem=1234"
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/AlphaTeam/AlphaTeam/week-2635?workitem=1234"
             )
         finally:
             if os.path.exists(tmp_db.name):

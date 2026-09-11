@@ -1040,7 +1040,7 @@ Item {
                     }
 
                     Text {
-                        text: "Specify the Team Name that sprint iterations are assigned to. Azure DevOps requires the team name in sprint taskboard URLs (e.g. {server}/{col}/{project}/_sprints/taskboard/{team}/{project}/sprints/{sprint}). If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
+                        text: "Specify the Team Name that sprint iterations are assigned to. Azure DevOps requires the team name in sprint taskboard URLs (e.g. {server}/{col}/{project}/_sprints/taskboard/{team}/sprints/{sprint}). If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 12
                         color: "#8b949e"

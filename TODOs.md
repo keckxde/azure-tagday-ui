@@ -2,7 +2,15 @@
 
 ## OPEN
 
+*(No open items)*
+
 ## DONE
+
+- TFS / Azure DevOps Sprint Taskboard URL Format Fix:
+  - Fixed duplicate project path in sprint URLs: stripped the redundant leading project name segment from `iteration_path` (e.g., `MyProject\sprints\week-2634` now correctly routes to `_sprints/taskboard/<TEAM>/sprints/week-2634?workitem={id}` rather than `_sprints/taskboard/<TEAM>/MyProject/sprints/week-2634?workitem={id}`).
+  - Corrected sprint link construction in both [`DevOpsBackend.get_sprint_taskboard_url()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) and [`DevOpsBackend._enrich_work_items_with_milestones()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+  - Updated documentation in [`SettingsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/SettingsView.qml) and automated unit test suite in [`test_sprint_workload_and_deadlines.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_sprint_workload_and_deadlines.py).
+
 
 - Workload Explorer Horizontal Scrollbar & Fluid Matrix Navigation:
   - **Luminous Interactive Scrollbar Control**: Replaced the unstyled and non-functional standalone scrollbar with a custom-engineered, dark-themed horizontal timeline scrollbar bar featuring high-contrast track styling (`#0d1117`, border `#30363d`), a luminous draggable thumb (`#388bfd`, hovered `#58a6ff`, active `#79c0ff`) with central grip dots proportional to the viewport width, direct linear drag coordinate calculation, and track click jump navigation.
