@@ -84,11 +84,17 @@ def _get_user_settings_candidates():
     return candidates
 
 
+_USER_SETTINGS_CACHE = {"path": None, "mtime": None, "data": {}}
+
 def _load_active_user_settings():
-    """Loads active user settings dict from available candidate config paths."""
+    """Loads active user settings dict from available candidate config paths with mtime caching."""
+    global _USER_SETTINGS_CACHE
     for path in _get_user_settings_candidates():
         if os.path.exists(path):
             try:
+                mtime = os.path.getmtime(path)
+                if _USER_SETTINGS_CACHE["path"] == path and _USER_SETTINGS_CACHE["mtime"] == mtime:
+                    return _USER_SETTINGS_CACHE["data"]
                 if path.endswith(".json"):
                     with open(path, "r", encoding="utf-8") as f:
                         data = json.load(f)
@@ -97,6 +103,7 @@ def _load_active_user_settings():
                     with open(path, "r", encoding="utf-8") as f:
                         data = yaml.safe_load(f)
                 if isinstance(data, dict):
+                    _USER_SETTINGS_CACHE = {"path": path, "mtime": mtime, "data": data}
                     return data
             except Exception:
                 pass
@@ -812,7 +819,11 @@ def extract_work_item_deadline(fields_dict, custom_field=None):
     if not isinstance(fields_dict, dict):
         return "", ""
 
-    cfg_field = (custom_field or get_configured_deadline_field()).strip()
+    if custom_field is not None:
+        cfg_field = str(custom_field).strip()
+    else:
+        cfg_field = get_configured_deadline_field().strip()
+
     if cfg_field and fields_dict.get(cfg_field):
         return str(fields_dict[cfg_field]).strip(), cfg_field
 

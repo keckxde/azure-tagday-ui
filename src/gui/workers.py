@@ -16,7 +16,7 @@ class TaskWorker(QThread):
     """
     progress = Signal(int, str)       # percent (0-100), message
     log_message = Signal(str)         # single line log
-    finished_task = Signal(bool, str) # success, summary message
+    finished_task = Signal(bool, object) # success, summary message or result object
 
     def __init__(self, task_func, *args, **kwargs):
         super().__init__()
@@ -47,8 +47,9 @@ class TaskWorker(QThread):
                 self.log_message.emit("Task was aborted.")
                 self.finished_task.emit(False, "Task aborted by user")
             else:
-                summary = str(result) if result is not None else "Completed successfully"
-                self.log_message.emit(f"Task finished: {summary}")
+                summary = result if result is not None else "Completed successfully"
+                log_summary = summary if isinstance(summary, str) else "Completed successfully"
+                self.log_message.emit(f"Task finished: {log_summary}")
                 self.finished_task.emit(True, summary)
         except Exception as e:
             if self._is_cancelled:
