@@ -809,6 +809,14 @@ class AzureInfoHandler(AzureBaseClient):
             if new_prs_count > 0:
                 has_changes = True
 
+            # 3. Update tag references for this repository
+            try:
+                tags_filtered, _, _ = self._process_tags(project_id, repo_dict, filter_version_tags_format=False)
+                if cache_db and tags_filtered:
+                    cache_db.save_tags(repo_id, tags_filtered)
+            except Exception as tag_err:
+                logger.debug("Could not update tag references for %s during active PR refresh: %s", repo_name, tag_err)
+
         except Exception as e:
             logger.warning("  -- Failed to refresh active PRs for %s: %s", repo_name, e)
         return has_changes
@@ -1119,7 +1127,7 @@ class AzureInfoHandler(AzureBaseClient):
                     pass
 
         proj = project_id or getattr(self, "project_id", "")
-        summary = {"synced": 0, "updated": 0, "new": 0, "errors": 0}
+        summary = {"synced": 0, "updated": 0, "new": 0, "errors": 0, "tags_synced": 0}
         from utils import normalize_pr_status
 
         # Phase 1: Re-check all PRs currently stored in SQLite as active
@@ -1153,7 +1161,7 @@ class AzureInfoHandler(AzureBaseClient):
                 pct = int(5 + (idx / total_active) * 25)
                 _report(pct, f"Reconciling active PRs ({idx + 1}/{total_active})...")
 
-        # Phase 2: Incremental Scan for New PRs across enabled repositories
+        # Phase 2: Incremental Scan for New PRs & Tag References across enabled repositories
         if proj and not _is_cancelled():
             try:
                 repos = self.get_repositories(proj)
@@ -1165,8 +1173,18 @@ class AzureInfoHandler(AzureBaseClient):
                         return summary
 
                     repo_name = repo.get("name", "")
+                    repo_id = repo.get("id", "")
                     pct = int(30 + (idx / total_repos) * 65) if total_repos > 0 else 50
-                    _report(pct, f"Scanning new PRs for repo {repo_name} ({idx + 1}/{total_repos})...")
+                    _report(pct, f"Scanning PRs and tag references for repo {repo_name} ({idx + 1}/{total_repos})...")
+
+                    # Update tag references for repository
+                    try:
+                        tags_filtered, _, _ = self._process_tags(proj, repo, filter_version_tags_format=False)
+                        if cache_db and tags_filtered:
+                            cache_db.save_tags(repo_id, tags_filtered)
+                            summary["tags_synced"] += len(tags_filtered)
+                    except Exception as e:
+                        logger.debug("Could not update tag references for %s during PR sync: %s", repo_name, e)
 
                     new_count = self._fetch_new_prs_incremental(proj, repo, cache_db, cancel_token=cancel_token)
                     summary["new"] += new_count

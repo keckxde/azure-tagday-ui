@@ -277,6 +277,34 @@ class TestFastRepoAndPRSync(unittest.TestCase):
         worker.cancel()
         self.assertTrue(worker.is_cancelled())
 
+    def test_sync_pull_requests_updates_tag_references(self):
+        """
+        Verifies that sync_pull_requests updates tag references in the SQLite database
+        for repositories when updating PRs.
+        """
+        repo = {"id": "repo-tag-1", "name": "RepoWithTags"}
+        self.cache_db.save_repository("ProjA", repo)
+
+        self.handler.get_repositories = MagicMock(return_value=[repo])
+        self.handler.get_repository_refs = MagicMock(return_value=[
+            {"name": "refs/tags/v2026.2.0", "objectId": "tag_commit_hash_12345"}
+        ])
+        self.handler.get_annotated_tag = MagicMock(return_value={
+            "taggedObject": {"objectId": "tag_commit_hash_12345"},
+            "taggedBy": {"name": "Release Bot", "date": "2026-09-10T12:00:00Z"},
+            "message": "Release v2026.2.0"
+        })
+        self.handler._fetch_new_prs_incremental = MagicMock(return_value=1)
+
+        summary = self.handler.sync_pull_requests(self.cache_db, project_id="ProjA")
+
+        self.assertGreaterEqual(summary.get("tags_synced", 0), 1)
+        cached_repo = self.cache_db.get_cached_repository("repo-tag-1", "RepoWithTags")
+        self.assertIsNotNone(cached_repo)
+        self.assertEqual(len(cached_repo["tags"]), 1)
+        self.assertEqual(cached_repo["tags"][0]["FriendlyName"], "v2026.2.0")
+
 
 if __name__ == "__main__":
     unittest.main()
+

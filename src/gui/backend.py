@@ -1898,9 +1898,11 @@ class DevOpsBackend(QObject):
                 progress_callback=_progress_cb,
                 cancel_token=worker.is_cancelled
             )
+            tags_synced = summary.get('tags_synced', 0)
+            tag_msg = f", {tags_synced} tag references updated" if tags_synced > 0 else ""
             worker.log_message.emit(
                 f"PR sync complete: {summary.get('synced', 0)} verified, "
-                f"{summary.get('updated', 0)} status updated, {summary.get('new', 0)} new, {summary.get('errors', 0)} errors"
+                f"{summary.get('updated', 0)} status updated, {summary.get('new', 0)} new{tag_msg}, {summary.get('errors', 0)} errors"
             )
             return summary
 
