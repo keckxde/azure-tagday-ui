@@ -26,7 +26,7 @@ Item {
     // Horizontal Matrix Scrolling Properties
     property real matrixContentX: 0
     property int matrixSprintCount: root.matrixData && root.matrixData.sprint_columns ? root.matrixData.sprint_columns.length : 0
-    property real minSprintColWidth: 120
+    property real minSprintColWidth: 175
     property real teamMemberColWidth: 180
     property real totalColWidth: 80
     property int matrixRowHeight: 72
@@ -309,8 +309,14 @@ Item {
     }
 
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 20
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: detailDrawer.visible ? detailDrawer.left : parent.right
+        anchors.leftMargin: 20
+        anchors.topMargin: 20
+        anchors.bottomMargin: 20
+        anchors.rightMargin: detailDrawer.visible ? 12 : 20
         spacing: 16
 
         // ====================== Top Header & Controls ======================
@@ -1365,6 +1371,21 @@ Item {
                                 Layout.fillHeight: true
                                 clip: true
 
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                    onWheel: function(wheel) {
+                                        if (wheel.angleDelta.x !== 0) {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.x));
+                                            wheel.accepted = true;
+                                        } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.y !== 0) {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.y));
+                                            wheel.accepted = true;
+                                        }
+                                    }
+                                }
+
                                 Row {
                                     id: sprintHeaderRow
                                     x: -root.matrixContentX
@@ -1831,6 +1852,17 @@ Item {
                                                                 root.selectedCell = root.formatCellObject(modelData);
                                                             }
                                                         }
+                                                        onWheel: function(wheel) {
+                                                            if (wheel.angleDelta.x !== 0) {
+                                                                root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.x));
+                                                                wheel.accepted = true;
+                                                            } else if (wheel.modifiers & Qt.ShiftModifier) {
+                                                                root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.y));
+                                                                wheel.accepted = true;
+                                                            } else {
+                                                                wheel.accepted = false;
+                                                            }
+                                                        }
                                                     }
 
                                                     ToolTip.visible: cellMa.containsMouse && hasItems
@@ -1928,6 +1960,21 @@ Item {
                                 Layout.fillHeight: true
                                 clip: true
 
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                    onWheel: function(wheel) {
+                                        if (wheel.angleDelta.x !== 0) {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.x));
+                                            wheel.accepted = true;
+                                        } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.y !== 0) {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.y));
+                                            wheel.accepted = true;
+                                        }
+                                    }
+                                }
+
                                 Row {
                                     x: -root.matrixContentX
                                     height: parent.height
@@ -1993,12 +2040,15 @@ Item {
 
                     // ---- Horizontal Matrix ScrollBar Control Bar ----
                     Rectangle {
+                        id: matrixScrollBarBar
                         Layout.fillWidth: true
-                        height: root.maxMatrixScrollX > 0 ? 22 : 0
+                        height: root.maxMatrixScrollX > 0 ? 30 : 0
                         visible: root.maxMatrixScrollX > 0
                         color: "#161b22"
                         border.color: "#30363d"
                         border.width: 1
+
+                        Behavior on height { NumberAnimation { duration: 120 } }
 
                         RowLayout {
                             anchors.fill: parent
@@ -2011,12 +2061,27 @@ Item {
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 12
+                                    anchors.rightMargin: 8
                                     spacing: 6
                                     Text {
-                                        text: "◀ Sprints Viewport ▶"
+                                        text: "◀ Sprints Timeline Viewport ▶"
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
+                                        font.weight: Font.DemiBold
                                         color: "#8b949e"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    // Step 1 Sprint Left Button
+                                    Button {
+                                        text: "◀"
+                                        font.pixelSize: 10
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Scroll 1 sprint left"
+                                        contentItem: Text { text: parent.text; font: parent.font; color: parent.hovered ? "#58a6ff" : "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        background: Rectangle { implicitWidth: 20; implicitHeight: 18; radius: 3; color: parent.hovered ? "#21262d" : "transparent"; border.color: parent.hovered ? "#30363d" : "transparent" }
+                                        onClicked: {
+                                            root.matrixContentX = Math.max(0, root.matrixContentX - root.sprintColWidth);
+                                        }
                                     }
                                 }
                                 Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: "#30363d" }
@@ -2024,21 +2089,112 @@ Item {
 
                             // Middle horizontal scrollbar
                             Item {
+                                id: scrollTrackContainer
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
 
-                                ScrollBar {
-                                    id: matrixHorizontalScrollBar
-                                    anchors.fill: parent
-                                    anchors.margins: 2
-                                    orientation: Qt.Horizontal
-                                    policy: ScrollBar.AlwaysOn
-                                    size: Math.min(1.0, root.sprintViewportWidth / Math.max(1, root.totalSprintContentWidth))
-                                    position: root.maxMatrixScrollX > 0 ? (root.matrixContentX / root.totalSprintContentWidth) : 0
+                                // Track background
+                                Rectangle {
+                                    id: scrollTrack
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: 10
+                                    radius: 5
+                                    color: "#0d1117"
+                                    border.color: scrollTrackMa.containsMouse ? "#58a6ff" : "#30363d"
+                                    border.width: 1
 
-                                    onPositionChanged: {
-                                        if (pressed) {
-                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, position * root.totalSprintContentWidth));
+                                    // Draggable Scrollbar Thumb
+                                    Rectangle {
+                                        id: scrollThumb
+                                        height: 8
+                                        radius: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        width: {
+                                            if (root.totalSprintContentWidth <= 0 || root.sprintViewportWidth <= 0) return 40;
+                                            var ratio = root.sprintViewportWidth / root.totalSprintContentWidth;
+                                            return Math.max(36, Math.min(scrollTrack.width - 2, (scrollTrack.width - 2) * ratio));
+                                        }
+
+                                        x: {
+                                            if (root.maxMatrixScrollX <= 0) return 1;
+                                            var maxThumbX = scrollTrack.width - scrollThumb.width - 2;
+                                            if (maxThumbX <= 0) return 1;
+                                            var scrollRatio = root.matrixContentX / root.maxMatrixScrollX;
+                                            return Math.max(1, Math.min(maxThumbX, 1 + scrollRatio * maxThumbX));
+                                        }
+
+                                        color: scrollThumbMa.pressed ? "#79c0ff" : (scrollThumbMa.hovered || scrollTrackMa.containsMouse ? "#58a6ff" : "#388bfd")
+
+                                        // Central grip dots on thumb
+                                        Row {
+                                            anchors.centerIn: parent
+                                            spacing: 2
+                                            visible: scrollThumb.width > 50
+                                            Rectangle { width: 2; height: 4; radius: 1; color: "#ffffff"; opacity: 0.8 }
+                                            Rectangle { width: 2; height: 4; radius: 1; color: "#ffffff"; opacity: 0.8 }
+                                            Rectangle { width: 2; height: 4; radius: 1; color: "#ffffff"; opacity: 0.8 }
+                                        }
+
+                                        MouseArea {
+                                            id: scrollThumbMa
+                                            anchors.fill: parent
+                                            anchors.margins: -4
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            preventStealing: true
+
+                                            property real startMouseX: 0
+                                            property real startContentX: 0
+
+                                            onPressed: function(mouse) {
+                                                startMouseX = mouse.x;
+                                                startContentX = root.matrixContentX;
+                                            }
+
+                                            onPositionChanged: function(mouse) {
+                                                if (pressed) {
+                                                    var deltaMouse = mouse.x - startMouseX;
+                                                    var maxThumbX = scrollTrack.width - scrollThumb.width - 2;
+                                                    if (maxThumbX > 0) {
+                                                        var deltaContent = (deltaMouse / maxThumbX) * root.maxMatrixScrollX;
+                                                        root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, startContentX + deltaContent));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Track Click MouseArea for jump navigation
+                                    MouseArea {
+                                        id: scrollTrackMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        z: -1
+
+                                        onPressed: function(mouse) {
+                                            var clickX = mouse.x;
+                                            var maxThumbX = scrollTrack.width - scrollThumb.width - 2;
+                                            if (maxThumbX > 0) {
+                                                var targetThumbX = clickX - (scrollThumb.width / 2);
+                                                var ratio = Math.max(0, Math.min(1.0, targetThumbX / maxThumbX));
+                                                root.matrixContentX = ratio * root.maxMatrixScrollX;
+                                            }
+                                        }
+
+                                        onWheel: function(wheel) {
+                                            if (wheel.angleDelta.x !== 0) {
+                                                root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.x));
+                                                wheel.accepted = true;
+                                            } else if (wheel.angleDelta.y !== 0) {
+                                                root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX - wheel.angleDelta.y));
+                                                wheel.accepted = true;
+                                            }
                                         }
                                     }
                                 }
@@ -2048,6 +2204,40 @@ Item {
                             Item {
                                 Layout.preferredWidth: root.totalColWidth
                                 Layout.fillHeight: true
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 8
+                                    spacing: 4
+
+                                    // Step 1 Sprint Right Button
+                                    Button {
+                                        text: "▶"
+                                        font.pixelSize: 10
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Scroll 1 sprint right"
+                                        contentItem: Text { text: parent.text; font: parent.font; color: parent.hovered ? "#58a6ff" : "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                        background: Rectangle { implicitWidth: 20; implicitHeight: 18; radius: 3; color: parent.hovered ? "#21262d" : "transparent"; border.color: parent.hovered ? "#30363d" : "transparent" }
+                                        onClicked: {
+                                            root.matrixContentX = Math.max(0, Math.min(root.maxMatrixScrollX, root.matrixContentX + root.sprintColWidth));
+                                        }
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Text {
+                                        text: {
+                                            if (root.maxMatrixScrollX <= 0) return "";
+                                            var pct = Math.round((root.matrixContentX / root.maxMatrixScrollX) * 100);
+                                            return pct + "%";
+                                        }
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        font.weight: Font.DemiBold
+                                        color: "#8b949e"
+                                    }
+                                }
                             }
                         }
                     }

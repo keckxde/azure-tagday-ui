@@ -4,6 +4,13 @@
 
 ## DONE
 
+- Workload Explorer Horizontal Scrollbar & Fluid Matrix Navigation:
+  - **Luminous Interactive Scrollbar Control**: Replaced the unstyled and non-functional standalone scrollbar with a custom-engineered, dark-themed horizontal timeline scrollbar bar featuring high-contrast track styling (`#0d1117`, border `#30363d`), a luminous draggable thumb (`#388bfd`, hovered `#58a6ff`, active `#79c0ff`) with central grip dots proportional to the viewport width, direct linear drag coordinate calculation, and track click jump navigation.
+  - **1-Click Sprint Step Buttons & Position Indicator**: Added dedicated `◀` and `▶` step buttons to quickly jump sprint-by-sprint across the timeline, accompanied by a live percentage indicator reflecting exact timeline viewport scroll position.
+  - **Dynamic Detail Drawer Layout Anchoring**: Updated the root `ColumnLayout` anchors to automatically resize when the drilldown details drawer is opened or dragged, preventing the drawer from overlapping sprint/total columns and triggering horizontal scrolling naturally.
+  - **Multi-Surface Mouse Wheel & Trackpad Scrolling**: Enabled fluid horizontal timeline scrolling (via horizontal wheel, trackpad gesture, or Shift+Vertical Wheel) across column headers, table rows, individual sprint cells, and the column totals footer without event blocking.
+  - **Legible Sprint Column Widths**: Set a comfortable minimum sprint column width of 175px (up from 120px) to ensure sprint dates, active week tags, milestone chips, and item breakdown pills remain clear and unclipped across horizons (4, 8, 12 weeks).
+
 - Workload Viewer Timeline & Current Date at a Glance:
   - **Live Today & Current Week Indicator**: Added an active timeline status card in [`WorkloadExplorerView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/WorkloadExplorerView.qml) displaying the current calendar date (`Today: Thu, Sep 10, 2026`) and ISO current sprint (`⚡ week-2637`) with a pulsating live status beacon.
   - **1-Click "Focus Current Week" Navigation**: Added a quick navigation action that automatically resets historic lookbacks and centers the horizontal matrix timeline scroll directly on the active sprint column.
