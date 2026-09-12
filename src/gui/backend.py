@@ -1493,14 +1493,13 @@ class DevOpsBackend(QObject):
                     and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
                     and sprint_leaf.lower() != tfs_proj.lower()
                 )
-                # Strip leading project name from iteration subpath parts
-                rel_ip_parts = ip_parts[1:] if (ip_parts and ip_parts[0].lower() == tfs_proj.lower() and len(ip_parts) > 1) else ip_parts
-                if has_sprint and rel_ip_parts:
-                    encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in rel_ip_parts)
+                # Keep full project-prefixed iteration path parts
+                full_ip_parts = ip_parts if (ip_parts and ip_parts[0].lower() == tfs_proj.lower()) else ([tfs_proj] + ip_parts if ip_parts else [])
+                if has_sprint and full_ip_parts:
+                    encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in full_ip_parts)
                     tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}/{encoded_sprint_path}?workitem={wi_id}"
                 elif has_sprint and sprint_leaf:
-                    encoded_sprint = urllib.parse.quote(sprint_leaf, safe="")
-                    tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}/{encoded_sprint}?workitem={wi_id}"
+                    tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}/{urllib.parse.quote(tfs_proj, safe='')}/{urllib.parse.quote(sprint_leaf, safe='')}?workitem={wi_id}"
                 else:
                     tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}?workitem={wi_id}"
             else:
@@ -3341,14 +3340,14 @@ class DevOpsBackend(QObject):
                             i_parts = [p for p in ipath.replace("\\", "/").strip("/").split("/") if p]
                             if i_parts:
                                 sprint_leaf = i_parts[-1]
-                                iteration_subpath_parts = i_parts[1:] if (i_parts[0].lower() == proj.lower() and len(i_parts) > 1) else i_parts
+                                iteration_subpath_parts = i_parts if i_parts[0].lower() == proj.lower() else [proj] + i_parts
                             if not extracted_team and len(i_parts) >= 3 and i_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
                                 extracted_team = i_parts[1]
             except (ValueError, TypeError):
                 t_parts = [p for p in str(target).replace("\\", "/").strip("/").split("/") if p]
                 if t_parts:
                     sprint_leaf = t_parts[-1]
-                    iteration_subpath_parts = t_parts[1:] if (t_parts[0].lower() == proj.lower() and len(t_parts) > 1) else t_parts
+                    iteration_subpath_parts = t_parts if t_parts[0].lower() == proj.lower() else [proj] + t_parts
                 if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower() and t_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
                     extracted_team = t_parts[1]
 
@@ -3357,7 +3356,7 @@ class DevOpsBackend(QObject):
             if s_parts:
                 sprint_leaf = s_parts[-1]
                 if not iteration_subpath_parts:
-                    iteration_subpath_parts = s_parts[1:] if (s_parts[0].lower() == proj.lower() and len(s_parts) > 1) else s_parts
+                    iteration_subpath_parts = s_parts if s_parts[0].lower() == proj.lower() else [proj] + s_parts
             if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team and s_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
                 extracted_team = s_parts[1]
 
@@ -3377,7 +3376,7 @@ class DevOpsBackend(QObject):
             encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in iteration_subpath_parts)
             base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{encoded_sprint_path}"
         elif has_specific_sprint and sprint_leaf:
-            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{urllib.parse.quote(sprint_leaf, safe='')}"
+            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{urllib.parse.quote(proj, safe='')}/{urllib.parse.quote(sprint_leaf, safe='')}"
         else:
             base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}"
 

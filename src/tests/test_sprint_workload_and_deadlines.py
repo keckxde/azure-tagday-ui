@@ -346,12 +346,12 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
 
         # 1. URL from sprint name (default team: "MyProject Team")
         url_sprint = backend.get_sprint_taskboard_url("week-2634")
-        self.assertEqual(url_sprint, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team/week-2634")
+        self.assertEqual(url_sprint, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team/MyProject/week-2634")
 
         # 2. URL with spaces in sprint name and custom configured team
         backend._tfs_team_name = "Core Dev Team"
         url_space = backend.get_sprint_taskboard_url("Sprint 2026.1")
-        self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Core%20Dev%20Team/Sprint%202026.1")
+        self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Core%20Dev%20Team/MyProject/Sprint%202026.1")
 
         # 3. URL from work item in cache DB with team in iteration path (includes ?workitem=ID)
         backend._tfs_team_name = ""
@@ -363,9 +363,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         }
         backend._cache_db = mock_db
         url_wi = backend.get_sprint_taskboard_url(999)
-        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/Alpha%20Team/Sprint-33?workitem=999")
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/Alpha%20Team/Sprint-33?workitem=999")
 
-        # 3b. URL from work item with Project\\sprints\\sprint format (like http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/sprints/<sprint>?workitem=5634858)
+        # 3b. URL from work item with Project\\sprints\\sprint format (like http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem=5634858)
         mock_db.get_work_item.return_value = {
             "id": 5634858,
             "title": "Sprint Task",
@@ -375,7 +375,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         url_sprints_format = backend.get_sprint_taskboard_url(5634858)
         self.assertEqual(
             url_sprints_format,
-            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/sprints/week-2634?workitem=5634858"
+            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/sprints/week-2634?workitem=5634858"
         )
 
         # 4. URL for unplanned work item falling back to current sprint taskboard
@@ -392,7 +392,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         backend._tfs_team_name = "Alpha Team"
         with patch.object(backend, "open_url") as mock_open:
             backend.open_sprint_in_browser("week-2634")
-            mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/week-2634")
+            mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/week-2634")
 
     def test_work_items_payload_team_and_sprint_url(self):
         from src.gui.backend import DevOpsBackend
@@ -441,7 +441,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             self.assertEqual(wi["area_path"], "MyProject\\AlphaTeam")
             self.assertEqual(
                 wi["tfs_sprint_url"],
-                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/AlphaTeam/AlphaTeam/week-2635?workitem=1234"
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/AlphaTeam/MyProject/AlphaTeam/week-2635?workitem=1234"
             )
         finally:
             if os.path.exists(tmp_db.name):
