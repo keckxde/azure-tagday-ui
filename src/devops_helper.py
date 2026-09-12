@@ -950,15 +950,18 @@ def generate_tagday_report(db_path: Optional[str] = None, output_path: Optional[
     )
 
 
-def generate_artifacts_report() -> bool:
+def generate_artifacts_report(db_path: Optional[str] = None, md_path: Optional[str] = None, csv_path: Optional[str] = None) -> bool:
     """
     Standardized entrypoint to generate Build Artifact & Disk Space Markdown and CSV reports.
     Defaults to configured BASE_FOLDER, AZURE_PROJECT_ID, BUILD_ARTIFACTS_MD, and BUILD_ARTIFACTS_CSV.
     """
     import generate_artifacts_report
-    db_path, _ = _getDBCacheHandler()
-    md_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_MD)
-    csv_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_CSV)
+    if not db_path:
+        db_path, _ = _getDBCacheHandler()
+    if not md_path:
+        md_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_MD)
+    if not csv_path:
+        csv_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_CSV)
     return generate_artifacts_report.run_reports(
         db_path=db_path,
         md_path=md_path,
@@ -972,9 +975,12 @@ def generate_revision_report(db_path: Optional[str] = None, revision_md_path: Op
     Defaults to configured BASE_FOLDER, AZURE_PROJECT_ID, and REVISION_FILE_MD.
     """
     import generate_revision
-    db_path, _ = _getDBCacheHandler()
-    revision_md_path = os.path.join(BASE_FOLDER, REVISION_FILE_MD)
+    if not db_path:
+        db_path, _ = _getDBCacheHandler()
+    if not revision_md_path:
+        revision_md_path = os.path.join(BASE_FOLDER, REVISION_FILE_MD)
     return generate_revision.generate_revision_md(db_path, revision_md_path)
+
 
 
 if __name__ == "__main__":

@@ -2,10 +2,16 @@
 
 ## OPEN
 
-- url of tfs sprints still wrong
-- Generate Revision.md / Revision.docx does not generate a file, or at least not in the folder it is supposed to
 
 ## DONE
+
+- Release Notes & Multi-Package Revision Document Generation (`REVISION.md` & `REVISION.docx`):
+  - **Generation from Scratch & Missing File Handling**: Fixed [`generate_revision.generate_revision_md()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_revision.py) which previously aborted with an error if `REVISION.md` did not already exist on disk. Now initializes a clean release history header and overview table from database cache if creating from scratch or if target files are missing.
+  - **Automatic Directory Creation**: Added `os.makedirs` for both Markdown and Word `.docx` target directories prior to saving, supporting arbitrary output paths and nested folders (`doc/04_Development/REVISION.md` or configured root).
+  - **Parameter Routing in Helper & GUI**: Corrected [`devops_helper.generate_revision_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) and [`devops_helper.generate_artifacts_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) to honor explicit `db_path`, `revision_md_path`, `md_path`, and `csv_path` arguments passed from [`DevOpsBackend.generate_revision_report_async()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+  - **Tagless Repository Resilience**: Eliminated potential `UnboundLocalError` when processing repositories with 0 tags in cache.
+  - **Automated Test Coverage**: Added comprehensive test cases in [`test_generate_revision.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_generate_revision.py) verifying initial generation from scratch, nested directory creation, tagless repos, and historical cutoff row preservation.
+
 
 - TFS / Azure DevOps Sprint Taskboard URL Format Fix:
   - Fixed duplicate project path in sprint URLs: stripped the redundant leading project name segment from `iteration_path` (e.g., `MyProject\sprints\week-2634` now correctly routes to `_sprints/taskboard/<TEAM>/sprints/week-2634?workitem={id}` rather than `_sprints/taskboard/<TEAM>/MyProject/sprints/week-2634?workitem={id}`).

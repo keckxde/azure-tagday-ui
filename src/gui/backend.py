@@ -2038,7 +2038,7 @@ class DevOpsBackend(QObject):
                 db_path=self._db_path,
                 revision_md_path=revision_md_path
             )
-            if success is False:
+            if not success:
                 raise RuntimeError("Revision report generation returned failure")
             worker.log_message.emit(f"Release Notes updated successfully: {revision_md_path}")
             return "Release Notes generated successfully"
@@ -2052,7 +2052,7 @@ class DevOpsBackend(QObject):
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
-            self.logMessage.emit(f"File does not exist: {path}")
+            self.logMessage.emit(f"File does not exist: {path}. Please click 'Generate Release Notes' first.")
 
     @Slot()
     def open_revision_docx(self):
@@ -2062,7 +2062,8 @@ class DevOpsBackend(QObject):
         if os.path.exists(docx_path):
             self.open_path_in_explorer(docx_path)
         else:
-            self.logMessage.emit(f"File does not exist: {docx_path}")
+            self.logMessage.emit(f"File does not exist: {docx_path}. Please click 'Generate Release Notes' first.")
+
 
     @Slot()
     def open_tagday_file(self):
