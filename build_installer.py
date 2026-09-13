@@ -69,6 +69,22 @@ def main():
 
     logger.info(f"Target build version: {app_version}")
 
+    # Clean old build artifacts from dist/
+    dist_dir = os.path.join(root_dir, "dist")
+    if os.path.exists(dist_dir):
+        logger.info("Cleaning previous build artifacts from dist/...")
+        for item in os.listdir(dist_dir):
+            if item == ".gitignore":
+                continue
+            item_path = os.path.join(dist_dir, item)
+            try:
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+            except Exception as e:
+                logger.warning(f"Could not remove old artifact {item}: {e}")
+
     # 1. Build PyInstaller distribution
     spec_file = os.path.join(root_dir, "azure-tagday-ui.spec")
     if not os.path.exists(spec_file):
