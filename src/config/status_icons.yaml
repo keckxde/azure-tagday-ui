@@ -1,0 +1,21 @@
+# ==============================================================================
+# Status Icons & Badges Configuration for Documentation and Reports
+# ==============================================================================
+
+# Build execution result labels and icons (Azure DevOps / TFS build definitions)
+build_status:
+  succeeded: ":octicons-check-circle-16:{ .green } Succeeded"
+  failed: ":octicons-x-circle-16:{ .red } Failed"
+  partiallySucceeded: ":octicons-alert-16:{ .yellow } Partially Succeeded"
+  canceled: ":octicons-circle-slash-16:{ .grey } Canceled"
+
+# Published build artifact status badges
+artifact_status:
+  active: ":octicons-package-16: { .green } Active"
+  deleted: ":material-delete-empty: { .red } Deleted"
+
+# Tag Day release overview badges and icons
+tagday_status:
+  completed_pr: ":octicons-check-circle-16:"
+  active_pr: ":octicons-git-pull-request-16:"
+  unmerged_branch: ":octicons-git-branch-16:"

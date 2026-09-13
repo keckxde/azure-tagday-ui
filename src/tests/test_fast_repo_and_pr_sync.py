@@ -304,6 +304,53 @@ class TestFastRepoAndPRSync(unittest.TestCase):
         self.assertEqual(len(cached_repo["tags"]), 1)
         self.assertEqual(cached_repo["tags"][0]["FriendlyName"], "v2026.2.0")
 
+    def test_process_tags_lightweight_tag_commit_fallback(self):
+        """
+        Verifies that lightweight tags (where get_annotated_tag returns None)
+        fall back to get_commit to populate CommitDate, Committer, and CommitId.
+        """
+        repo = {"id": "repo-lw-1", "name": "LightweightRepo"}
+        self.handler.get_repository_refs = MagicMock(return_value=[
+            {"name": "refs/tags/v01.00.2616", "objectId": "commit_sha_abcdef12345"}
+        ])
+        self.handler.get_annotated_tag = MagicMock(return_value=None)
+        self.handler.get_commit = MagicMock(return_value={
+            "committer": {"name": "Alice Developer", "date": "2026-04-17T09:25:29Z"},
+            "comment": "Release v1.00.2616 merge commit"
+        })
+
+        tags_filtered, stable, unstable = self.handler._process_tags("ProjA", repo, filter_version_tags_format=False)
+
+        self.assertEqual(len(tags_filtered), 1)
+        tag = tags_filtered[0]
+        self.assertEqual(tag["FriendlyName"], "v01.00.2616")
+        self.assertEqual(tag["CommitId"], "commit_")
+        self.assertEqual(tag["Committer"], "Alice Developer")
+        self.assertEqual(tag["CommitDate"], "2026-04-17 09:25:29")
+        self.assertTrue(tag["stable"])
+        self.assertEqual(stable, "v01.00.2616")
+
+    def test_process_tags_preserves_all_tags_without_10_cutoff(self):
+        """
+        Verifies that repositories with more than 10 tags preserve the entire tag history.
+        """
+        repo = {"id": "repo-many-tags", "name": "ManyTagsRepo"}
+        raw_tags = [
+            {"name": f"refs/tags/v01.{i:02d}.26{i:02d}", "objectId": f"hash_{i:04d}"}
+            for i in range(15)
+        ]
+        self.handler.get_repository_refs = MagicMock(return_value=raw_tags)
+        self.handler.get_annotated_tag = MagicMock(return_value=None)
+        self.handler.get_commit = MagicMock(return_value={
+            "committer": {"name": "Dev", "date": "2026-01-01T00:00:00Z"},
+            "comment": "Tag release"
+        })
+
+        tags_filtered, _, _ = self.handler._process_tags("ProjA", repo, filter_version_tags_format=False)
+
+        # Should preserve all 15 tags, not truncate to 10
+        self.assertEqual(len(tags_filtered), 15)
+
 
 if __name__ == "__main__":
     unittest.main()

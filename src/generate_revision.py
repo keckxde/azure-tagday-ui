@@ -6,6 +6,8 @@ import json
 import logging
 from datetime import datetime
 
+import utils
+
 try:
     from devops_helper import (
         patch_pr_title_for_release_notes,
@@ -15,7 +17,6 @@ try:
     )
 except ImportError:
     patch_pr_title_for_release_notes = None
-    import utils
     BASE_FOLDER = utils.GetEnvVariable("BASE_FOLDER", os.getcwd())
     AZURE_PROJECT_ID = utils.GetEnvVariable("AZURE_PROJECT_ID")
     REVISION_FILE_MD = utils.GetEnvVariable("REVISION_FILE_MD", "doc/04_Development/REVISION.md")
@@ -181,7 +182,38 @@ def generate_revision_md(db_path, revision_md_path):
         unstable_tags = []
         superinstaller_tags = []
         for trow in tags_rows:
-            tag_date = safe_iso_parse(trow["commit_date"]) or datetime.min
+            tag_date = safe_iso_parse(trow["commit_date"])
+            if not tag_date:
+                if trow.get("raw_json"):
+                    try:
+                        meta = json.loads(trow["raw_json"])
+                        c_date = (meta.get("addinfo") or {}).get("taggedBy", {}).get("date") or meta.get("CommitDate")
+                        if c_date:
+                            tag_date = safe_iso_parse(c_date)
+                    except Exception:
+                        pass
+            if not tag_date:
+                sy, sw, _ = utils.parse_sprint_week(trow["name"])
+                if not (sy and sw):
+                    sem = utils.parse_semver_tuple(trow["name"])
+                    if sem != (0, 0, 0):
+                        patch = sem[2]
+                        if 2000 <= patch <= 3000:
+                            yy = patch // 100
+                            ww = patch % 100
+                            if 20 <= yy <= 99 and 1 <= ww <= 53:
+                                sy = 2000 + yy
+                                sw = ww
+                if sy and sw:
+                    try:
+                        from datetime import date
+                        sunday = date.fromisocalendar(sy, sw, 7).strftime("%Y-%m-%d")
+                        tag_date = safe_iso_parse(f"{sunday} 23:59:59")
+                    except Exception:
+                        pass
+            if not tag_date:
+                tag_date = datetime.min
+
             name = trow["name"]
             t_obj = {
                 "name": name,
@@ -231,16 +263,20 @@ def generate_revision_md(db_path, revision_md_path):
 
         # Group PRs under tags chronologically
         tag_groups = []
-        sorted_tags = sorted(tags, key=lambda x: x["date"], reverse=True)
+        sorted_tags = sorted(tags, key=lambda x: (x["date"], utils.parse_semver_tuple(x["name"])), reverse=True)
         claimed_pr_ids = set()
 
         for idx, tag in enumerate(sorted_tags):
             group_prs = []
             next_older_date = sorted_tags[idx+1]["date"] if idx+1 < len(sorted_tags) else datetime.min
+            tag_semver = utils.parse_semver_tuple(tag["name"])
 
             for pr in prs:
                 if pr["id"] not in claimed_pr_ids and pr["date"]:
-                    if pr["commit_id"] == tag["commit_id"]:
+                    if pr["commit_id"] and tag["commit_id"] and pr["commit_id"] == tag["commit_id"]:
+                        group_prs.append(pr)
+                        claimed_pr_ids.add(pr["id"])
+                    elif tag_semver != (0, 0, 0) and utils.parse_semver_tuple(pr.get("title", "")) == tag_semver:
                         group_prs.append(pr)
                         claimed_pr_ids.add(pr["id"])
                     elif next_older_date < pr["date"] <= tag["date"]:

@@ -1,5 +1,8 @@
 include README.md
 include LICENSE*
+include pyproject.toml
 recursive-include src/gui/qml *.qml
+recursive-include src/templates *.tmpl
+recursive-include src/config *.yaml *.yml *.json
 recursive-include templates *.tmpl
-recursive-include config *.yaml
+recursive-include config *.yaml *.yml *.json

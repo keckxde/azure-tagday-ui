@@ -1,35 +1,67 @@
 [project]
 name = "azure-tagday-ui"
-version = "0.1.0"
-requires-python = ">=3.14"
+version = "1.6.0"
+description = "Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and Tag Day Automation Platform"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "keckx" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: X11 Applications :: Qt",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Office/Business :: Groupware",
+]
 dependencies = [
-    "jinja2>=3.1.6",
-    "pyside6>=6.11.2",
-    "python-docx>=1.2.0",
-    "python-dotenv>=1.2.3",
-    "pyyaml>=6.0.3",
+    "jinja2>=3.1.2",
+    "pyside6>=6.5.0",
+    "python-docx>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.scripts]
-gui = "gui.main:main"
+azure-tagday-ui = "gui.main:main"
 tagday-gui = "gui.main:main"
+gui = "gui.main:main"
+tagday = "devops_helper:main_cli"
+devops-helper = "devops_helper:main_cli"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.package-dir]
-"" = "src"
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "devops_helper",
+    "utils",
+    "generate_artifacts_report",
+    "generate_rescheduling_report",
+    "generate_revision",
+    "generate_sprint_report",
+    "generate_tagday_report",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["azure*", "gui*", "config*", "templates*"]
 
 [tool.setuptools.package-data]
 "gui" = ["qml/*.qml", "qml/**/*.qml"]
+"config" = ["*.yaml", "*.yml", "*.json"]
+"templates" = ["*.tmpl"]
+"*" = ["*.qml", "*.yaml", "*.yml", "*.tmpl"]
 
 [dependency-groups]
 dev = [
-    "pyinstaller>=6.22.2",
+    "pyinstaller>=6.0.0",
+    "pytest>=7.0.0",
+    "build>=1.0.0",
+    "wheel>=0.40.0",
 ]
 
 [tool.pytest.ini_options]

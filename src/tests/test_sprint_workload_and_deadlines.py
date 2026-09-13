@@ -340,6 +340,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
 
         backend = DevOpsBackend()
         backend._tfs_team_name = ""
+        backend._sprint_url_template = ""
         devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"
         devops_helper.AZURE_COLLECTION = "DefaultCollection"
         devops_helper.AZURE_PROJECT_ID = "MyProject"
@@ -394,6 +395,74 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             backend.open_sprint_in_browser("week-2634")
             mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/week-2634")
 
+    def test_custom_sprint_url_templates_and_presets(self):
+        from src.gui.backend import DevOpsBackend
+        from unittest.mock import MagicMock, patch
+        import devops_helper
+
+        with patch("src.gui.backend._save_user_settings"), patch("src.gui.backend._load_user_settings", return_value={}):
+            backend = DevOpsBackend()
+            backend._tfs_team_name = "Alpha Team"
+            backend._sprint_url_template = ""
+            devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"
+            devops_helper.AZURE_COLLECTION = "DefaultCollection"
+            devops_helper.AZURE_PROJECT_ID = "MyProject"
+
+            mock_db = MagicMock()
+            mock_db.get_work_item.return_value = {
+                "id": 5634858,
+                "title": "Sprint Task",
+                "iteration_path": "MyProject\\sprints\\week-2634",
+                "area_path": "MyProject\\Alpha Team",
+            }
+            backend._cache_db = mock_db
+
+            # 1. Preset: Team Sprints Leaf
+            preset_leaf = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}"
+            backend.setSprintUrlTemplate(preset_leaf)
+            self.assertEqual(backend.sprintUrlTemplate, preset_leaf)
+
+            url_leaf = backend.get_sprint_taskboard_url(5634858)
+            self.assertEqual(
+                url_leaf,
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/sprints/week-2634?workitem=5634858"
+            )
+
+            # 2. Preset: TFS Boards Iteration Taskboard
+            preset_boards = "{base_url}/{collection}/{project}/{team}/_boards/iteration/taskboard/{iteration_leaf}"
+            backend.setSprintUrlTemplate(preset_boards)
+            url_boards = backend.get_sprint_taskboard_url("week-2634", team_name="Beta Team")
+            self.assertEqual(
+                url_boards,
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Beta%20Team/_boards/iteration/taskboard/week-2634"
+            )
+
+            # 3. Preset: TFS Legacy Backlogs Iteration with workitem_id token
+            preset_backlogs = "{base_url}/{collection}/{project}/{team}/_backlogs/iteration/{iteration_leaf}?workitem={workitem_id}"
+            backend.setSprintUrlTemplate(preset_backlogs)
+            url_backlogs = backend.get_sprint_taskboard_url(5634858)
+            self.assertEqual(
+                url_backlogs,
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/Alpha%20Team/_backlogs/iteration/week-2634?workitem=5634858"
+            )
+
+            # 4. Custom template with all tokens
+            custom_tmpl = "{server}/{collection}/{project}/{view_mode}/{raw_team}/{raw_iteration_leaf}/#{id}"
+            backend.setSprintUrlTemplate(custom_tmpl)
+            url_custom = backend.get_sprint_taskboard_url(5634858, sprint_name="week-2634", team_name="Alpha Team")
+            self.assertEqual(
+                url_custom,
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/taskboard/Alpha Team/week-2634/#5634858"
+            )
+
+            # 5. preview_sprint_url and test_open_sprint_url
+            preview = backend.preview_sprint_url("12345", "Sprint 1", "Core Team", "{base_url}/{collection}/{project}/_sprints/{team}/{iteration_leaf}")
+            self.assertEqual(preview, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/Core%20Team/Sprint%201?workitem=12345")
+
+            with patch.object(backend, "open_url") as mock_open:
+                backend.test_open_sprint_url("12345", "Sprint 1", "Core Team", "{base_url}/{collection}/{project}/_sprints/{team}/{iteration_leaf}")
+                mock_open.assert_called_once_with("https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/Core%20Team/Sprint%201?workitem=12345")
+
     def test_work_items_payload_team_and_sprint_url(self):
         from src.gui.backend import DevOpsBackend
         import devops_helper
@@ -426,6 +495,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             )
 
             backend = DevOpsBackend()
+            backend._sprint_url_template = ""
             backend._cache_db = cache
             backend._db_path = tmp_db.name
             devops_helper.AZURE_BASE_URL = "https://tfs.mycompany.com/tfs"

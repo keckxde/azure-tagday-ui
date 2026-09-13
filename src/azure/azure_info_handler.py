@@ -886,7 +886,7 @@ class AzureInfoHandler(AzureBaseClient):
         return b_we_have_dev_branch
 
     def _process_tags(self, project_id, repo, filter_version_tags_format):
-        """Filters tags, extracts annotated tag information, and returns stable/unstable lists."""
+        """Filters tags, extracts annotated and lightweight tag information, and returns stable/unstable lists."""
         tags_filtered = []
         last_stable_tag = ""
         last_unstable_tag = ""
@@ -902,54 +902,50 @@ class AzureInfoHandler(AzureBaseClient):
 
         for tag in tags:
             tag["FriendlyName"] = tag.get("name", "").replace("refs/tags/", "")
-            if filter_version_tags_format and not tag["FriendlyName"].startswith("v"):
-                logger.debug("  -- Ignore Tag %s -> missing 'v'", tag['name'])
+            if filter_version_tags_format and not (tag["FriendlyName"].startswith("v") or tag["FriendlyName"].startswith("V")):
+                logger.debug("  -- Ignore Tag %s -> missing 'v'", tag.get('name'))
                 continue
 
-            version_parts = tag["FriendlyName"].split(".")
-            if filter_version_tags_format and len(version_parts) < 3:
-                logger.debug("  -- Ignore Tag %s -> wrong version number %d", tag['FriendlyName'], len(version_parts))
+            sem = parse_semver_tuple(tag["FriendlyName"])
+            if filter_version_tags_format and sem == (0, 0, 0):
+                logger.debug("  -- Ignore Tag %s -> cannot parse semver", tag['FriendlyName'])
                 continue
 
-            if filter_version_tags_format and len(version_parts[1]) < 2:
-                logger.debug("  -- Ignore Tag %s -> wrong MINOR version number %s", tag['FriendlyName'], version_parts[1])
-                continue
+            # Classify stable vs unstable by minor version parity (odd = unstable, even = stable)
+            if sem != (0, 0, 0):
+                minor = sem[1]
+                if minor % 2:
+                    tag["unstable"] = True
+                    tag["stable"] = False
+                else:
+                    tag["unstable"] = False
+                    tag["stable"] = True
+            else:
+                tag["unstable"] = False
+                tag["stable"] = True
 
-            if len(version_parts) == 3:
-                try:
-                    minor = int(version_parts[1])
-                    if minor % 2:
-                        tag["unstable"] = True
-                        tag["stable"] = False
-                        if not last_unstable_tag or tag["FriendlyName"] > last_unstable_tag:
-                            last_unstable_tag = tag["FriendlyName"]
-                    else:
-                        tag["unstable"] = False
-                        tag["stable"] = True
-                        if not last_stable_tag or tag["FriendlyName"] > last_stable_tag:
-                            last_stable_tag = tag["FriendlyName"]
-                except ValueError:
-                    pass
-
+            # 1. Try fetching annotated tag info
+            tag_object_id = tag.get("objectId", "")
             try:
-                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag['objectId'])
+                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag_object_id)
                 if tag["addinfo"]:
                     try:
                         tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
                     except Exception:
-                        logger.warning("Ignore error - cannot work with taggedObject %s, %s", repo_id, tag['objectId'])
+                        tag["CommitId"] = tag_object_id[:7]
             except Exception:
                 tag["addinfo"] = None
 
-            if tag.get("CommitId") and tag.get("addinfo"):
+            if tag.get("addinfo"):
                 try:
-                    date_str = tag["addinfo"]["taggedBy"]["date"]
+                    tagged_by = tag["addinfo"].get("taggedBy", {})
+                    date_str = tagged_by.get("date")
                     tag_date_obj = parse_iso_datetime(date_str)
                     if tag_date_obj:
                         tag_date_obj = tag_date_obj + timedelta(hours=1)
                         tag["CommitDateObj"] = tag_date_obj
                         tag["CommitDate"] = UpdateDateString(tag_date_obj)
-                    tag["Committer"] = tag["addinfo"]["taggedBy"]["name"]
+                    tag["Committer"] = tagged_by.get("name", "")
                     tag["CommentComplete"] = tag["addinfo"].get("message", "").replace("\n", " ")
                     if len(tag["CommentComplete"]) > 50:
                         tag["Comment"] = tag["CommentComplete"][:46] + "..."
@@ -958,10 +954,45 @@ class AzureInfoHandler(AzureBaseClient):
                 except Exception as e:
                     logger.error("Error parsing annotated tag info for %s: %s", tag['FriendlyName'], e)
 
+            # 2. If lightweight tag or annotated tag lacks commit details, fetch commit directly
+            if not tag.get("CommitDate") or not tag.get("CommitId"):
+                commit_sha = tag.get("peeledObjectId") or tag_object_id
+                if commit_sha:
+                    tag["CommitId"] = commit_sha[:7]
+                    try:
+                        commit = self.get_commit(project_id, repo_id, commit_sha)
+                        if commit and isinstance(commit, dict):
+                            committer_info = commit.get("committer") or commit.get("author") or {}
+                            date_str = committer_info.get("date")
+                            tag_date_obj = parse_iso_datetime(date_str)
+                            if tag_date_obj:
+                                tag["CommitDateObj"] = tag_date_obj
+                                tag["CommitDate"] = UpdateDateString(tag_date_obj)
+                            tag["Committer"] = committer_info.get("name") or (tag.get("creator", {}) or {}).get("displayName", "")
+                            comment_raw = (commit.get("comment") or "").replace("\n", " ")
+                            tag["CommentComplete"] = comment_raw
+                            if len(comment_raw) > 50:
+                                tag["Comment"] = comment_raw[:46] + "..."
+                            else:
+                                tag["Comment"] = comment_raw
+                    except Exception as ce:
+                        logger.debug("Could not fetch commit details for lightweight tag %s in %s: %s", tag['FriendlyName'], repo_name, ce)
+
             tags_filtered.append(tag)
 
-        tags_filtered.reverse()
-        tags_filtered = tags_filtered[:10]
+        # Sort tags descending by CommitDate and SemVer
+        tags_filtered.sort(
+            key=lambda x: (x.get("CommitDate") or "1970-01-01", parse_semver_tuple(x.get("FriendlyName", ""))),
+            reverse=True
+        )
+
+        for t in tags_filtered:
+            if t.get("stable") and not last_stable_tag:
+                last_stable_tag = t["FriendlyName"]
+            elif t.get("unstable") and not last_unstable_tag:
+                last_unstable_tag = t["FriendlyName"]
+            if last_stable_tag and last_unstable_tag:
+                break
 
         if tags_filtered:
             repo["LatestTag"] = tags_filtered[0]

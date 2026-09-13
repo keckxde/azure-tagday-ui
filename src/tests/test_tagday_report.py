@@ -236,6 +236,54 @@ class TestTagDayReport(unittest.TestCase):
             content = f.read()
         self.assertIn("Tag Day Release Overview", content)
 
+    def test_load_tagday_data_missing_tag_date_and_title_mapping(self):
+        """
+        Verifies that tags with empty commit_date (e.g. from lightweight tags)
+        have their dates resolved from sprint week in tag name and properly map to PRs.
+        """
+        with self.cache._connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO projects (id, name) VALUES (?, ?)", ("TEST_PROJ", "Test Project"))
+            conn.execute("""
+                INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url, is_disabled)
+                VALUES (?, ?, ?, ?, ?, 0)
+            """, ("r-empty-date", "TEST_PROJ", "repo-empty-date", "refs/heads/dev", "http://tfs/repo"))
+
+            # Tag with empty commit_date but name indicating week 2615 (April 2026)
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, ("r-empty-date", "v00.30.2615", "abc1234", "", "", "", "{}"))
+
+            # PR completed during week 2615
+            conn.execute("""
+                INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (501, "r-empty-date", "Feature before release 2615", "completed", "refs/heads/dev", "refs/heads/f1", "Dev1", "2026-04-10 12:00:00", "{}"))
+
+            # Release PR titled 'v0.30.2615'
+            conn.execute("""
+                INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (502, "r-empty-date", "v0.30.2615", "completed", "refs/heads/master", "refs/heads/dev", "Dev1", "2026-04-12 18:00:00", "{}"))
+
+        data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJ")
+        repo_data = data["all_repositories"]["repo-empty-date"]
+
+        # Tag date should be resolved from sprint week
+        self.assertIsNotNone(repo_data["latest_tag"])
+        self.assertEqual(repo_data["latest_tag"]["name"], "v00.30.2615")
+        self.assertTrue(repo_data["latest_tag"]["commit_date"].startswith("2026-04-12"))
+
+        # Both PRs should be mapped to the tag v00.30.2615
+        prs = repo_data["all_prs"]
+        self.assertEqual(len(prs), 2)
+        for p in prs:
+            self.assertTrue(p["is_tagged"], f"PR #{p['pr_id']} should be tagged")
+            self.assertEqual(p["tag_name"], "v00.30.2615")
+
+        # Repository should have NO prs_after_tag
+        self.assertEqual(len(repo_data["prs_after_tag"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,84 @@
+# Revision History
+
+| Package | SuperInstaller | Unstable (Nightly) | Stable | Last Change | Owner |
+| ------- | -------------- | ------------------ | ------ | ----------- | ----- |
+| [azure-tagday-ui](#azure-tagday-ui) | - | v01.07.2637 | v01.04.2637 | 2637 | Antigravity AI |
+
+---
+
+### azure-tagday-ui
+
+**Info:**
+Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and Tag Day Automation Platform.
+
+**Version:**
+
+| Date     | Version        | Stable | Description |
+| -------- | -------------- | ------ | ----------- |
+| 13.09.26 | v01.07.2637    |        | Pip Package Distribution (`wheel` & `sdist`): Configured standardized PEP 517 packaging with setuptools, bundling all QML views/components, Jinja2 report templates, and registering `azure-tagday-ui`, `tagday-gui`, `gui`, `devops-helper`, and `tagday` script entry points. |
+| 13.09.26 | v01.06.2637    |        | Sprint URL Syntax & Testing Tool: Configurable URL template syntax with dynamic tokens, server presets, clickable placeholder pills, and live interactive test sandbox with 1-click browser testing. |
+| 13.09.26 | v01.05.2637    |        | Remote Tag Sync & PR-to-Tag Mapping: Lightweight tag commit resolution, full tag history retention, semver tag sorting, automatic tag date backfills from ISO sprint patterns, and multi-strategy PR claiming. |
+| 13.09.26 | v01.04.2637    | X      | Release Notes & Multi-Package Revision Generation: Initial generation from scratch, nested directory creation, tagless repo resilience, and robust parameter routing. |
+| 12.09.26 | v01.03.2637    |        | Workload Explorer Fluid Matrix & Timeline: Dark-themed interactive horizontal timeline scrollbar, 1-click sprint step navigation, responsive detail drawer resizing, and multi-surface trackpad/wheel support. |
+| 11.09.26 | v01.02.2637    |        | Workload Timeline Live Indicators: Real-time current date & sprint beacon, 1-click 'Focus Current Week', and matrix swimlane highlighting. |
+| 10.09.26 | v01.01.2637    |        | High-Performance UI Loading & Optimization: Debounced search inputs (150ms), fast read-only SQLite project discovery, precalculated `_search_text` indexing, bulk repo cache queries, and SQLite table index additions. |
+| 09.09.26 | v01.00.2637    | X      | Background Sync & Config Architecture: Scheduled background auto-sync timer with customizable intervals and sync scopes, database-first configuration resolution (`project_config` table), and optional CLI `.env` loading. |
+| 08.09.26 | v00.31.2636    |        | Pull Request & TFS Sync Fixes: Multi-status active/completed PR retrieval, repository-scoped TFS on-premise endpoint fallback, and UI refresh fixes. |
+| 06.09.26 | v00.30.2636    | X      | Milestone Management: Major Milestones dialog with historic filter toggles, import/export (Excel, CSV, JSON), optimistic UI updates, and async REST deadline synchronization. |
+
+---
+
+## Detailed Change Log
+
+### 1. Deployable and Runnable Python Package via pip (`sdist` & `wheel`)
+- **PEP 517/518 Packaging Specification**: Configured standardized packaging in [`pyproject.toml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/pyproject.toml) and [`MANIFEST.in`](file:///c:/Users/keckx/Projects/azure-tagday-ui/MANIFEST.in) with `setuptools` and `wheel`.
+- **Complete Resource Bundling**: Ensured all sub-packages (`azure`, `gui`, `config`, `templates`) and top-level helper modules (`devops_helper`, `utils`, `generate_*`) along with all QML components (`gui/qml/**/*.qml`), configuration files (`config/*.yaml`, `config/*.json`), and Jinja2 report templates (`templates/*.tmpl`) are bundled into distribution packages.
+- **Entry Points & Execution**: Configured `azure-tagday-ui`, `tagday-gui`, and `gui` to launch the Qt Quick GUI application (`gui.main:main`), and `tagday` / `devops-helper` to launch the CLI tool (`devops_helper:main_cli`). Added `src/gui/__main__.py` allowing `python -m gui` execution.
+
+### 2. Azure DevOps / TFS Sprint URL Syntax Configuration & Live Testing Sandbox
+- **Customizable URL Syntax Template & Placeholders**: Added configurable sprint URL template support in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) (`sprintUrlTemplate` property and persistence in `user_settings.yaml` / SQLite `project_config`). Supports dynamic placeholders `{base_url}` / `{server}`, `{collection}`, `{project}`, `{team}`, `{raw_team}`, `{view_mode}`, `{iteration_path}`, `{iteration_leaf}`, `{raw_iteration_leaf}`, and `{workitem_id}` / `{id}` with smart query parameter appending/cleanup.
+- **Built-in Presets for TFS On-Premise & Azure DevOps**: Provided 1-click syntax presets in [`SettingsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/SettingsView.qml) covering Modern Hierarchical (`{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}`), Team Sprints Leaf (`{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}`), TFS Boards Taskboard (`{base_url}/{collection}/{project}/{team}/_boards/iteration/taskboard/{iteration_leaf}`), TFS Legacy Backlogs (`{base_url}/{collection}/{project}/{team}/_backlogs/iteration/{iteration_leaf}`), and Azure Cloud Simple.
+- **Clickable Placeholder Chips**: Added token pills in the Settings UI that append dynamic placeholders to the template input with a single click.
+- **Live URL Preview & 1-Click Browser Testing**: Engineered an interactive test sandbox allowing users to specify sample Sprint names, Team names, and Work Item IDs, view the formatted URL rendered in real time, and immediately open it in their system default browser (`🌐 Open in Browser`) to validate against their server.
+- **Automated Unit Test Suite**: Added comprehensive unit test coverage in [`test_sprint_workload_and_deadlines.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_sprint_workload_and_deadlines.py).
+
+### 2. Remote TAG Synchronization & Accurate PR-to-TAG Mapping
+- **Lightweight Tag Commit Resolution**: Enhanced [`AzureInfoHandler._process_tags()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/azure/azure_info_handler.py) to automatically fall back to `get_commit` when `get_annotated_tag` returns 404 / None (lightweight Git tags). Extracts `CommitDate`, `CommitId`, `Committer`, and `Comment` so lightweight tags have complete commit timestamps and metadata.
+- **Full Tag History Preservation**: Eliminated the arbitrary `[:10]` truncation cutoff in `_process_tags`, ensuring the full history of version tags is preserved in the SQLite database cache for every repository.
+- **Semantic Versioning Tag Sorting & Classification**: Refactored `_process_tags`, [`DevOpsBackend._compute_all_cache_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py), [`generate_tagday_report.load_tagday_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_tagday_report.py), and [`generate_revision.generate_revision_md()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_revision.py) to sort tags by `(CommitDate, parse_semver_tuple)` descending, avoiding lexicographical string comparison errors (e.g. `"v1.9"` vs `"v1.10"`).
+- **Automatic Missing Tag Date Backfill**: Added robust date derivation from tag metadata or sprint week patterns (`vXX.YY.WWxx` -> calendar week Sunday) in `load_tagday_data` and `generate_revision_md` when working with existing SQLite caches.
+- **Multi-Strategy PR-to-Tag Mapping**: Enabled direct merge commit ID matching, release PR title SemVer matching (e.g. PR titled `v1.00.2616`), and chronological closed-date window matching, while guarding `is_completed_after_repo_tag` with `not is_tagged` so tagged PRs are never falsely marked as untagged pending changes.
+
+### 2. Release Notes & Multi-Package Revision Document Generation
+- **Generation from Scratch & Missing File Handling**: Fixed [`generate_revision.generate_revision_md()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_revision.py) which previously aborted with an error if `REVISION.md` did not already exist on disk. Initializes a clean release history header and overview table from database cache if creating from scratch or if target files are missing.
+- **Automatic Directory Creation**: Added `os.makedirs` for both Markdown and Word `.docx` target directories prior to saving, supporting arbitrary output paths and nested folders (`doc/04_Development/REVISION.md` or configured root).
+- **Parameter Routing in Helper & GUI**: Corrected [`devops_helper.generate_revision_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) and [`devops_helper.generate_artifacts_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) to honor explicit `db_path`, `revision_md_path`, `md_path`, and `csv_path` arguments passed from [`DevOpsBackend.generate_revision_report_async()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+- **Tagless Repository Resilience**: Eliminated potential `UnboundLocalError` when processing repositories with 0 tags in cache.
+
+### 3. TFS / Azure DevOps Sprint Taskboard URL Format Fix
+- Fixed duplicate project path in sprint URLs: stripped redundant leading project name segment from `iteration_path` (e.g., `MyProject\sprints\week-2634` now correctly routes to `_sprints/taskboard/<TEAM>/sprints/week-2634?workitem={id}` rather than `_sprints/taskboard/<TEAM>/MyProject/sprints/week-2634?workitem={id}`).
+- Corrected sprint link construction in both [`DevOpsBackend.get_sprint_taskboard_url()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) and [`DevOpsBackend._enrich_work_items_with_milestones()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+
+### 4. Workload Explorer Horizontal Scrollbar & Fluid Matrix Navigation
+- **Luminous Interactive Scrollbar Control**: Replaced the unstyled standalone scrollbar with a custom-engineered, dark-themed horizontal timeline scrollbar featuring high-contrast track styling (`#0d1117`, border `#30363d`), a luminous draggable thumb (`#388bfd`, hovered `#58a6ff`, active `#79c0ff`) with central grip dots proportional to viewport width, direct linear drag coordinate calculation, and track click jump navigation.
+- **1-Click Sprint Step Buttons & Position Indicator**: Added dedicated `◀` and `▶` step buttons to quickly jump sprint-by-sprint across the timeline, accompanied by a live percentage indicator reflecting exact timeline viewport scroll position.
+- **Dynamic Detail Drawer Layout Anchoring**: Updated root `ColumnLayout` anchors to automatically resize when drilldown details drawer is opened or dragged, preventing the drawer from overlapping sprint/total columns.
+- **Multi-Surface Mouse Wheel & Trackpad Scrolling**: Enabled fluid horizontal timeline scrolling across column headers, table rows, individual sprint cells, and column totals footer.
+- **Legible Sprint Column Widths**: Set comfortable minimum sprint column width of 175px (up from 120px) to ensure sprint dates, active week tags, milestone chips, and item breakdown pills remain clear and unclipped.
+
+### 5. Workload Viewer Timeline & Current Date at a Glance
+- **Live Today & Current Week Indicator**: Added an active timeline status card in [`WorkloadExplorerView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/WorkloadExplorerView.qml) displaying the current calendar date (`Today: Thu, Sep 10, 2026`) and ISO current sprint (`⚡ week-2637`) with a pulsating live status beacon.
+- **1-Click "Focus Current Week" Navigation**: Added a quick navigation action that automatically resets historic lookbacks and centers the horizontal matrix timeline scroll directly on the active sprint column.
+- **Matrix Header & Swimlane Highlighting**: Current week column headers feature a prominent `● THIS WEEK` pill badge, luminous top accent bar (`#58a6ff`), and highlighted date ranges. Down the matrix, team member cells feature an unbroken vertical swimlane highlight tint and accent guides.
+- **Backend Date & Timeline Metadata**: Enhanced [`DevOpsBackend.getWorkloadMatrix()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) and added `getCurrentDateInfo()` to deliver ISO calendar year/week/weekday calculations.
+
+### 6. High-Performance UI Loading, Search Responsiveness & Database Optimization
+- **Debounced Search Inputs**: Integrated a 150ms debounce `Timer` across all search fields ([`SearchBar.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/components/SearchBar.qml), [`PullRequestsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/PullRequestsView.qml), and [`ReportsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/ReportsView.qml)), eliminating synchronous full matrix recalculations, UI stutter, and string allocations on keystrokes.
+- **Fast Project & Database Discovery**: Replaced heavy `AzureDevOpsCache` instantiations in [`DevOpsBackend.get_available_databases()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) with lightweight read-only `sqlite3` queries and an in-memory cache keyed by file path, timestamp, and size.
+- **Precalculated Search Indices**: Added upfront `_search_text` index computation to work items during data loading ([`DevOpsBackend._enrich_work_items_with_milestones()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py)). QML filtering and Python matrix filtering perform single-pass substring checks against `_search_text`.
+- **Bulk Repository Cache Queries**: Refactored [`AzureDevOpsCache.get_all_cached_repositories()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/azure/azure_db.py) to 4 bulk queries (`v_branches`, `tags`, `submodules`, `pull_requests`) grouped in memory.
+- **SQLite Indexing & JSON Deserialization Reduction**: Added database indexes on `work_items` (`id`, `deleted`, `state`, `type`, `assigned_to`), `pull_requests` (`status`), `tags` (`name`, `commit_id`), and `iteration_shifts` (`work_item_id`). Returned parsed `fields` and `raw_dict` in `get_all_work_items()`.
+
+### 7. Scheduled Background Synchronization & Configuration Architecture
+- **Scheduled Background Synchronization**: Added configurable scheduled background synchronization (preset intervals for 1, 2, 5, 10, 15, 30, and 60 minutes, configurable sync scopes for Full Sync / Work Items / Pull Requests, and live countdown timer) powered by a non-blocking `QTimer` in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+- **Database-First Configuration Architecture**: Configuration loading considers the local SQLite database (`project_config` table) and active project user settings as primary source of truth. Removed unconditional module-level `load_dotenv()` execution on import; `.env` is loaded only on explicit CLI request.

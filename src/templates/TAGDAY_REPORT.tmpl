@@ -1,0 +1,112 @@
+# Tag Day Release Overview
+
+> **Report Generation Date:** `{{ gen_time }}`  
+> **Project:** `{{ project_id }}`  
+> **Scope:** Release readiness evaluation per repository relative to each repository's latest version tag (`v*`).  
+
+## Executive Summary & Readiness KPIs
+
+| Metric | Value | Scope / Description |
+| :--- | :---: | :--- |
+| **Total Repositories Analyzed** | `{{ total_repos_tracked }}` | Active git repositories in `{{ project_id }}` |
+| **Repositories with Untagged Changes** | **`{{ repos_with_any|length }}`** | Repositories with merged PRs, active PRs, or unmerged branches |
+| **Repositories with Merged PRs** | **`{{ repos_with_prs|length }}`** | Repositories with PR activity after their latest tag |
+| **Repositories with Unmerged Branches** | **`{{ repos_with_branches|length }}`** | Repositories with pending commits ahead of target |
+| **Untagged Completed Pull Requests** | **`{{ total_prs_after_tag }}`** | Merged after each repository's latest tag date |
+| **Active / In-Flight Pull Requests** | **`{{ total_active_prs }}`** | Pending review or merge in TFS |
+| **Pending Feature Branches** | **`{{ total_unmerged_branches }}`** | Unmerged branches ahead of base |
+
+### Quick Jump Directory
+
+- [1. Repositories with Unmerged Branch Updates](#1-repositories-with-unmerged-branch-updates)
+- [2. Repositories with Pull Requests after Latest Tag](#2-repositories-with-pull-requests-after-latest-tag)
+- [3. Consolidated Global Changes Timeline](#3-consolidated-global-changes-timeline)
+- [4. Individual Repository Walkthrough](#4-individual-repository-walkthrough)
+
+## 1. Repositories with Unmerged Branch Updates
+
+Feature, fix, or integration branches that have commits ahead of the target integration branch (`ahead > 0`):
+
+{% if not repos_with_branches -%}
+!!! success "No Unmerged Feature Branches"
+    All branches are merged into base branches.
+{% else -%}
+| Repository | Branch Name | Ahead | Behind | Prepared PR | Last Commit Date | Author | Last Commit Comment |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+{% for b in unmerged_branch_rows -%}
+| [{{ b.repo_name }}](#repo-{{ b.anchor }}) | [{{ b.branch_name }}]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ b.repo_name }}?version=GB{{ b.branch_name }}&_a=history) | **`+{{ b.ahead }}`** | `-{{ b.behind }}` | {{ b.pr_link }} | `{{ b.commit_date }}` | {{ b.committer }} | {{ b.comment_clean }} |
+{% endfor %}
+{% endif %}
+
+## 2. Repositories with Pull Requests after Latest Tag
+
+Repositories that received changes merged into `dev` or `main` after their own latest version tag:
+
+{% if not repos_with_prs -%}
+!!! success "All Repositories Up-to-Date"
+    No untagged or active Pull Requests found in any repository.
+{% else -%}
+| Repository | Category | Latest Tag | Tag Date | Untagged PRs | Active PRs | Latest PR Date | Latest PR Title | Quick Links |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
+{% for r in sorted_prs_repos -%}
+| [{{ r.name }}](#repo-{{ r.anchor }}) | `{{ r.category }}` | `{{ r.latest_tag_str }}` | `{{ r.latest_tag_date }}` | **`{{ r.merged_count }}`** | `{{ r.active_count }}` | `{{ r.latest_pr_date }}` | {{ r.latest_pr_link }} | [dev]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}/pushes?itemVersion=GBdev) · [main]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}/pushes?itemVersion=GBmain) |
+{% endfor %}
+{% endif %}
+
+## 3. Consolidated Global Changes Timeline
+
+Unified chronological audit trail of all untagged changes (merged PRs, active PRs, and branch commits after each repository's latest tag):
+
+{% if not timeline -%}
+!!! info "No Untagged Changes Recorded"
+    All repositories are clean and tagged.
+{% else -%}
+| Date | Repository | Item | Type / Status | Target | Author | Change Summary |
+| :---: | :--- | :---: | :---: | :---: | :--- | :--- |
+{% for ch in timeline[:150] -%}
+| `{{ ch.date }}` | [{{ ch.repo_name }}](#repo-{{ ch.anchor }}) | {{ ch.item_link }} | {{ ch.status_badge }} | `{{ ch.target_branch }}` | {{ ch.created_by }} | {{ ch.title_clean }} |
+{% endfor %}
+{% if timeline|length > 150 -%}
+> *Showing latest 150 of {{ timeline|length }} total untagged changes recorded.*
+{% endif %}
+{% endif %}
+
+## 4. Individual Repository Walkthrough
+
+Detailed inspection view for individual repositories that have modifications or pending work:
+
+{% for cat in category_groups -%}
+### Category: {{ cat.name }}
+
+{% for r in cat.repos -%}
+<a id="repo-{{ r.anchor }}"></a>
+#### {{ r.name }}
+
+- **TFS Repository:** <{{ r.web_url }}>
+- **Pushes:** [dev pushes]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}/pushes?itemVersion=GBdev) · [main pushes]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}/pushes?itemVersion=GBmain)
+- **Latest Local Tag:** {{ r.tag_display }}
+
+{% if r.unmerged_branches -%}
+**Unmerged Branches Ahead:**
+
+| Branch | Commit | Commit Date | Committer | Ahead | Behind | Prepared PR | Comment |
+| :--- | :---: | :---: | :--- | :---: | :---: | :---: | :--- |
+{% for b in r.unmerged_branches -%}
+| [{{ b.branch_name }}]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}?version=GB{{ b.branch_name }}&_a=history) | `{{ b.short_hash }}` | `{{ b.commit_date }}` | {{ b.committer }} | **`+{{ b.ahead }}`** | `-{{ b.behind }}` | {{ b.pr_link }} | {{ b.comment_clean }} |
+{% endfor %}
+
+{% endif -%}
+{% if r.all_prs -%}
+**Pull Requests ({{ r.all_prs|length }}):**
+
+| PR | Date | Status | Tag Info | Target | Author | Description / Title |
+| :---: | :---: | :---: | :---: | :--- | :--- | :--- |
+{% for pr in r.all_prs -%}
+| [!{{ pr.pr_id }}]({{ azure_base_url }}/{{ azure_collection }}/{{ project_id }}/_git/{{ r.name }}/pullrequest/{{ pr.pr_id }}) | `{{ pr.date }}` | `{{ pr.status_str }}` | {% if pr.is_tagged %}`{{ pr.tag_name }}`{% else %}*Untagged*{% endif %} | `{{ pr.target_branch }}` | {{ pr.created_by }} | {{ pr.desc_clean }} |
+{% endfor %}
+
+{% endif -%}
+---
+
+{% endfor -%}
+{% endfor -%}

@@ -220,6 +220,7 @@ class DevOpsBackend(QObject):
     tagCategoriesChanged = Signal()
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
+    sprintUrlTemplateChanged = Signal()
     autoSyncChanged = Signal()
     logRecord = Signal(str, str, str, str)  # timestamp, level, logger_name, message
     logMessage = Signal(str)                # legacy formatted string signal
@@ -252,6 +253,7 @@ class DevOpsBackend(QObject):
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
         self._tfs_team_name = user_cfg.get("tfs_team_name", "")
+        self._sprint_url_template = user_cfg.get("sprint_url_template", "")
 
         # Auto-Sync / Scheduled Synchronization settings
         self._auto_sync_enabled = bool(user_cfg.get("auto_sync_enabled", False))
@@ -386,6 +388,8 @@ class DevOpsBackend(QObject):
                 self._bug_hierarchy_mode = db_cfg["bug_behavior"]
             if db_cfg.get("AZURE_TEAM"):
                 self._tfs_team_name = db_cfg["AZURE_TEAM"]
+            if db_cfg.get("SPRINT_URL_TEMPLATE"):
+                self._sprint_url_template = db_cfg["SPRINT_URL_TEMPLATE"]
             if "AUTO_SYNC_ENABLED" in db_cfg:
                 self._auto_sync_enabled = str(db_cfg["AUTO_SYNC_ENABLED"]).lower() in ("true", "1", "yes")
             if "AUTO_SYNC_INTERVAL_MINUTES" in db_cfg:
@@ -456,6 +460,28 @@ class DevOpsBackend(QObject):
                     self._cache_db.set_config("AZURE_TEAM", val)
                 except Exception:
                     pass
+            self.settingsChanged.emit()
+
+    @Property(str, notify=sprintUrlTemplateChanged)
+    def sprintUrlTemplate(self):
+        """Returns the configured TFS / Azure DevOps sprint URL syntax template."""
+        return self._sprint_url_template or ""
+
+    @Slot(str)
+    def setSprintUrlTemplate(self, template_str):
+        """Persists the custom sprint URL template."""
+        val = (template_str or "").strip()
+        if self._sprint_url_template != val:
+            self._sprint_url_template = val
+            cfg = _load_user_settings()
+            cfg["sprint_url_template"] = val
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SPRINT_URL_TEMPLATE", val)
+                except Exception:
+                    pass
+            self.sprintUrlTemplateChanged.emit()
             self.settingsChanged.emit()
 
     @Property(str, notify=settingsChanged)
@@ -1184,9 +1210,14 @@ class DevOpsBackend(QObject):
                 SELECT r.name AS repo_name, t.name, t.commit_date, t.is_stable, t.is_unstable
                 FROM tags t
                 JOIN repositories r ON t.repo_id = r.id
-                WHERE t.name LIKE 'v%'
-                ORDER BY t.commit_date DESC, t.name DESC
             """).fetchall()
+
+        # Sort tags by commit_date and semver descending
+        sorted_tag_rows = sorted(
+            [t for t in tag_rows if (t["name"] or "").lower().startswith("v") or utils.parse_semver_tuple(t["name"]) != (0, 0, 0)],
+            key=lambda t: (t["commit_date"] or "1970-01-01", utils.parse_semver_tuple(t["name"])),
+            reverse=True
+        )
 
         stable_tags_map = {}
         unstable_tags_map = {}
@@ -1194,7 +1225,7 @@ class DevOpsBackend(QObject):
         global_latest_stable = None
         global_latest_unstable = None
 
-        for t in tag_rows:
+        for t in sorted_tag_rows:
             rname = t["repo_name"]
             tname = t["name"]
             tdate = (t["commit_date"] or "").split(" ")[0].split("T")[0]
@@ -1487,21 +1518,25 @@ class DevOpsBackend(QObject):
             
             # Fast sprint URL construction
             if tfs_base and tfs_col and tfs_proj and team_name:
-                encoded_team = urllib.parse.quote(team_name, safe="")
                 has_sprint = (
                     sprint_leaf
                     and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
                     and sprint_leaf.lower() != tfs_proj.lower()
                 )
-                # Keep full project-prefixed iteration path parts
                 full_ip_parts = ip_parts if (ip_parts and ip_parts[0].lower() == tfs_proj.lower()) else ([tfs_proj] + ip_parts if ip_parts else [])
-                if has_sprint and full_ip_parts:
-                    encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in full_ip_parts)
-                    tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}/{encoded_sprint_path}?workitem={wi_id}"
-                elif has_sprint and sprint_leaf:
-                    tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}/{urllib.parse.quote(tfs_proj, safe='')}/{urllib.parse.quote(sprint_leaf, safe='')}?workitem={wi_id}"
-                else:
-                    tfs_sprint_url = f"{tfs_base}/{tfs_col}/{tfs_proj}/_sprints/taskboard/{encoded_team}?workitem={wi_id}"
+                encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in full_ip_parts) if (has_sprint and full_ip_parts) else ""
+                tfs_sprint_url = self._render_sprint_url(
+                    base_url=tfs_base,
+                    col=tfs_col,
+                    proj=tfs_proj,
+                    team=team_name,
+                    raw_team=team_name,
+                    view_mode="taskboard",
+                    iteration_path=encoded_sprint_path,
+                    iteration_leaf=sprint_leaf if has_sprint else "",
+                    raw_iteration_leaf=sprint_leaf if has_sprint else "",
+                    clean_id=wi_id,
+                )
             else:
                 tfs_sprint_url = ""
 
@@ -3276,8 +3311,80 @@ class DevOpsBackend(QObject):
         else:
             self.logMessage.emit(f"Could not construct Azure DevOps URL for Work Item #{clean_id}")
 
-    @Slot(str, result=str)
+    def _render_sprint_url(self, base_url, col, proj, team, raw_team, view_mode, iteration_path, iteration_leaf, raw_iteration_leaf, clean_id, custom_template=None):
+        """
+        Renders a sprint URL given components and an optional custom template.
+        Supports tokens:
+          {base_url} or {server} -> Server base URL (e.g. https://tfs.server.com/tfs)
+          {collection}           -> TFS Collection (e.g. DefaultCollection)
+          {project}              -> Project Name
+          {team}                 -> URL-encoded Team Name
+          {raw_team}             -> Unencoded Team Name
+          {view_mode}            -> View Mode (taskboard, backlog, iteration)
+          {iteration_path}       -> Full encoded iteration subpath (e.g. Project/sprints/Sprint-1)
+          {iteration_leaf}       -> Encoded leaf sprint name (e.g. Sprint-1)
+          {raw_iteration_leaf}   -> Unencoded leaf sprint name
+          {workitem_id} or {id}  -> Work item ID
+        """
+        import urllib.parse
+        import re
+
+        tmpl = custom_template if (custom_template is not None and str(custom_template).strip() != "") else (self._sprint_url_template or "").strip()
+
+        if not tmpl:
+            # Default hierarchical Azure DevOps / TFS URL
+            encoded_team = urllib.parse.quote(team, safe="")
+            v_mode = view_mode if view_mode in ("taskboard", "backlog", "iteration") else "taskboard"
+            has_sprint = (
+                iteration_leaf
+                and iteration_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
+                and iteration_leaf.lower() != proj.lower()
+            )
+            if has_sprint and iteration_path:
+                base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{iteration_path}"
+            elif has_sprint and iteration_leaf:
+                base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{urllib.parse.quote(proj, safe='')}/{urllib.parse.quote(iteration_leaf, safe='')}"
+            else:
+                base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}"
+
+            if clean_id is not None:
+                return f"{base_sprint_url}?workitem={clean_id}"
+            return base_sprint_url
+
+        # Custom template interpolation
+        encoded_team = urllib.parse.quote(team, safe="")
+        encoded_leaf = urllib.parse.quote(iteration_leaf, safe="")
+        encoded_proj = urllib.parse.quote(proj, safe="")
+        encoded_col = urllib.parse.quote(col, safe="")
+        id_str = str(clean_id) if clean_id is not None else ""
+
+        rendered = tmpl
+        rendered = rendered.replace("{base_url}", base_url).replace("{server}", base_url)
+        rendered = rendered.replace("{collection}", col)
+        rendered = rendered.replace("{project}", proj)
+        rendered = rendered.replace("{team}", encoded_team)
+        rendered = rendered.replace("{raw_team}", raw_team or team)
+        rendered = rendered.replace("{view_mode}", view_mode)
+        rendered = rendered.replace("{iteration_path}", iteration_path or encoded_leaf)
+        rendered = rendered.replace("{iteration_leaf}", encoded_leaf)
+        rendered = rendered.replace("{raw_iteration_leaf}", raw_iteration_leaf or iteration_leaf)
+
+        has_id_token = ("{workitem_id}" in tmpl) or ("{id}" in tmpl)
+        rendered = rendered.replace("{workitem_id}", id_str).replace("{id}", id_str)
+
+        if not has_id_token and clean_id is not None:
+            sep = "&" if "?" in rendered else "?"
+            rendered = f"{rendered}{sep}workitem={clean_id}"
+        elif has_id_token and clean_id is None:
+            # Clean up empty ?workitem= or &workitem= or ?id=
+            rendered = re.sub(r'[\?&](workitem|id)=(&|$)', r'\2', rendered)
+            if rendered.endswith("?") or rendered.endswith("&"):
+                rendered = rendered[:-1]
+
+        return rendered
+
     @Slot(result=str)
+    @Slot(str, result=str)
     @Slot(int, result=str)
     @Slot(str, str, result=str)
     @Slot(int, str, result=str)
@@ -3285,28 +3392,22 @@ class DevOpsBackend(QObject):
     @Slot(int, str, str, result=str)
     @Slot(str, str, str, str, result=str)
     @Slot(int, str, str, str, result=str)
-    def get_sprint_taskboard_url(self, target="", sprint_name="", team_name="", view_mode="taskboard"):
+    @Slot(str, str, str, str, str, result=str)
+    @Slot(int, str, str, str, str, result=str)
+    def get_sprint_taskboard_url(self, target="", sprint_name="", team_name="", view_mode="taskboard", template=""):
         """
         Constructs the TFS / Azure DevOps Sprint Taskboard URL for a work item, sprint name, or current sprint.
-
-        The URL format requires a team name:
-          {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}?workitem={id}
-        or for current sprint:
-          {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}?workitem={id}
-
-        The team name is determined by:
-          1. Explicitly passed `team_name`
-          2. Configured TFS Team Name in settings/project config (`self._tfs_team_name`)
-          3. Extracted team segment from the work item's area path (e.g. 'Project\\Team')
-          4. Extracted team segment from the iteration path (e.g. 'Project\\Team\\Sprint')
-          5. Default Azure DevOps team convention: '{project} Team'
         """
         import urllib.parse
         base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
         col = (getattr(devops_helper, "AZURE_COLLECTION", "") or getattr(devops_helper, "DEFAULT_COLLECTION", "") or "").strip("/")
         proj = (getattr(devops_helper, "AZURE_PROJECT_ID", "") or getattr(devops_helper, "DEFAULT_PROJECT", "") or "").strip("/")
+
         if not (base_url and col and proj):
-            return ""
+            # If called for previewing, provide reasonable placeholders
+            base_url = base_url or "https://tfs.company.com/tfs"
+            col = col or "DefaultCollection"
+            proj = proj or "Project"
 
         team = (team_name or self._tfs_team_name or "").strip()
         extracted_team = ""
@@ -3364,26 +3465,62 @@ class DevOpsBackend(QObject):
         if not team:
             team = extracted_team or f"{proj} Team"
 
-        encoded_team = urllib.parse.quote(team, safe="")
-        v_mode = view_mode if view_mode in ("taskboard", "backlog", "iteration") else "taskboard"
-
         has_specific_sprint = (
             sprint_leaf
             and sprint_leaf.lower() not in ("unplanned", "none", "backlog", "default", "root", "current", "")
             and sprint_leaf.lower() != proj.lower()
         )
 
+        encoded_sprint_path = ""
         if has_specific_sprint and iteration_subpath_parts:
             encoded_sprint_path = "/".join(urllib.parse.quote(p, safe="") for p in iteration_subpath_parts)
-            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{encoded_sprint_path}"
         elif has_specific_sprint and sprint_leaf:
-            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}/{urllib.parse.quote(proj, safe='')}/{urllib.parse.quote(sprint_leaf, safe='')}"
-        else:
-            base_sprint_url = f"{base_url}/{col}/{proj}/_sprints/{v_mode}/{encoded_team}"
+            encoded_sprint_path = f"{urllib.parse.quote(proj, safe='')}/{urllib.parse.quote(sprint_leaf, safe='')}"
 
-        if clean_id is not None:
-            return f"{base_sprint_url}?workitem={clean_id}"
-        return base_sprint_url
+        return self._render_sprint_url(
+            base_url=base_url,
+            col=col,
+            proj=proj,
+            team=team,
+            raw_team=team,
+            view_mode=view_mode if view_mode in ("taskboard", "backlog", "iteration") else "taskboard",
+            iteration_path=encoded_sprint_path,
+            iteration_leaf=sprint_leaf if has_specific_sprint else "",
+            raw_iteration_leaf=sprint_leaf if has_specific_sprint else "",
+            clean_id=clean_id,
+            custom_template=template,
+        )
+
+    @Slot(result=str)
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    @Slot(str, str, str, result=str)
+    @Slot(str, str, str, str, result=str)
+    @Slot(str, str, str, str, str, result=str)
+    def preview_sprint_url(self, target="", sprint_name="", team_name="", template="", view_mode="taskboard"):
+        """
+        Renders a preview of the sprint taskboard URL without opening a browser.
+        """
+        return self.get_sprint_taskboard_url(target=target, sprint_name=sprint_name, team_name=team_name, view_mode=view_mode, template=template)
+
+    @Slot()
+    @Slot(str)
+    @Slot(str, str)
+    @Slot(str, str, str)
+    @Slot(str, str, str, str)
+    @Slot(str, str, str, str, str)
+    def test_open_sprint_url(self, target="", sprint_name="", team_name="", template="", view_mode="taskboard"):
+        """
+        Renders the sprint URL using the given template and opens it in the system browser for immediate validation.
+        """
+        url = self.get_sprint_taskboard_url(target=target, sprint_name=sprint_name, team_name=team_name, view_mode=view_mode, template=template)
+        if url:
+            s_label = sprint_name or str(target) or "Sprint"
+            logger.info(f"Testing Sprint URL in browser: {url}")
+            self.logMessage.emit(f"Testing Sprint URL ({s_label}): {url}")
+            self.open_url(url)
+        else:
+            self.logMessage.emit("Could not construct test Sprint URL (check Server URL and Project settings).")
 
     @Slot(str)
     @Slot(int)
@@ -4257,7 +4394,7 @@ class DevOpsBackend(QObject):
     def importMilestonesFromExcel(self, file_path, clear_existing=False):
         """
         Imports milestones from an Excel (.xlsx/.xls), CSV (.csv), or JSON (.json) file.
-        Supports Team and Week-Range (e.g. week-2630 – week-2633).
+        Supports Team and Week-Range (e.g. week-2630 - week-2633).
         """
         if not self._cache_db:
             return {"success": False, "error": "No database connected", "message": "Database not connected."}

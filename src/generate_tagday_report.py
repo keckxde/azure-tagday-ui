@@ -36,6 +36,9 @@ from utils import (
     categorize_repository,
     sort_categories_for_report,
     parse_semver_tuple,
+    UpdateDateString,
+    parse_sprint_week,
+    get_sprint_date_range,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,20 +102,61 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 "all_prs": []
             }
 
-        # 2. Fetch all version tags starting with 'v' and determine latest tag per repository
+        # 2. Fetch all version tags and determine latest tag per repository
         all_tags = conn.execute("""
-            SELECT t.repo_id, r.name AS repo_name, t.name AS tag_name, t.commit_date, t.committer_name, t.comment
+            SELECT t.repo_id, r.name AS repo_name, t.name AS tag_name, t.commit_id, t.commit_date, t.committer_name, t.comment, t.raw_json
             FROM tags t
             JOIN repositories r ON t.repo_id = r.id
-            WHERE t.name LIKE 'v%'
         """).fetchall()
 
         repo_tags_map = {}
         for t in all_tags:
             rname = t["repo_name"]
+            tname = t["tag_name"] or ""
+            # Include tags that start with v/V or parse as valid semver
+            if not (tname.lower().startswith("v") or parse_semver_tuple(tname) != (0, 0, 0)):
+                continue
+
+            t_dict = dict(t)
+            # Resolve missing commit_date if needed
+            c_date = t_dict.get("commit_date") or ""
+            if not c_date:
+                if t_dict.get("raw_json"):
+                    try:
+                        meta = json.loads(t_dict["raw_json"])
+                        c_date = (
+                            (meta.get("addinfo") or {}).get("taggedBy", {}).get("date")
+                            or meta.get("CommitDate")
+                            or ""
+                        )
+                        if c_date:
+                            c_date = UpdateDateString(c_date)
+                    except Exception:
+                        pass
+                if not c_date:
+                    sy, sw, _ = parse_sprint_week(tname)
+                    if not (sy and sw):
+                        sem = parse_semver_tuple(tname)
+                        if sem != (0, 0, 0):
+                            patch = sem[2]
+                            if 2000 <= patch <= 3000:
+                                yy = patch // 100
+                                ww = patch % 100
+                                if 20 <= yy <= 99 and 1 <= ww <= 53:
+                                    sy = 2000 + yy
+                                    sw = ww
+                    if sy and sw:
+                        try:
+                            from datetime import date
+                            sunday = date.fromisocalendar(sy, sw, 7).strftime("%Y-%m-%d")
+                            c_date = f"{sunday} 23:59:59"
+                        except Exception:
+                            pass
+
+            t_dict["commit_date"] = c_date
             if rname not in repo_tags_map:
                 repo_tags_map[rname] = []
-            repo_tags_map[rname].append(t)
+            repo_tags_map[rname].append(t_dict)
 
         repo_tags_chronological = {}
         for rname in repositories.keys():
@@ -202,6 +246,18 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             assigned_tag = direct_tag
             tag_type = "direct" if direct_tag else "untagged"
 
+            # Check if PR title matches a known tag in this repo (e.g. PR titled 'v1.00.2616')
+            if not assigned_tag:
+                clean_title = (pr_title or "").strip()
+                title_semver = parse_semver_tuple(clean_title)
+                if title_semver != (0, 0, 0):
+                    for t in repo_tags_chronological.get(rname, []):
+                        if parse_semver_tuple(t["tag_name"]) == title_semver:
+                            assigned_tag = t["tag_name"]
+                            tag_type = "direct"
+                            break
+
+            # Chronological release window match for completed PRs
             if not assigned_tag and closed_date and status in ("completed", "3"):
                 for t in repo_tags_chronological.get(rname, []):
                     t_dt = t["commit_date"] or ""
@@ -243,9 +299,13 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
 
             # Per-repository baseline cutoff date
             repo_latest_tag = repositories[rname]["latest_tag"]
-            repo_cutoff_date = repo_latest_tag["commit_date"] if repo_latest_tag and repo_latest_tag["commit_date"] else "1970-01-01 00:00:00"
+            repo_cutoff_date = repo_latest_tag["commit_date"] if repo_latest_tag and repo_latest_tag["commit_date"] else ""
 
-            is_completed_after_repo_tag = (status in ("completed", "3") and closed_date and closed_date > repo_cutoff_date)
+            is_completed_after_repo_tag = (
+                status in ("completed", "3")
+                and not is_tagged
+                and (not repo_cutoff_date or (closed_date and closed_date > repo_cutoff_date))
+            )
             is_active = (status in ("active", "1"))
 
             if is_completed_after_repo_tag:

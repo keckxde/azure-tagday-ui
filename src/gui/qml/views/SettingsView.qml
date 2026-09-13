@@ -1026,68 +1026,417 @@ Item {
                         Layout.bottomMargin: 4
                     }
 
-                    // TFS / Azure DevOps Team Name for Sprint URLs
+                    // TFS / Azure DevOps Team Name & Sprint Taskboard URL Configuration
                     RowLayout {
                         spacing: 8
-                        Text { text: "👥"; font.pixelSize: 16 }
-                        Text {
-                            text: "Azure DevOps / TFS Team Assignment (Sprint View URLs)"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 14
-                            font.weight: Font.Bold
-                            color: "#f0f6fc"
-                        }
-                    }
-
-                    Text {
-                        text: "Specify the Team Name that sprint iterations are assigned to. Azure DevOps requires the team name in sprint taskboard URLs (e.g. {server}/{col}/{project}/_sprints/taskboard/{team}/sprints/{sprint}). If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        color: "#8b949e"
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        TextField {
-                            id: teamNameInput
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            text: (backend && backend.tfsTeamName) ? backend.tfsTeamName : ""
-                            placeholderText: "e.g. MyTeam or Core Team (leave empty for automatic detection / default)"
-                            placeholderTextColor: "#484f58"
-                            color: "#f0f6fc"
-                            background: Rectangle {
-                                color: "#0d1117"
-                                radius: 6
-                                border.color: teamNameInput.activeFocus ? "#58a6ff" : "#30363d"
-                                border.width: 1
+                        Text { text: "🎯"; font.pixelSize: 18 }
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Azure DevOps / TFS Sprint Taskboard URL Configuration & Testing"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 14
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Configure team assignment, customize the URL template for your TFS/Azure DevOps server, and test sprint links in your browser."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
                             }
                         }
+                    }
 
-                        Button {
-                            text: "💾 Save Team"
+                    // 1. Team Name Assignment
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: "Team Name Assignment:"
+                            font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            color: "#c9d1d9"
+                        }
+
+                        Text {
+                            text: "Specify the Team Name that sprint iterations are assigned to. If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            TextField {
+                                id: teamNameInput
+                                Layout.fillWidth: true
+                                implicitHeight: 34
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                text: (backend && backend.tfsTeamName) ? backend.tfsTeamName : ""
+                                placeholderText: "e.g. MyTeam or Core Team (leave empty for automatic detection / default)"
+                                placeholderTextColor: "#484f58"
+                                color: "#f0f6fc"
+                                background: Rectangle {
+                                    color: "#0d1117"
+                                    radius: 6
+                                    border.color: teamNameInput.activeFocus ? "#58a6ff" : "#30363d"
+                                    border.width: 1
+                                }
                             }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 130; radius: 6
-                                color: parent.hovered ? "#1f6feb" : "#238636"
-                                border.color: "#3fb950"
+
+                            Button {
+                                text: "💾 Save Team"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: "#ffffff"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 34; implicitWidth: 130; radius: 6
+                                    color: parent.hovered ? "#2ea043" : "#238636"
+                                    border.color: "#3fb950"
+                                }
+                                onClicked: {
+                                    if (backend) {
+                                        backend.setTfsTeamName(teamNameInput.text);
+                                        root.bannerMsg = "TFS Team Name updated to: " + (teamNameInput.text.trim() || "Default / Auto-detected");
+                                        root.bannerType = "success";
+                                    }
+                                }
                             }
-                            onClicked: {
-                                if (backend) {
-                                    backend.setTfsTeamName(teamNameInput.text);
-                                    root.bannerMsg = "TFS Team Name updated to: " + (teamNameInput.text.trim() || "Default / Auto-detected");
-                                    root.bannerType = "success";
+                        }
+                    }
+
+                    // 2. Sprint URL Syntax Template & Presets
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Layout.topMargin: 4
+
+                        Text {
+                            text: "Sprint URL Syntax Template:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        Text {
+                            text: "Select a syntax preset matching your server environment, or craft a custom URL template using placeholders."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                        }
+
+                        // Presets Row
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: [
+                                    { name: "⚡ Modern Hierarchical (Default)", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}" },
+                                    { name: "📁 Team Sprints Leaf", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}" },
+                                    { name: "📋 TFS Boards Taskboard", tmpl: "{base_url}/{collection}/{project}/{team}/_boards/iteration/taskboard/{iteration_leaf}" },
+                                    { name: "🗂️ TFS Legacy Backlogs", tmpl: "{base_url}/{collection}/{project}/{team}/_backlogs/iteration/{iteration_leaf}" },
+                                    { name: "☁️ Azure Cloud Simple", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_leaf}" }
+                                ]
+
+                                Rectangle {
+                                    implicitHeight: 26
+                                    implicitWidth: presetLabel.implicitWidth + 16
+                                    radius: 13
+                                    color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#1f6feb22" : "#21262d"
+                                    border.color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#58a6ff" : "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        id: presetLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.name
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#58a6ff" : "#c9d1d9"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            sprintUrlTemplateInput.text = modelData.tmpl;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Template input & save row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            TextField {
+                                id: sprintUrlTemplateInput
+                                Layout.fillWidth: true
+                                implicitHeight: 34
+                                font.family: "Consolas, Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                text: (backend && backend.sprintUrlTemplate) ? backend.sprintUrlTemplate : "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
+                                placeholderText: "e.g. {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
+                                placeholderTextColor: "#484f58"
+                                color: "#58a6ff"
+                                background: Rectangle {
+                                    color: "#0d1117"
+                                    radius: 6
+                                    border.color: sprintUrlTemplateInput.activeFocus ? "#58a6ff" : "#30363d"
+                                    border.width: 1
+                                }
+                            }
+
+                            Button {
+                                text: "💾 Save Syntax"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: "#ffffff"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 34; implicitWidth: 130; radius: 6
+                                    color: parent.hovered ? "#2ea043" : "#238636"
+                                    border.color: "#3fb950"
+                                }
+                                onClicked: {
+                                    if (backend) {
+                                        backend.setSprintUrlTemplate(sprintUrlTemplateInput.text);
+                                        root.bannerMsg = "Sprint URL Syntax Template updated!";
+                                        root.bannerType = "success";
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "↺ Reset"
+                                font.pixelSize: 11
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: "#8b949e"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 34; implicitWidth: 70; radius: 6
+                                    color: parent.hovered ? "#30363d" : "#21262d"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: {
+                                    sprintUrlTemplateInput.text = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}";
+                                    if (backend) {
+                                        backend.setSprintUrlTemplate("");
+                                        root.bannerMsg = "Sprint URL Syntax Template reset to default.";
+                                        root.bannerType = "info";
+                                    }
+                                }
+                            }
+                        }
+
+                        // Placeholder Tokens Chips
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Text {
+                                text: "Tokens (click to append):"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Repeater {
+                                    model: [
+                                        "{base_url}", "{collection}", "{project}", "{team}", "{view_mode}", "{iteration_path}", "{iteration_leaf}", "{workitem_id}"
+                                    ]
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: tokenText.implicitWidth + 10
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: "#30363d"
+                                        border.width: 1
+
+                                        Text {
+                                            id: tokenText
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 10
+                                            color: "#79c0ff"
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (!sprintUrlTemplateInput.text.includes(modelData)) {
+                                                    sprintUrlTemplateInput.text = sprintUrlTemplateInput.text + "/" + modelData;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Interactive Testing Sandbox & Live URL Preview
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: testSandboxCol.implicitHeight + 24
+                        radius: 6
+                        color: "#0d1117"
+                        border.color: "#21262d"
+                        border.width: 1
+
+                        ColumnLayout {
+                            id: testSandboxCol
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 10
+
+                            RowLayout {
+                                spacing: 6
+                                Text { text: "🧪"; font.pixelSize: 14 }
+                                Text {
+                                    text: "Sprint URL Live Preview & Browser Test Sandbox"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+                            }
+
+                            // Test Parameter Inputs
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Text { text: "Sample Sprint:"; font.pixelSize: 10; color: "#8b949e" }
+                                    TextField {
+                                        id: testSprintInput
+                                        Layout.fillWidth: true
+                                        implicitHeight: 28
+                                        font.pixelSize: 11
+                                        text: "week-2634"
+                                        color: "#f0f6fc"
+                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Text { text: "Sample Team:"; font.pixelSize: 10; color: "#8b949e" }
+                                    TextField {
+                                        id: testTeamInput
+                                        Layout.fillWidth: true
+                                        implicitHeight: 28
+                                        font.pixelSize: 11
+                                        text: teamNameInput.text.trim() || "Alpha Team"
+                                        color: "#f0f6fc"
+                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+                                    Text { text: "Sample Work Item ID:"; font.pixelSize: 10; color: "#8b949e" }
+                                    TextField {
+                                        id: testWiInput
+                                        Layout.fillWidth: true
+                                        implicitHeight: 28
+                                        font.pixelSize: 11
+                                        text: "5634858"
+                                        color: "#f0f6fc"
+                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
+                                    }
+                                }
+                            }
+
+                            // Live Formatted URL Display & Test Button
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 32
+                                    radius: 4
+                                    color: "#161b22"
+                                    border.color: "#30363d"
+                                    border.width: 1
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 6
+
+                                        Text { text: "🔗"; font.pixelSize: 12 }
+                                        Text {
+                                            id: livePreviewUrlText
+                                            Layout.fillWidth: true
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 11
+                                            color: "#58a6ff"
+                                            elide: Text.ElideMiddle
+                                            text: backend ? backend.preview_sprint_url(
+                                                testWiInput.text.trim(),
+                                                testSprintInput.text.trim(),
+                                                testTeamInput.text.trim(),
+                                                sprintUrlTemplateInput.text.trim()
+                                            ) : ""
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    text: "🌐 Open in Browser"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font; color: "#ffffff"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 32; implicitWidth: 140; radius: 4
+                                        color: parent.hovered ? "#388bfd" : "#1f6feb"
+                                    }
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.test_open_sprint_url(
+                                                testWiInput.text.trim(),
+                                                testSprintInput.text.trim(),
+                                                testTeamInput.text.trim(),
+                                                sprintUrlTemplateInput.text.trim()
+                                            );
+                                            root.bannerMsg = "Opened sprint URL in system browser for verification.";
+                                            root.bannerType = "info";
+                                        }
+                                    }
                                 }
                             }
                         }

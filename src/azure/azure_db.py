@@ -1268,20 +1268,24 @@ class AzureDevOpsCache:
         """
         Saves tags for a repository. Clears old tags of this repo first.
         """
+        from utils import UpdateDateString
         with self._connection() as conn:
             conn.execute("DELETE FROM tags WHERE repo_id = ?", (repo_id,))
             for tag in tags:
                 is_stable = 1 if tag.get("stable") else 0
                 is_unstable = 1 if tag.get("unstable") else 0
                 committer_name = tag.get("Committer", "")
-                commit_date = tag.get("CommitDate", "")
+                commit_date = tag.get("CommitDate") or ""
+                if not commit_date and tag.get("CommitDateObj"):
+                    commit_date = UpdateDateString(tag["CommitDateObj"])
                 comment = tag.get("Comment", "")
+                commit_id = tag.get("CommitId") or tag.get("objectId", "")[:7]
                 raw_json = json.dumps(tag, cls=DateTimeEncoder, ensure_ascii=False)
 
                 conn.execute("""
                 INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (repo_id, tag["FriendlyName"], tag["objectId"][:7], commit_date, committer_name, comment, is_stable, is_unstable, raw_json))
+                """, (repo_id, tag["FriendlyName"], commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json))
 
     def save_submodules(self, repo_id, submodules):
         """

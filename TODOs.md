@@ -2,8 +2,33 @@
 
 ## OPEN
 
+- Publish it on my gitlab as a pip artifact or even on pypi
 
 ## DONE
+
+- Deployable and Runnable Python Package via pip (`sdist` & `wheel`):
+  - **Comprehensive `pyproject.toml` Specification**: Configured standardized PEP 517/518 build configuration with `setuptools` and `wheel`. Included all sub-packages (`azure`, `gui`, `config`, `templates`) and top-level modules (`devops_helper`, `utils`, `generate_tagday_report`, `generate_revision`, `generate_sprint_report`, `generate_artifacts_report`, `generate_rescheduling_report`).
+  - **Full Asset & Resource Packaging**: Configured `package-data` and `MANIFEST.in` to bundle all QML interface files (`gui/qml/**/*.qml`), configuration files (`config/*.yaml`, `config/*.json`), and Jinja2 report templates (`templates/*.tmpl`).
+  - **Automated CLI & GUI Script Entry Points**: Registered entry point binaries in `pyproject.toml`:
+    - `azure-tagday-ui` & `tagday-gui` & `gui`: Launches the full Qt Quick / QML desktop application interface (`gui.main:main`).
+    - `tagday` & `devops-helper`: Launches the CLI command-line tool for sync and document generation (`devops_helper:main_cli`).
+    - Added `gui/__main__.py` enabling direct `python -m gui` invocation.
+  - **Clean Standalone Execution**: Verified that installing the wheel via `pip install dist/azure_tagday_ui-1.6.0-py3-none-any.whl` runs seamlessly from any working directory outside the repository root.
+
+- Configurable Azure DevOps / TFS Sprint Taskboard URL Syntax & Live Testing Sandbox:
+  - **Customizable URL Syntax Template & Placeholders**: Added configurable sprint URL template support in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py) (`sprintUrlTemplate` property and persistence in `user_settings.yaml` / SQLite `project_config`). Supports dynamic placeholders `{base_url}` / `{server}`, `{collection}`, `{project}`, `{team}`, `{raw_team}`, `{view_mode}`, `{iteration_path}`, `{iteration_leaf}`, `{raw_iteration_leaf}`, and `{workitem_id}` / `{id}` with smart query parameter appending/cleanup.
+  - **Built-in Presets for TFS On-Premise & Azure DevOps**: Provided 1-click syntax presets in [`SettingsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/SettingsView.qml) covering Modern Hierarchical (`{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}`), Team Sprints Leaf (`{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}`), TFS Boards Taskboard (`{base_url}/{collection}/{project}/{team}/_boards/iteration/taskboard/{iteration_leaf}`), TFS Legacy Backlogs (`{base_url}/{collection}/{project}/{team}/_backlogs/iteration/{iteration_leaf}`), and Azure Cloud Simple.
+  - **Clickable Placeholder Chips**: Added token pills in the Settings UI that append dynamic placeholders to the template input with a single click.
+  - **Live URL Preview & 1-Click Browser Testing**: Engineered an interactive test sandbox allowing users to specify sample Sprint names, Team names, and Work Item IDs, view the formatted URL rendered in real time, and immediately open it in their system default browser (`🌐 Open in Browser`) to validate against their server.
+  - **Automated Unit Test Suite**: Added comprehensive unit test coverage in [`test_sprint_workload_and_deadlines.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_sprint_workload_and_deadlines.py).
+
+- Remote TAG Synchronization, Lightweight Tag Commit Resolution & Accurate PR-to-TAG Mapping:
+  - **Lightweight Tag Commit Resolution**: Enhanced [`AzureInfoHandler._process_tags()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/azure/azure_info_handler.py) to automatically fall back to `get_commit` when `get_annotated_tag` returns 404 / None (lightweight Git tags). Extracts `CommitDate`, `CommitId`, `Committer`, and `Comment` so lightweight tags have complete commit timestamps and metadata.
+  - **Full Tag History Preservation**: Eliminated the arbitrary `[:10]` truncation cutoff in `_process_tags`, ensuring the full history of version tags is preserved in the SQLite database cache for every repository.
+  - **Semantic Versioning Tag Sorting & Classification**: Refactored `_process_tags`, [`DevOpsBackend._compute_all_cache_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py), [`generate_tagday_report.load_tagday_data()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_tagday_report.py), and [`generate_revision.generate_revision_md()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_revision.py) to sort tags by `(CommitDate, parse_semver_tuple)` descending, avoiding lexicographical string comparison errors (e.g. `"v1.9"` vs `"v1.10"`).
+  - **Automatic Missing Tag Date Backfill**: Added robust date derivation from tag metadata or sprint week patterns (`vXX.YY.WWxx` -> calendar week Sunday) in `load_tagday_data` and `generate_revision_md` when working with existing SQLite caches.
+  - **Multi-Strategy PR-to-Tag Mapping**: Enabled direct merge commit ID matching, release PR title SemVer matching (e.g. PR titled `v1.00.2616`), and chronological closed-date window matching, while guarding `is_completed_after_repo_tag` with `not is_tagged` so tagged PRs are never falsely marked as untagged pending changes.
+  - **Automated Test Coverage**: Added comprehensive test cases in [`test_fast_repo_and_pr_sync.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_fast_repo_and_pr_sync.py) and [`test_tagday_report.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_tagday_report.py).
 
 - Release Notes & Multi-Package Revision Document Generation (`REVISION.md` & `REVISION.docx`):
   - **Generation from Scratch & Missing File Handling**: Fixed [`generate_revision.generate_revision_md()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/generate_revision.py) which previously aborted with an error if `REVISION.md` did not already exist on disk. Now initializes a clean release history header and overview table from database cache if creating from scratch or if target files are missing.
@@ -11,7 +36,6 @@
   - **Parameter Routing in Helper & GUI**: Corrected [`devops_helper.generate_revision_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) and [`devops_helper.generate_artifacts_report()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/devops_helper.py) to honor explicit `db_path`, `revision_md_path`, `md_path`, and `csv_path` arguments passed from [`DevOpsBackend.generate_revision_report_async()`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
   - **Tagless Repository Resilience**: Eliminated potential `UnboundLocalError` when processing repositories with 0 tags in cache.
   - **Automated Test Coverage**: Added comprehensive test cases in [`test_generate_revision.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_generate_revision.py) verifying initial generation from scratch, nested directory creation, tagless repos, and historical cutoff row preservation.
-
 
 - TFS / Azure DevOps Sprint Taskboard URL Format Fix:
   - Fixed duplicate project path in sprint URLs: stripped the redundant leading project name segment from `iteration_path` (e.g., `MyProject\sprints\week-2634` now correctly routes to `_sprints/taskboard/<TEAM>/sprints/week-2634?workitem={id}` rather than `_sprints/taskboard/<TEAM>/MyProject/sprints/week-2634?workitem={id}`).

@@ -983,7 +983,8 @@ def generate_revision_report(db_path: Optional[str] = None, revision_md_path: Op
 
 
 
-if __name__ == "__main__":
+def main_cli():
+    """CLI entry point for devops-helper / tagday-cli command."""
     import argparse
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Azure DevOps Sync & Document Generation CLI")
@@ -1029,4 +1030,8 @@ if __name__ == "__main__":
 
     if args.untagged_repos:
         list_untagged_repos()
+
+
+if __name__ == "__main__":
+    main_cli()
 
