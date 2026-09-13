@@ -352,7 +352,16 @@ AZURE_PROJECT_ID=MY_PROJECT
 │   ├── generate_sprint_report.py # Agile weekly sprint & timeframe reporter
 │   ├── generate_tagday_report.py    # Tag Day release audit reporter
 │   └── utils.py                 # Core utilities & environment loaders
+├── doc/                         # Comprehensive guides & documentation
+│   └── BUILD.md                 # Building, Packaging & CI/CD guide
 ├── templates/                   # Jinja2 markdown report templates
 ├── pyproject.toml               # Project metadata and dependency definitions
 └── uv.lock                      # Exact locked dependency versions
 ```
+
+---
+
+## Packaging & Continuous Integration
+
+For complete instructions on building Python wheels, compiling standalone Windows NSIS installers, dynamic `git describe` versioning, and configuring GitHub Actions CI/CD workflows, see the dedicated [Building and Packaging Guide](file:///c:/Users/keckx/Projects/azure-tagday-ui/doc/BUILD.md).
+

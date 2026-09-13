@@ -429,6 +429,24 @@ class DevOpsBackend(QObject):
     def projectName(self):
         return self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or "N/A"
 
+    @Property(dict, notify=statsChanged)
+    def appVersionInfo(self):
+        """Returns comprehensive version and Git tag / describe metadata."""
+        import version
+        return version.get_version_info()
+
+    @Property(str, notify=statsChanged)
+    def appVersion(self):
+        """Returns the user-facing application display version string."""
+        import version
+        return version.get_version_info().get("display_version", "v0.01.2637")
+
+    @Property(bool, notify=statsChanged)
+    def isExactTagVersion(self):
+        """Returns True if the current application build/run is on an exact Git release tag."""
+        import version
+        return bool(version.get_version_info().get("is_exact_tag", False))
+
     @Property(str, notify=statsChanged)
     def lastSynced(self):
         return self._stats.get("last_synced", "Never")

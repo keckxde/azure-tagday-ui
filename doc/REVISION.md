@@ -2,7 +2,7 @@
 
 | Package | SuperInstaller | Unstable (Nightly) | Stable | Last Change | Owner |
 | ------- | -------------- | ------------------ | ------ | ----------- | ----- |
-| [azure-tagday-ui](#azure-tagday-ui) | - | v01.07.2637 | v01.04.2637 | 2637 | Antigravity AI |
+| [azure-tagday-ui](#azure-tagday-ui) | - | v01.09.2637 | v01.04.2637 | 2637 | Antigravity AI |
 
 ---
 
@@ -15,6 +15,8 @@ Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and T
 
 | Date     | Version        | Stable | Description |
 | -------- | -------------- | ------ | ----------- |
+| 13.09.26 | v01.09.2637    |        | GitHub Actions CI/CD Pipeline & Packaging Guide: Multi-job workflow running full pytest suite, building Python wheel & sdist, compiling NSIS Windows Setup installer, creating portable zip archives, and publishing automated GitHub Releases / PyPI, with dedicated `doc/BUILD.md`. |
+| 13.09.26 | v01.08.2637    |        | Dynamic Git Tag & Describe Versioning Engine: Real-time Git describe inspection detecting exact tag vs deviated commits/distance/dirty state, integrated into PEP 440 packaging (setuptools_scm) for pip/uv, and interactive UI version badges/tooltips across Window Title, Sidebar Header, and Settings View. |
 | 13.09.26 | v01.07.2637    |        | Pip Package Distribution (`wheel` & `sdist`): Configured standardized PEP 517 packaging with setuptools, bundling all QML views/components, Jinja2 report templates, and registering `azure-tagday-ui`, `tagday-gui`, `gui`, `devops-helper`, and `tagday` script entry points. |
 | 13.09.26 | v01.06.2637    |        | Sprint URL Syntax & Testing Tool: Configurable URL template syntax with dynamic tokens, server presets, clickable placeholder pills, and live interactive test sandbox with 1-click browser testing. |
 | 13.09.26 | v01.05.2637    |        | Remote Tag Sync & PR-to-Tag Mapping: Lightweight tag commit resolution, full tag history retention, semver tag sorting, automatic tag date backfills from ISO sprint patterns, and multi-strategy PR claiming. |
@@ -30,7 +32,21 @@ Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and T
 
 ## Detailed Change Log
 
-### 1. Deployable and Runnable Python Package via pip (`sdist` & `wheel`)
+### 1. GitHub Actions CI/CD Pipeline for Automated Building, Testing & Publishing
+- **Automated Workflow Configuration ([`.github/workflows/build-and-publish.yml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/.github/workflows/build-and-publish.yml))**: Full end-to-end CI/CD pipeline triggered on pushes to `main`/`master`, Git version tags (`v*`), pull requests, and manual triggers (`workflow_dispatch`).
+- **Cross-Platform Test Job**: Automatically executes the full 220+ test suite via `pytest` and `uv` on Windows runner with full Git depth resolution.
+- **Python Package Distribution**: Builds standardized PEP 517/518 wheel (`.whl`) and source distribution (`.tar.gz`) packages, validates package metadata with `twine check`, and uploads 30-day retention build artifacts.
+- **Standalone Windows Executable & NSIS Setup Installer**: Compiles the standalone PyInstaller bundle, builds the NSIS setup installer (`AzureTagDayUI-Setup-<version>.exe`) with dynamic version injection, and archives the portable zip bundle (`azure-tagday-ui-windows-x64.zip`).
+- **Automated Release Publishing**: Automatically creates GitHub Releases on version tags (`v*`) with all distribution assets attached (Installer, Portable Zip, Wheel, and Tarball), generates automated release notes, and supports PyPI publishing via `PYPI_API_TOKEN` secret.
+- **Comprehensive Building Documentation ([`doc/BUILD.md`](file:///c:/Users/keckx/Projects/azure-tagday-ui/doc/BUILD.md))**: Detailed guide covering local builds, prerequisites, dynamic versioning, packaging, testing, and CI/CD workflow mechanics.
+
+### 2. Dynamic Git Tag & Describe Versioning Engine (Pip, UV, Build & GUI)
+- **Dynamic `git describe` Metadata Engine**: Implemented [`src/version.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/version.py) parsing `git describe --tags --always --long --dirty` to detect whether the current checkout is directly on an exact release tag (e.g. `v0.01.2637`) or deviated from it with commit distance (e.g. `v0.01.2637+3 (b95f88e)`) and uncommitted dirty working tree states (`[DIRTY]`).
+- **PEP 440 Compliance & `setuptools-scm` Integration**: Configured `dynamic = ["version"]` in [`pyproject.toml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/pyproject.toml) via `setuptools_scm`, automatically generating normalized version numbers for `pip`, `uv`, and PyPI builds with build artifact fallback (`_version_scm.py` and `importlib.metadata`).
+- **Interactive UI Version Representation**: Exposed `appVersionInfo`, `appVersion`, and `isExactTagVersion` QML properties in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py), dynamic window title in [`Main.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/Main.qml), and detailed version card in [`SettingsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/SettingsView.qml).
+- **Automated Unit Tests**: Added comprehensive test cases in [`src/tests/test_version.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_version.py).
+
+### 3. Deployable and Runnable Python Package via pip (`sdist` & `wheel`)
 - **PEP 517/518 Packaging Specification**: Configured standardized packaging in [`pyproject.toml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/pyproject.toml) and [`MANIFEST.in`](file:///c:/Users/keckx/Projects/azure-tagday-ui/MANIFEST.in) with `setuptools` and `wheel`.
 - **Complete Resource Bundling**: Ensured all sub-packages (`azure`, `gui`, `config`, `templates`) and top-level helper modules (`devops_helper`, `utils`, `generate_*`) along with all QML components (`gui/qml/**/*.qml`), configuration files (`config/*.yaml`, `config/*.json`), and Jinja2 report templates (`templates/*.tmpl`) are bundled into distribution packages.
 - **Entry Points & Execution**: Configured `azure-tagday-ui`, `tagday-gui`, and `gui` to launch the Qt Quick GUI application (`gui.main:main`), and `tagday` / `devops-helper` to launch the CLI tool (`devops_helper:main_cli`). Added `src/gui/__main__.py` allowing `python -m gui` execution.

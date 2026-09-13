@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 1024
     minimumHeight: 700
     visible: true
-    title: "DevOps Manager"
+    title: "DevOps Manager" + (backend && backend.appVersion ? " - " + backend.appVersion : "")
     color: "#0d1117"
 
     Component.onCompleted: {
@@ -164,7 +164,7 @@ ApplicationWindow {
 
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
+                            spacing: 3
 
                             Text {
                                 text: "DevOps Manager"

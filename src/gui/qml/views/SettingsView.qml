@@ -2304,35 +2304,124 @@ Item {
                 }
             }
 
-            // About Application Card
+            // About Application & Version Information Card
             Rectangle {
                 Layout.fillWidth: true
-                height: 100
+                implicitHeight: aboutAppCol.implicitHeight + 36
                 color: "#161b22"
                 radius: 8
                 border.color: "#30363d"
                 border.width: 1
 
                 ColumnLayout {
+                    id: aboutAppCol
                     anchors.fill: parent
                     anchors.margins: 18
-                    spacing: 6
+                    spacing: 12
 
-                    Text {
-                        text: "About DevOps Manager"
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 14
-                        font.weight: Font.Bold
-                        color: "#f0f6fc"
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "ℹ️"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "About DevOps Manager"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Desktop interface for managing multi-repository Azure DevOps (TFS) pipelines, Work Item WIQL sync, Tag Day releases, and Workload Planning."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
                     }
 
-                    Text {
-                        text: "Desktop interface for managing multi-repository Azure DevOps (TFS) pipelines, Work Item WIQL sync, Tag Day releases, and Build Artifact storage."
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 11
-                        color: "#8b949e"
-                        wrapMode: Text.WordWrap
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Version & Git Describe Information Grid
+                    GridLayout {
                         Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 16
+
+                        // Application Display Version
+                        ColumnLayout {
+                            spacing: 3
+                            Text { text: "Display Version:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                            RowLayout {
+                                spacing: 8
+                                Text {
+                                    text: backend ? backend.appVersion : "v0.01.2637"
+                                    font.family: "Consolas, Segoe UI, monospace"
+                                    font.pixelSize: 13
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+                                Rectangle {
+                                    implicitHeight: 20
+                                    implicitWidth: statusPillText.implicitWidth + 12
+                                    radius: 10
+                                    color: (backend && backend.isExactTagVersion) ? "#23863622" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d2992222" : "#1f6feb22")
+                                    border.color: (backend && backend.isExactTagVersion) ? "#3fb950" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d29922" : "#58a6ff")
+                                    border.width: 1
+                                    Text {
+                                        id: statusPillText
+                                        anchors.centerIn: parent
+                                        text: backend && backend.appVersionInfo ? backend.appVersionInfo.status_label : "Release"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: (backend && backend.isExactTagVersion) ? "#3fb950" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d29922" : "#58a6ff")
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pip / PyPI Package Version
+                        ColumnLayout {
+                            spacing: 3
+                            Text { text: "Pip / Wheel Version (PEP 440):"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                            Text {
+                                text: backend && backend.appVersionInfo ? backend.appVersionInfo.pep440_version : "0.1.2637"
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: 12
+                                color: "#79c0ff"
+                            }
+                        }
+
+                        // Git Describe Raw
+                        ColumnLayout {
+                            spacing: 3
+                            Text { text: "Git Describe:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                            Text {
+                                text: backend && backend.appVersionInfo ? backend.appVersionInfo.raw_describe : "v0.01.2637-0-gb95f88e"
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        // Metadata Source
+                        ColumnLayout {
+                            spacing: 3
+                            Text { text: "Version Resolution Source:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                            Text {
+                                text: backend && backend.appVersionInfo ? (backend.appVersionInfo.source === "git" ? "Live Git Worktree" : (backend.appVersionInfo.source === "scm_cache" ? "Build SCM Cache" : "Installed Package Metadata")) : "Git"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
                     }
                 }
             }

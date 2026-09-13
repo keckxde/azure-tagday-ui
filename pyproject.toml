@@ -1,6 +1,6 @@
 [project]
 name = "azure-tagday-ui"
-version = "1.6.0"
+dynamic = ["version"]
 description = "Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and Tag Day Automation Platform"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,6 +23,10 @@ dependencies = [
     "pyyaml>=6.0.0",
 ]
 
+[tool.setuptools_scm]
+write_to = "src/_version_scm.py"
+fallback_version = "0.1.2637"
+
 [project.scripts]
 azure-tagday-ui = "gui.main:main"
 tagday-gui = "gui.main:main"
@@ -31,12 +35,14 @@ tagday = "devops_helper:main_cli"
 devops-helper = "devops_helper:main_cli"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0", "setuptools-scm>=8.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = [
+    "version",
+    "_version_scm",
     "devops_helper",
     "utils",
     "generate_artifacts_report",
@@ -62,6 +68,7 @@ dev = [
     "pytest>=7.0.0",
     "build>=1.0.0",
     "wheel>=0.40.0",
+    "twine>=5.0.0",
 ]
 
 [tool.pytest.ini_options]

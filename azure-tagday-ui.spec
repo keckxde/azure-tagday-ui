@@ -34,6 +34,8 @@ hiddenimports = [
     "gui",
     "gui.backend",
     "gui.workers",
+    "version",
+    "_version_scm",
     "utils",
     "generate_tagday_report",
     "generate_artifacts_report",

@@ -7,7 +7,9 @@
 
 ; --- Application Information ---
 !define PRODUCT_NAME "Azure TagDay & DevOps UI"
+!ifndef PRODUCT_VERSION
 !define PRODUCT_VERSION "0.1.0"
+!endif
 !define PRODUCT_PUBLISHER "keckx"
 !define PRODUCT_EXE "azure-tagday-ui.exe"
 !define UNINSTALL_NAME "Uninstall.exe"

@@ -57,6 +57,18 @@ def main():
     root_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(root_dir)
 
+    sys.path.insert(0, os.path.join(root_dir, "src"))
+    try:
+        from version import get_version_info
+        v_info = get_version_info()
+        raw_tag = v_info.get("tag") or "v0.1.0"
+        app_version = raw_tag.lstrip("v")
+    except Exception as e:
+        logger.warning(f"Could not load dynamic version: {e}")
+        app_version = "0.1.0"
+
+    logger.info(f"Target build version: {app_version}")
+
     # 1. Build PyInstaller distribution
     spec_file = os.path.join(root_dir, "azure-tagday-ui.spec")
     if not os.path.exists(spec_file):
@@ -65,36 +77,39 @@ def main():
 
     run_command(["pyinstaller", "--noconfirm", spec_file], "Building PyInstaller bundle")
 
+    # Create portable zip archive of PyInstaller standalone bundle
+    bundle_dir = os.path.join(root_dir, "dist", "azure-tagday-ui")
+    if os.path.exists(bundle_dir):
+        zip_base = os.path.join(root_dir, "dist", f"azure-tagday-ui-windows-x64-{app_version}")
+        logger.info(f"Creating portable zip archive: {zip_base}.zip...")
+        shutil.make_archive(zip_base, "zip", root_dir=os.path.join(root_dir, "dist"), base_dir="azure-tagday-ui")
+        # Also create a generic named zip for CI releases
+        shutil.copyfile(f"{zip_base}.zip", os.path.join(root_dir, "dist", "azure-tagday-ui-windows-x64.zip"))
+
     # 2. Build Windows installer using NSIS or Inno Setup
     nsis_exe = find_nsis()
     inno_exe = find_inno_setup()
 
     if nsis_exe:
         nsi_file = os.path.join(root_dir, "installer.nsi")
-        setup_exe = os.path.join(root_dir, "dist", "AzureTagDayUI-Setup-0.1.0.exe")
-        if os.path.exists(setup_exe):
-            try:
-                os.remove(setup_exe)
-            except Exception as e:
-                logger.warning(f"Could not remove existing setup exe {setup_exe}: {e}")
-        run_command([nsis_exe, nsi_file], "Compiling NSIS Windows Installer")
+        run_command([nsis_exe, f"-DPRODUCT_VERSION={app_version}", nsi_file], f"Compiling NSIS Windows Installer (v{app_version})")
     elif inno_exe:
         iss_file = os.path.join(root_dir, "installer.iss")
-        setup_exe = os.path.join(root_dir, "dist", "AzureTagDayUI-InnoSetup-0.1.0.exe")
-        if os.path.exists(setup_exe):
-            try:
-                os.remove(setup_exe)
-            except Exception as e:
-                logger.warning(f"Could not remove existing setup exe {setup_exe}: {e}")
-        run_command([inno_exe, iss_file], "Compiling Inno Setup Windows Installer")
+        run_command([inno_exe, f"/DPRODUCT_VERSION={app_version}", iss_file], f"Compiling Inno Setup Windows Installer (v{app_version})")
     else:
         logger.warning("Neither NSIS (makensis) nor Inno Setup (ISCC) found.")
-        logger.warning("The PyInstaller distribution in 'dist/azure-tagday-ui/' is ready for manual distribution.")
+        logger.warning("The PyInstaller distribution in 'dist/azure-tagday-ui/' and portable zip are ready.")
 
-    # 3. Build Python Wheel package via uv build
+    # 3. Build Python Wheel package via uv build or python -m build
     uv_exe = shutil.which("uv")
     if uv_exe:
         run_command([uv_exe, "build"], "Building distributable Python Wheel (.whl) & sdist")
+    else:
+        try:
+            import build  # type: ignore
+            run_command([sys.executable, "-m", "build"], "Building Python Wheel (.whl) & sdist via build module")
+        except ImportError:
+            logger.warning("Neither uv nor python-build module found; skipping wheel package generation.")
 
     logger.info("==================================================")
     logger.info("All build artifacts generated in 'dist/' directory:")

@@ -2,9 +2,26 @@
 
 ## OPEN
 
-- Publish it on my gitlab as a pip artifact or even on pypi
+(All current milestone items completed)
 
 ## DONE
+
+- GitHub Actions CI/CD Pipeline for Automated Building, Testing & Publishing:
+  - **Automated Workflow Configuration ([`.github/workflows/build-and-publish.yml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/.github/workflows/build-and-publish.yml))**: Full end-to-end CI/CD pipeline triggered on pushes to `main`/`master`, Git version tags (`v*`), pull requests, and manual triggers (`workflow_dispatch`).
+  - **Cross-Platform Test Job**: Automatically executes the full 220+ test suite via `pytest` and `uv` on Windows runner with full Git depth resolution.
+  - **Python Package Distribution**: Builds standardized PEP 517/518 wheel (`.whl`) and source distribution (`.tar.gz`) packages, validates package metadata with `twine check`, and uploads 30-day retention build artifacts.
+  - **Standalone Windows Executable & NSIS Setup Installer**: Compiles the standalone PyInstaller bundle, builds the NSIS setup installer (`AzureTagDayUI-Setup-<version>.exe`) with dynamic version injection, and archives the portable zip bundle (`azure-tagday-ui-windows-x64.zip`).
+  - **Automated Release Publishing**: Automatically creates GitHub Releases on version tags (`v*`) with all distribution assets attached (Installer, Portable Zip, Wheel, and Tarball), generates automated release notes, and supports PyPI publishing via `PYPI_API_TOKEN` secret.
+
+- Dynamic Git Tag & Describe Versioning Engine (Pip, UV, Build & GUI):
+  - **Dynamic `git describe` Metadata Engine**: Implemented [`src/version.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/version.py) parsing `git describe --tags --always --long --dirty` to detect whether the current checkout is directly on an exact release tag (e.g. `v0.01.2637`) or deviated from it with commit distance (e.g. `v0.01.2637+3 (b95f88e)`) and uncommitted dirty working tree states (`[DIRTY]`).
+  - **PEP 440 Compliance & `setuptools-scm` Integration**: Configured `dynamic = ["version"]` in [`pyproject.toml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/pyproject.toml) via `setuptools_scm`, automatically generating normalized version numbers for `pip`, `uv`, and PyPI builds with build artifact fallback (`_version_scm.py` and `importlib.metadata`).
+  - **Interactive UI Version Representation**:
+    - Exposed `appVersionInfo`, `appVersion`, and `isExactTagVersion` QML properties in [`DevOpsBackend`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/backend.py).
+    - Window title in [`Main.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/Main.qml) dynamically reflects version state (`DevOps Manager - <version>`).
+    - Added an interactive pill badge in the sidebar header with color coding (Green for exact release tags, Blue/Orange for dev/dirty builds), rich hover tooltip detailing tag, distance, commit hash, and dirty status, and 1-click navigation to Settings.
+    - Added an "About DevOps Manager" section in [`SettingsView.qml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/gui/qml/views/SettingsView.qml) with detailed version cards, raw `git describe` string, PEP 440 package version, and resolution source.
+  - **Automated Test Suite**: Added comprehensive test coverage in [`src/tests/test_version.py`](file:///c:/Users/keckx/Projects/azure-tagday-ui/src/tests/test_version.py).
 
 - Deployable and Runnable Python Package via pip (`sdist` & `wheel`):
   - **Comprehensive `pyproject.toml` Specification**: Configured standardized PEP 517/518 build configuration with `setuptools` and `wheel`. Included all sub-packages (`azure`, `gui`, `config`, `templates`) and top-level modules (`devops_helper`, `utils`, `generate_tagday_report`, `generate_revision`, `generate_sprint_report`, `generate_artifacts_report`, `generate_rescheduling_report`).
