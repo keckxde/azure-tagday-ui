@@ -284,6 +284,98 @@ class TestTagDayReport(unittest.TestCase):
         # Repository should have NO prs_after_tag
         self.assertEqual(len(repo_data["prs_after_tag"]), 0)
 
+    def test_check_branch_important_and_repo_category_important(self):
+        # Branch patterns
+        self.assertFalse(generate_tagday_report.check_branch_important("archive/old-stuff"))
+        self.assertFalse(generate_tagday_report.check_branch_important("demo/feature"))
+        self.assertFalse(generate_tagday_report.check_branch_important("test/experimental"))
+        self.assertFalse(generate_tagday_report.check_branch_important("my-deprecated-fix"))
+        self.assertTrue(generate_tagday_report.check_branch_important("feature/login"))
+        self.assertTrue(generate_tagday_report.check_branch_important("bugfix/1234"))
+
+        # Category patterns (testing category and repo_name)
+        self.assertFalse(generate_tagday_report.check_repo_category_important("DEPRECATED"))
+        self.assertFalse(generate_tagday_report.check_repo_category_important("Deprecated Components"))
+        self.assertTrue(generate_tagday_report.check_repo_category_important("CORE"))
+        self.assertTrue(generate_tagday_report.check_repo_category_important("GENERIC"))
+        self.assertTrue(generate_tagday_report.check_repo_category_important("OTHERS"))
+
+        # Category patterns evaluated against repo_name
+        self.assertFalse(generate_tagday_report.check_repo_category_important("OTHERS", repo_name="repo-deprecated-app"))
+        self.assertFalse(generate_tagday_report.check_repo_category_important("CORE", repo_name="legacy-deprecated-service"))
+        self.assertTrue(generate_tagday_report.check_repo_category_important("CORE", repo_name="repo-core-engine"))
+
+        # Custom patterns
+        self.assertFalse(generate_tagday_report.check_repo_category_important("SANDBOX", ignore_patterns=["*sandbox*"]))
+        self.assertFalse(generate_tagday_report.check_repo_category_important("OTHERS", ignore_patterns=["*sandbox*"], repo_name="my-sandbox-repo"))
+        self.assertTrue(generate_tagday_report.check_repo_category_important("CORE", ignore_patterns=["*sandbox*"], repo_name="core-service"))
+
+    def test_load_tagday_data_with_category_and_branch_filters(self):
+        self._seed_sample_repo_data()
+
+        # Seed an additional repository with category DEPRECATED that has unmerged branches and PRs
+        # and another repository with category OTHERS whose name matches *deprecated*
+        with self.cache._connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url, is_disabled)
+                VALUES ('r-dep', 'TEST_PROJ', 'repo-deprecated-app', 'refs/heads/dev', 'http://tfs/dep', 0)
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO repo_category_overrides (repo_name, category)
+                VALUES ('repo-deprecated-app', 'DEPRECATED')
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
+                VALUES (999, 'r-dep', 'Deprecated PR', 'active', 'refs/heads/dev', 'refs/heads/dep-feat', 'Dev1', '', '{}')
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO branches (repo_id, name, commit_id, commit_date, committer_name, comment, ahead_count, behind_count)
+                VALUES ('r-dep', 'refs/heads/dep-feat', 'dep123', '2026-09-01 10:00:00', 'Dev1', 'Dep branch', 5, 0)
+            """)
+
+            # Repo whose category is OTHERS but name matches *deprecated*
+            conn.execute("""
+                INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url, is_disabled)
+                VALUES ('r-dep-name', 'TEST_PROJ', 'my-deprecated-tool', 'refs/heads/dev', 'http://tfs/dep-name', 0)
+            """)
+            conn.execute("""
+                INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
+                VALUES (998, 'r-dep-name', 'Another Deprecated PR', 'active', 'refs/heads/dev', 'refs/heads/dep-tool-feat', 'Dev1', '', '{}')
+            """)
+
+            # Also add an archive branch to repo-app
+            conn.execute("""
+                INSERT OR REPLACE INTO branches (repo_id, name, commit_id, commit_date, committer_name, comment, ahead_count, behind_count)
+                VALUES ('r-app', 'refs/heads/archive/old-experiment', 'arc123', '2026-08-25 10:00:00', 'Dev2', 'Archived experiment', 10, 0)
+            """)
+
+        data = generate_tagday_report.load_tagday_data(
+            self.cache,
+            project_id="TEST_PROJ",
+            ignore_category_patterns=["*deprecated*"],
+            ignore_branch_patterns=["*archive*", "*demo*"]
+        )
+
+        # Both repos should be in all_repositories, but NOT in repos_with_prs, repos_with_unmerged_branches, or repos_with_any_changes
+        self.assertIn("repo-deprecated-app", data["all_repositories"])
+        self.assertIn("my-deprecated-tool", data["all_repositories"])
+        self.assertNotIn("repo-deprecated-app", data["repos_with_prs"])
+        self.assertNotIn("my-deprecated-tool", data["repos_with_prs"])
+        self.assertNotIn("repo-deprecated-app", data["repos_with_unmerged_branches"])
+        self.assertNotIn("my-deprecated-tool", data["repos_with_unmerged_branches"])
+        self.assertNotIn("repo-deprecated-app", data["repos_with_any_changes"])
+        self.assertNotIn("my-deprecated-tool", data["repos_with_any_changes"])
+
+        # Timeline should NOT contain any items from either repo
+        timeline_repos = [item["repo_name"] for item in data["all_changes_timeline"]]
+        self.assertNotIn("repo-deprecated-app", timeline_repos)
+        self.assertNotIn("my-deprecated-tool", timeline_repos)
+
+        # The archive branch in repo-app should NOT be included in unmerged_branches
+        app_branches = [b["branch_name"] for b in data["all_repositories"]["repo-app"]["unmerged_branches"]]
+        self.assertNotIn("archive/old-experiment", app_branches)
+
 
 if __name__ == "__main__":
     unittest.main()
+

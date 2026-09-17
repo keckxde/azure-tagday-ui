@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-import logging, re, os, sys
+import logging, re, os, sys, fnmatch
 import json
 from datetime import datetime, timedelta
 
@@ -422,13 +422,20 @@ def categorize_repository(repo_name, config=None, cache_db=None, config_path=Non
     repo_map = config.get("repositories", {})
     prefix_rules = config.get("prefix_rules", {})
 
-    # 1. Explicit mapping
-    if repo_name in repo_map:
-        return repo_map[repo_name]
+    if not repo_name:
+        return default_cat
 
-    # 2. Prefix rules
+    r_lower = str(repo_name).strip().lower()
+
+    # 1. Explicit mapping (case-insensitive)
+    for r_key, cat in repo_map.items():
+        if str(r_key).strip().lower() == r_lower:
+            return cat
+
+    # 2. Prefix rules (case-insensitive)
     for prefix, cat in prefix_rules.items():
-        if repo_name.startswith(prefix):
+        p_clean = str(prefix).strip().lower()
+        if p_clean and r_lower.startswith(p_clean):
             return cat
 
     # 3. Default category fallback
@@ -455,11 +462,102 @@ def sort_categories_for_report(active_categories, known_order=None):
     for c in sorted(active_set):
         if c not in ordered and c != "OTHERS":
             ordered.append(c)
-    if "OTHERS" in active_set:
+    if "OTHERS" in active_set and "OTHERS" not in ordered:
         ordered.append("OTHERS")
     elif not ordered:
         ordered = ["OTHERS"]
     return ordered
+
+
+def matches_pattern(text, pattern):
+    """
+    Case-insensitive pattern matching supporting wildcards (* and ?), prefixes, and substrings.
+    """
+    if not text or not pattern:
+        return False
+    t = str(text).strip().lower()
+    p = str(pattern).strip().lower()
+    if not p:
+        return False
+    if fnmatch.fnmatchcase(t, p):
+        return True
+    if "*" not in p and "?" not in p and p in t:
+        return True
+    return False
+
+
+def matches_any_pattern(text, patterns):
+    """
+    Checks if text matches any pattern in a list of wildcard/string patterns.
+    Supports either string patterns or dicts with a 'pattern' key and optional 'enabled' flag.
+    """
+    if not text or not patterns:
+        return False
+    for pat in patterns:
+        if isinstance(pat, dict):
+            if not pat.get("enabled", True):
+                continue
+            p_str = pat.get("pattern", "")
+        else:
+            p_str = str(pat)
+        if matches_pattern(text, p_str):
+            return True
+    return False
+
+
+def get_default_ignore_category_patterns():
+    """Returns default repository category patterns ignored for change notifications."""
+    return ["*deprecated*"]
+
+
+def get_default_ignore_branch_patterns():
+    """Returns default branch patterns not considered as changes (unmerged/ahead tracking)."""
+    return ["*archive*", "*demo*", "*deprecated*", "*test*", "archive/*", "demo/*", "test/*"]
+
+
+def load_change_filter_patterns(cache_db=None):
+    """
+    Loads ignored category patterns and ignored branch patterns from cache_db project_config or defaults.
+
+    Returns:
+        tuple: (list_of_category_patterns, list_of_branch_patterns)
+    """
+    cat_patterns = get_default_ignore_category_patterns()
+    branch_patterns = get_default_ignore_branch_patterns()
+
+    if cache_db and hasattr(cache_db, "get_config"):
+        try:
+            db_cat = cache_db.get_config("IGNORE_REPO_CATEGORY_PATTERNS")
+            if db_cat:
+                if isinstance(db_cat, str):
+                    try:
+                        parsed = json.loads(db_cat)
+                        if isinstance(parsed, list):
+                            cat_patterns = [str(x).strip() for x in parsed if str(x).strip()]
+                    except Exception:
+                        cat_patterns = [x.strip() for x in db_cat.split(",") if x.strip()]
+                elif isinstance(db_cat, list):
+                    cat_patterns = [str(x).strip() for x in db_cat if str(x).strip()]
+        except Exception:
+            pass
+
+        try:
+            db_br = cache_db.get_config("IGNORE_BRANCH_PATTERNS")
+            if db_br:
+                if isinstance(db_br, str):
+                    try:
+                        parsed = json.loads(db_br)
+                        if isinstance(parsed, list):
+                            branch_patterns = [str(x).strip() for x in parsed if str(x).strip()]
+                    except Exception:
+                        branch_patterns = [x.strip() for x in db_br.split(",") if x.strip()]
+                elif isinstance(db_br, list):
+                    branch_patterns = [str(x).strip() for x in db_br if str(x).strip()]
+        except Exception:
+            pass
+
+    return cat_patterns, branch_patterns
+
 
 
 def parse_sprint_week(iteration_str):

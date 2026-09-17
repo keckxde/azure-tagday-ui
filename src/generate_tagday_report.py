@@ -39,23 +39,48 @@ from utils import (
     UpdateDateString,
     parse_sprint_week,
     get_sprint_date_range,
+    matches_pattern,
+    matches_any_pattern,
+    load_change_filter_patterns,
+    get_default_ignore_category_patterns,
+    get_default_ignore_branch_patterns,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def check_branch_important(text: str) -> bool:
-    """Überprüft, ob 'archiv', 'demo' oder 'deprecated' im String vorkommen. Falls ja => false, Falls nein: true """
-    keywords = ("archive/", "demo/", "deprecated","test/")
-    
-    # Text in Kleinbuchstaben umwandeln für einen case-insensitive Abgleich
-    text_clean = text.lower().strip()
-    
-    # Prüfen, ob eines der Keywords im Text existiert => Nicht wichtig
+def check_branch_important(text: str, ignore_patterns=None) -> bool:
+    """
+    Checks whether a branch name is considered important (relevant for change tracking).
+    Returns False if branch matches any ignored pattern (e.g. *archive*, *demo*, *deprecated*, *test*),
+    True otherwise.
+    """
+    if not text:
+        return False
+    if ignore_patterns is None:
+        ignore_patterns = get_default_ignore_branch_patterns()
+    if matches_any_pattern(text, ignore_patterns):
+        return False
     return True
 
 
-def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=False):
+def check_repo_category_important(category: str, ignore_patterns=None, repo_name: str = "") -> bool:
+    """
+    Checks whether a repository category or repository name is relevant for change notifications and pending status.
+    Returns False if category or repo_name matches any ignored pattern (e.g. *deprecated*),
+    True otherwise.
+    """
+    if ignore_patterns is None:
+        ignore_patterns = get_default_ignore_category_patterns()
+    if category and matches_any_pattern(category, ignore_patterns):
+        return False
+    if repo_name and matches_any_pattern(repo_name, ignore_patterns):
+        return False
+    return True
+
+
+def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=False,
+                      ignore_category_patterns=None, ignore_branch_patterns=None):
     """
     Queries SQLite cache database and prepares Tag Day data evaluated per repository
     relative to each repository's own latest version tag.
@@ -65,6 +90,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         project_id (str, optional): Project identifier.
         ignore_repos (list, optional): List of repository names to ignore.
         patch_titles (bool, optional): Whether to run the PR title patcher (enforce [<TYPE>_<NR>] prefixes). Default False.
+        ignore_category_patterns (list, optional): List of category patterns to exclude from change notifications.
+        ignore_branch_patterns (list, optional): List of branch patterns to exclude from unmerged branch changes.
 
     Returns:
         dict: Structured datasets for Tag Day report.
@@ -73,6 +100,13 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         db_cfg_val = cache_db.get_config("IGNORE_REPOS") if hasattr(cache_db, "get_config") else None
         ignore_str = db_cfg_val if db_cfg_val is not None else devops_helper.utils.GetEnvVariable("IGNORE_REPOS", "")
         ignore_repos = ignore_str.split() if ignore_str else []
+
+    if ignore_category_patterns is None or ignore_branch_patterns is None:
+        db_cat_pat, db_br_pat = load_change_filter_patterns(cache_db=cache_db)
+        if ignore_category_patterns is None:
+            ignore_category_patterns = db_cat_pat
+        if ignore_branch_patterns is None:
+            ignore_branch_patterns = db_br_pat
 
     with cache_db._connection() as conn:
         # 1. Fetch all repositories
@@ -88,13 +122,16 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             name = r["name"]
             if name in ignore_repos:
                 continue
+            cat = categorize_repository(name, cache_db=cache_db)
+            is_cat_important = check_repo_category_important(cat, ignore_category_patterns, repo_name=name)
             repositories[name] = {
                 "id": r["id"],
                 "name": name,
                 "default_branch": r["default_branch"],
                 "web_url": r["web_url"] or f"{devops_helper.AZURE_BASE_URL}/{devops_helper.AZURE_COLLECTION}/{project_id}/_git/{name}",
                 "is_disabled": bool(r["is_disabled"]),
-                "category": categorize_repository(name),
+                "category": cat,
+                "is_category_important_for_changes": is_cat_important,
                 "latest_tag": None,
                 "prs_after_tag": [],
                 "unmerged_branches": [],
@@ -308,12 +345,14 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             )
             is_active = (status in ("active", "1"))
 
-            if is_completed_after_repo_tag:
-                repositories[rname]["prs_after_tag"].append(pr_item)
-                all_changes_timeline.append(pr_item)
-            elif is_active:
-                repositories[rname]["active_prs"].append(pr_item)
-                all_changes_timeline.append(pr_item)
+            # Exclude repositories in filtered categories from change notifications
+            if repositories[rname].get("is_category_important_for_changes", True):
+                if is_completed_after_repo_tag:
+                    repositories[rname]["prs_after_tag"].append(pr_item)
+                    all_changes_timeline.append(pr_item)
+                elif is_active:
+                    repositories[rname]["active_prs"].append(pr_item)
+                    all_changes_timeline.append(pr_item)
 
         # 4. Fetch Branches with unmerged commits (ahead_count > 0)
         branches_rows = conn.execute("""
@@ -362,31 +401,35 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 "prepared_pr": prepared_pr,
                 "prepared_prs": active_matching if active_matching else matching_prs,
             }
-            if check_branch_important(bname):
+            
+            is_branch_important = check_branch_important(bname, ignore_patterns=ignore_branch_patterns)
+            is_cat_important = repositories[rname].get("is_category_important_for_changes", True)
+
+            if is_branch_important and is_cat_important:
                 repositories[rname]["unmerged_branches"].append(branch_item)
 
-            # Per-repository baseline cutoff date
-            repo_latest_tag = repositories[rname]["latest_tag"]
-            repo_cutoff_date = repo_latest_tag["commit_date"] if repo_latest_tag and repo_latest_tag["commit_date"] else "1970-01-01 00:00:00"
+                # Per-repository baseline cutoff date
+                repo_latest_tag = repositories[rname]["latest_tag"]
+                repo_cutoff_date = repo_latest_tag["commit_date"] if repo_latest_tag and repo_latest_tag["commit_date"] else "1970-01-01 00:00:00"
 
-            # If commit date of ahead branch is after repo's latest tag, add to changes timeline
-            if branch_item["commit_date"] and branch_item["commit_date"] > repo_cutoff_date:
-                pr_note = f" (PR !{prepared_pr['pr_id']})" if prepared_pr else ""
-                all_changes_timeline.append({
-                    "pr_id": f"Branch:{branch_item['short_hash']}",
-                    "repo_name": rname,
-                    "title": f"[{bname}]{pr_note} {branch_item['comment']}",
-                    "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']}" if prepared_pr else ""),
-                    "status": "unmerged",
-                    "status_str": f"AHEAD +{branch_item['ahead']}",
-                    "target_branch": bname,
-                    "source_branch": bname,
-                    "created_by": branch_item["committer"],
-                    "closed_date": "",
-                    "creation_date": branch_item["commit_date"],
-                    "date": branch_item["commit_date"],
-                    "item_type": "BRANCH_UPDATE"
-                })
+                # If commit date of ahead branch is after repo's latest tag, add to changes timeline
+                if branch_item["commit_date"] and branch_item["commit_date"] > repo_cutoff_date:
+                    pr_note = f" (PR !{prepared_pr['pr_id']})" if prepared_pr else ""
+                    all_changes_timeline.append({
+                        "pr_id": f"Branch:{branch_item['short_hash']}",
+                        "repo_name": rname,
+                        "title": f"[{bname}]{pr_note} {branch_item['comment']}",
+                        "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']}" if prepared_pr else ""),
+                        "status": "unmerged",
+                        "status_str": f"AHEAD +{branch_item['ahead']}",
+                        "target_branch": bname,
+                        "source_branch": bname,
+                        "created_by": branch_item["committer"],
+                        "closed_date": "",
+                        "creation_date": branch_item["commit_date"],
+                        "date": branch_item["commit_date"],
+                        "item_type": "BRANCH_UPDATE"
+                    })
 
         # Sort timeline chronologically descending
         all_changes_timeline.sort(key=lambda x: x.get("date") or "1970-01-01", reverse=True)
@@ -406,6 +449,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             "repos_with_unmerged_branches": repos_with_unmerged_branches,
             "repos_with_any_changes": repos_with_any_changes,
             "all_changes_timeline": all_changes_timeline,
+            "ignore_category_patterns": ignore_category_patterns,
+            "ignore_branch_patterns": ignore_branch_patterns,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 

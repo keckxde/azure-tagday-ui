@@ -30,7 +30,6 @@ fallback_version = "0.1.2637"
 [project.scripts]
 azure-tagday-ui = "gui.main:main"
 tagday-gui = "gui.main:main"
-gui = "gui.main:main"
 tagday = "devops_helper:main_cli"
 devops-helper = "devops_helper:main_cli"
 

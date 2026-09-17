@@ -2,7 +2,7 @@
 
 | Package | SuperInstaller | Unstable (Nightly) | Stable | Last Change | Owner |
 | ------- | -------------- | ------------------ | ------ | ----------- | ----- |
-| [azure-tagday-ui](#azure-tagday-ui) | - | v01.09.2637 | v01.04.2637 | 2637 | Antigravity AI |
+| [azure-tagday-ui](#azure-tagday-ui) | - | v01.10.2637 | v01.04.2637 | 2637 | Antigravity AI |
 
 ---
 
@@ -15,6 +15,7 @@ Multi-Repository Azure DevOps & TFS Release Management, Workload Planning, and T
 
 | Date     | Version        | Stable | Description |
 | -------- | -------------- | ------ | ----------- |
+| 17.09.26 | v01.10.2637    |        | Change Notification Filters & Layout Enhancements: Case-independent wildcard/prefix filters for repository categories, repository names, and branches to exclude from Tag Day release tracking, pending tags, and Tag Day Explorer; collapsible sidebar (Ctrl+B) with persistence; full-width wrapping repository category filter bar; collapsible Work Items filter panel with active filter summary strip; strict column layout constraints to eliminate horizontal overflow; and comprehensive `doc/USER_MANUAL.md`. |
 | 13.09.26 | v01.09.2637    |        | GitHub Actions CI/CD Pipeline & Packaging Guide: Multi-job workflow running full pytest suite, building Python wheel & sdist, compiling NSIS Windows Setup installer, creating portable zip archives, and publishing automated GitHub Releases / PyPI, with dedicated `doc/BUILD.md`. |
 | 13.09.26 | v01.08.2637    |        | Dynamic Git Tag & Describe Versioning Engine: Real-time Git describe inspection detecting exact tag vs deviated commits/distance/dirty state, integrated into PEP 440 packaging (setuptools_scm) for pip/uv, and interactive UI version badges/tooltips across Window Title, Sidebar Header, and Settings View. |
 | 13.09.26 | v01.07.2637    |        | Pip Package Distribution (`wheel` & `sdist`): Configured standardized PEP 517 packaging with setuptools, bundling all QML views/components, Jinja2 report templates, and registering `azure-tagday-ui`, `tagday-gui`, `gui`, `devops-helper`, and `tagday` script entry points. |

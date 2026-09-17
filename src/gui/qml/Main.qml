@@ -87,6 +87,15 @@ ApplicationWindow {
 
     property bool isSyncLogDrawerOpen: false
     property real syncLogDrawerHeight: 380
+    property bool isSidebarCollapsed: backend ? backend.sidebarCollapsed : false
+
+    Shortcut {
+        sequence: "Ctrl+B"
+        onActivated: {
+            if (backend)
+                backend.toggleSidebar();
+        }
+    }
 
     function toggleSyncLogDrawer() {
         window.isSyncLogDrawerOpen = !window.isSyncLogDrawerOpen;
@@ -123,585 +132,950 @@ ApplicationWindow {
             spacing: 0
 
             // ==========================================
-            // Sidebar Navigation
+            // Sidebar Navigation (Collapsible)
             // ==========================================
-        Rectangle {
-            Layout.preferredWidth: 240
-            Layout.fillHeight: true
-            color: "#161b22"
-            border.color: "#30363d"
-            border.width: 1
-            clip: true
-            z: 2
+            Rectangle {
+                id: sidebarRect
+                Layout.preferredWidth: window.isSidebarCollapsed ? 64 : 240
+                Layout.fillHeight: true
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+                clip: true
+                z: 2
 
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 4
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
 
-                // App Brand
-                Item {
-                    Layout.fillWidth: true
-                    height: 70
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 4
 
-                    Row {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 20
-                        spacing: 12
+                    // App Brand & Collapse Toggle Header
+                    Item {
+                        Layout.fillWidth: true
+                        height: 64
 
+                        // Expanded Brand Header
+                        RowLayout {
+                            visible: !window.isSidebarCollapsed
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 12
+                            spacing: 10
+
+                            Rectangle {
+                                width: 36
+                                height: 36
+                                radius: 8
+                                color: "#1f6feb"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⚡"
+                                    font.pixelSize: 18
+                                }
+                            }
+
+                            Column {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Text {
+                                    text: "DevOps Manager"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 14
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                    elide: Text.ElideRight
+                                    width: parent.width
+                                }
+
+                                Text {
+                                    text: backend ? backend.projectName : "Unknown Project"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    color: "#8b949e"
+                                    elide: Text.ElideRight
+                                    width: parent.width
+                                }
+                            }
+
+                            // Collapse Button (◀)
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: 6
+                                color: collapseBtnMa.containsMouse ? "#30363d" : "#21262d"
+                                border.color: collapseBtnMa.containsMouse ? "#58a6ff" : "#30363d"
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "◀"
+                                    font.pixelSize: 10
+                                    color: collapseBtnMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                }
+
+                                ToolTip.visible: collapseBtnMa.containsMouse
+                                ToolTip.text: "Collapse sidebar (Ctrl+B)"
+                                ToolTip.delay: 200
+
+                                MouseArea {
+                                    id: collapseBtnMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (backend) backend.toggleSidebar();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Collapsed Brand Header (Logo / Expand Button)
                         Rectangle {
+                            visible: window.isSidebarCollapsed
+                            anchors.centerIn: parent
                             width: 38
                             height: 38
                             radius: 8
-                            color: "#1f6feb"
+                            color: expandBtnMa.containsMouse ? "#388bfd" : "#1f6feb"
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "⚡"
-                                font.pixelSize: 20
-                            }
-                        }
-
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
-
-                            Text {
-                                text: "DevOps Manager"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
+                                text: expandBtnMa.containsMouse ? "▶" : "⚡"
+                                font.pixelSize: expandBtnMa.containsMouse ? 13 : 19
+                                color: "#ffffff"
                             }
 
-                            Text {
-                                text: backend ? backend.projectName : "Unknown Project"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
+                            ToolTip.visible: expandBtnMa.containsMouse
+                            ToolTip.text: "Expand sidebar (Ctrl+B)"
+                            ToolTip.delay: 200
+
+                            MouseArea {
+                                id: expandBtnMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (backend) backend.toggleSidebar();
+                                }
                             }
                         }
                     }
-                }
 
-                // Nav Links
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 4
-
-                    NavItem {
-                        iconText: "📊"
-                        label: "Dashboard"
-                        active: window.currentTabIndex === 0
-                        onClicked: window.currentTabIndex = 0
-                    }
-
-                    NavItem {
-                        iconText: "📦"
-                        label: "Repositories"
-                        active: window.currentTabIndex === 1
-                        onClicked: window.currentTabIndex = 1
-                    }
-
-                    NavItem {
-                        iconText: "🔀"
-                        label: "Pull Requests"
-                        active: window.currentTabIndex === 2
-                        onClicked: window.currentTabIndex = 2
-                    }
-
-                    NavItem {
-                        iconText: "📋"
-                        label: "Work Items"
-                        active: window.currentTabIndex === 3
-                        onClicked: window.currentTabIndex = 3
-                    }
-
-                    NavItem {
-                        iconText: "👥"
-                        label: "Workload Explorer"
-                        active: window.currentTabIndex === 4
-                        onClicked: window.currentTabIndex = 4
-                    }
-
-                    NavItem {
-                        iconText: "📈"
-                        label: "Reports & Analytics"
-                        active: window.currentTabIndex === 5
-                        onClicked: window.currentTabIndex = 5
-                    }
-
-                    NavItem {
-                        iconText: "⚙️"
-                        label: "Settings"
-                        active: window.currentTabIndex === 6
-                        onClicked: window.currentTabIndex = 6
-                    }
-                }
-
-                Item {
-                    Layout.fillHeight: true
-                }
-
-                // ==========================================
-                // Quick Font Size / Scaling Switcher
-                // ==========================================
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.bottomMargin: 8
-                    implicitHeight: 36
-                    radius: 6
-                    color: "#0d1117"
-                    border.color: "#30363d"
-                    border.width: 1
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 6
+                    // Nav Links
+                    ColumnLayout {
+                        Layout.fillWidth: true
                         spacing: 4
 
-                        Text {
-                            text: "🔤 Font:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 10
-                            font.weight: Font.DemiBold
-                            color: "#8b949e"
+                        NavItem {
+                            iconText: "📊"
+                            label: "Dashboard"
+                            active: window.currentTabIndex === 0
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 0
                         }
 
-                        Item { Layout.fillWidth: true }
+                        NavItem {
+                            iconText: "📦"
+                            label: "Repositories"
+                            active: window.currentTabIndex === 1
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 1
+                        }
 
-                        Repeater {
-                            model: [
-                                { label: "S", mode: "small", tip: "Small (90%) - Compact" },
-                                { label: "M", mode: "medium", tip: "Medium (100%) - Default" },
-                                { label: "L", mode: "large", tip: "Large (115%) - Enhanced" },
-                                { label: "XL", mode: "xlarge", tip: "Extra Large (130%) - 4K/HiDPI" }
-                            ]
+                        NavItem {
+                            iconText: "🔀"
+                            label: "Pull Requests"
+                            active: window.currentTabIndex === 2
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 2
+                        }
 
-                            Rectangle {
-                                property bool isCur: backend && backend.fontSizeMode === modelData.mode
-                                implicitWidth: 26
-                                implicitHeight: 26
-                                radius: 4
-                                color: isCur ? "#1f6feb" : (btnMa.containsMouse ? "#21262d" : "transparent")
-                                border.color: isCur ? "#388bfd" : (btnMa.containsMouse ? "#30363d" : "transparent")
+                        NavItem {
+                            iconText: "📋"
+                            label: "Work Items"
+                            active: window.currentTabIndex === 3
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 3
+                        }
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.label
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 10
-                                    font.weight: parent.isCur ? Font.Bold : Font.Normal
-                                    color: parent.isCur ? "#ffffff" : "#8b949e"
-                                }
+                        NavItem {
+                            iconText: "👥"
+                            label: "Workload Explorer"
+                            active: window.currentTabIndex === 4
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 4
+                        }
 
-                                ToolTip.visible: btnMa.containsMouse
-                                ToolTip.text: modelData.tip
+                        NavItem {
+                            iconText: "📈"
+                            label: "Reports & Analytics"
+                            active: window.currentTabIndex === 5
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 5
+                        }
 
-                                MouseArea {
-                                    id: btnMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (backend) {
-                                            backend.setFontSizeMode(modelData.mode);
-                                        }
-                                    }
-                                }
-                            }
+                        NavItem {
+                            iconText: "⚙️"
+                            label: "Settings"
+                            active: window.currentTabIndex === 6
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.currentTabIndex = 6
                         }
                     }
-                }
 
-                // ==========================================
-                // Sidebar Sync Actions Panel
-                // ==========================================
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.bottomMargin: 8
-                    implicitHeight: syncControlsCol.implicitHeight + 20
-                    color: "#0d1117"
-                    radius: 8
-                    border.color: "#30363d"
-                    border.width: 1
+                    Item {
+                        Layout.fillHeight: true
+                    }
 
-                    ColumnLayout {
-                        id: syncControlsCol
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 8
+                    // ==========================================
+                    // Quick Font Size / Scaling Switcher (Expanded)
+                    // ==========================================
+                    Rectangle {
+                        visible: !window.isSidebarCollapsed
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.rightMargin: 12
+                        Layout.bottomMargin: 8
+                        implicitHeight: 36
+                        radius: 6
+                        color: "#0d1117"
+                        border.color: "#30363d"
+                        border.width: 1
 
-                        // Section Header with DB quick refresh
                         RowLayout {
-                            Layout.fillWidth: true
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 6
+                            spacing: 4
 
                             Text {
-                                text: "DATA SYNC"
+                                text: "🔤 Font:"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 10
-                                font.weight: Font.Bold
+                                font.weight: Font.DemiBold
                                 color: "#8b949e"
                             }
 
-                            Item {
-                                Layout.fillWidth: true
-                            }
+                            Item { Layout.fillWidth: true }
 
-                            Rectangle {
-                                width: 22
-                                height: 22
-                                radius: 4
-                                color: refreshMa.containsMouse ? "#21262d" : "transparent"
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "🔄"
-                                    font.pixelSize: 11
-                                    opacity: refreshMa.containsMouse ? 1.0 : 0.7
-                                }
-                                MouseArea {
-                                    id: refreshMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (backend)
-                                            backend.refresh_all_data();
-                                    }
-                                }
-                                ToolTip.visible: refreshMa.containsMouse
-                                ToolTip.text: "Reload local cache from disk"
-                            }
-                        }
-
-                        // Auto-Sync Status & Quick Toggle Bar
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 26
-                            radius: 4
-                            color: backend && backend.autoSyncEnabled ? Qt.rgba(31 / 255, 111 / 255, 235 / 255, 0.15) : "#161b22"
-                            border.color: backend && backend.autoSyncEnabled ? "#1f6feb" : "#30363d"
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 6
-
-                                Text {
-                                    text: "⏱️"
-                                    font.pixelSize: 10
-                                }
-
-                                Text {
-                                    text: backend && backend.autoSyncEnabled ? ("Auto: " + backend.nextAutoSyncText) : "Auto-Sync: Off"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    color: backend && backend.autoSyncEnabled ? "#58a6ff" : "#8b949e"
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                }
+                            Repeater {
+                                model: [
+                                    { label: "S", mode: "small", tip: "Small (90%) - Compact" },
+                                    { label: "M", mode: "medium", tip: "Medium (100%) - Default" },
+                                    { label: "L", mode: "large", tip: "Large (115%) - Enhanced" },
+                                    { label: "XL", mode: "xlarge", tip: "Extra Large (130%) - 4K/HiDPI" }
+                                ]
 
                                 Rectangle {
-                                    implicitHeight: 18
-                                    implicitWidth: autoToggleText.implicitWidth + 8
-                                    radius: 3
-                                    color: autoToggleMa.containsMouse ? "#30363d" : (backend && backend.autoSyncEnabled ? "#162b20" : "#21262d")
-                                    border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
-                                    border.width: 1
+                                    property bool isCur: backend && backend.fontSizeMode === modelData.mode
+                                    implicitWidth: 26
+                                    implicitHeight: 26
+                                    radius: 4
+                                    color: isCur ? "#1f6feb" : (btnMa.containsMouse ? "#21262d" : "transparent")
+                                    border.color: isCur ? "#388bfd" : (btnMa.containsMouse ? "#30363d" : "transparent")
 
                                     Text {
-                                        id: autoToggleText
                                         anchors.centerIn: parent
-                                        text: backend && backend.autoSyncEnabled ? "ON" : "OFF"
+                                        text: modelData.label
                                         font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 9
-                                        font.weight: Font.Bold
-                                        color: backend && backend.autoSyncEnabled ? "#3fb950" : "#6e7681"
+                                        font.pixelSize: 10
+                                        font.weight: parent.isCur ? Font.Bold : Font.Normal
+                                        color: parent.isCur ? "#ffffff" : "#8b949e"
                                     }
 
+                                    ToolTip.visible: btnMa.containsMouse
+                                    ToolTip.text: modelData.tip
+
                                     MouseArea {
-                                        id: autoToggleMa
+                                        id: btnMa
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             if (backend) {
-                                                backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
+                                                backend.setFontSizeMode(modelData.mode);
                                             }
                                         }
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            ToolTip.visible: autoSyncTipMa.containsMouse
-                            ToolTip.text: backend && backend.autoSyncEnabled
-                                ? (backend.autoSyncStatusText + "\nClick to configure in Settings")
-                                : "Scheduled background synchronization is disabled.\nClick to configure in Settings."
+                    // ==========================================
+                    // Quick Font Size Switcher (Collapsed)
+                    // ==========================================
+                    Rectangle {
+                        visible: window.isSidebarCollapsed
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.bottomMargin: 6
+                        width: 38
+                        height: 34
+                        radius: 6
+                        color: fontCollapsedMa.containsMouse ? "#21262d" : "#0d1117"
+                        border.color: fontCollapsedMa.containsMouse ? "#58a6ff" : "#30363d"
+                        border.width: 1
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 2
+                            Text {
+                                text: "🔤"
+                                font.pixelSize: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: {
+                                    var m = backend ? backend.fontSizeMode : "medium";
+                                    if (m === "small") return "S";
+                                    if (m === "large") return "L";
+                                    if (m === "xlarge") return "XL";
+                                    return "M";
+                                }
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                color: "#58a6ff"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        ToolTip.visible: fontCollapsedMa.containsMouse
+                        ToolTip.text: "Font Mode: " + (backend ? backend.fontSizeMode.toUpperCase() : "MEDIUM") + "\nClick to cycle (S / M / L / XL)"
+                        ToolTip.delay: 150
+
+                        MouseArea {
+                            id: fontCollapsedMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (backend) {
+                                    var cur = backend.fontSizeMode;
+                                    var next = "medium";
+                                    if (cur === "small") next = "medium";
+                                    else if (cur === "medium") next = "large";
+                                    else if (cur === "large") next = "xlarge";
+                                    else if (cur === "xlarge") next = "small";
+                                    backend.setFontSizeMode(next);
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // Sidebar Sync Actions Panel (Expanded)
+                    // ==========================================
+                    Rectangle {
+                        visible: !window.isSidebarCollapsed
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.rightMargin: 12
+                        Layout.bottomMargin: 8
+                        implicitHeight: syncControlsCol.implicitHeight + 20
+                        color: "#0d1117"
+                        radius: 8
+                        border.color: "#30363d"
+                        border.width: 1
+
+                        ColumnLayout {
+                            id: syncControlsCol
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 8
+
+                            // Section Header with DB quick refresh
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Text {
+                                    text: "DATA SYNC"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: Font.Bold
+                                    color: "#8b949e"
+                                }
+
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    width: 22
+                                    height: 22
+                                    radius: 4
+                                    color: refreshMa.containsMouse ? "#21262d" : "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "🔄"
+                                        font.pixelSize: 11
+                                        opacity: refreshMa.containsMouse ? 1.0 : 0.7
+                                    }
+                                    MouseArea {
+                                        id: refreshMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (backend)
+                                                backend.refresh_all_data();
+                                        }
+                                    }
+                                    ToolTip.visible: refreshMa.containsMouse
+                                    ToolTip.text: "Reload local cache from disk"
+                                }
+                            }
+
+                            // Auto-Sync Status & Quick Toggle Bar
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 26
+                                radius: 4
+                                color: backend && backend.autoSyncEnabled ? Qt.rgba(31 / 255, 111 / 255, 235 / 255, 0.15) : "#161b22"
+                                border.color: backend && backend.autoSyncEnabled ? "#1f6feb" : "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+
+                                    Text {
+                                        text: "⏱️"
+                                        font.pixelSize: 10
+                                    }
+
+                                    Text {
+                                        text: backend && backend.autoSyncEnabled ? ("Auto: " + backend.nextAutoSyncText) : "Auto-Sync: Off"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: backend && backend.autoSyncEnabled ? "#58a6ff" : "#8b949e"
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Rectangle {
+                                        implicitHeight: 18
+                                        implicitWidth: autoToggleText.implicitWidth + 8
+                                        radius: 3
+                                        color: autoToggleMa.containsMouse ? "#30363d" : (backend && backend.autoSyncEnabled ? "#162b20" : "#21262d")
+                                        border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
+                                        border.width: 1
+
+                                        Text {
+                                            id: autoToggleText
+                                            anchors.centerIn: parent
+                                            text: backend && backend.autoSyncEnabled ? "ON" : "OFF"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: backend && backend.autoSyncEnabled ? "#3fb950" : "#6e7681"
+                                        }
+
+                                        MouseArea {
+                                            id: autoToggleMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (backend) {
+                                                    backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                ToolTip.visible: autoSyncTipMa.containsMouse
+                                ToolTip.text: backend && backend.autoSyncEnabled
+                                    ? (backend.autoSyncStatusText + "\nClick to configure in Settings")
+                                    : "Scheduled background synchronization is disabled.\nClick to configure in Settings."
+
+                                MouseArea {
+                                    id: autoSyncTipMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        window.currentTabIndex = 6; // Go to Settings
+                                    }
+                                }
+                            }
+
+                            // Primary: Sync All
+                            Button {
+                                Layout.fillWidth: true
+                                implicitHeight: 34
+                                enabled: backend ? !backend.isBusy : false
+                                font.weight: Font.DemiBold
+                                contentItem: Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text {
+                                        text: backend && backend.isBusy ? "⏳" : "🔄"
+                                        font.pixelSize: 12
+                                    }
+                                    Text {
+                                        text: backend && backend.isBusy ? "Syncing..." : "Sync All"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        color: parent.parent.enabled ? "#ffffff" : "#8b949e"
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#21262d"
+                                    border.color: parent.enabled ? "#3fb950" : "#30363d"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    if (backend)
+                                        backend.sync_all_async();
+                                }
+                            }
+
+                            // Secondary: Sync Work Items (WIQL)
+                            Button {
+                                Layout.fillWidth: true
+                                implicitHeight: 32
+                                enabled: backend ? !backend.isBusy : false
+                                font.weight: Font.DemiBold
+                                contentItem: Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text {
+                                        text: backend && backend.isBusy ? "⏳" : "⚡"
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: backend && backend.isBusy ? "Syncing WIQL..." : "Sync Work Items (WIQL)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: parent.parent.enabled ? (parent.parent.hovered ? "#79c0ff" : "#58a6ff") : "#8b949e"
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.enabled ? (parent.hovered ? Qt.rgba(56 / 255, 139 / 255, 253 / 255, 0.15) : "#161b22") : "#161b22"
+                                    border.color: parent.enabled ? (parent.hovered ? "#58a6ff" : "#1f6feb") : "#30363d"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    if (backend)
+                                        backend.sync_work_items_async();
+                                }
+                            }
+
+                            // Secondary: Sync Pull Requests
+                            Button {
+                                Layout.fillWidth: true
+                                implicitHeight: 32
+                                enabled: backend ? !backend.isBusy : false
+                                font.weight: Font.DemiBold
+                                contentItem: Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text {
+                                        text: backend && backend.isBusy ? "⏳" : "🔀"
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: backend && backend.isBusy ? "Syncing PRs..." : "Sync Pull Requests"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: parent.parent.enabled ? (parent.parent.hovered ? "#a371f7" : "#bc8cff") : "#8b949e"
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.enabled ? (parent.hovered ? Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.15) : "#161b22") : "#161b22"
+                                    border.color: parent.enabled ? (parent.hovered ? "#bc8cff" : "#8957e5") : "#30363d"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    if (backend)
+                                        backend.sync_pull_requests_async();
+                                }
+                            }
+
+                            // Progress Bar & Abort Button (Visible during active sync / tasks)
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 18
+                                visible: backend ? backend.isBusy : false
+                                color: "#161b22"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+                                clip: true
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width * (Math.max(0, Math.min(100, backend ? backend.progress : 0)) / 100.0)
+                                    radius: 3
+                                    color: "#1f6feb"
+
+                                    Behavior on width {
+                                        NumberAnimation { duration: 150 }
+                                    }
+                                }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: (backend ? backend.progress : 0) + "%"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                }
+                            }
+
+                            Button {
+                                Layout.fillWidth: true
+                                implicitHeight: 28
+                                visible: backend ? backend.isBusy : false
+                                font.weight: Font.DemiBold
+                                contentItem: Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text {
+                                        text: "⏹️"
+                                        font.pixelSize: 10
+                                    }
+                                    Text {
+                                        text: "Abort Sync"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#ff7b72"
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.hovered ? "#490202" : "#210909"
+                                    border.color: parent.hovered ? "#f85149" : "#da3633"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    if (backend)
+                                        backend.abort_sync();
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // Sidebar Sync Actions Panel (Collapsed)
+                    // ==========================================
+                    ColumnLayout {
+                        visible: window.isSidebarCollapsed
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.bottomMargin: 8
+                        spacing: 6
+
+                        // Sync All Compact Icon Button
+                        Rectangle {
+                            width: 38
+                            height: 38
+                            radius: 6
+                            color: syncAllColMa.containsMouse ? "#2ea043" : "#238636"
+                            border.color: syncAllColMa.containsMouse ? "#3fb950" : "#2ea043"
+                            border.width: 1
+                            opacity: (backend && backend.isBusy) ? 0.7 : 1.0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: backend && backend.isBusy ? "⏳" : "🔄"
+                                font.pixelSize: 16
+                            }
+
+                            ToolTip.visible: syncAllColMa.containsMouse
+                            ToolTip.text: backend && backend.isBusy ? ("Syncing (" + backend.progress + "%)...") : "Sync All Data (Cache & Remote)"
+                            ToolTip.delay: 150
 
                             MouseArea {
-                                id: autoSyncTipMa
+                                id: syncAllColMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: backend ? !backend.isBusy : false
+                                onClicked: {
+                                    if (backend) backend.sync_all_async();
+                                }
+                            }
+                        }
+
+                        // Sync WIQL Compact Icon Button
+                        Rectangle {
+                            width: 38
+                            height: 32
+                            radius: 6
+                            color: syncWiqlColMa.containsMouse ? Qt.rgba(56 / 255, 139 / 255, 253 / 255, 0.25) : "#161b22"
+                            border.color: syncWiqlColMa.containsMouse ? "#58a6ff" : "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⚡"
+                                font.pixelSize: 14
+                            }
+
+                            ToolTip.visible: syncWiqlColMa.containsMouse
+                            ToolTip.text: "Sync Work Items (WIQL)"
+                            ToolTip.delay: 150
+
+                            MouseArea {
+                                id: syncWiqlColMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: backend ? !backend.isBusy : false
+                                onClicked: {
+                                    if (backend) backend.sync_work_items_async();
+                                }
+                            }
+                        }
+
+                        // Sync PRs Compact Icon Button
+                        Rectangle {
+                            width: 38
+                            height: 32
+                            radius: 6
+                            color: syncPrsColMa.containsMouse ? Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.25) : "#161b22"
+                            border.color: syncPrsColMa.containsMouse ? "#bc8cff" : "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "🔀"
+                                font.pixelSize: 14
+                            }
+
+                            ToolTip.visible: syncPrsColMa.containsMouse
+                            ToolTip.text: "Sync Pull Requests"
+                            ToolTip.delay: 150
+
+                            MouseArea {
+                                id: syncPrsColMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: backend ? !backend.isBusy : false
+                                onClicked: {
+                                    if (backend) backend.sync_pull_requests_async();
+                                }
+                            }
+                        }
+
+                        // Abort button when busy (Collapsed)
+                        Rectangle {
+                            visible: backend ? backend.isBusy : false
+                            width: 38
+                            height: 28
+                            radius: 6
+                            color: abortColMa.containsMouse ? "#490202" : "#210909"
+                            border.color: abortColMa.containsMouse ? "#f85149" : "#da3633"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⏹️"
+                                font.pixelSize: 12
+                            }
+
+                            ToolTip.visible: abortColMa.containsMouse
+                            ToolTip.text: "Abort Current Sync"
+                            ToolTip.delay: 150
+
+                            MouseArea {
+                                id: abortColMa
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    window.currentTabIndex = 6; // Go to Settings
+                                    if (backend) backend.abort_sync();
                                 }
                             }
                         }
 
-                        // Primary: Sync All
-                        Button {
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            enabled: backend ? !backend.isBusy : false
-                            font.weight: Font.DemiBold
-                            contentItem: Row {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text {
-                                    text: backend && backend.isBusy ? "⏳" : "🔄"
-                                    font.pixelSize: 12
-                                }
-                                Text {
-                                    text: backend && backend.isBusy ? "Syncing..." : "Sync All"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.DemiBold
-                                    color: parent.parent.enabled ? "#ffffff" : "#8b949e"
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#21262d"
-                                border.color: parent.enabled ? "#3fb950" : "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend)
-                                    backend.sync_all_async();
-                            }
-                        }
-
-                        // Secondary: Sync Work Items (WIQL)
-                        Button {
-                            Layout.fillWidth: true
-                            implicitHeight: 32
-                            enabled: backend ? !backend.isBusy : false
-                            font.weight: Font.DemiBold
-                            contentItem: Row {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text {
-                                    text: backend && backend.isBusy ? "⏳" : "⚡"
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: backend && backend.isBusy ? "Syncing WIQL..." : "Sync Work Items (WIQL)"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: parent.parent.enabled ? (parent.parent.hovered ? "#79c0ff" : "#58a6ff") : "#8b949e"
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: parent.enabled ? (parent.hovered ? Qt.rgba(56 / 255, 139 / 255, 253 / 255, 0.15) : "#161b22") : "#161b22"
-                                border.color: parent.enabled ? (parent.hovered ? "#58a6ff" : "#1f6feb") : "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend)
-                                    backend.sync_work_items_async();
-                            }
-                        }
-
-                        // Secondary: Sync Pull Requests
-                        Button {
-                            Layout.fillWidth: true
-                            implicitHeight: 32
-                            enabled: backend ? !backend.isBusy : false
-                            font.weight: Font.DemiBold
-                            contentItem: Row {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text {
-                                    text: backend && backend.isBusy ? "⏳" : "🔀"
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: backend && backend.isBusy ? "Syncing PRs..." : "Sync Pull Requests"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.Medium
-                                    color: parent.parent.enabled ? (parent.parent.hovered ? "#a371f7" : "#bc8cff") : "#8b949e"
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: parent.enabled ? (parent.hovered ? Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.15) : "#161b22") : "#161b22"
-                                border.color: parent.enabled ? (parent.hovered ? "#bc8cff" : "#8957e5") : "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend)
-                                    backend.sync_pull_requests_async();
-                            }
-                        }
-
-                        // Progress Bar & Abort Button (Visible during active sync / tasks)
+                        // Auto-sync mini pill (Collapsed)
                         Rectangle {
-                            Layout.fillWidth: true
-                            height: 18
-                            visible: backend ? backend.isBusy : false
-                            color: "#161b22"
+                            width: 38
+                            height: 22
                             radius: 4
-                            border.color: "#30363d"
+                            color: backend && backend.autoSyncEnabled ? "#162b20" : "#161b22"
+                            border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
                             border.width: 1
-                            clip: true
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Text {
+                                    text: "⏱️"
+                                    font.pixelSize: 9
+                                }
+                                Rectangle {
+                                    width: 5
+                                    height: 5
+                                    radius: 2.5
+                                    color: backend && backend.autoSyncEnabled ? "#3fb950" : "#6e7681"
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
+                            ToolTip.visible: autoSyncColMa.containsMouse
+                            ToolTip.text: backend && backend.autoSyncEnabled
+                                ? ("Auto-Sync: ON (" + backend.nextAutoSyncText + ")\nClick to toggle")
+                                : "Auto-Sync: OFF\nClick to toggle"
+                            ToolTip.delay: 150
+
+                            MouseArea {
+                                id: autoSyncColMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (backend) backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom sync status indicator (Clickable to toggle Sync Log)
+                    Rectangle {
+                        id: bottomStatusBar
+                        Layout.fillWidth: true
+                        height: 52
+                        color: statusMa.containsMouse ? "#21262d" : "#0d1117"
+                        border.color: "#30363d"
+                        border.width: 1
+
+                        // Expanded Status Bar
+                        RowLayout {
+                            visible: !window.isSidebarCollapsed
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 8
 
                             Rectangle {
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                anchors.bottom: parent.bottom
-                                width: parent.width * (Math.max(0, Math.min(100, backend ? backend.progress : 0)) / 100.0)
-                                radius: 3
-                                color: "#1f6feb"
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: backend && backend.isBusy ? "#d29922" : "#3fb950"
 
-                                Behavior on width {
-                                    NumberAnimation { duration: 150 }
+                                SequentialAnimation on opacity {
+                                    running: backend && backend.isBusy
+                                    loops: Animation.Infinite
+                                    PropertyAnimation {
+                                        to: 0.3
+                                        duration: 600
+                                    }
+                                    PropertyAnimation {
+                                        to: 1.0
+                                        duration: 600
+                                    }
                                 }
                             }
 
                             Text {
-                                anchors.centerIn: parent
-                                text: (backend ? backend.progress : 0) + "%"
+                                text: backend ? backend.statusMessage : "Ready"
                                 font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 10
-                                font.weight: Font.Bold
-                                color: "#ffffff"
+                                font.pixelSize: 11
+                                color: backend && backend.isBusy ? "#e3b341" : "#8b949e"
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+
+                            // Log pill button
+                            Rectangle {
+                                implicitHeight: 22
+                                implicitWidth: logBtnText.implicitWidth + 10
+                                radius: 3
+                                color: window.isSyncLogDrawerOpen ? "#1f6feb" : (statusMa.containsMouse ? "#30363d" : "#161b22")
+                                border.color: window.isSyncLogDrawerOpen ? "#58a6ff" : "#30363d"
+                                border.width: 1
+
+                                Text {
+                                    id: logBtnText
+                                    anchors.centerIn: parent
+                                    text: window.isSyncLogDrawerOpen ? "▼ Log" : "▲ Log"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: window.isSyncLogDrawerOpen ? "#ffffff" : "#c9d1d9"
+                                }
                             }
                         }
 
-                        Button {
-                            Layout.fillWidth: true
-                            implicitHeight: 28
-                            visible: backend ? backend.isBusy : false
-                            font.weight: Font.DemiBold
-                            contentItem: Row {
+                        // Collapsed Status Bar
+                        Item {
+                            visible: window.isSidebarCollapsed
+                            anchors.fill: parent
+
+                            Row {
                                 anchors.centerIn: parent
                                 spacing: 6
+
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: backend && backend.isBusy ? "#d29922" : "#3fb950"
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    SequentialAnimation on opacity {
+                                        running: backend && backend.isBusy
+                                        loops: Animation.Infinite
+                                        PropertyAnimation {
+                                            to: 0.3
+                                            duration: 600
+                                        }
+                                        PropertyAnimation {
+                                            to: 1.0
+                                            duration: 600
+                                        }
+                                    }
+                                }
+
                                 Text {
-                                    text: "⏹️"
+                                    text: window.isSyncLogDrawerOpen ? "▼" : "▲"
                                     font.pixelSize: 10
+                                    color: window.isSyncLogDrawerOpen ? "#58a6ff" : "#8b949e"
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
-                                Text {
-                                    text: "Abort Sync"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: "#ff7b72"
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: parent.hovered ? "#490202" : "#210909"
-                                border.color: parent.hovered ? "#f85149" : "#da3633"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend)
-                                    backend.abort_sync();
                             }
                         }
+
+                        MouseArea {
+                            id: statusMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.toggleSyncLogDrawer()
+                        }
+
+                        ToolTip.visible: statusMa.containsMouse
+                        ToolTip.text: (backend ? backend.statusMessage : "Ready") + "\nClick to " + (window.isSyncLogDrawerOpen ? "hide" : "show") + " Sync Log"
+                        ToolTip.delay: 150
                     }
-                }
-
-                // Bottom sync status indicator (Clickable to toggle Sync Log)
-                Rectangle {
-                    id: bottomStatusBar
-                    Layout.fillWidth: true
-                    height: 52
-                    color: statusMa.containsMouse ? "#21262d" : "#0d1117"
-                    border.color: "#30363d"
-                    border.width: 1
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 8
-
-                        Rectangle {
-                            width: 8
-                            height: 8
-                            radius: 4
-                            color: backend && backend.isBusy ? "#d29922" : "#3fb950"
-
-                            SequentialAnimation on opacity {
-                                running: backend && backend.isBusy
-                                loops: Animation.Infinite
-                                PropertyAnimation {
-                                    to: 0.3
-                                    duration: 600
-                                }
-                                PropertyAnimation {
-                                    to: 1.0
-                                    duration: 600
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: backend ? backend.statusMessage : "Ready"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: backend && backend.isBusy ? "#e3b341" : "#8b949e"
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                        }
-
-                        // Log pill button
-                        Rectangle {
-                            implicitHeight: 22
-                            implicitWidth: logBtnText.implicitWidth + 10
-                            radius: 3
-                            color: window.isSyncLogDrawerOpen ? "#1f6feb" : (statusMa.containsMouse ? "#30363d" : "#161b22")
-                            border.color: window.isSyncLogDrawerOpen ? "#58a6ff" : "#30363d"
-                            border.width: 1
-
-                            Text {
-                                id: logBtnText
-                                anchors.centerIn: parent
-                                text: window.isSyncLogDrawerOpen ? "▼ Log" : "▲ Log"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 10
-                                font.weight: Font.DemiBold
-                                color: window.isSyncLogDrawerOpen ? "#ffffff" : "#c9d1d9"
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: statusMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: window.toggleSyncLogDrawer()
-                    }
-
-                    ToolTip.visible: statusMa.containsMouse
-                    ToolTip.text: "Click to " + (window.isSyncLogDrawerOpen ? "hide" : "show") + " Sync Log"
                 }
             }
-        }
 
         // ==========================================
         // Main Content Area Stack

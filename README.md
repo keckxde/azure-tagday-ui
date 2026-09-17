@@ -353,6 +353,7 @@ AZURE_PROJECT_ID=MY_PROJECT
 │   ├── generate_tagday_report.py    # Tag Day release audit reporter
 │   └── utils.py                 # Core utilities & environment loaders
 ├── doc/                         # Comprehensive guides & documentation
+│   ├── USER_MANUAL.md           # End-user operational manual & UI guide
 │   └── BUILD.md                 # Building, Packaging & CI/CD guide
 ├── templates/                   # Jinja2 markdown report templates
 ├── pyproject.toml               # Project metadata and dependency definitions
@@ -361,7 +362,8 @@ AZURE_PROJECT_ID=MY_PROJECT
 
 ---
 
-## Packaging & Continuous Integration
+## Documentation & Guides
 
-For complete instructions on building Python wheels, compiling standalone Windows NSIS installers, dynamic `git describe` versioning, and configuring GitHub Actions CI/CD workflows, see the dedicated [Building and Packaging Guide](file:///c:/Users/keckx/Projects/azure-tagday-ui/doc/BUILD.md).
+- **[User Manual](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/doc/USER_MANUAL.md)**: End-user guide covering project configuration, repository categorization, weekly workload planning, Tag Day audits, and change notification filters.
+- **[Building and Packaging Guide](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/doc/BUILD.md)**: Guide for compiling standalone Windows NSIS installers, dynamic `git describe` versioning, and CI/CD workflows.
 

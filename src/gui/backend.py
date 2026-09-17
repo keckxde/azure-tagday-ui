@@ -216,8 +216,10 @@ class DevOpsBackend(QObject):
     milestonesChanged = Signal()
     milestoneCategoriesChanged = Signal()
     repoCategoriesChanged = Signal()
+    changeFiltersChanged = Signal()
     iterationShiftsChanged = Signal()
     tagCategoriesChanged = Signal()
+    sidebarCollapsedChanged = Signal(bool)
     fontSizeModeChanged = Signal(str, float)  # mode string, scale factor
     bugHierarchyModeChanged = Signal(str)     # 'like_user_story' or 'like_task'
     sprintUrlTemplateChanged = Signal()
@@ -251,6 +253,7 @@ class DevOpsBackend(QObject):
         user_cfg = _load_user_settings()
         self._font_size_mode = user_cfg.get("font_size_mode", "medium")
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
+        self._sidebar_collapsed = bool(user_cfg.get("sidebar_collapsed", False))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
         self._tfs_team_name = user_cfg.get("tfs_team_name", "")
         self._sprint_url_template = user_cfg.get("sprint_url_template", "")
@@ -418,6 +421,7 @@ class DevOpsBackend(QObject):
                     pass
             if "FILTER_VERSION_TAGS_FORMAT" in db_cfg:
                 devops_helper.FILTER_VERSION_TAGS_FORMAT = str(db_cfg["FILTER_VERSION_TAGS_FORMAT"]).lower() == "true"
+            self.changeFiltersChanged.emit()
         except Exception as e:
             logger.warning(f"Error reading project config from database: {e}")
 
@@ -544,6 +548,24 @@ class DevOpsBackend(QObject):
 
         self.fontSizeModeChanged.emit(self._font_size_mode, self._ui_scale)
         self.settingsChanged.emit()
+
+    @Property(bool, notify=sidebarCollapsedChanged)
+    def sidebarCollapsed(self):
+        return self._sidebar_collapsed
+
+    @Slot(bool)
+    def setSidebarCollapsed(self, collapsed):
+        val = bool(collapsed)
+        if self._sidebar_collapsed != val:
+            self._sidebar_collapsed = val
+            cfg = _load_user_settings()
+            cfg["sidebar_collapsed"] = self._sidebar_collapsed
+            _save_user_settings(cfg)
+            self.sidebarCollapsedChanged.emit(self._sidebar_collapsed)
+
+    @Slot()
+    def toggleSidebar(self):
+        self.setSidebarCollapsed(not self._sidebar_collapsed)
 
     @Property(bool, notify=autoSyncChanged)
     def autoSyncEnabled(self):
@@ -1071,6 +1093,16 @@ class DevOpsBackend(QObject):
         except Exception:
             return []
 
+    @Property(list, notify=changeFiltersChanged)
+    def repoCategoryFilterPatterns(self):
+        cat_pat, _ = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return cat_pat
+
+    @Property(list, notify=changeFiltersChanged)
+    def branchFilterPatterns(self):
+        _, br_pat = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return br_pat
+
     @Property(list, notify=repoCategoriesChanged)
     def repoPrefixRules(self):
         if not self._cache_db:
@@ -1263,34 +1295,38 @@ class DevOpsBackend(QObject):
 
         repos_dict = self._cache_db.get_all_cached_repositories(devops_helper.AZURE_PROJECT_ID)
         devops_helper.addCategoriesToRepos(repos_dict, cache_db=self._cache_db, auto_save_missing=True)
+        db_cat_pat, _ = utils.load_change_filter_patterns(cache_db=self._cache_db)
 
         repo_list = []
         for r_id, r in repos_dict.items():
             info = r.get("info", {})
             rname = info.get("name", str(r_id))
+            rcat = r.get("category", "OTHERS")
+            is_cat_important = generate_tagday_report.check_repo_category_important(rcat, db_cat_pat, repo_name=rname)
 
             # Check pending changes from Tag Day dataset
-            td_repo = repos_changed_map.get(rname)
+            td_repo = repos_changed_map.get(rname) if is_cat_important else None
             prs_after_tag_count = len(td_repo.get("prs_after_tag", [])) if td_repo else 0
             unmerged_branches_count = len(td_repo.get("unmerged_branches", [])) if td_repo else 0
             active_prs_count = len(td_repo.get("active_prs", [])) if td_repo else 0
-            pending_count = prs_after_tag_count + unmerged_branches_count + active_prs_count
-            has_pending = pending_count > 0
+            pending_count = (prs_after_tag_count + unmerged_branches_count + active_prs_count) if is_cat_important else 0
+            has_pending = pending_count > 0 and is_cat_important
 
             parts = []
-            if prs_after_tag_count > 0:
-                parts.append(f"{prs_after_tag_count} untagged PR{'s' if prs_after_tag_count > 1 else ''}")
-            if unmerged_branches_count > 0:
-                parts.append(f"{unmerged_branches_count} unmerged branch{'es' if unmerged_branches_count > 1 else ''}")
-            if active_prs_count > 0:
-                parts.append(f"{active_prs_count} active PR{'s' if active_prs_count > 1 else ''}")
+            if is_cat_important:
+                if prs_after_tag_count > 0:
+                    parts.append(f"{prs_after_tag_count} untagged PR{'s' if prs_after_tag_count > 1 else ''}")
+                if unmerged_branches_count > 0:
+                    parts.append(f"{unmerged_branches_count} unmerged branch{'es' if unmerged_branches_count > 1 else ''}")
+                if active_prs_count > 0:
+                    parts.append(f"{active_prs_count} active PR{'s' if active_prs_count > 1 else ''}")
 
             status_text = ", ".join(parts) if parts else "Up to date"
 
             repo_list.append({
                 "id": str(r_id),
                 "name": rname,
-                "category": r.get("category", "OTHERS"),
+                "category": rcat,
                 "default_branch": info.get("defaultBranch", "").replace("refs/heads/", ""),
                 "web_url": info.get("webUrl", ""),
                 "latest_tag": latest_tags_map.get(rname, "-"),
@@ -4928,6 +4964,61 @@ class DevOpsBackend(QObject):
             self.repositoriesChanged.emit()
         except Exception as e:
             logger.error(f"Error recalculating repo categories: {e}")
+
+    @Slot(str, str, result=bool)
+    def save_change_filters(self, repo_category_patterns_json, branch_patterns_json):
+        """
+        Saves user-configured repository category filters (for change notifications)
+        and branch filters (for unmerged / ahead change tracking) into project_config.
+        """
+        try:
+            cats = json.loads(repo_category_patterns_json) if repo_category_patterns_json else []
+            branches = json.loads(branch_patterns_json) if branch_patterns_json else []
+
+            clean_cats = [str(x).strip() for x in cats if str(x).strip()]
+            clean_branches = [str(x).strip() for x in branches if str(x).strip()]
+
+            if self._cache_db:
+                self._cache_db.set_config("IGNORE_REPO_CATEGORY_PATTERNS", json.dumps(clean_cats))
+                self._cache_db.set_config("IGNORE_BRANCH_PATTERNS", json.dumps(clean_branches))
+
+            self.changeFiltersChanged.emit()
+            # Recalculate repo and tag day metrics
+            self.refresh_all_data()
+            self.load_interactive_reports()
+            logger.info("Saved change notification filters: %d category patterns, %d branch patterns",
+                        len(clean_cats), len(clean_branches))
+            return True
+        except Exception as e:
+            logger.error("Failed to save change filters: %s", e, exc_info=True)
+            return False
+
+    @Slot(result=bool)
+    def reset_change_filters_to_defaults(self):
+        """
+        Resets repository category filters and branch filters to built-in defaults.
+        """
+        try:
+            default_cats = utils.get_default_ignore_category_patterns()
+            default_branches = utils.get_default_ignore_branch_patterns()
+
+            if self._cache_db:
+                self._cache_db.set_config("IGNORE_REPO_CATEGORY_PATTERNS", json.dumps(default_cats))
+                self._cache_db.set_config("IGNORE_BRANCH_PATTERNS", json.dumps(default_branches))
+
+            self.changeFiltersChanged.emit()
+            self.refresh_all_data()
+            self.load_interactive_reports()
+            logger.info("Reset change notification filters to defaults.")
+            return True
+        except Exception as e:
+            logger.error("Failed to reset change filters: %s", e, exc_info=True)
+            return False
+
+    @Slot(str, str, result=bool)
+    def test_pattern_match(self, pattern, text):
+        """Helper to test whether a wildcard pattern matches a sample text."""
+        return utils.matches_pattern(text, pattern)
 
     @Slot(str, str, str, result=dict)
     def test_tfs_connection(self, url, collection, pat):
