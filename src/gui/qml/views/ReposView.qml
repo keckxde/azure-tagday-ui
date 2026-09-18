@@ -37,7 +37,7 @@ Item {
         anchors.margins: root.contentMargins
         spacing: 16
 
-        // Top Toolbar
+        // Top Toolbar Actions Row
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
@@ -59,56 +59,6 @@ Item {
 
             Item {
                 Layout.fillWidth: true
-            }
-
-            // Category & Pending filter chips
-            Row {
-                spacing: 6
-                Repeater {
-                    model: {
-                        var base = ["⚠️ PENDING", "ALL"];
-                        if (backend && backend.repoCategories) {
-                            for (var i = 0; i < backend.repoCategories.length; i++) {
-                                base.push(backend.repoCategories[i].name);
-                            }
-                        } else {
-                            base.push("GENERIC", "3RDPARTY", "OTHERS");
-                        }
-                        return base;
-                    }
-                    Button {
-                        text: modelData === "⚠️ PENDING" ? ("⚠️ PENDING (" + root.pendingCount + ")") : modelData
-                        checkable: true
-                        checked: root.selectedCategory === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : (modelData === "⚠️ PENDING" ? "#f0883e" : "#8b949e")
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 28
-                            implicitWidth: modelData === "⚠️ PENDING" ? 115 : 68
-                            radius: 14
-                            color: {
-                                if (parent.checked) {
-                                    return modelData === "⚠️ PENDING" ? "#d29922" : (backend ? backend.get_category_color(modelData) : "#1f6feb");
-                                }
-                                return parent.hovered ? "#21262d" : "#161b22";
-                            }
-                            border.color: {
-                                if (parent.checked) {
-                                    return modelData === "⚠️ PENDING" ? "#e3b341" : "#388bfd";
-                                }
-                                return modelData === "⚠️ PENDING" ? "#6e4b10" : "#30363d";
-                            }
-                        }
-                        onClicked: root.selectedCategory = modelData
-                    }
-                }
             }
 
             Button {
@@ -172,6 +122,69 @@ Item {
                     border.color: "#30363d"
                 }
                 onClicked: backend.refresh_all_data()
+            }
+        }
+
+        // Category & Pending Filter Bar with Full Width Wrapping
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredWidth: parent ? parent.width : root.width
+            implicitHeight: catFlow.implicitHeight
+
+            Flow {
+                id: catFlow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                spacing: 6
+
+                Repeater {
+                    model: {
+                        var base = ["⚠️ PENDING", "ALL"];
+                        if (backend && backend.repoCategories) {
+                            for (var i = 0; i < backend.repoCategories.length; i++) {
+                                base.push(backend.repoCategories[i].name);
+                            }
+                        } else {
+                            base.push("GENERIC", "3RDPARTY", "OTHERS");
+                        }
+                        return base;
+                    }
+                    Button {
+                        text: modelData === "⚠️ PENDING" ? ("⚠️ PENDING (" + root.pendingCount + ")") : modelData
+                        checkable: true
+                        checked: root.selectedCategory === modelData
+                        font.pixelSize: 11
+                        font.weight: checked ? Font.DemiBold : Font.Normal
+                        leftPadding: 14
+                        rightPadding: 14
+                        topPadding: 4
+                        bottomPadding: 4
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: parent.checked ? "#ffffff" : (modelData === "⚠️ PENDING" ? "#f0883e" : "#8b949e")
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 28
+                            radius: 14
+                            color: {
+                                if (parent.checked) {
+                                    return modelData === "⚠️ PENDING" ? "#d29922" : (backend ? backend.get_category_color(modelData) : "#1f6feb");
+                                }
+                                return parent.hovered ? "#21262d" : "#161b22";
+                            }
+                            border.color: {
+                                if (parent.checked) {
+                                    return modelData === "⚠️ PENDING" ? "#e3b341" : "#388bfd";
+                                }
+                                return modelData === "⚠️ PENDING" ? "#6e4b10" : "#30363d";
+                            }
+                        }
+                        onClicked: root.selectedCategory = modelData
+                    }
+                }
             }
         }
 

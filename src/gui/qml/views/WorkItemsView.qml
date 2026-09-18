@@ -186,6 +186,7 @@ Item {
         root.updateFilteredModel()
     }
 
+    property bool isFiltersCollapsed: false
     property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
@@ -358,6 +359,31 @@ Item {
                 }
             }
 
+            // Filter Collapse Toggle Button
+            Button {
+                id: toggleFiltersBtn
+                text: root.isFiltersCollapsed ? ("🔽 Filters" + (root.hasActiveFilters ? " (Active)" : "")) : "🔼 Hide Filters"
+                font.weight: Font.DemiBold
+                font.pixelSize: 11
+                ToolTip.visible: hovered
+                ToolTip.text: root.isFiltersCollapsed ? "Show filter options panel" : "Collapse filter panel to maximize table view"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: root.isFiltersCollapsed && root.hasActiveFilters ? "#58a6ff" : "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 34
+                    implicitWidth: 105
+                    radius: 6
+                    color: parent.hovered ? "#30363d" : (root.isFiltersCollapsed && root.hasActiveFilters ? "#1f334d" : "#21262d")
+                    border.color: root.isFiltersCollapsed && root.hasActiveFilters ? "#388bfd" : "#30363d"
+                }
+                onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
+            }
+
             // Export to Excel Button
             Button {
                 id: exportExcelBtn
@@ -510,10 +536,17 @@ Item {
             }
         }
 
-        // ====================== State Filter Row ======================
-        RowLayout {
+        // ====================== Filter Section Container (Collapsible) ======================
+        ColumnLayout {
+            id: filtersSection
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 10
+            visible: !root.isFiltersCollapsed
+
+            // ====================== State Filter Row ======================
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
 
             Text {
                 text: "State:"
@@ -1447,6 +1480,76 @@ Item {
 
             Item { Layout.fillWidth: true }
         }
+        } // End of filtersSection
+
+        // ====================== Active Filter Bar (Shown when collapsed & filters active) ======================
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 34
+            radius: 6
+            color: "#16202c"
+            border.color: "#388bfd"
+            border.width: 1
+            visible: root.isFiltersCollapsed && root.hasActiveFilters
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 8
+
+                Text {
+                    text: "🔍 Active Filters Applied"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#58a6ff"
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: {
+                        var parts = [];
+                        if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
+                        if (root.filterState !== "ALL") parts.push("State: " + root.filterState);
+                        if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
+                        if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
+                        if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
+                        if (root.filterUrgency !== "ALL") parts.push("Deadline: " + root.filterUrgency);
+                        if (root.filterLevel1 !== "ALL") parts.push("L1: " + root.filterLevel1);
+                        if (root.filterLevel2 !== "ALL") parts.push("L2: " + root.filterLevel2);
+                        if (root.filterMilestone !== "ALL") parts.push("Milestone: " + root.filterMilestone);
+                        if (root.filterTagCategory !== "ALL") parts.push("Cat: " + root.filterTagCategory);
+                        if (root.filterTag !== "ALL") parts.push("Tag: " + root.filterTag);
+                        if (root.filterPriority !== "ALL") parts.push("Prio: " + root.filterPriority);
+                        if (root.filterGrouping !== "ALL") parts.push("PBS: " + root.filterGrouping);
+                        return parts.join("  •  ");
+                    }
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                    elide: Text.ElideRight
+                }
+
+                Button {
+                    text: "Show Filters"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitHeight: 22; implicitWidth: 84; radius: 4; color: parent.hovered ? "#21262d" : "transparent"; border.color: "#388bfd" }
+                    onClicked: root.isFiltersCollapsed = false
+                }
+
+                Button {
+                    text: "Reset All"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#f85149"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitHeight: 22; implicitWidth: 72; radius: 4; color: parent.hovered ? "#3c1e1e" : "transparent"; border.color: "#da3633" }
+                    onClicked: root.resetAllFilters()
+                }
+            }
+        }
 
         // ====================== Table Header ======================
         Rectangle {
@@ -1463,14 +1566,14 @@ Item {
                 anchors.rightMargin: 24
                 spacing: 12
 
-                Text { text: "ID";          Layout.preferredWidth: 64;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TYPE";        Layout.preferredWidth: 92;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TITLE";       Layout.fillWidth: true;     font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "STATE";       Layout.preferredWidth: 88;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ITERATION";   Layout.preferredWidth: 125; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "DEADLINE";    Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "REFS";        Layout.preferredWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ID";          Layout.preferredWidth: 64;  Layout.minimumWidth: 64;  Layout.maximumWidth: 64;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "TYPE";        Layout.preferredWidth: 92;  Layout.minimumWidth: 92;  Layout.maximumWidth: 92;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "TITLE";       Layout.fillWidth: true;     Layout.minimumWidth: 140; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "STATE";       Layout.preferredWidth: 88;  Layout.minimumWidth: 88;  Layout.maximumWidth: 88;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ITERATION";   Layout.preferredWidth: 125; Layout.minimumWidth: 125; Layout.maximumWidth: 125; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "DEADLINE";    Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                Text { text: "REFS";        Layout.preferredWidth: 75;  Layout.minimumWidth: 75;  Layout.maximumWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
             }
         }
 
@@ -1557,17 +1660,19 @@ Item {
                     RowLayout {
                         id: mainRow
                         z: 1
-                        width: parent.width
                         height: 52
                         anchors.left: parent.left
+                        anchors.right: parent.right
                         anchors.leftMargin: 16
-                        anchors.rightMargin: 16
+                        anchors.rightMargin: 24
                         spacing: 12
 
                         // ID
                         Text {
                             text: "#" + model.id
                             Layout.preferredWidth: 64
+                            Layout.minimumWidth: 64
+                            Layout.maximumWidth: 64
                             font.family: "Consolas, monospace"
                             font.pixelSize: 13
                             font.weight: Font.Bold
@@ -1577,6 +1682,8 @@ Item {
                         // Type badge
                         Rectangle {
                             Layout.preferredWidth: 92
+                            Layout.minimumWidth: 92
+                            Layout.maximumWidth: 92
                             height: 22
                             radius: 11
                             property color typeC: root.typeColor(model.type)
@@ -1596,12 +1703,15 @@ Item {
                         // Title, Hierarchy Path & Badges
                         RowLayout {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 140
+                            clip: true
                             spacing: 6
 
                             // Milestone Strategic Badge (Direct or Inherited)
                             Rectangle {
                                 implicitHeight: 18
-                                implicitWidth: milestoneBadgeLayout.implicitWidth + 10
+                                implicitWidth: Math.min(milestoneBadgeLayout.implicitWidth + 10, 160)
+                                Layout.maximumWidth: 160
                                 radius: 4
                                 visible: !!model.has_milestone
                                 color: model.milestone_bg || (model.milestone_color ? Qt.rgba(Qt.color(model.milestone_color).r, Qt.color(model.milestone_color).g, Qt.color(model.milestone_color).b, 0.2) : "#3d2800")
@@ -1618,6 +1728,7 @@ Item {
                                         font.pixelSize: 9
                                     }
                                     Text {
+                                        Layout.maximumWidth: 130
                                         text: model.effective_milestone_name || model.milestone_name || "Milestone"
                                         font.pixelSize: 9
                                         font.weight: Font.Bold
@@ -1642,6 +1753,7 @@ Item {
                             Rectangle {
                                 implicitHeight: 18
                                 implicitWidth: prioBadgeText.implicitWidth + 8
+                                Layout.maximumWidth: 80
                                 radius: 4
                                 visible: !!model.is_prio1
                                 color: "#3d2800"
@@ -1661,7 +1773,8 @@ Item {
                             // Hierarchy (L1 / L2 PBS) Breadcrumb Chip
                             Rectangle {
                                 implicitHeight: 18
-                                implicitWidth: hBadgeText.implicitWidth + 8
+                                implicitWidth: Math.min(hBadgeText.implicitWidth + 8, 180)
+                                Layout.maximumWidth: 180
                                 radius: 4
                                 visible: (model.level1_display || "") !== "" && model.level1_display !== "Ungrouped Sub-System"
                                 color: "#161b22"
@@ -1671,6 +1784,7 @@ Item {
                                 Text {
                                     id: hBadgeText
                                     anchors.centerIn: parent
+                                    width: Math.min(implicitWidth, 170)
                                     text: (model.level1_display || "") + ((model.level2_display && model.level2_display !== "Ungrouped Component") ? (" › " + model.level2_display) : "")
                                     font.pixelSize: 9
                                     color: model.is_grouped ? "#8b949e" : "#f85149"
@@ -1692,7 +1806,8 @@ Item {
 
                                 Rectangle {
                                     implicitHeight: 18
-                                    implicitWidth: rowTagLayout.implicitWidth + 8
+                                    implicitWidth: Math.min(rowTagLayout.implicitWidth + 8, 110)
+                                    Layout.maximumWidth: 110
                                     radius: 4
                                     property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
                                     color: rowTagMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#241700" : "#16202c")
@@ -1706,6 +1821,7 @@ Item {
                                         Text { text: isTarget ? "🎯" : "🏷️"; font.pixelSize: 8 }
                                         Text {
                                             id: rowTagText
+                                            Layout.maximumWidth: 85
                                             text: modelData
                                             font.pixelSize: 9
                                             font.weight: isTarget ? Font.Bold : Font.Normal
@@ -1768,6 +1884,7 @@ Item {
 
                             Text {
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 80
                                 text: model.title
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 13
@@ -1781,6 +1898,8 @@ Item {
                         // State badge
                         Rectangle {
                             Layout.preferredWidth: 88
+                            Layout.minimumWidth: 88
+                            Layout.maximumWidth: 88
                             height: 22
                             radius: 11
                             property color stateC: root.stateColor(model.state)
@@ -1800,6 +1919,8 @@ Item {
                         // Iteration Pill
                         Rectangle {
                             Layout.preferredWidth: 125
+                            Layout.minimumWidth: 125
+                            Layout.maximumWidth: 125
                             height: 24
                             radius: 12
                             color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : (model.has_milestone ? "#3d2800" : "#21262d")) : (model.is_iteration_planned ? "#0d2344" : (model.has_milestone ? "#241700" : "#161b22"))
@@ -1845,6 +1966,8 @@ Item {
                         // Deadline Pill
                         Rectangle {
                             Layout.preferredWidth: 115
+                            Layout.minimumWidth: 115
+                            Layout.maximumWidth: 115
                             height: 22
                             radius: 11
                             property bool hasDeadline: (model.deadline_str || "") !== ""
@@ -1862,6 +1985,8 @@ Item {
                         Text {
                             text: model.assigned_to || "Unassigned"
                             Layout.preferredWidth: 115
+                            Layout.minimumWidth: 115
+                            Layout.maximumWidth: 115
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 12
                             color: "#8b949e"
@@ -1871,6 +1996,8 @@ Item {
                         // References pill
                         Item {
                             Layout.preferredWidth: 75
+                            Layout.minimumWidth: 75
+                            Layout.maximumWidth: 75
                             height: 22
                             Row {
                                 spacing: 5
