@@ -1797,9 +1797,14 @@ class DevOpsBackend(QObject):
             for b in unmerged_branches:
                 prep_pr_id = ""
                 prep_pr_title = ""
+                prep_pr_status = ""
+                is_abandoned = b.get("is_abandoned", False)
                 if b.get("prepared_pr"):
                     prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
                     prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                        is_abandoned = True
 
                 clean_branches.append({
                     "branch_name": b.get("branch_name", ""),
@@ -1812,6 +1817,8 @@ class DevOpsBackend(QObject):
                     "behind": b.get("behind", 0),
                     "prepared_pr_id": prep_pr_id,
                     "prepared_pr_title": prep_pr_title,
+                    "prepared_pr_status": prep_pr_status,
+                    "is_abandoned": is_abandoned,
                 })
 
             repos_summary.append({
@@ -5385,9 +5392,14 @@ class DevOpsBackend(QObject):
             for b in unmerged_branches:
                 prep_pr_id = ""
                 prep_pr_title = ""
+                prep_pr_status = ""
+                is_abandoned = b.get("is_abandoned", False)
                 if b.get("prepared_pr"):
                     prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
                     prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                        is_abandoned = True
 
                 clean_branches.append({
                     "branch_name": b.get("branch_name", ""),
@@ -5400,6 +5412,8 @@ class DevOpsBackend(QObject):
                     "behind": b.get("behind", 0),
                     "prepared_pr_id": prep_pr_id,
                     "prepared_pr_title": prep_pr_title,
+                    "prepared_pr_status": prep_pr_status,
+                    "is_abandoned": is_abandoned,
                 })
 
             repos_summary.append({

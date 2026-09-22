@@ -1233,7 +1233,7 @@ Item {
 
                                         StatusBadge {
                                             text: modelData.status_str || modelData.status
-                                            badgeColor: modelData.status === "completed" ? "#238636" : (modelData.status === "active" ? "#1f6feb" : "#d29922")
+                                            badgeColor: modelData.status === "completed" ? "#238636" : (modelData.status === "active" ? "#1f6feb" : ((modelData.status === "abandoned" || modelData.is_abandoned) ? "#da3633" : "#d29922"))
                                         }
                                     }
 
@@ -1883,12 +1883,18 @@ Item {
                                                             font.family: "Segoe UI, sans-serif"
                                                             font.pixelSize: 12
                                                             font.weight: Font.Bold
-                                                            color: "#f0f6fc"
+                                                            color: modelData.is_abandoned ? "#8b949e" : "#f0f6fc"
+                                                        }
+
+                                                        StatusBadge {
+                                                            visible: !!modelData.is_abandoned
+                                                            text: "ABANDONED"
+                                                            badgeColor: "#da3633"
                                                         }
 
                                                         StatusBadge {
                                                             text: "+" + modelData.ahead + " ahead"
-                                                            badgeColor: "#d29922"
+                                                            badgeColor: modelData.is_abandoned ? "#6e7681" : "#d29922"
                                                         }
 
                                                         StatusBadge {
@@ -1901,7 +1907,7 @@ Item {
                                                             text: modelData.short_hash ? ("#" + modelData.short_hash) : ""
                                                             font.family: "Consolas, monospace"
                                                             font.pixelSize: 11
-                                                            color: "#58a6ff"
+                                                            color: modelData.is_abandoned ? "#6e7681" : "#58a6ff"
                                                         }
                                                     }
 
@@ -1927,19 +1933,19 @@ Item {
 
                                                 Button {
                                                     visible: !!modelData.prepared_pr_id
-                                                    text: "PR !" + modelData.prepared_pr_id + " ↗"
+                                                    text: "PR !" + modelData.prepared_pr_id + (modelData.is_abandoned ? " (Abandoned) ↗" : " ↗")
                                                     font.pixelSize: 10
                                                     contentItem: Text {
                                                         text: parent.text
                                                         font: parent.font
-                                                        color: "#58a6ff"
+                                                        color: modelData.is_abandoned ? "#f85149" : "#58a6ff"
                                                     }
                                                     background: Rectangle {
                                                         implicitHeight: 24
-                                                        implicitWidth: 80
+                                                        implicitWidth: modelData.is_abandoned ? 135 : 80
                                                         radius: 4
-                                                        color: parent.hovered ? "#21262d" : "#161b22"
-                                                        border.color: "#30363d"
+                                                        color: parent.hovered ? (modelData.is_abandoned ? "#3d1418" : "#21262d") : (modelData.is_abandoned ? "#261014" : "#161b22")
+                                                        border.color: modelData.is_abandoned ? "#da3633" : "#30363d"
                                                     }
                                                     onClicked: {
                                                         var prUrl = root.selectedRepo.web_url + "/pullrequest/" + modelData.prepared_pr_id;
