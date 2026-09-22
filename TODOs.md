@@ -2,11 +2,17 @@
 
 ## OPEN
 
-### Sync
+### Development
 
-- When you recognize, that do not have any connection to the repository server, also stop the synch directly and inform the user about the lost connection.
+- are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
 ## DONE
+
+- Stop Synchronization Immediately on Repository Server Connection Loss:
+  - **Connection Loss Detection & Exception Model ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py), [`src/azure/azure_info_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_base_client.py))**: Introduced `AzureServerConnectionError` and `is_connection_error` utility to reliably classify DNS lookup failures, socket timeouts, connection resets/refusals, and server unavailable errors (HTTP 401/403/408/502/503/504).
+  - **Immediate Sync Termination Across All Phases ([`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py), [`src/devops_helper.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/devops_helper.py))**: Terminated sync pipelines immediately during repository fetching (`GetTFSRepositories` parallel worker pool), WIQL work item discovery and batch downloading (`sync_work_items`), and pull request status reconciliation (`sync_pull_requests`), preventing redundant failing requests or accidental deletion marks.
+  - **UI Status Messaging & Notifications ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `connectionLost` Qt signal, updated status bar to `❌ Lost connection to repository server: ...`, and logged clear explanatory warnings to the UI Sync Log.
+  - **Automated Verification ([`src/tests/test_server_connection_loss.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_server_connection_loss.py))**: Added unit tests validating error detection, immediate thread/sync abortion, cache preservation, and UI notification emissions (10/10 passed).
 
 - GitHub Actions CI/CD Pipeline for Automated Building, Testing & Publishing:
   - **Automated Workflow Configuration ([`.github/workflows/build-and-publish.yml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/.github/workflows/build-and-publish.yml))**: Full end-to-end CI/CD pipeline triggered on pushes to `main`/`master`, Git version tags (`v*`), pull requests, and manual triggers (`workflow_dispatch`).

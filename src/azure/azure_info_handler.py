@@ -13,9 +13,9 @@ for p in (py_dir, parent_dir):
 
 from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple, generate_weekly_iterations_advance, parse_sprint_week
 try:
-    from .azure_info_base_client import AzureBaseClient
+    from .azure_info_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
 except ImportError:
-    from azure_info_base_client import AzureBaseClient
+    from azure_info_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +226,9 @@ class AzureInfoHandler(AzureBaseClient):
             remote_all_ids = set(remote_all_ids_list)
             _notify(f"WIQL discovery successful: found {len(remote_all_ids)} work item(s) for project '{target_proj}'", 0, len(remote_all_ids))
         except Exception as wiql_err:
+            if is_connection_error(wiql_err):
+                logger.error("Lost connection to repository server during work items discovery: %s", wiql_err)
+                raise AzureServerConnectionError(f"Lost connection to repository server during work items discovery: {wiql_err}", original_error=wiql_err) from wiql_err
             logger.warning("WIQL query failed (%s), falling back to cached DB IDs", wiql_err)
             _notify(f"⚠️ WIQL query failed: {wiql_err}. Falling back to cached DB IDs.", 0, 0)
             remote_all_ids_list = cache_db.get_all_work_item_ids(include_deleted=True)
@@ -270,6 +273,9 @@ class AzureInfoHandler(AzureBaseClient):
                     0, len(items_to_fetch)
                 )
             except Exception as inc_err:
+                if is_connection_error(inc_err):
+                    logger.error("Lost connection to repository server during incremental work items query: %s", inc_err)
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {inc_err}", original_error=inc_err) from inc_err
                 logger.warning("Incremental WIQL query failed (%s), falling back to full sync", inc_err)
                 _notify(f"⚠️ Incremental WIQL query failed: {inc_err}. Falling back to full sync.", 0, 0)
                 items_to_fetch = remote_all_ids
@@ -367,6 +373,9 @@ class AzureInfoHandler(AzureBaseClient):
                         summary["deleted"] += 1
 
             except Exception as batch_err:
+                if is_connection_error(batch_err):
+                    logger.error("Lost connection to repository server during work items batch download: %s", batch_err)
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {batch_err}", original_error=batch_err) from batch_err
                 _notify(f"Batch #{batch_num} failed ({batch_err}), falling back to individual requests...", batch_end, total_items)
                 for idx, task_id in enumerate(chunk):
                     if (idx + 1) % 25 == 0 or idx == len(chunk) - 1:
@@ -402,9 +411,15 @@ class AzureInfoHandler(AzureBaseClient):
                             cache_db.mark_work_item_deleted(task_id)
                             summary["deleted"] += 1
                         else:
+                            if is_connection_error(e):
+                                logger.error("Lost connection to repository server fetching #%s: %s", task_id, e)
+                                raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                             logger.error(" - sync_work_items: #%s HTTP error %s", task_id, e)
                             summary["errors"] += 1
                     except Exception as e:
+                        if is_connection_error(e):
+                            logger.error("Lost connection to repository server fetching #%s: %s", task_id, e)
+                            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                         err_str = str(e).lower()
                         if "404" in err_str or "not found" in err_str or "does not exist" in err_str:
                             logger.warning(" - sync_work_items: #%s not found (%s). Marking as deleted.", task_id, e)
@@ -448,6 +463,9 @@ class AzureInfoHandler(AzureBaseClient):
                         if grandparent_id:
                             next_level_parents.add(grandparent_id)
             except Exception as p_err:
+                if is_connection_error(p_err):
+                    logger.error("Lost connection to repository server while fetching parent work items: %s", p_err)
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {p_err}", original_error=p_err) from p_err
                 logger.warning(" - sync_work_items: error fetching missing parent items %s: %s", p_chunk, p_err)
                 break
             missing_parents = (next_level_parents - found_ids) - active_db_ids
@@ -1185,6 +1203,9 @@ class AzureInfoHandler(AzureBaseClient):
                     cache_db.save_single_pull_request(live_pr)
                     summary["synced"] += 1
             except Exception as e:
+                if is_connection_error(e):
+                    logger.error("Lost connection to repository server while reconciling active PR #%s: %s", pr_id, e)
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                 logger.warning("Could not sync status for active PR #%s: %s", pr_id, e)
                 summary["errors"] += 1
 
@@ -1222,12 +1243,17 @@ class AzureInfoHandler(AzureBaseClient):
                             cache_db.save_tags(repo_id, tags_filtered)
                             summary["tags_synced"] += len(tags_filtered)
                     except Exception as e:
+                        if is_connection_error(e):
+                            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                         logger.debug("Could not update tag references for %s during PR sync: %s", repo_name, e)
 
                     new_count = self._fetch_new_prs_incremental(proj, repo, cache_db, cancel_token=cancel_token)
                     summary["new"] += new_count
                     summary["synced"] += new_count
             except Exception as e:
+                if is_connection_error(e):
+                    logger.error("Lost connection to repository server in sync_pull_requests: %s", e)
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                 logger.warning("Could not incrementally fetch new PRs for project %s: %s", proj, e)
                 summary["errors"] += 1
 
@@ -1272,6 +1298,9 @@ class AzureInfoHandler(AzureBaseClient):
                 except Exception as e:
                     logger.warning("Error reconciling deleted repositories: %s", e)
         except Exception as e:
+            if is_connection_error(e):
+                logger.error("Lost connection to repository server while fetching repositories: %s", e)
+                raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
             logger.error("Error fetching repositories: %s", e)
             return {}
 
@@ -1316,6 +1345,8 @@ class AzureInfoHandler(AzureBaseClient):
             try:
                 branches = self.get_repository_refs(project_id, repo_id, "heads/")
             except Exception as e:
+                if is_connection_error(e):
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                 logger.error("Error fetching branches for %s: %s", repo_name, e)
 
             b_we_have_dev_branch = self._process_branches(project_id, repo, branches)
@@ -1385,6 +1416,10 @@ class AzureInfoHandler(AzureBaseClient):
                             except Exception as e:
                                 logger.error("  -- Failed to write %s cache to database: %s", r_name, e)
                 except Exception as e:
+                    if is_connection_error(e):
+                        logger.error("Lost connection to repository server while processing repository %s: %s", repo_name, e)
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                     logger.error("Error processing repository %s: %s", repo_name, e)
 
         return result

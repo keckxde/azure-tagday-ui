@@ -1,14 +1,52 @@
 # -*- coding: UTF-8 -*-
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
 import base64
 import ssl
 import re
-
+import socket
+import http.client
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class AzureServerConnectionError(ConnectionError):
+    """Raised when communication with the TFS / Azure DevOps server fails due to lost connection, timeout, or server unavailability."""
+    def __init__(self, message, original_error=None, status_code=None):
+        super().__init__(message)
+        self.original_error = original_error
+        self.status_code = status_code
+
+
+def is_connection_error(exc):
+    """
+    Returns True if the exception represents a lost connection or unreachable repository server.
+    """
+    if exc is None:
+        return False
+    if isinstance(exc, AzureServerConnectionError):
+        return True
+    if isinstance(exc, (ConnectionError, TimeoutError, socket.timeout, socket.gaierror, http.client.RemoteDisconnected)):
+        return True
+    if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError):
+        return True
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403, 408, 502, 503, 504):
+        return True
+    msg = str(exc).lower()
+    keywords = (
+        "connection refused", "connection reset", "connection timed out",
+        "connection aborted", "lost connection", "no connection", "unreachable",
+        "name or service not known", "getaddrinfo failed", "winerror 10060",
+        "winerror 10061", "winerror 10054", "remotedisconnected", "bad gateway",
+        "service unavailable", "gateway timeout", "timed out"
+    )
+    if any(k in msg for k in keywords):
+        return True
+    return False
+
 
 class AzureBaseClient:
     """
@@ -97,7 +135,17 @@ class AzureBaseClient:
                 err_body = ""
             print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
             logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
+            if err.code in (401, 403):
+                raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
+            elif err.code in (408, 502, 503, 504):
+                raise AzureServerConnectionError(f"Repository server unavailable ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             raise err
+        except urllib.error.URLError as err:
+            logger.error("Connection failed to repository server %s: %s", full_url, err.reason)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err.reason}", original_error=err) from err
+        except (TimeoutError, ConnectionError, OSError) as err:
+            logger.error("Network/Socket error connecting to repository server %s: %s", full_url, err)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err}", original_error=err) from err
 
     def get_distributed_task_tasks(self):
         """

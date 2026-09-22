@@ -230,6 +230,7 @@ class DevOpsBackend(QObject):
     busyChanged = Signal()
     statusMessageChanged = Signal()
     progressChanged = Signal()
+    connectionLost = Signal(str)            # error description on repository server disconnect
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -3705,7 +3706,6 @@ class DevOpsBackend(QObject):
     def _on_worker_finished(self, success, result_msg):
         self._progress = 100 if success else 0
         self.progressChanged.emit()
-        self._set_busy(False, "Ready")
         self.reset_auto_sync_timer()
 
         if isinstance(result_msg, dict) and "work_items" in result_msg:
@@ -3714,10 +3714,23 @@ class DevOpsBackend(QObject):
             self.refresh_all_data()
 
         if success:
+            self._set_busy(False, "Ready")
             log_text = result_msg if isinstance(result_msg, str) else "Completed successfully"
             logger.info(f"[COMPLETED] {log_text}")
         else:
-            logger.error(f"[FAILED] {result_msg}")
+            err_text = str(result_msg or "Unknown error")
+            logger.error(f"[FAILED] {err_text}")
+            err_lower = err_text.lower()
+            if any(k in err_lower for k in ("lost connection", "connection refused", "connection reset", "connection timed out", "connection aborted", "no connection", "unreachable", "timed out", "server unavailable", "bad gateway")):
+                status_txt = f"❌ Lost connection to repository server: {err_text}"
+                self._set_busy(False, status_txt)
+                self.logMessage.emit(f"❌ Synchronization stopped: {err_text}")
+                self.connectionLost.emit(err_text)
+            elif "abort" in err_lower or "cancel" in err_lower:
+                self._set_busy(False, "⏹️ Synchronization cancelled by user")
+            else:
+                self._set_busy(False, f"⚠️ Sync failed: {err_text}")
+                self.logMessage.emit(f"⚠️ Task failed: {err_text}")
         self._worker = None
 
     @Slot()

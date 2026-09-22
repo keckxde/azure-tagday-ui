@@ -15,7 +15,7 @@ if py_dir not in sys.path:
     sys.path.insert(0, py_dir)
 
 import utils
-from azure import AzureInfoHandler, AzureDevOpsCache
+from azure import AzureInfoHandler, AzureDevOpsCache, AzureServerConnectionError, is_connection_error
 
 logger = logging.getLogger(__name__)
 
@@ -705,11 +705,16 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
                         else:
                             cache_db.mark_work_item_deleted(wid)
                             summary["deleted"] += 1
-                    except Exception:
+                    except Exception as e:
+                        if is_connection_error(e):
+                            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                         cache_db.mark_work_item_deleted(wid)
                         summary["deleted"] += 1
                 logger.info(f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted, {summary.get('errors', 0)} errors")
     except Exception as e:
+        if is_connection_error(e):
+            logger.error(f"Synchronization stopped: lost connection to repository server during work items sync: {e}")
+            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
         logger.error(f"Error syncing work items to SQLite: {e}")
 
     if _is_cancelled():
@@ -727,6 +732,9 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
                 cancel_token=cancel_token
             )
     except Exception as e:
+        if is_connection_error(e):
+            logger.error(f"Synchronization stopped: lost connection to repository server during pull requests sync: {e}")
+            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
         logger.warning(f"Error reconciling pull request statuses: {e}")
 
     try:

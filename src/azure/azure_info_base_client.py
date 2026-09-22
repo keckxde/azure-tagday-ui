@@ -1,14 +1,23 @@
 # -*- coding: UTF-8 -*-
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
 import base64
 import ssl
 import re
-
+import socket
+import http.client
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+try:
+    from .azure_base_client import AzureServerConnectionError, is_connection_error
+except ImportError:
+    from azure_base_client import AzureServerConnectionError, is_connection_error
+
 
 class AzureBaseClient:
     """
@@ -92,7 +101,17 @@ class AzureBaseClient:
                 err_body = ""
             print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
             logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
+            if err.code in (401, 403):
+                raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
+            elif err.code in (408, 502, 503, 504):
+                raise AzureServerConnectionError(f"Repository server unavailable ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             raise err
+        except urllib.error.URLError as err:
+            logger.error("Connection failed to repository server %s: %s", full_url, err.reason)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err.reason}", original_error=err) from err
+        except (TimeoutError, ConnectionError, OSError) as err:
+            logger.error("Network/Socket error connecting to repository server %s: %s", full_url, err)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err}", original_error=err) from err
 
     def get_distributed_task_tasks(self):
         """
