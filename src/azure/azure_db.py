@@ -1192,9 +1192,14 @@ class AzureDevOpsCache:
 
         default_cat = "OTHERS"
         colors = {}
+        bg_colors = {}
+        sort_orders = {}
         for c in cats:
             cname = c["name"]
             colors[cname] = c["color"]
+            if c.get("bg_color"):
+                bg_colors[cname] = c["bg_color"]
+            sort_orders[cname] = c.get("sort_order", 0)
             if c.get("is_default"):
                 default_cat = cname
 
@@ -1203,49 +1208,89 @@ class AzureDevOpsCache:
         return {
             "default_category": default_cat,
             "category_colors": colors,
+            "category_bg_colors": bg_colors,
+            "category_sort_orders": sort_orders,
             "prefix_rules": prefix_rules,
             "repositories": overrides,
         }
 
-    def save_full_repo_category_config(self, config_dict):
+    def save_full_repo_category_config(self, config_dict, merge=False):
         """Persists a complete repository categories configuration dictionary into the database."""
         if not config_dict or not isinstance(config_dict, dict):
             return False
         default_cat = config_dict.get("default_category", "OTHERS")
         colors = config_dict.get("category_colors", {})
+        bg_colors = config_dict.get("category_bg_colors", {})
+        sort_orders = config_dict.get("category_sort_orders", {})
         prefix_rules = config_dict.get("prefix_rules", {})
         repos_map = config_dict.get("repositories", {})
 
         with self._connection() as conn:
-            conn.execute("DELETE FROM repo_categories")
-            conn.execute("DELETE FROM repo_prefix_rules")
-            conn.execute("DELETE FROM repo_category_overrides")
+            if not merge:
+                conn.execute("DELETE FROM repo_categories")
+                conn.execute("DELETE FROM repo_prefix_rules")
+                conn.execute("DELETE FROM repo_category_overrides")
 
             order = 1
             all_cat_names = list(colors.keys())
-            if default_cat not in all_cat_names:
+            if default_cat and default_cat not in all_cat_names:
                 all_cat_names.append(default_cat)
 
             for cname in all_cat_names:
                 col = colors.get(cname, "#6e7681")
+                bg_col = bg_colors.get(cname, "")
+                s_order = sort_orders.get(cname, order)
                 is_def = 1 if cname == default_cat else 0
-                conn.execute("""
-                INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
-                VALUES (?, ?, ?, ?, ?)
-                """, (cname, col, "", order, is_def))
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        color = excluded.color,
+                        bg_color = CASE WHEN excluded.bg_color != '' THEN excluded.bg_color ELSE repo_categories.bg_color END,
+                        sort_order = excluded.sort_order,
+                        is_default = CASE WHEN excluded.is_default = 1 THEN 1 ELSE repo_categories.is_default END
+                    """, (cname, col, bg_col, s_order, is_def))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, (cname, col, bg_col, s_order, is_def))
                 order += 1
 
             for pfx, cname in prefix_rules.items():
-                conn.execute("""
-                INSERT INTO repo_prefix_rules (prefix, category)
-                VALUES (?, ?)
-                """, (pfx, cname))
+                pfx_clean = str(pfx).strip().lower()
+                cname_clean = str(cname).strip()
+                if not pfx_clean or not cname_clean:
+                    continue
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_prefix_rules (prefix, category)
+                    VALUES (?, ?)
+                    ON CONFLICT(prefix) DO UPDATE SET category = excluded.category
+                    """, (pfx_clean, cname_clean))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_prefix_rules (prefix, category)
+                    VALUES (?, ?)
+                    """, (pfx_clean, cname_clean))
 
             for rname, cname in repos_map.items():
-                conn.execute("""
-                INSERT INTO repo_category_overrides (repo_name, category)
-                VALUES (?, ?)
-                """, (rname, cname))
+                rname_clean = str(rname).strip()
+                cname_clean = str(cname).strip()
+                if not rname_clean or not cname_clean:
+                    continue
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, ?)
+                    ON CONFLICT(repo_name) DO UPDATE SET category = excluded.category
+                    """, (rname_clean, cname_clean))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, ?)
+                    """, (rname_clean, cname_clean))
         return True
 
     def get_last_push_id(self, repo_id):

@@ -4972,6 +4972,113 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.error(f"Error recalculating repo categories: {e}")
 
+    @Slot(result=str)
+    def browse_repo_categories_export_path(self):
+        """Opens native file dialog to select save destination for repo categories export (.yaml, .json, .xlsx)."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_path = os.path.join(initial_dir, f"repo_categories_export_{timestamp}.yaml")
+            file_path, _ = QFileDialog.getSaveFileName(
+                None, "Export Repository Categories", default_path,
+                "YAML Configuration (*.yaml *.yml);;JSON Configuration (*.json);;Excel Spreadsheet (*.xlsx);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening repo categories export dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseRepoCategoriesExportPath(self):
+        """CamelCase alias for browse_repo_categories_export_path."""
+        return self.browse_repo_categories_export_path()
+
+    @Slot(result=str)
+    def browse_repo_categories_import_file(self):
+        """Opens native file dialog to select a YAML, JSON, or Excel repo categories file to import."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Select Repository Categories File to Import", initial_dir,
+                "Repo Category Files (*.yaml *.yml *.json *.xlsx *.xls);;YAML Files (*.yaml *.yml);;JSON Files (*.json);;Excel Spreadsheets (*.xlsx *.xls);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening repo categories import dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseRepoCategoriesImportFile(self):
+        """CamelCase alias for browse_repo_categories_import_file."""
+        return self.browse_repo_categories_import_file()
+
+    @Slot(str, result=dict)
+    def export_repo_categories(self, file_path=""):
+        """Exports full repo category configuration to YAML, JSON, or Excel."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_repo_categories_export_path()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+        try:
+            cfg = self._cache_db.get_full_repo_category_config()
+            ok = utils.export_repo_categories_to_file(cfg, file_path)
+            if ok:
+                logger.info(f"Successfully exported repository categories to {file_path}")
+                return {"success": True, "file_path": file_path}
+            else:
+                return {"success": False, "error": f"Failed to write export file: {file_path}"}
+        except Exception as e:
+            logger.error(f"Error exporting repo categories: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, result=dict)
+    def exportRepoCategories(self, file_path=""):
+        """CamelCase alias for export_repo_categories."""
+        return self.export_repo_categories(file_path)
+
+    @Slot(str, bool, result=dict)
+    def import_repo_categories(self, file_path="", merge=False):
+        """Imports repo category configuration from YAML, JSON, or Excel file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_repo_categories_import_file()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+        try:
+            cfg = utils.import_repo_categories_from_file(file_path)
+            if not cfg:
+                return {"success": False, "error": f"Failed to parse categories from: {os.path.basename(file_path)}"}
+
+            ok = self._cache_db.save_full_repo_category_config(cfg, merge=merge)
+            if ok:
+                self.repoCategoriesChanged.emit()
+                self._recalculate_repo_categories()
+                cat_count = len(cfg.get("category_colors", {}))
+                pfx_count = len(cfg.get("prefix_rules", {}))
+                repo_count = len(cfg.get("repositories", {}))
+                logger.info(f"Imported repo categories from {file_path} (Cats: {cat_count}, Rules: {pfx_count}, Overrides: {repo_count})")
+                return {
+                    "success": True,
+                    "file_path": file_path,
+                    "categories_count": cat_count,
+                    "prefix_rules_count": pfx_count,
+                    "overrides_count": repo_count,
+                }
+            return {"success": False, "error": "Failed to persist imported configuration to database"}
+        except Exception as e:
+            logger.error(f"Error importing repo categories from {file_path}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, bool, result=dict)
+    def importRepoCategories(self, file_path="", merge=False):
+        """CamelCase alias for import_repo_categories."""
+        return self.import_repo_categories(file_path, merge)
+
     @Slot(str, str, result=bool)
     def save_change_filters(self, repo_category_patterns_json, branch_patterns_json):
         """

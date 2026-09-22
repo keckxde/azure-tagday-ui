@@ -408,6 +408,390 @@ def save_repo_categories(config, file_path=None, cache_db=None):
     return True
 
 
+def _normalize_repo_category_config(data):
+    """Helper to normalize raw dictionary into standard repo category config structure."""
+    if not isinstance(data, dict):
+        return None
+
+    default_cat = str(data.get("default_category") or "OTHERS").strip()
+    raw_colors = data.get("category_colors", {})
+    colors = {str(k).strip(): str(v).strip() for k, v in raw_colors.items() if str(k).strip()} if isinstance(raw_colors, dict) else {}
+
+    raw_bg_colors = data.get("category_bg_colors", {})
+    bg_colors = {str(k).strip(): str(v).strip() for k, v in raw_bg_colors.items() if str(k).strip()} if isinstance(raw_bg_colors, dict) else {}
+
+    raw_sort_orders = data.get("category_sort_orders", {})
+    sort_orders = {}
+    if isinstance(raw_sort_orders, dict):
+        for k, v in raw_sort_orders.items():
+            try:
+                sort_orders[str(k).strip()] = int(v)
+            except (ValueError, TypeError):
+                pass
+
+    raw_prefix = data.get("prefix_rules", {})
+    prefix_rules = {str(k).strip().lower(): str(v).strip() for k, v in raw_prefix.items() if str(k).strip() and str(v).strip()} if isinstance(raw_prefix, dict) else {}
+
+    raw_repos = data.get("repositories", {})
+    repositories = {str(k).strip(): str(v).strip() for k, v in raw_repos.items() if str(k).strip() and str(v).strip()} if isinstance(raw_repos, dict) else {}
+
+    if default_cat and default_cat not in colors:
+        colors[default_cat] = "#6e7681"
+
+    return {
+        "default_category": default_cat,
+        "category_colors": colors,
+        "category_bg_colors": bg_colors,
+        "category_sort_orders": sort_orders,
+        "prefix_rules": prefix_rules,
+        "repositories": repositories,
+    }
+
+
+def export_repo_categories_to_file(config, file_path):
+    """
+    Exports repository categories configuration to a YAML, JSON, or Excel file.
+
+    Args:
+        config (dict): Repo category configuration dictionary.
+        file_path (str): Target output file path (.yaml, .yml, .json, .xlsx).
+
+    Returns:
+        bool: True if export succeeded, False otherwise.
+    """
+    if not config or not isinstance(config, dict) or not file_path:
+        return False
+
+    ext = os.path.splitext(file_path)[1].lower()
+    parent_dir = os.path.dirname(os.path.abspath(file_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    default_cat = config.get("default_category", "OTHERS")
+    colors = config.get("category_colors", {})
+    bg_colors = config.get("category_bg_colors", {})
+    sort_orders = config.get("category_sort_orders", {})
+    prefix_rules = config.get("prefix_rules", {})
+    repositories = config.get("repositories", {})
+
+    export_dict = {
+        "default_category": default_cat,
+        "category_colors": colors,
+        "category_bg_colors": bg_colors,
+        "category_sort_orders": sort_orders,
+        "prefix_rules": prefix_rules,
+        "repositories": repositories,
+    }
+
+    if ext in [".yaml", ".yml"]:
+        try:
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(export_dict, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export repo categories to YAML {file_path}: {e}")
+            return False
+
+    elif ext == ".json":
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(export_dict, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export repo categories to JSON {file_path}: {e}")
+            return False
+
+    elif ext == ".xlsx":
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+
+            wb = openpyxl.Workbook()
+
+            # Sheet 1: Categories
+            ws_cats = wb.active
+            ws_cats.title = "Categories"
+
+            header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="1F6FEB", end_color="1F6FEB", fill_type="solid")
+            thin_border = Border(
+                left=Side(style='thin', color='D0D7DE'),
+                right=Side(style='thin', color='D0D7DE'),
+                top=Side(style='thin', color='D0D7DE'),
+                bottom=Side(style='thin', color='D0D7DE')
+            )
+
+            cat_headers = ["Category Name", "Color", "Background Color", "Is Default", "Sort Order"]
+            ws_cats.append(cat_headers)
+            for col_num in range(1, len(cat_headers) + 1):
+                cell = ws_cats.cell(row=1, column=col_num)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            all_cat_names = list(colors.keys())
+            if default_cat and default_cat not in all_cat_names:
+                all_cat_names.append(default_cat)
+
+            for idx, cname in enumerate(all_cat_names, start=1):
+                c_color = colors.get(cname, "#6e7681")
+                c_bg = bg_colors.get(cname, "")
+                is_def = "YES" if cname == default_cat else "NO"
+                s_order = sort_orders.get(cname, idx)
+                row_vals = [cname, c_color, c_bg, is_def, s_order]
+                ws_cats.append(row_vals)
+                current_row = ws_cats.max_row
+                for col_num in range(1, len(row_vals) + 1):
+                    c_cell = ws_cats.cell(row=current_row, column=col_num)
+                    c_cell.border = thin_border
+                    if col_num in [2, 3, 4, 5]:
+                        c_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            # Sheet 2: Prefix Rules
+            ws_rules = wb.create_sheet(title="Prefix Rules")
+            rule_headers = ["Prefix", "Category"]
+            ws_rules.append(rule_headers)
+            for col_num in range(1, len(rule_headers) + 1):
+                cell = ws_rules.cell(row=1, column=col_num)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for pfx, cname in prefix_rules.items():
+                ws_rules.append([pfx, cname])
+                current_row = ws_rules.max_row
+                for col_num in range(1, 3):
+                    ws_rules.cell(row=current_row, column=col_num).border = thin_border
+
+            # Sheet 3: Repository Mappings
+            ws_repos = wb.create_sheet(title="Repository Mappings")
+            repo_headers = ["Repository Name", "Category"]
+            ws_repos.append(repo_headers)
+            for col_num in range(1, len(repo_headers) + 1):
+                cell = ws_repos.cell(row=1, column=col_num)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for rname, cname in repositories.items():
+                ws_repos.append([rname, cname])
+                current_row = ws_repos.max_row
+                for col_num in range(1, 3):
+                    ws_repos.cell(row=current_row, column=col_num).border = thin_border
+
+            for ws in [ws_cats, ws_rules, ws_repos]:
+                for col in ws.columns:
+                    max_len = 0
+                    col_letter = get_column_letter(col[0].column)
+                    for cell in col:
+                        val_str = str(cell.value or "")
+                        if len(val_str) > max_len:
+                            max_len = len(val_str)
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
+
+            wb.save(file_path)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export repo categories to Excel {file_path}: {e}")
+            return False
+
+    else:
+        log.error(f"Unsupported export file format: {ext}")
+        return False
+
+
+def import_repo_categories_from_file(file_path):
+    """
+    Imports repository categories configuration from a YAML, JSON, or Excel file.
+
+    Args:
+        file_path (str): Source file path (.yaml, .yml, .json, .xlsx).
+
+    Returns:
+        dict or None: Normalized dictionary with keys 'default_category', 'category_colors',
+                      'category_bg_colors', 'category_sort_orders', 'prefix_rules', 'repositories'
+                      or None if reading failed.
+    """
+    if not file_path or not os.path.exists(file_path):
+        log.error(f"Import file does not exist: {file_path}")
+        return None
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in [".yaml", ".yml"]:
+        try:
+            import yaml
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            return _normalize_repo_category_config(data)
+        except Exception as e:
+            log.error(f"Failed to read YAML config from {file_path}: {e}")
+            return None
+
+    elif ext == ".json":
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return _normalize_repo_category_config(data)
+        except Exception as e:
+            log.error(f"Failed to read JSON config from {file_path}: {e}")
+            return None
+
+    elif ext in [".xlsx", ".xls"]:
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+
+            colors = {}
+            bg_colors = {}
+            sort_orders = {}
+            default_cat = None
+            prefix_rules = {}
+            repositories = {}
+
+            # Process Categories sheet
+            cats_sheet = None
+            for sname in ["Categories", "Category", "Sheet1"]:
+                if sname in wb.sheetnames:
+                    cats_sheet = wb[sname]
+                    break
+            if cats_sheet is None and wb.sheetnames:
+                cats_sheet = wb.active
+
+            if cats_sheet:
+                headers = {}
+                for col_idx in range(1, cats_sheet.max_column + 1):
+                    val = cats_sheet.cell(row=1, column=col_idx).value
+                    if val is not None:
+                        h = str(val).strip().lower()
+                        if "name" in h or h == "category":
+                            headers["name"] = col_idx
+                        elif "bg" in h or "background" in h:
+                            headers["bg_color"] = col_idx
+                        elif "color" in h:
+                            headers["color"] = col_idx
+                        elif "default" in h:
+                            headers["is_default"] = col_idx
+                        elif "sort" in h or "order" in h:
+                            headers["sort_order"] = col_idx
+
+                name_col = headers.get("name", 1)
+                color_col = headers.get("color")
+                bg_col = headers.get("bg_color")
+                def_col = headers.get("is_default")
+                sort_col = headers.get("sort_order")
+
+                for row_idx in range(2, cats_sheet.max_row + 1):
+                    cname = cats_sheet.cell(row=row_idx, column=name_col).value
+                    if not cname:
+                        continue
+                    cname_str = str(cname).strip()
+                    if not cname_str:
+                        continue
+
+                    c_color = str(cats_sheet.cell(row=row_idx, column=color_col).value).strip() if color_col and cats_sheet.cell(row=row_idx, column=color_col).value is not None else "#6e7681"
+                    colors[cname_str] = c_color if (c_color.startswith("#") or c_color) else "#6e7681"
+
+                    if bg_col:
+                        bg_val = cats_sheet.cell(row=row_idx, column=bg_col).value
+                        if bg_val:
+                            bg_colors[cname_str] = str(bg_val).strip()
+
+                    if sort_col:
+                        s_val = cats_sheet.cell(row=row_idx, column=sort_col).value
+                        try:
+                            if s_val is not None:
+                                sort_orders[cname_str] = int(s_val)
+                        except (ValueError, TypeError):
+                            pass
+
+                    if def_col:
+                        def_val = cats_sheet.cell(row=row_idx, column=def_col).value
+                        if def_val is not None:
+                            d_str = str(def_val).strip().lower()
+                            if d_str in ["1", "true", "yes", "y", "default"]:
+                                default_cat = cname_str
+
+            # Process Prefix Rules sheet
+            rules_sheet = None
+            for sname in ["Prefix Rules", "PrefixRules", "Rules", "Prefixes"]:
+                if sname in wb.sheetnames:
+                    rules_sheet = wb[sname]
+                    break
+
+            if rules_sheet:
+                headers = {}
+                for col_idx in range(1, rules_sheet.max_column + 1):
+                    val = rules_sheet.cell(row=1, column=col_idx).value
+                    if val is not None:
+                        h = str(val).strip().lower()
+                        if "prefix" in h:
+                            headers["prefix"] = col_idx
+                        elif "category" in h or "cat" in h:
+                            headers["category"] = col_idx
+
+                pfx_col = headers.get("prefix", 1)
+                cat_col = headers.get("category", 2)
+
+                for row_idx in range(2, rules_sheet.max_row + 1):
+                    pfx = rules_sheet.cell(row=row_idx, column=pfx_col).value
+                    cat = rules_sheet.cell(row=row_idx, column=cat_col).value
+                    if pfx is not None and cat is not None:
+                        pfx_str = str(pfx).strip().lower()
+                        cat_str = str(cat).strip()
+                        if pfx_str and cat_str:
+                            prefix_rules[pfx_str] = cat_str
+
+            # Process Repository Mappings sheet
+            repos_sheet = None
+            for sname in ["Repository Mappings", "Repositories", "Repo Mappings", "Overrides"]:
+                if sname in wb.sheetnames:
+                    repos_sheet = wb[sname]
+                    break
+
+            if repos_sheet:
+                headers = {}
+                for col_idx in range(1, repos_sheet.max_column + 1):
+                    val = repos_sheet.cell(row=1, column=col_idx).value
+                    if val is not None:
+                        h = str(val).strip().lower()
+                        if "repo" in h or "name" in h:
+                            headers["repo"] = col_idx
+                        elif "category" in h or "cat" in h:
+                            headers["category"] = col_idx
+
+                repo_col = headers.get("repo", 1)
+                cat_col = headers.get("category", 2)
+
+                for row_idx in range(2, repos_sheet.max_row + 1):
+                    rname = repos_sheet.cell(row=row_idx, column=repo_col).value
+                    cat = repos_sheet.cell(row=row_idx, column=cat_col).value
+                    if rname is not None and cat is not None:
+                        rname_str = str(rname).strip()
+                        cat_str = str(cat).strip()
+                        if rname_str and cat_str:
+                            repositories[rname_str] = cat_str
+
+            res = {
+                "default_category": default_cat or "OTHERS",
+                "category_colors": colors,
+                "category_bg_colors": bg_colors,
+                "category_sort_orders": sort_orders,
+                "prefix_rules": prefix_rules,
+                "repositories": repositories,
+            }
+            return _normalize_repo_category_config(res)
+        except Exception as e:
+            log.error(f"Failed to read Excel config from {file_path}: {e}")
+            return None
+
+    else:
+        log.error(f"Unsupported import file format: {ext}")
+        return None
+
+
 def categorize_repository(repo_name, config=None, cache_db=None, config_path=None):
     """Categorizes repository using the database configuration or default configuration.
 

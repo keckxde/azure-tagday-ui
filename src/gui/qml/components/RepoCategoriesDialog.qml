@@ -231,7 +231,7 @@ Dialog {
                     }
                     background: Rectangle {
                         implicitHeight: 30
-                        implicitWidth: 150
+                        implicitWidth: 140
                         radius: 6
                         color: parent.hovered ? "#0d2844" : "transparent"
                         border.color: "#1f6feb"
@@ -245,6 +245,74 @@ Dialog {
                             root.feedbackType = "success";
                         } else {
                             root.feedbackMsg = (res && res.error) ? res.error : "Matching failed";
+                            root.feedbackType = "error";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "📤 Export"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Export category definitions, prefix rules, and repository mappings to YAML, JSON, or Excel"
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#c9d1d9"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 85
+                        radius: 6
+                        color: parent.hovered ? "#30363d" : "#21262d"
+                        border.color: "#30363d"
+                        border.width: 1
+                    }
+                    onClicked: {
+                        if (!backend) return;
+                        var res = backend.export_repo_categories("");
+                        if (res && res.success) {
+                            root.feedbackMsg = "✓ Exported categories to " + res.file_path;
+                            root.feedbackType = "success";
+                        } else if (res && !res.cancelled) {
+                            root.feedbackMsg = (res && res.error) ? res.error : "Export failed";
+                            root.feedbackType = "error";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "📥 Import"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Import categories, prefix rules, and repository mappings from YAML, JSON, or Excel file"
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#3fb950"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 85
+                        radius: 6
+                        color: parent.hovered ? "#163c20" : "transparent"
+                        border.color: "#238636"
+                        border.width: 1
+                    }
+                    onClicked: {
+                        if (!backend) return;
+                        var res = backend.import_repo_categories("", false);
+                        if (res && res.success) {
+                            root.feedbackMsg = "✓ Imported " + res.categories_count + " categories, " + res.prefix_rules_count + " prefix rules, " + res.overrides_count + " mappings";
+                            root.feedbackType = "success";
+                        } else if (res && !res.cancelled) {
+                            root.feedbackMsg = (res && res.error) ? res.error : "Import failed";
                             root.feedbackType = "error";
                         }
                     }
