@@ -1196,6 +1196,13 @@ class AzureInfoHandler(AzureBaseClient):
         if proj and not _is_cancelled():
             try:
                 repos = self.get_repositories(proj)
+                if cache_db and hasattr(cache_db, "reconcile_deleted_repositories"):
+                    try:
+                        active_names = [r.get("name") for r in repos if r.get("name")]
+                        active_ids = [r.get("id") for r in repos if r.get("id")]
+                        cache_db.reconcile_deleted_repositories(proj, active_names, active_ids)
+                    except Exception as e:
+                        logger.warning("Error reconciling deleted repositories in sync_pull_requests: %s", e)
                 enabled = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
                 total_repos = len(enabled)
                 for idx, repo in enumerate(enabled):
@@ -1255,6 +1262,15 @@ class AzureInfoHandler(AzureBaseClient):
         """
         try:
             repos = self.get_repositories(project_id)
+            if cache_db and hasattr(cache_db, "reconcile_deleted_repositories"):
+                try:
+                    active_names = [r.get("name") for r in repos if r.get("name")]
+                    active_ids = [r.get("id") for r in repos if r.get("id")]
+                    deleted_repos = cache_db.reconcile_deleted_repositories(project_id, active_names, active_ids)
+                    if deleted_repos:
+                        logger.info("Marked %d repository/repositories as DELETED (no longer in TFS): %s", len(deleted_repos), ", ".join(deleted_repos))
+                except Exception as e:
+                    logger.warning("Error reconciling deleted repositories: %s", e)
         except Exception as e:
             logger.error("Error fetching repositories: %s", e)
             return {}

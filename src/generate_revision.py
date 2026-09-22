@@ -76,6 +76,18 @@ def generate_revision_md(db_path, revision_md_path):
         logger.error(f"TFS SQLite cache database not found at: {db_path}")
         return False
 
+    # Connect to SQLite Cache DB
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cache_db = AzureDevOpsCache(db_path)
+    cat_config = cache_db.get_full_repo_category_config() if hasattr(cache_db, "get_full_repo_category_config") else None
+
+    def _is_deleted(r_name):
+        if not r_name:
+            return False
+        cat = utils.categorize_repository(r_name, config=cat_config, cache_db=cache_db)
+        return (cat or "").strip().upper() == "DELETED"
+
     repos_data = {}
     header_block = "# Revision History\n\n| Package | SuperInstaller | Unstable (Nightly) | Stable | Last Change | Owner |\n| ------- | -------------- | ------------------ | ------ | ----------- | ----- |"
 
@@ -93,6 +105,10 @@ def generate_revision_md(db_path, revision_md_path):
                     repo_header = sections[i]  # e.g., "### DemoProject"
                     repo_body = sections[i+1]  # everything until the next ###
                     repo_name = repo_header.replace("###", "").strip()
+
+                    # Exclude deleted repositories
+                    if _is_deleted(repo_name):
+                        continue
 
                     # Parse Info table (keep it exactly as is)
                     info_match = re.search(r'\*\*Info:\*\*.*?(?=\*\*Version:\*\*|$)', repo_body, re.DOTALL)
@@ -140,21 +156,22 @@ def generate_revision_md(db_path, revision_md_path):
         except Exception as e:
             logger.warning(f"Could not read existing REVISION.md at {revision_md_path}: {e}")
 
-    # Connect to SQLite Cache DB
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cache_db = AzureDevOpsCache(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM repositories")
 
     for repo_entry in cursor.fetchall():
         repo_name = repo_entry["name"]
+        if _is_deleted(repo_name):
+            continue
         if repo_name not in repos_data:
             repos_data[repo_name] = {
                 "header": "### " + repo_name,
                 "info_block": "",
                 "old_rows": []
             }
+
+    # Ensure no deleted repositories remain in repos_data
+    repos_data = {r: d for r, d in repos_data.items() if not _is_deleted(r)}
 
     # 2. Re-render each repository's Version table using cached SQLite data
     updated_details = []
@@ -368,6 +385,8 @@ def generate_revision_md(db_path, revision_md_path):
                 owner = cols[5] if len(cols) >= 6 else ""
                 if pkg_match:
                     repo_name = pkg_match.group(1)
+                    if _is_deleted(repo_name):
+                        continue
                     if repo_name in repo_tags_map:
                         seen_repos.add(repo_name)
                         stable, unstable, superinst, latest_change, committer_name = repo_tags_map[repo_name]
@@ -384,6 +403,8 @@ def generate_revision_md(db_path, revision_md_path):
 
     # Add any repositories from DB cache that were not in the Overview table yet
     for repo_name in sorted(repo_tags_map.keys()):
+        if _is_deleted(repo_name):
+            continue
         if repo_name not in seen_repos:
             tag_info = repo_tags_map[repo_name]
             stable, unstable, superinst, latest_change, committer_name = tag_info

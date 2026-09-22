@@ -2,7 +2,9 @@
 
 ## OPEN
 
-(All current milestone items completed)
+### Sync
+
+- When you recognize, that do not have any connection to the repository server, also stop the synch directly and inform the user about the lost connection.
 
 ## DONE
 

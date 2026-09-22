@@ -363,6 +363,7 @@ def load_repo_categories(cache_db=None, custom_path=None):
             "GENERIC": "#6e40c9",
             "3RDPARTY": "#d29922",
             "OTHERS": "#6e7681",
+            "DELETED": "#cf222e",
         },
     }
     return default_config, "database"

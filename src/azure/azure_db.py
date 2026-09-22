@@ -407,6 +407,7 @@ class AzureDevOpsCache:
                         ("GENERIC", "#6e40c9", "#261b4d", 3, 0),
                         ("3RDPARTY", "#d29922", "#3d2800", 4, 0),
                         ("OTHERS", "#6e7681", "#21262d", 5, 1),
+                        ("DELETED", "#cf222e", "#3d1418", 6, 0),
                     ]
                     conn.executemany("""
                     INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
@@ -421,6 +422,12 @@ class AzureDevOpsCache:
                     INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
                     VALUES (?, ?)
                     """, default_rules)
+                else:
+                    # Ensure DELETED category exists even in existing databases
+                    conn.execute("""
+                    INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES ('DELETED', '#cf222e', '#3d1418', 6, 0)
+                    """)
             except Exception:
                 pass
 
@@ -1138,6 +1145,44 @@ class AzureDevOpsCache:
             return True
         except Exception:
             return False
+
+    def reconcile_deleted_repositories(self, project_id, active_repo_names, active_repo_ids=None):
+        """
+        Compares cached repositories for a project against the list of active repositories returned by TFS.
+        Any cached repository no longer present in TFS is automatically marked with category 'DELETED'.
+
+        Args:
+            project_id (str, optional): The project identifier or name.
+            active_repo_names (iterable): Collection of active repository names returned by TFS.
+            active_repo_ids (iterable, optional): Collection of active repository IDs returned by TFS.
+
+        Returns:
+            list: List of repository names that were marked as DELETED.
+        """
+        active_names = {str(n).strip() for n in (active_repo_names or []) if n}
+        active_ids = {str(i).strip() for i in (active_repo_ids or []) if i}
+
+        # Ensure DELETED category exists
+        self.save_repo_category("DELETED", "#cf222e", bg_color="#3d1418", sort_order=99, is_default=False)
+
+        marked_deleted = []
+        with self._connection() as conn:
+            if project_id:
+                rows = conn.execute("SELECT id, name FROM repositories WHERE project_id = ?", (project_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT id, name FROM repositories").fetchall()
+
+            for r in rows:
+                r_id = str(r["id"]).strip()
+                r_name = str(r["name"]).strip()
+                if (r_name not in active_names) and (r_id not in active_ids):
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, 'DELETED')
+                    ON CONFLICT(repo_name) DO UPDATE SET category = 'DELETED'
+                    """, (r_name,))
+                    marked_deleted.append(r_name)
+        return marked_deleted
 
     def get_full_repo_category_config(self):
         """Returns the full repository category configuration dictionary compatible with utils.categorize_repository."""

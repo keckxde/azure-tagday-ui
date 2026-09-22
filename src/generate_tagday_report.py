@@ -67,9 +67,11 @@ def check_branch_important(text: str, ignore_patterns=None) -> bool:
 def check_repo_category_important(category: str, ignore_patterns=None, repo_name: str = "") -> bool:
     """
     Checks whether a repository category or repository name is relevant for change notifications and pending status.
-    Returns False if category or repo_name matches any ignored pattern (e.g. *deprecated*),
+    Returns False if category is DELETED or matches any ignored pattern (e.g. *deprecated*),
     True otherwise.
     """
+    if category and str(category).strip().upper() == "DELETED":
+        return False
     if ignore_patterns is None:
         ignore_patterns = get_default_ignore_category_patterns()
     if category and matches_any_pattern(category, ignore_patterns):

@@ -749,11 +749,14 @@ def export_prs(file_base_path):
         logger.warning("No pull requests found in cache database. Please run sync first.")
         return
 
-    # Group PRs by repository name and branch
+    # Group PRs by repository name and branch (excluding DELETED repositories)
     grouped = {}
     for pr in prs:
-        pr["title"] = patch_pr_title_for_release_notes(pr, cache_db=cache_db)
         repo_name = pr["repo_name"]
+        cat = utils.categorize_repository(repo_name, cache_db=cache_db)
+        if (cat or "").strip().upper() == "DELETED":
+            continue
+        pr["title"] = patch_pr_title_for_release_notes(pr, cache_db=cache_db)
         branch = pr["target_branch"].replace("refs/heads/", "") if pr["target_branch"] else "unknown"
         if repo_name not in grouped:
             grouped[repo_name] = {}
