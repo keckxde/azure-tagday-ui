@@ -250,12 +250,113 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/pipelines", params={"api-version": "6.0-preview.1"})
         return res.get("value", [])
 
+    def get_project_builds(self, project_id):
+        """
+        Retrieves builds definitions for a specific project.
+
+        Args:
+            project_id (str): The target project ID or name.
+
+        Returns:
+            list: List of build definition dictionaries.
+        """
+        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={})
+        return res.get("value", [])
+
+    def get_all_build_artifacts(self, project_id, cache_db=None):
+        """
+        Retrieves build definitions and artifacts for a specific project.
+        Saves builds and artifacts into SQLite cache if cache_db is provided.
+
+        Args:
+            project_id (str): The target project ID or name.
+            cache_db (AzureDevOpsCache, optional): Database cache instance.
+
+        Returns:
+            list: List of build dictionaries with associated artifacts.
+        """
+        builds = self.get_project_builds(project_id)
+        count = 0
+        for i, build in enumerate(builds):
+            try:
+                build_id = build["id"]
+                build_number = build.get("buildNumber", "")
+                artifacts = self.get_build_artifacts(project_id, build_id, cache_db=cache_db)
+
+                builds[i]["artifacts"] = artifacts or []
+
+                if artifacts:
+                    for artifact in artifacts:
+                        artifact_name = artifact.get("name", "")
+                        resource = artifact.get("resource") or {}
+                        props = resource.get("properties") or {} if isinstance(resource, dict) else {}
+                        artifact_size = props.get("artifactsize", 0) if isinstance(props, dict) else 0
+                        try:
+                            artifact_size_mb = int(artifact_size) / 1024 / 1024
+                        except (ValueError, TypeError):
+                            artifact_size_mb = 0.0
+
+                        count += artifact_size_mb
+
+                if cache_db:
+                    cache_db.save_build(project_id, builds[i])
+            except Exception as e:
+                logger.warning("Error processing build %s: %s", build.get('id'), e)
+
+        return builds
+
+    def delete_artifact(self, project_id, build_id, artifact_name, cache_db=None):
+        """Deletes a specific artifact from a build and marks it deleted in cache_db if provided."""
+        res, _ = self._request("DELETE", f"{project_id}/_apis/build/builds/{build_id}/artifacts", params={"artifactName": artifact_name})
+        if cache_db:
+            cache_db.mark_artifact_deleted(build_id, artifact_name)
+        return res
+
+    def get_build_artifacts(self, project_id, build_id, cache_db=None):
+        """
+        Retrieves build artifacts for a specific build.
+        If a failure occurs in the response (e.g. 404, 410, or network exception),
+        it assumes that the build artifact was deleted and records this deleted information
+        in the database cache.
+
+        Args:
+            project_id (str): The target project ID or name.
+            build_id (int/str): The build ID.
+            cache_db (AzureDevOpsCache, optional): Database cache instance.
+
+        Returns:
+            list: List of artifact dictionaries, or marked deleted artifact records on failure.
+        """
+        try:
+            res, status = self._request("GET", f"{project_id}/_apis/build/builds/{build_id}/artifacts", params={})
+            if status >= 400:
+                raise urllib.error.HTTPError(None, status, f"HTTP {status}", None, None)
+            artifacts = res.get("value", []) if isinstance(res, dict) else []
+            if cache_db and artifacts:
+                cache_db.save_artifacts(build_id, artifacts)
+            return artifacts
+        except Exception as e:
+            logger.warning("Failed to retrieve artifacts for build %s in %s: %s. Assuming artifact was deleted.", build_id, project_id, e)
+            if cache_db:
+                cache_db.mark_build_artifacts_deleted(build_id)
+            return [{
+                "id": None,
+                "build_id": build_id,
+                "name": "[deleted]",
+                "type": "Deleted",
+                "size_bytes": 0,
+                "size_mb": 0.0,
+                "is_deleted": 1,
+                "deleted": True
+            }]
+
     def get_work_item(self, task_id, expand="all"):
         """
         Retrieves details of a specific work item by ID.
 
         Args:
             task_id (int/str): The ID of the work item.
+            expand (str, optional): Expand parameter ('all', 'fields', 'relations', etc.). Defaults to 'all'.
 
         Returns:
             dict: The work item details dictionary.
@@ -498,16 +599,26 @@ class AzureBaseClient:
         res, _ = self._request("GET", "_apis/wit/workitems/recents", params={"api-version": "6.0"})
         return res.get("value", [])
 
-    def get_pull_request(self, pr_id):
+    def get_pull_request(self, pr_id, project_id=None, repo_id=None):
         """
-        Retrieves details of a specific pull request by ID.
+        Retrieves details of a specific pull request by ID. Supports repository-scoped and collection-level endpoints.
 
         Args:
             pr_id (int/str): The ID of the pull request.
+            project_id (str, optional): The target project ID or name.
+            repo_id (str, optional): The target repository ID or name.
 
         Returns:
             dict: Pull request details dictionary.
         """
+        if project_id and repo_id:
+            try:
+                res, status = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}", params={"api-version": "6.0"})
+                if res and status == 200:
+                    return res
+            except Exception as e:
+                logger.debug("Failed repo-level get_pull_request for PR %s (project=%s, repo=%s): %s", pr_id, project_id, repo_id, e)
+
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
 

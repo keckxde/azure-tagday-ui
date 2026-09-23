@@ -13,9 +13,9 @@ for p in (py_dir, parent_dir):
 
 from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple, generate_weekly_iterations_advance, parse_sprint_week
 try:
-    from .azure_info_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
+    from .azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
 except ImportError:
-    from azure_info_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
+    from azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
 
 logger = logging.getLogger(__name__)
 
