@@ -246,6 +246,81 @@ def parse_semver_tuple(tag_name):
     return tuple(nums[:3])
 
 
+def propose_next_tag(latest_tag_name=None, target_date=None, bump="patch", pad_digits=None):
+    """
+    Proposes the next tag string based on the latest tag and current/target ISO week (<YYWW> format).
+    The default mechanism increments or sets the Patch Level Number in weekly format <YYWW>.
+
+    Args:
+        latest_tag_name (str, optional): The latest existing tag (e.g. 'v01.02.2632', 'v1.0.0', None).
+        target_date (datetime/date, optional): Reference date for week calculation. Defaults to datetime.now().
+        bump (str, optional): Version component to bump ('patch', 'minor', 'major'). Defaults to 'patch'.
+        pad_digits (bool/int, optional): If None, detected from latest_tag_name (e.g. 'v01.02' -> 2-digit padding).
+
+    Returns:
+        str: Formatted proposed tag string (e.g. 'v01.02.2638').
+    """
+    if target_date is None:
+        target_date = datetime.now()
+    elif isinstance(target_date, str):
+        parsed_dt = parse_iso_datetime(target_date)
+        target_date = parsed_dt if parsed_dt else datetime.now()
+
+    iso_year, iso_week, _ = target_date.isocalendar()
+    yy = iso_year % 100
+    ww = iso_week
+    current_yyww = yy * 100 + ww
+
+    raw = str(latest_tag_name or "").strip()
+    is_empty_or_placeholder = not raw or raw in ("-", "None", "null", "none")
+    has_v = raw.startswith(("v", "V")) or is_empty_or_placeholder
+    clean = raw.lstrip("vV")
+    parts = clean.split(".") if clean else []
+
+    major, minor, patch = parse_semver_tuple(latest_tag_name)
+
+    if pad_digits is None:
+        if len(parts) >= 1 and len(parts[0]) >= 2:
+            should_pad = True
+        elif len(parts) >= 2 and len(parts[1]) >= 2:
+            should_pad = True
+        elif is_empty_or_placeholder:
+            should_pad = True
+        else:
+            should_pad = False
+    elif isinstance(pad_digits, bool):
+        should_pad = pad_digits
+    elif isinstance(pad_digits, int):
+        should_pad = (pad_digits >= 2)
+    else:
+        should_pad = bool(pad_digits)
+
+    bump_lower = str(bump or "patch").lower()
+
+    if bump_lower == "major":
+        new_major = (major + 1) if major > 0 else 1
+        new_minor = 0
+        new_patch = current_yyww
+    elif bump_lower == "minor":
+        new_major = major if major > 0 else 1
+        new_minor = minor + 1
+        new_patch = current_yyww
+    else:  # 'patch' or default
+        new_major = major if major > 0 else 1
+        new_minor = minor
+        if patch < current_yyww:
+            new_patch = current_yyww
+        else:
+            new_patch = patch + 1
+
+    major_str = f"{new_major:02d}" if should_pad else str(new_major)
+    minor_str = f"{new_minor:02d}" if should_pad else str(new_minor)
+    patch_str = f"{new_patch:04d}" if new_patch >= 1000 else str(new_patch)
+    prefix = "v" if has_v else ""
+
+    return f"{prefix}{major_str}.{minor_str}.{patch_str}"
+
+
 def parseYAMLFile(filename):
     """
     Parses a YAML configuration file.

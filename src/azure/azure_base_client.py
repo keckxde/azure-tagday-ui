@@ -813,3 +813,95 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/commits", params=params)
         return res.get("value", [])
 
+    def create_annotated_tag(self, project_id, repo_id, tag_name, object_id, message=""):
+        """
+        Creates an annotated tag in Azure DevOps / TFS Git repository.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            tag_name (str): The name of the tag (e.g. 'v01.02.2638').
+            object_id (str): The commit SHA to tag.
+            message (str, optional): Tag annotation message.
+
+        Returns:
+            dict: The created annotated tag object.
+        """
+        clean_name = tag_name.replace("refs/tags/", "")
+        payload = {
+            "name": clean_name,
+            "taggedObject": {
+                "objectId": object_id
+            },
+            "message": message or f"Release tag {clean_name}"
+        }
+        res, _ = self._request(
+            "POST",
+            f"{project_id}/_apis/git/repositories/{repo_id}/annotatedtags",
+            params={"api-version": "6.0-preview.1"},
+            data=payload
+        )
+        return res
+
+    def create_tag_ref(self, project_id, repo_id, tag_name, object_id):
+        """
+        Creates a Git tag reference (lightweight tag ref) in Azure DevOps / TFS.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            tag_name (str): The name of the tag (e.g. 'v01.02.2638').
+            object_id (str): The commit SHA to point the tag to.
+
+        Returns:
+            dict: Response object containing created ref details.
+        """
+        clean_name = tag_name.replace("refs/tags/", "")
+        ref_name = f"refs/tags/{clean_name}"
+        payload = [
+            {
+                "name": ref_name,
+                "oldObjectId": "0000000000000000000000000000000000000000",
+                "newObjectId": object_id
+            }
+        ]
+        res, _ = self._request(
+            "POST",
+            f"{project_id}/_apis/git/repositories/{repo_id}/refs",
+            params={"api-version": "6.0"},
+            data=payload
+        )
+        return res
+
+    def get_branch_commit_id(self, project_id, repo_id, branch_name):
+        """
+        Resolves the latest commit SHA for a specified branch.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            branch_name (str): Branch name (e.g. 'dev', 'main', 'refs/heads/dev').
+
+        Returns:
+            str: Commit SHA if resolved, or empty string.
+        """
+        clean_branch = branch_name.replace("refs/heads/", "")
+        try:
+            refs = self.get_repository_refs(project_id, repo_id, filter_str=f"heads/{clean_branch}")
+            for r in refs:
+                r_name = r.get("name", "").replace("refs/heads/", "")
+                if r_name == clean_branch and r.get("objectId"):
+                    return r["objectId"]
+        except Exception as e:
+            logger.debug(f"Failed to query refs for branch {branch_name}: {e}")
+
+        # Fallback: query commits endpoint for branch
+        try:
+            commits = self.get_commits(project_id, repo_id, branch_name=clean_branch, limit=1)
+            if commits and commits[0].get("commitId"):
+                return commits[0]["commitId"]
+        except Exception as e:
+            logger.debug(f"Failed to query commits for branch {branch_name}: {e}")
+
+        return ""
+

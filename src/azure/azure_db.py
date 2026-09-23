@@ -1377,6 +1377,40 @@ class AzureDevOpsCache:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (repo_id, tag["FriendlyName"], commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json))
 
+    def save_single_tag(self, repo_id, tag_name, commit_id, commit_date=None, committer="", comment="", is_stable=None, is_unstable=None):
+        """
+        Inserts or replaces a single tag for a repository in the SQLite cache without deleting existing tags.
+        """
+        from utils import parse_semver_tuple
+        clean_name = tag_name.replace("refs/tags/", "")
+        if not commit_date:
+            commit_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sem = parse_semver_tuple(clean_name)
+        if is_stable is None and is_unstable is None:
+            if sem != (0, 0, 0):
+                is_unstable = 1 if (sem[1] % 2) else 0
+                is_stable = 0 if (sem[1] % 2) else 1
+            else:
+                is_stable = 1
+                is_unstable = 0
+        tag_dict = {
+            "name": f"refs/tags/{clean_name}",
+            "FriendlyName": clean_name,
+            "objectId": commit_id,
+            "CommitId": commit_id,
+            "CommitDate": commit_date,
+            "Committer": committer,
+            "Comment": comment,
+            "stable": bool(is_stable),
+            "unstable": bool(is_unstable)
+        }
+        raw_json = json.dumps(tag_dict, cls=DateTimeEncoder, ensure_ascii=False)
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (repo_id, clean_name, commit_id, commit_date, committer, comment, is_stable or 0, is_unstable or 0, raw_json))
+
     def save_submodules(self, repo_id, submodules):
         """
         Saves submodules for a repository. Clears old submodules of this repo first.

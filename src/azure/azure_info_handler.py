@@ -11,6 +11,7 @@ for p in (py_dir, parent_dir):
         sys.path.insert(0, p)
 
 
+from datetime import datetime
 from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple, generate_weekly_iterations_advance, parse_sprint_week
 try:
     from .azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
@@ -1578,6 +1579,111 @@ class AzureInfoHandler(AzureBaseClient):
             "total_generated": len(results),
             "created_on_server": created_count,
             "iterations": results
+        }
+
+    def create_repository_tag(self, project_id, repo_id_or_name, tag_name, branch_name="dev", message="", cache_db=None):
+        """
+        Creates a Git tag on the target branch (default 'dev') in Azure DevOps / TFS and updates local cache.
+
+        Args:
+            project_id (str): Azure DevOps project ID or name.
+            repo_id_or_name (str): Repository ID (GUID) or repository name.
+            tag_name (str): Tag name to create (e.g. 'v01.02.2638').
+            branch_name (str, optional): Target branch to tag (e.g. 'dev', 'main'). Defaults to 'dev'.
+            message (str, optional): Tag annotation message / description.
+            cache_db (AzureDevOpsCache, optional): Database cache instance to update upon success.
+
+        Returns:
+            dict: Dictionary with success status, details, and message.
+        """
+        clean_tag = tag_name.strip().replace("refs/tags/", "")
+        if not clean_tag:
+            raise ValueError("Tag name cannot be empty.")
+
+        repo_id = str(repo_id_or_name).strip()
+        repo_name = repo_id
+
+        # Resolve repo ID if name was provided
+        try:
+            repos = self.get_repositories(project_id)
+            for r in repos:
+                if r.get("name", "").lower() == repo_id.lower() or r.get("id", "").lower() == repo_id.lower():
+                    repo_id = r.get("id")
+                    repo_name = r.get("name")
+                    break
+        except Exception as e:
+            logger.debug(f"Could not query repos from server to resolve repo ID: {e}")
+
+        clean_branch = branch_name.strip().replace("refs/heads/", "")
+        commit_id = self.get_branch_commit_id(project_id, repo_id, clean_branch)
+
+        if not commit_id:
+            # Try variations like develop if dev was specified
+            if clean_branch.lower() == "dev":
+                for alt in ("develop", "development", "main", "master"):
+                    alt_cid = self.get_branch_commit_id(project_id, repo_id, alt)
+                    if alt_cid:
+                        commit_id = alt_cid
+                        clean_branch = alt
+                        break
+
+        if not commit_id:
+            raise RuntimeError(
+                f"Could not resolve commit SHA for branch '{branch_name}' in repository '{repo_name}'. "
+                f"Please ensure the branch exists on the server."
+            )
+
+        tag_comment = message or f"Tag Day release {clean_tag} from branch '{clean_branch}'"
+        created_tag_obj = None
+
+        # Try creating annotated tag first
+        try:
+            created_tag_obj = self.create_annotated_tag(
+                project_id,
+                repo_id,
+                clean_tag,
+                commit_id,
+                message=tag_comment
+            )
+            logger.info("Successfully created annotated tag %s on repo %s (commit %s)", clean_tag, repo_name, commit_id[:8])
+        except Exception as e:
+            logger.warning("Annotated tag creation failed for %s on %s: %s. Falling back to tag ref creation...", clean_tag, repo_name, e)
+            try:
+                created_tag_obj = self.create_tag_ref(
+                    project_id,
+                    repo_id,
+                    clean_tag,
+                    commit_id
+                )
+                logger.info("Successfully created tag ref %s on repo %s (commit %s)", clean_tag, repo_name, commit_id[:8])
+            except Exception as ref_err:
+                logger.error("Failed to create tag %s on repo %s: %s", clean_tag, repo_name, ref_err)
+                raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
+
+        # Update local cache if available
+        if cache_db:
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cache_db.save_single_tag(
+                    repo_id=repo_id,
+                    tag_name=clean_tag,
+                    commit_id=commit_id,
+                    commit_date=now_str,
+                    committer="GUI User",
+                    comment=tag_comment
+                )
+            except Exception as db_err:
+                logger.warning("Failed to save newly created tag into local cache DB: %s", db_err)
+
+        return {
+            "success": True,
+            "repo_id": repo_id,
+            "repo_name": repo_name,
+            "tag_name": clean_tag,
+            "branch_name": clean_branch,
+            "commit_id": commit_id,
+            "message": tag_comment,
+            "created_tag": created_tag_obj
         }
 
 

@@ -231,6 +231,7 @@ class DevOpsBackend(QObject):
     statusMessageChanged = Signal()
     progressChanged = Signal()
     connectionLost = Signal(str)            # error description on repository server disconnect
+    tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -1238,6 +1239,49 @@ class DevOpsBackend(QObject):
             self.statusMessageChanged.emit()
         self.busyChanged.emit()
 
+    def _run_worker(self, task_func, status_msg="Working...", on_success=None, on_error=None):
+        """Helper to run a TaskWorker thread with standard busy state, progress tracking, and logging."""
+        self._set_busy(True, status_msg)
+        self._progress = 0
+        self.progressChanged.emit()
+
+        worker = TaskWorker(task_func)
+        self._worker = worker
+
+        def _on_progress(pct, msg):
+            self._progress = pct
+            self.progressChanged.emit()
+            if msg:
+                self._status_message = msg
+                self.statusMessageChanged.emit()
+
+        def _on_log(msg):
+            pass
+
+        def _on_finished(success, result):
+            self._set_busy(False, "Ready")
+            self._progress = 100 if success else 0
+            self.progressChanged.emit()
+            if success:
+                if on_success:
+                    try:
+                        on_success(result)
+                    except Exception as e:
+                        logger.error(f"Error in on_success callback: {e}")
+            else:
+                if on_error:
+                    try:
+                        on_error(result)
+                    except Exception as e:
+                        logger.error(f"Error in on_error callback: {e}")
+            self._worker = None
+
+        worker.progress.connect(_on_progress)
+        worker.log_message.connect(_on_log)
+        worker.finished_task.connect(_on_finished)
+        worker.start()
+        return worker
+
     @Slot()
     def _compute_all_cache_data(self, worker=None):
         """
@@ -1831,6 +1875,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
@@ -2183,6 +2230,120 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def propose_next_tag(self, latest_tag, bump="patch"):
+        """Calculates and returns the proposed next release tag string using weekly <YYWW> format."""
+        try:
+            return utils.propose_next_tag(latest_tag, bump=bump)
+        except Exception as e:
+            logger.warning(f"Error calculating proposed tag for {latest_tag}: {e}")
+            return "v01.00.0000"
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def propose_repo_tag(self, repo_name, bump="patch"):
+        """Finds latest tag for a repository and returns its proposed next tag."""
+        latest_tag = "-"
+        if self._tagday_data and "repos_summary" in self._tagday_data:
+            for r in self._tagday_data["repos_summary"]:
+                if r.get("name") == repo_name or r.get("id") == repo_name:
+                    latest_tag = r.get("latest_tag") or "-"
+                    break
+        if latest_tag == "-":
+            for r in self._repositories:
+                if r.get("name") == repo_name or r.get("id") == repo_name:
+                    latest_tag = r.get("latest_stable_tag") or r.get("latest_unstable_tag") or "-"
+                    break
+        return utils.propose_next_tag(latest_tag, bump=bump)
+
+    @Slot(str, result=list)
+    def get_repo_branches(self, repo_name):
+        """Returns list of branch names for a repository, prioritizing 'dev' and default branches."""
+        branches = []
+        if self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    r_row = conn.execute("SELECT id, default_branch FROM repositories WHERE name = ? OR id = ?", (repo_name, repo_name)).fetchone()
+                    if r_row:
+                        repo_id = r_row["id"]
+                        b_rows = conn.execute("SELECT name FROM branches WHERE repo_id = ? ORDER BY name ASC", (repo_id,)).fetchall()
+                        for b in b_rows:
+                            b_clean = b["name"].replace("refs/heads/", "")
+                            if b_clean not in branches:
+                                branches.append(b_clean)
+            except Exception as e:
+                logger.debug(f"Error querying branches for {repo_name}: {e}")
+
+        if not branches:
+            branches = ["dev", "main", "master", "develop"]
+        else:
+            dev_variants = [b for b in branches if b.lower() in ("dev", "develop", "development")]
+            other_branches = [b for b in branches if b not in dev_variants]
+            if not dev_variants:
+                dev_variants = ["dev"]
+            branches = dev_variants + other_branches
+
+        return branches
+
+    @Slot(str, str)
+    @Slot(str, str, str)
+    @Slot(str, str, str, str)
+    def create_tag_async(self, repo_name_or_id, tag_name, branch_name="dev", message=""):
+        """
+        Creates a Git tag on the specified branch (default 'dev') in TFS / Azure DevOps in background.
+        """
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            target_branch = branch_name or "dev"
+            worker.log_message.emit(
+                f"Connecting to Azure DevOps to tag branch '{target_branch}' on repository '{repo_name_or_id}' with tag '{tag_name}'..."
+            )
+            azHandler = devops_helper._getHandler()
+            if not azHandler:
+                raise RuntimeError(
+                    "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID."
+                )
+
+            res = azHandler.create_repository_tag(
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                repo_id_or_name=repo_name_or_id,
+                tag_name=tag_name,
+                branch_name=target_branch,
+                message=message,
+                cache_db=self._cache_db
+            )
+
+            actual_repo = res.get("repo_name", repo_name_or_id)
+            actual_tag = res.get("tag_name", tag_name)
+            cid = res.get("commit_id", "")[:8]
+            worker.log_message.emit(
+                f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
+            )
+
+            try:
+                self.load_interactive_reports()
+                self.refresh_all_data()
+            except Exception as ref_err:
+                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
+
+            return f"Tag '{actual_tag}' created successfully on '{actual_repo}'"
+
+        def _on_success(result_msg):
+            self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
+
+        def _on_error(err_msg):
+            self.tagCreated.emit(str(repo_name_or_id), str(tag_name), False, str(err_msg))
+
+        self._run_worker(
+            _work,
+            f"Tagging {repo_name_or_id}...",
+            on_success=_on_success,
+            on_error=_on_error
+        )
 
     @Slot(int, result=dict)
     @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
@@ -5545,6 +5706,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
