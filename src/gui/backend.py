@@ -230,6 +230,8 @@ class DevOpsBackend(QObject):
     busyChanged = Signal()
     statusMessageChanged = Signal()
     progressChanged = Signal()
+    connectionLost = Signal(str)            # error description on repository server disconnect
+    tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -1237,6 +1239,49 @@ class DevOpsBackend(QObject):
             self.statusMessageChanged.emit()
         self.busyChanged.emit()
 
+    def _run_worker(self, task_func, status_msg="Working...", on_success=None, on_error=None):
+        """Helper to run a TaskWorker thread with standard busy state, progress tracking, and logging."""
+        self._set_busy(True, status_msg)
+        self._progress = 0
+        self.progressChanged.emit()
+
+        worker = TaskWorker(task_func)
+        self._worker = worker
+
+        def _on_progress(pct, msg):
+            self._progress = pct
+            self.progressChanged.emit()
+            if msg:
+                self._status_message = msg
+                self.statusMessageChanged.emit()
+
+        def _on_log(msg):
+            pass
+
+        def _on_finished(success, result):
+            self._set_busy(False, "Ready")
+            self._progress = 100 if success else 0
+            self.progressChanged.emit()
+            if success:
+                if on_success:
+                    try:
+                        on_success(result)
+                    except Exception as e:
+                        logger.error(f"Error in on_success callback: {e}")
+            else:
+                if on_error:
+                    try:
+                        on_error(result)
+                    except Exception as e:
+                        logger.error(f"Error in on_error callback: {e}")
+            self._worker = None
+
+        worker.progress.connect(_on_progress)
+        worker.log_message.connect(_on_log)
+        worker.finished_task.connect(_on_finished)
+        worker.start()
+        return worker
+
     @Slot()
     def _compute_all_cache_data(self, worker=None):
         """
@@ -1797,9 +1842,14 @@ class DevOpsBackend(QObject):
             for b in unmerged_branches:
                 prep_pr_id = ""
                 prep_pr_title = ""
+                prep_pr_status = ""
+                is_abandoned = b.get("is_abandoned", False)
                 if b.get("prepared_pr"):
                     prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
                     prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                        is_abandoned = True
 
                 clean_branches.append({
                     "branch_name": b.get("branch_name", ""),
@@ -1812,6 +1862,8 @@ class DevOpsBackend(QObject):
                     "behind": b.get("behind", 0),
                     "prepared_pr_id": prep_pr_id,
                     "prepared_pr_title": prep_pr_title,
+                    "prepared_pr_status": prep_pr_status,
+                    "is_abandoned": is_abandoned,
                 })
 
             repos_summary.append({
@@ -1823,6 +1875,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
@@ -2175,6 +2230,120 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def propose_next_tag(self, latest_tag, bump="patch"):
+        """Calculates and returns the proposed next release tag string using weekly <YYWW> format."""
+        try:
+            return utils.propose_next_tag(latest_tag, bump=bump)
+        except Exception as e:
+            logger.warning(f"Error calculating proposed tag for {latest_tag}: {e}")
+            return "v01.00.0000"
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def propose_repo_tag(self, repo_name, bump="patch"):
+        """Finds latest tag for a repository and returns its proposed next tag."""
+        latest_tag = "-"
+        if self._tagday_data and "repos_summary" in self._tagday_data:
+            for r in self._tagday_data["repos_summary"]:
+                if r.get("name") == repo_name or r.get("id") == repo_name:
+                    latest_tag = r.get("latest_tag") or "-"
+                    break
+        if latest_tag == "-":
+            for r in self._repositories:
+                if r.get("name") == repo_name or r.get("id") == repo_name:
+                    latest_tag = r.get("latest_stable_tag") or r.get("latest_unstable_tag") or "-"
+                    break
+        return utils.propose_next_tag(latest_tag, bump=bump)
+
+    @Slot(str, result=list)
+    def get_repo_branches(self, repo_name):
+        """Returns list of branch names for a repository, prioritizing 'dev' and default branches."""
+        branches = []
+        if self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    r_row = conn.execute("SELECT id, default_branch FROM repositories WHERE name = ? OR id = ?", (repo_name, repo_name)).fetchone()
+                    if r_row:
+                        repo_id = r_row["id"]
+                        b_rows = conn.execute("SELECT name FROM branches WHERE repo_id = ? ORDER BY name ASC", (repo_id,)).fetchall()
+                        for b in b_rows:
+                            b_clean = b["name"].replace("refs/heads/", "")
+                            if b_clean not in branches:
+                                branches.append(b_clean)
+            except Exception as e:
+                logger.debug(f"Error querying branches for {repo_name}: {e}")
+
+        if not branches:
+            branches = ["dev", "main", "master", "develop"]
+        else:
+            dev_variants = [b for b in branches if b.lower() in ("dev", "develop", "development")]
+            other_branches = [b for b in branches if b not in dev_variants]
+            if not dev_variants:
+                dev_variants = ["dev"]
+            branches = dev_variants + other_branches
+
+        return branches
+
+    @Slot(str, str)
+    @Slot(str, str, str)
+    @Slot(str, str, str, str)
+    def create_tag_async(self, repo_name_or_id, tag_name, branch_name="dev", message=""):
+        """
+        Creates a Git tag on the specified branch (default 'dev') in TFS / Azure DevOps in background.
+        """
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            target_branch = branch_name or "dev"
+            worker.log_message.emit(
+                f"Connecting to Azure DevOps to tag branch '{target_branch}' on repository '{repo_name_or_id}' with tag '{tag_name}'..."
+            )
+            azHandler = devops_helper._getHandler()
+            if not azHandler:
+                raise RuntimeError(
+                    "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID."
+                )
+
+            res = azHandler.create_repository_tag(
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                repo_id_or_name=repo_name_or_id,
+                tag_name=tag_name,
+                branch_name=target_branch,
+                message=message,
+                cache_db=self._cache_db
+            )
+
+            actual_repo = res.get("repo_name", repo_name_or_id)
+            actual_tag = res.get("tag_name", tag_name)
+            cid = res.get("commit_id", "")[:8]
+            worker.log_message.emit(
+                f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
+            )
+
+            try:
+                self.load_interactive_reports()
+                self.refresh_all_data()
+            except Exception as ref_err:
+                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
+
+            return f"Tag '{actual_tag}' created successfully on '{actual_repo}'"
+
+        def _on_success(result_msg):
+            self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
+
+        def _on_error(err_msg):
+            self.tagCreated.emit(str(repo_name_or_id), str(tag_name), False, str(err_msg))
+
+        self._run_worker(
+            _work,
+            f"Tagging {repo_name_or_id}...",
+            on_success=_on_success,
+            on_error=_on_error
+        )
 
     @Slot(int, result=dict)
     @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
@@ -3698,7 +3867,6 @@ class DevOpsBackend(QObject):
     def _on_worker_finished(self, success, result_msg):
         self._progress = 100 if success else 0
         self.progressChanged.emit()
-        self._set_busy(False, "Ready")
         self.reset_auto_sync_timer()
 
         if isinstance(result_msg, dict) and "work_items" in result_msg:
@@ -3707,10 +3875,23 @@ class DevOpsBackend(QObject):
             self.refresh_all_data()
 
         if success:
+            self._set_busy(False, "Ready")
             log_text = result_msg if isinstance(result_msg, str) else "Completed successfully"
             logger.info(f"[COMPLETED] {log_text}")
         else:
-            logger.error(f"[FAILED] {result_msg}")
+            err_text = str(result_msg or "Unknown error")
+            logger.error(f"[FAILED] {err_text}")
+            err_lower = err_text.lower()
+            if any(k in err_lower for k in ("lost connection", "connection refused", "connection reset", "connection timed out", "connection aborted", "no connection", "unreachable", "timed out", "server unavailable", "bad gateway")):
+                status_txt = f"❌ Lost connection to repository server: {err_text}"
+                self._set_busy(False, status_txt)
+                self.logMessage.emit(f"❌ Synchronization stopped: {err_text}")
+                self.connectionLost.emit(err_text)
+            elif "abort" in err_lower or "cancel" in err_lower:
+                self._set_busy(False, "⏹️ Synchronization cancelled by user")
+            else:
+                self._set_busy(False, f"⚠️ Sync failed: {err_text}")
+                self.logMessage.emit(f"⚠️ Task failed: {err_text}")
         self._worker = None
 
     @Slot()
@@ -4965,6 +5146,113 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.error(f"Error recalculating repo categories: {e}")
 
+    @Slot(result=str)
+    def browse_repo_categories_export_path(self):
+        """Opens native file dialog to select save destination for repo categories export (.yaml, .json, .xlsx)."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_path = os.path.join(initial_dir, f"repo_categories_export_{timestamp}.yaml")
+            file_path, _ = QFileDialog.getSaveFileName(
+                None, "Export Repository Categories", default_path,
+                "YAML Configuration (*.yaml *.yml);;JSON Configuration (*.json);;Excel Spreadsheet (*.xlsx);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening repo categories export dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseRepoCategoriesExportPath(self):
+        """CamelCase alias for browse_repo_categories_export_path."""
+        return self.browse_repo_categories_export_path()
+
+    @Slot(result=str)
+    def browse_repo_categories_import_file(self):
+        """Opens native file dialog to select a YAML, JSON, or Excel repo categories file to import."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Select Repository Categories File to Import", initial_dir,
+                "Repo Category Files (*.yaml *.yml *.json *.xlsx *.xls);;YAML Files (*.yaml *.yml);;JSON Files (*.json);;Excel Spreadsheets (*.xlsx *.xls);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening repo categories import dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseRepoCategoriesImportFile(self):
+        """CamelCase alias for browse_repo_categories_import_file."""
+        return self.browse_repo_categories_import_file()
+
+    @Slot(str, result=dict)
+    def export_repo_categories(self, file_path=""):
+        """Exports full repo category configuration to YAML, JSON, or Excel."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_repo_categories_export_path()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+        try:
+            cfg = self._cache_db.get_full_repo_category_config()
+            ok = utils.export_repo_categories_to_file(cfg, file_path)
+            if ok:
+                logger.info(f"Successfully exported repository categories to {file_path}")
+                return {"success": True, "file_path": file_path}
+            else:
+                return {"success": False, "error": f"Failed to write export file: {file_path}"}
+        except Exception as e:
+            logger.error(f"Error exporting repo categories: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, result=dict)
+    def exportRepoCategories(self, file_path=""):
+        """CamelCase alias for export_repo_categories."""
+        return self.export_repo_categories(file_path)
+
+    @Slot(str, bool, result=dict)
+    def import_repo_categories(self, file_path="", merge=False):
+        """Imports repo category configuration from YAML, JSON, or Excel file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_repo_categories_import_file()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+        try:
+            cfg = utils.import_repo_categories_from_file(file_path)
+            if not cfg:
+                return {"success": False, "error": f"Failed to parse categories from: {os.path.basename(file_path)}"}
+
+            ok = self._cache_db.save_full_repo_category_config(cfg, merge=merge)
+            if ok:
+                self.repoCategoriesChanged.emit()
+                self._recalculate_repo_categories()
+                cat_count = len(cfg.get("category_colors", {}))
+                pfx_count = len(cfg.get("prefix_rules", {}))
+                repo_count = len(cfg.get("repositories", {}))
+                logger.info(f"Imported repo categories from {file_path} (Cats: {cat_count}, Rules: {pfx_count}, Overrides: {repo_count})")
+                return {
+                    "success": True,
+                    "file_path": file_path,
+                    "categories_count": cat_count,
+                    "prefix_rules_count": pfx_count,
+                    "overrides_count": repo_count,
+                }
+            return {"success": False, "error": "Failed to persist imported configuration to database"}
+        except Exception as e:
+            logger.error(f"Error importing repo categories from {file_path}: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, bool, result=dict)
+    def importRepoCategories(self, file_path="", merge=False):
+        """CamelCase alias for import_repo_categories."""
+        return self.import_repo_categories(file_path, merge)
+
     @Slot(str, str, result=bool)
     def save_change_filters(self, repo_category_patterns_json, branch_patterns_json):
         """
@@ -5385,9 +5673,14 @@ class DevOpsBackend(QObject):
             for b in unmerged_branches:
                 prep_pr_id = ""
                 prep_pr_title = ""
+                prep_pr_status = ""
+                is_abandoned = b.get("is_abandoned", False)
                 if b.get("prepared_pr"):
                     prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
                     prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                        is_abandoned = True
 
                 clean_branches.append({
                     "branch_name": b.get("branch_name", ""),
@@ -5400,6 +5693,8 @@ class DevOpsBackend(QObject):
                     "behind": b.get("behind", 0),
                     "prepared_pr_id": prep_pr_id,
                     "prepared_pr_title": prep_pr_title,
+                    "prepared_pr_status": prep_pr_status,
+                    "is_abandoned": is_abandoned,
                 })
 
             repos_summary.append({
@@ -5411,6 +5706,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),

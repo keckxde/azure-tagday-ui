@@ -2,9 +2,25 @@
 
 ## OPEN
 
-(All current milestone items completed)
+### Development
+
+- are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
 ## DONE
+
+- Weekly Proposed Release Tagging Engine & Direct 'dev' Branch Tagging in Tagday Explorer:
+  - **Weekly `<YYWW>` Proposed Tag Calculation ([`src/utils.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/utils.py))**: Implemented `propose_next_tag(latest_tag_name, target_date, bump, pad_digits)` calculating weekly ISO calendar patch numbers (`<YYWW>`), preserving leading `v` and 2-digit padding, handling same-week increments (`2639` ➔ `2640`), and supporting minor/major version bumps.
+  - **TFS / Azure DevOps Git Tag API Integration ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py), [`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py))**: Added `create_annotated_tag`, `create_tag_ref`, and `get_branch_commit_id` in `AzureBaseClient` and `create_repository_tag` in `AzureInfoHandler` with automatic branch commit SHA resolution targeting `dev` (with fallback to `develop`, `development`, `main`, or `master`) and annotated tag creation with ref fallback.
+  - **Local SQLite Cache Real-Time Synchronization ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py))**: Added `save_single_tag` to `AzureDevOpsCache` for instant local cache updates without wiping repository tag history.
+  - **Backend Bridge & Async Slots ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `propose_next_tag`, `propose_repo_tag`, `get_repo_branches`, `create_tag_async`, and `tagCreated` Qt signal; precalculated proposed tag variants in `repos_summary`.
+  - **Interactive UI in Tagday Explorer ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Added top action button `🏷️ Tag Dev Branch...`, left repository list proposed tag badges and quick tag actions, repository inspector proposed release tag card with quick bump chips, and tagging modal overlay with real-time feedback.
+  - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added full unit test suite covering weekly formatting, padding preservation, same-week bumps, minor/major bumps, Git tag creation handler, and backend bridge methods (7/7 passed).
+
+- Stop Synchronization Immediately on Repository Server Connection Loss:
+  - **Connection Loss Detection & Exception Model ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py), [`src/azure/azure_info_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_base_client.py))**: Introduced `AzureServerConnectionError` and `is_connection_error` utility to reliably classify DNS lookup failures, socket timeouts, connection resets/refusals, and server unavailable errors (HTTP 401/403/408/502/503/504).
+  - **Immediate Sync Termination Across All Phases ([`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py), [`src/devops_helper.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/devops_helper.py))**: Terminated sync pipelines immediately during repository fetching (`GetTFSRepositories` parallel worker pool), WIQL work item discovery and batch downloading (`sync_work_items`), and pull request status reconciliation (`sync_pull_requests`), preventing redundant failing requests or accidental deletion marks.
+  - **UI Status Messaging & Notifications ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `connectionLost` Qt signal, updated status bar to `❌ Lost connection to repository server: ...`, and logged clear explanatory warnings to the UI Sync Log.
+  - **Automated Verification ([`src/tests/test_server_connection_loss.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_server_connection_loss.py))**: Added unit tests validating error detection, immediate thread/sync abortion, cache preservation, and UI notification emissions (10/10 passed).
 
 - GitHub Actions CI/CD Pipeline for Automated Building, Testing & Publishing:
   - **Automated Workflow Configuration ([`.github/workflows/build-and-publish.yml`](file:///c:/Users/keckx/Projects/azure-tagday-ui/.github/workflows/build-and-publish.yml))**: Full end-to-end CI/CD pipeline triggered on pushes to `main`/`master`, Git version tags (`v*`), pull requests, and manual triggers (`workflow_dispatch`).

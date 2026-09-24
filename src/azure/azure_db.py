@@ -407,6 +407,7 @@ class AzureDevOpsCache:
                         ("GENERIC", "#6e40c9", "#261b4d", 3, 0),
                         ("3RDPARTY", "#d29922", "#3d2800", 4, 0),
                         ("OTHERS", "#6e7681", "#21262d", 5, 1),
+                        ("DELETED", "#cf222e", "#3d1418", 6, 0),
                     ]
                     conn.executemany("""
                     INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
@@ -421,6 +422,12 @@ class AzureDevOpsCache:
                     INSERT OR IGNORE INTO repo_prefix_rules (prefix, category)
                     VALUES (?, ?)
                     """, default_rules)
+                else:
+                    # Ensure DELETED category exists even in existing databases
+                    conn.execute("""
+                    INSERT OR IGNORE INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES ('DELETED', '#cf222e', '#3d1418', 6, 0)
+                    """)
             except Exception:
                 pass
 
@@ -1139,6 +1146,44 @@ class AzureDevOpsCache:
         except Exception:
             return False
 
+    def reconcile_deleted_repositories(self, project_id, active_repo_names, active_repo_ids=None):
+        """
+        Compares cached repositories for a project against the list of active repositories returned by TFS.
+        Any cached repository no longer present in TFS is automatically marked with category 'DELETED'.
+
+        Args:
+            project_id (str, optional): The project identifier or name.
+            active_repo_names (iterable): Collection of active repository names returned by TFS.
+            active_repo_ids (iterable, optional): Collection of active repository IDs returned by TFS.
+
+        Returns:
+            list: List of repository names that were marked as DELETED.
+        """
+        active_names = {str(n).strip() for n in (active_repo_names or []) if n}
+        active_ids = {str(i).strip() for i in (active_repo_ids or []) if i}
+
+        # Ensure DELETED category exists
+        self.save_repo_category("DELETED", "#cf222e", bg_color="#3d1418", sort_order=99, is_default=False)
+
+        marked_deleted = []
+        with self._connection() as conn:
+            if project_id:
+                rows = conn.execute("SELECT id, name FROM repositories WHERE project_id = ?", (project_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT id, name FROM repositories").fetchall()
+
+            for r in rows:
+                r_id = str(r["id"]).strip()
+                r_name = str(r["name"]).strip()
+                if (r_name not in active_names) and (r_id not in active_ids):
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, 'DELETED')
+                    ON CONFLICT(repo_name) DO UPDATE SET category = 'DELETED'
+                    """, (r_name,))
+                    marked_deleted.append(r_name)
+        return marked_deleted
+
     def get_full_repo_category_config(self):
         """Returns the full repository category configuration dictionary compatible with utils.categorize_repository."""
         cats = self.get_repo_categories()
@@ -1147,9 +1192,14 @@ class AzureDevOpsCache:
 
         default_cat = "OTHERS"
         colors = {}
+        bg_colors = {}
+        sort_orders = {}
         for c in cats:
             cname = c["name"]
             colors[cname] = c["color"]
+            if c.get("bg_color"):
+                bg_colors[cname] = c["bg_color"]
+            sort_orders[cname] = c.get("sort_order", 0)
             if c.get("is_default"):
                 default_cat = cname
 
@@ -1158,49 +1208,89 @@ class AzureDevOpsCache:
         return {
             "default_category": default_cat,
             "category_colors": colors,
+            "category_bg_colors": bg_colors,
+            "category_sort_orders": sort_orders,
             "prefix_rules": prefix_rules,
             "repositories": overrides,
         }
 
-    def save_full_repo_category_config(self, config_dict):
+    def save_full_repo_category_config(self, config_dict, merge=False):
         """Persists a complete repository categories configuration dictionary into the database."""
         if not config_dict or not isinstance(config_dict, dict):
             return False
         default_cat = config_dict.get("default_category", "OTHERS")
         colors = config_dict.get("category_colors", {})
+        bg_colors = config_dict.get("category_bg_colors", {})
+        sort_orders = config_dict.get("category_sort_orders", {})
         prefix_rules = config_dict.get("prefix_rules", {})
         repos_map = config_dict.get("repositories", {})
 
         with self._connection() as conn:
-            conn.execute("DELETE FROM repo_categories")
-            conn.execute("DELETE FROM repo_prefix_rules")
-            conn.execute("DELETE FROM repo_category_overrides")
+            if not merge:
+                conn.execute("DELETE FROM repo_categories")
+                conn.execute("DELETE FROM repo_prefix_rules")
+                conn.execute("DELETE FROM repo_category_overrides")
 
             order = 1
             all_cat_names = list(colors.keys())
-            if default_cat not in all_cat_names:
+            if default_cat and default_cat not in all_cat_names:
                 all_cat_names.append(default_cat)
 
             for cname in all_cat_names:
                 col = colors.get(cname, "#6e7681")
+                bg_col = bg_colors.get(cname, "")
+                s_order = sort_orders.get(cname, order)
                 is_def = 1 if cname == default_cat else 0
-                conn.execute("""
-                INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
-                VALUES (?, ?, ?, ?, ?)
-                """, (cname, col, "", order, is_def))
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        color = excluded.color,
+                        bg_color = CASE WHEN excluded.bg_color != '' THEN excluded.bg_color ELSE repo_categories.bg_color END,
+                        sort_order = excluded.sort_order,
+                        is_default = CASE WHEN excluded.is_default = 1 THEN 1 ELSE repo_categories.is_default END
+                    """, (cname, col, bg_col, s_order, is_def))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_categories (name, color, bg_color, sort_order, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, (cname, col, bg_col, s_order, is_def))
                 order += 1
 
             for pfx, cname in prefix_rules.items():
-                conn.execute("""
-                INSERT INTO repo_prefix_rules (prefix, category)
-                VALUES (?, ?)
-                """, (pfx, cname))
+                pfx_clean = str(pfx).strip().lower()
+                cname_clean = str(cname).strip()
+                if not pfx_clean or not cname_clean:
+                    continue
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_prefix_rules (prefix, category)
+                    VALUES (?, ?)
+                    ON CONFLICT(prefix) DO UPDATE SET category = excluded.category
+                    """, (pfx_clean, cname_clean))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_prefix_rules (prefix, category)
+                    VALUES (?, ?)
+                    """, (pfx_clean, cname_clean))
 
             for rname, cname in repos_map.items():
-                conn.execute("""
-                INSERT INTO repo_category_overrides (repo_name, category)
-                VALUES (?, ?)
-                """, (rname, cname))
+                rname_clean = str(rname).strip()
+                cname_clean = str(cname).strip()
+                if not rname_clean or not cname_clean:
+                    continue
+                if merge:
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, ?)
+                    ON CONFLICT(repo_name) DO UPDATE SET category = excluded.category
+                    """, (rname_clean, cname_clean))
+                else:
+                    conn.execute("""
+                    INSERT INTO repo_category_overrides (repo_name, category)
+                    VALUES (?, ?)
+                    """, (rname_clean, cname_clean))
         return True
 
     def get_last_push_id(self, repo_id):
@@ -1286,6 +1376,40 @@ class AzureDevOpsCache:
                 INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (repo_id, tag["FriendlyName"], commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json))
+
+    def save_single_tag(self, repo_id, tag_name, commit_id, commit_date=None, committer="", comment="", is_stable=None, is_unstable=None):
+        """
+        Inserts or replaces a single tag for a repository in the SQLite cache without deleting existing tags.
+        """
+        from utils import parse_semver_tuple
+        clean_name = tag_name.replace("refs/tags/", "")
+        if not commit_date:
+            commit_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sem = parse_semver_tuple(clean_name)
+        if is_stable is None and is_unstable is None:
+            if sem != (0, 0, 0):
+                is_unstable = 1 if (sem[1] % 2) else 0
+                is_stable = 0 if (sem[1] % 2) else 1
+            else:
+                is_stable = 1
+                is_unstable = 0
+        tag_dict = {
+            "name": f"refs/tags/{clean_name}",
+            "FriendlyName": clean_name,
+            "objectId": commit_id,
+            "CommitId": commit_id,
+            "CommitDate": commit_date,
+            "Committer": committer,
+            "Comment": comment,
+            "stable": bool(is_stable),
+            "unstable": bool(is_unstable)
+        }
+        raw_json = json.dumps(tag_dict, cls=DateTimeEncoder, ensure_ascii=False)
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (repo_id, clean_name, commit_id, commit_date, committer, comment, is_stable or 0, is_unstable or 0, raw_json))
 
     def save_submodules(self, repo_id, submodules):
         """

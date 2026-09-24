@@ -207,6 +207,22 @@ The **Reports → Tag Day Overview** tool automates release audits by evaluating
 4. **Repository Deep-Dive**: Per-category repository walkthrough with web links and commit logs.
 5. **Interactive Tag Day Explorer**: Explore candidate release items in GUI (**Reports → 🏷️ Tag Day Explorer**). Repositories whose category or name matches configured *Repository Category Filters* (e.g. `*deprecated*`) are automatically omitted from "Repositories with Changes" and timeline candidate items.
 
+### Weekly Proposed Tags & Direct 'dev' Branch Tagging
+
+Tagday Explorer automatically generates proposed release tags and allows tagging repository branches directly:
+
+- **Weekly `<YYWW>` Proposal**: The default mechanism calculates the patch level number based on the current ISO calendar week (e.g. `v01.02.2639` for Year 2026, Week 39), preserving leading `v` prefixes and 2-digit padding.
+- **Repository List Badge & Quick Action**: Each repository with candidate updates shows its latest tag and proposed tag (`v01.02.2638 ➔ v01.02.2639`) along with a quick `🏷️` tag launcher.
+- **Repository Inspector & Quick Bumps**: When inspecting a repository, the **Proposed Release Tag** card provides 1-click bump presets:
+  - `Weekly Patch (<YYWW>)`: Sets patch number to current calendar week.
+  - `+0.1 Minor`: Bumps minor version and sets patch to current week (e.g. `v01.03.2639`).
+  - `+1.0 Major`: Bumps major version, resets minor to `00`, and sets patch to current week (e.g. `v02.00.2639`).
+- **Interactive Tagging Modal**:
+  - Click **🏷️ Tag Dev Branch...** in the top action bar or repository inspector.
+  - Select target branch (defaults to `dev`, with automatic fallback to `develop`/`development`/`main`).
+  - Customize tag name or annotation message.
+  - Click **🚀 Create & Push Tag** to create the Git tag in Azure DevOps / TFS and immediately refresh the local database and UI.
+
 ### Generating Reports
 
 - In GUI: Click **📑 Open TAGDAY.md** or trigger report generation in **Reports**.

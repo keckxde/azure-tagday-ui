@@ -67,9 +67,11 @@ def check_branch_important(text: str, ignore_patterns=None) -> bool:
 def check_repo_category_important(category: str, ignore_patterns=None, repo_name: str = "") -> bool:
     """
     Checks whether a repository category or repository name is relevant for change notifications and pending status.
-    Returns False if category or repo_name matches any ignored pattern (e.g. *deprecated*),
+    Returns False if category is DELETED or matches any ignored pattern (e.g. *deprecated*),
     True otherwise.
     """
+    if category and str(category).strip().upper() == "DELETED":
+        return False
     if ignore_patterns is None:
         ignore_patterns = get_default_ignore_category_patterns()
     if category and matches_any_pattern(category, ignore_patterns):
@@ -385,6 +387,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             matching_prs = prs_by_repo_and_source.get((rname, bname), [])
             active_matching = [p for p in matching_prs if p.get("status") in ("active", "1")]
             prepared_pr = active_matching[0] if active_matching else (matching_prs[0] if matching_prs else None)
+            has_abandoned_pr = any(p.get("status") in ("abandoned", "2") for p in matching_prs)
+            is_abandoned = bool((has_abandoned_pr or (prepared_pr and prepared_pr.get("status") in ("abandoned", "2"))) and not active_matching)
 
             branch_item = {
                 "repo_name": rname,
@@ -400,6 +404,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 "item_type": "BRANCH",
                 "prepared_pr": prepared_pr,
                 "prepared_prs": active_matching if active_matching else matching_prs,
+                "is_abandoned": is_abandoned,
             }
             
             is_branch_important = check_branch_important(bname, ignore_patterns=ignore_branch_patterns)
@@ -414,21 +419,23 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
 
                 # If commit date of ahead branch is after repo's latest tag, add to changes timeline
                 if branch_item["commit_date"] and branch_item["commit_date"] > repo_cutoff_date:
-                    pr_note = f" (PR !{prepared_pr['pr_id']})" if prepared_pr else ""
+                    pr_note = f" (PR !{prepared_pr['pr_id']} [ABANDONED])" if (prepared_pr and is_abandoned) else (f" (PR !{prepared_pr['pr_id']})" if prepared_pr else (" [ABANDONED]" if is_abandoned else ""))
+                    status_text = f"ABANDONED +{branch_item['ahead']}" if is_abandoned else f"AHEAD +{branch_item['ahead']}"
                     all_changes_timeline.append({
                         "pr_id": f"Branch:{branch_item['short_hash']}",
                         "repo_name": rname,
                         "title": f"[{bname}]{pr_note} {branch_item['comment']}",
-                        "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']}" if prepared_pr else ""),
-                        "status": "unmerged",
-                        "status_str": f"AHEAD +{branch_item['ahead']}",
+                        "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']} (Abandoned)" if (prepared_pr and is_abandoned) else (f", PR !{prepared_pr['pr_id']}" if prepared_pr else "")),
+                        "status": "abandoned" if is_abandoned else "unmerged",
+                        "status_str": status_text,
                         "target_branch": bname,
                         "source_branch": bname,
                         "created_by": branch_item["committer"],
                         "closed_date": "",
                         "creation_date": branch_item["commit_date"],
                         "date": branch_item["commit_date"],
-                        "item_type": "BRANCH_UPDATE"
+                        "item_type": "BRANCH_UPDATE",
+                        "is_abandoned": is_abandoned,
                     })
 
         # Sort timeline chronologically descending

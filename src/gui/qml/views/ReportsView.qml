@@ -15,6 +15,58 @@ Item {
     property string shiftReviewFilter: "all" // "all", "pending", "accepted"
     property bool shiftSprintOnlyFilter: false
 
+    // Tagging Modal & Release Proposal State
+    property bool tagModalOpen: false
+    property string tagModalRepo: ""
+    property string tagModalBranch: "dev"
+    property string tagModalTagName: ""
+    property string tagModalComment: ""
+    property string tagModalStatus: ""
+    property bool tagModalIsError: false
+    property bool tagModalIsSuccess: false
+    property var tagModalBranches: ["dev", "main", "develop"]
+
+    Connections {
+        target: backend
+        function onTagCreated(repoName, tagName, success, message) {
+            if (root.tagModalOpen) {
+                root.tagModalStatus = message;
+                root.tagModalIsError = !success;
+                root.tagModalIsSuccess = success;
+            }
+        }
+    }
+
+    function openTaggingModal(repoName, branchName) {
+        var rName = repoName;
+        if (!rName) {
+            if (root.selectedRepo)
+                rName = root.selectedRepo.name;
+            else if (backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0)
+                rName = backend.tagDayData.repos_summary[0].name;
+            else
+                rName = "";
+        }
+        root.tagModalRepo = rName;
+        root.tagModalBranch = branchName || "dev";
+        root.tagModalBranches = (backend && rName) ? backend.get_repo_branches(rName) : ["dev", "main", "develop"];
+        var propTag = (backend && rName) ? backend.propose_repo_tag(rName, "patch") : "v01.00.2638";
+        root.tagModalTagName = propTag;
+        root.tagModalComment = "Tag Day release " + propTag + " from branch '" + root.tagModalBranch + "'";
+        root.tagModalStatus = "";
+        root.tagModalIsError = false;
+        root.tagModalIsSuccess = false;
+        root.tagModalOpen = true;
+    }
+
+    function setTagModalBump(bumpType) {
+        if (backend && root.tagModalRepo) {
+            var newTag = backend.propose_repo_tag(root.tagModalRepo, bumpType);
+            root.tagModalTagName = newTag;
+            root.tagModalComment = "Tag Day release " + newTag + " from branch '" + root.tagModalBranch + "'";
+        }
+    }
+
     readonly property var selectedRepo: {
         if (!selectedRepoName || !backend || !backend.tagDayData || !backend.tagDayData.repos_summary)
             return null;
@@ -948,6 +1000,29 @@ Item {
                         }
 
                         Button {
+                            text: "🏷️ Tag Dev Branch..."
+                            enabled: backend ? !backend.isBusy : false
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 32
+                                implicitWidth: 175
+                                radius: 6
+                                color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#30363d"
+                                border.color: parent.enabled ? "#3fb950" : "#30363d"
+                            }
+                            onClicked: {
+                                root.openTaggingModal(root.selectedRepoName || "");
+                            }
+                        }
+
+                        Button {
                             text: "📑 Open TAGDAY.md"
                             font.pixelSize: 12
                             contentItem: Text {
@@ -1092,7 +1167,6 @@ Item {
                                                 font.weight: repoCard.isSelected ? Font.Bold : Font.DemiBold
                                                 color: repoCard.isSelected ? "#58a6ff" : "#f0f6fc"
                                                 Layout.fillWidth: true
-                                                elide: Text.ElideRight
                                             }
 
                                             Row {
@@ -1102,6 +1176,20 @@ Item {
                                                     font.family: "Consolas, monospace"
                                                     font.pixelSize: 11
                                                     color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#3fb950" : "#8b949e"
+                                                }
+                                                Text {
+                                                    text: "➔"
+                                                    font.pixelSize: 9
+                                                    color: "#58a6ff"
+                                                    visible: !!modelData.proposed_tag
+                                                }
+                                                Text {
+                                                    text: modelData.proposed_tag || ""
+                                                    font.family: "Consolas, monospace"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    color: "#58a6ff"
+                                                    visible: !!modelData.proposed_tag
                                                 }
                                                 Text {
                                                     text: "•"
@@ -1117,9 +1205,36 @@ Item {
                                             }
                                         }
 
-                                        StatusBadge {
-                                            text: (modelData.prs_count + modelData.branches_count) + " updates"
-                                            badgeColor: repoCard.isSelected ? "#388bfd" : "#d29922"
+                                        RowLayout {
+                                            spacing: 4
+                                            StatusBadge {
+                                                text: (modelData.prs_count + modelData.branches_count) + " updates"
+                                                badgeColor: repoCard.isSelected ? "#388bfd" : "#d29922"
+                                            }
+
+                                            Button {
+                                                text: "🏷️"
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: "Tag dev branch with proposed " + (modelData.proposed_tag || "")
+                                                ToolTip.delay: 300
+                                                font.pixelSize: 11
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    font: parent.font
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+                                                background: Rectangle {
+                                                    implicitHeight: 24
+                                                    implicitWidth: 26
+                                                    radius: 4
+                                                    color: parent.hovered ? "#238636" : "#161b22"
+                                                    border.color: parent.hovered ? "#3fb950" : "#30363d"
+                                                }
+                                                onClicked: {
+                                                    root.openTaggingModal(modelData.name, "dev");
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1233,7 +1348,7 @@ Item {
 
                                         StatusBadge {
                                             text: modelData.status_str || modelData.status
-                                            badgeColor: modelData.status === "completed" ? "#238636" : (modelData.status === "active" ? "#1f6feb" : "#d29922")
+                                            badgeColor: modelData.status === "completed" ? "#238636" : (modelData.status === "active" ? "#1f6feb" : ((modelData.status === "abandoned" || modelData.is_abandoned) ? "#da3633" : "#d29922"))
                                         }
                                     }
 
@@ -1346,6 +1461,29 @@ Item {
                                         }
                                     }
                                 }
+
+                                Button {
+                                    text: "🏷️ Tag Dev Branch"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#ffffff"
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 28
+                                        implicitWidth: 130
+                                        radius: 5
+                                        color: parent.hovered ? "#2ea043" : "#238636"
+                                        border.color: "#3fb950"
+                                    }
+                                    onClicked: {
+                                        if (root.selectedRepo) {
+                                            root.openTaggingModal(root.selectedRepo.name, "dev");
+                                        }
+                                    }
+                                }
                             }
 
                             // Baseline / Latest Semantic Tag Card
@@ -1419,6 +1557,107 @@ Item {
                                             color: "#8b949e"
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Proposed Next Tag & Quick Tagging Card
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 60
+                                color: "#0d1f33"
+                                radius: 6
+                                border.color: "#1f6feb"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 12
+
+                                    Rectangle {
+                                        width: 36
+                                        height: 36
+                                        radius: 6
+                                        color: "#162a45"
+                                        border.color: "#58a6ff"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "🚀"
+                                            font.pixelSize: 16
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            spacing: 8
+                                            Text {
+                                                text: "Proposed Release Tag:"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                color: "#8b949e"
+                                            }
+                                            Text {
+                                                text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? root.selectedRepo.proposed_tag : "Calculating..."
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 13
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: 86
+                                                radius: 3
+                                                color: "#1f6feb"
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "Weekly <YYWW>"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.Bold
+                                                    color: "#ffffff"
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "Default: weekly patch increment format (<YYWW>). Click 'Tag Dev Branch' to create and push tag directly to Azure DevOps."
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#8b949e"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        spacing: 6
+
+                                        Button {
+                                            text: "Tag 'dev' Branch"
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            contentItem: Text {
+                                                text: parent.text
+                                                font: parent.font
+                                                color: "#ffffff"
+                                            }
+                                            background: Rectangle {
+                                                implicitHeight: 30
+                                                implicitWidth: 120
+                                                radius: 5
+                                                color: parent.hovered ? "#2ea043" : "#238636"
+                                                border.color: "#3fb950"
+                                            }
+                                            onClicked: {
+                                                if (root.selectedRepo) {
+                                                    root.openTaggingModal(root.selectedRepo.name, "dev");
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1883,12 +2122,18 @@ Item {
                                                             font.family: "Segoe UI, sans-serif"
                                                             font.pixelSize: 12
                                                             font.weight: Font.Bold
-                                                            color: "#f0f6fc"
+                                                            color: modelData.is_abandoned ? "#8b949e" : "#f0f6fc"
+                                                        }
+
+                                                        StatusBadge {
+                                                            visible: !!modelData.is_abandoned
+                                                            text: "ABANDONED"
+                                                            badgeColor: "#da3633"
                                                         }
 
                                                         StatusBadge {
                                                             text: "+" + modelData.ahead + " ahead"
-                                                            badgeColor: "#d29922"
+                                                            badgeColor: modelData.is_abandoned ? "#6e7681" : "#d29922"
                                                         }
 
                                                         StatusBadge {
@@ -1901,7 +2146,7 @@ Item {
                                                             text: modelData.short_hash ? ("#" + modelData.short_hash) : ""
                                                             font.family: "Consolas, monospace"
                                                             font.pixelSize: 11
-                                                            color: "#58a6ff"
+                                                            color: modelData.is_abandoned ? "#6e7681" : "#58a6ff"
                                                         }
                                                     }
 
@@ -1927,19 +2172,19 @@ Item {
 
                                                 Button {
                                                     visible: !!modelData.prepared_pr_id
-                                                    text: "PR !" + modelData.prepared_pr_id + " ↗"
+                                                    text: "PR !" + modelData.prepared_pr_id + (modelData.is_abandoned ? " (Abandoned) ↗" : " ↗")
                                                     font.pixelSize: 10
                                                     contentItem: Text {
                                                         text: parent.text
                                                         font: parent.font
-                                                        color: "#58a6ff"
+                                                        color: modelData.is_abandoned ? "#f85149" : "#58a6ff"
                                                     }
                                                     background: Rectangle {
                                                         implicitHeight: 24
-                                                        implicitWidth: 80
+                                                        implicitWidth: modelData.is_abandoned ? 135 : 80
                                                         radius: 4
-                                                        color: parent.hovered ? "#21262d" : "#161b22"
-                                                        border.color: "#30363d"
+                                                        color: parent.hovered ? (modelData.is_abandoned ? "#3d1418" : "#21262d") : (modelData.is_abandoned ? "#261014" : "#161b22")
+                                                        border.color: modelData.is_abandoned ? "#da3633" : "#30363d"
                                                     }
                                                     onClicked: {
                                                         var prUrl = root.selectedRepo.web_url + "/pullrequest/" + modelData.prepared_pr_id;
@@ -4911,6 +5156,389 @@ Item {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Tagging Dialog Modal
+    // =========================================================================
+    Rectangle {
+        id: tagModalOverlay
+        anchors.fill: parent
+        color: "#99000000"
+        visible: root.tagModalOpen
+        z: 9999
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (backend && !backend.isBusy)
+                    root.tagModalOpen = false;
+            }
+        }
+
+        Rectangle {
+            id: tagModalBox
+            width: Math.min(560, parent.width - 32)
+            implicitHeight: modalCol.implicitHeight + 40
+            anchors.centerIn: parent
+            color: "#161b22"
+            radius: 10
+            border.color: "#388bfd"
+            border.width: 1
+
+            MouseArea {
+                anchors.fill: parent
+                // absorb clicks to prevent closing modal
+            }
+
+            ColumnLayout {
+                id: modalCol
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 14
+
+                // Modal Header
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Text {
+                        text: "🏷️ Tag Repository Release"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 16
+                        font.weight: Font.Bold
+                        color: "#f0f6fc"
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        text: "✕"
+                        font.pixelSize: 13
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#8b949e"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 24
+                            implicitWidth: 24
+                            radius: 12
+                            color: parent.hovered ? "#30363d" : "transparent"
+                        }
+                        onClicked: {
+                            if (backend && !backend.isBusy)
+                                root.tagModalOpen = false;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: "#30363d"
+                }
+
+                // Target Repository Selection
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Text {
+                        text: "Target Repository:"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: "#c9d1d9"
+                    }
+
+                    ComboBox {
+                        id: modalRepoCombo
+                        Layout.fillWidth: true
+                        model: {
+                            var list = [];
+                            if (backend && backend.tagDayData && backend.tagDayData.repos_summary) {
+                                for (var i = 0; i < backend.tagDayData.repos_summary.length; i++) {
+                                    list.push(backend.tagDayData.repos_summary[i].name);
+                                }
+                            }
+                            if (list.length === 0 && root.selectedRepoName)
+                                list.push(root.selectedRepoName);
+                            return list;
+                        }
+                        currentIndex: {
+                            var idx = model.indexOf(root.tagModalRepo);
+                            return idx >= 0 ? idx : 0;
+                        }
+                        onActivated: {
+                            root.tagModalRepo = currentText;
+                            root.tagModalBranches = backend ? backend.get_repo_branches(root.tagModalRepo) : ["dev", "main", "develop"];
+                            root.setTagModalBump("patch");
+                        }
+                    }
+                }
+
+                // Target Branch (default: dev)
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "Target Branch (Dev Branch):"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+                        Text {
+                            text: "• Tag is attached to latest commit on this branch"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            color: "#8b949e"
+                        }
+                    }
+
+                    ComboBox {
+                        id: modalBranchCombo
+                        Layout.fillWidth: true
+                        editable: true
+                        model: root.tagModalBranches && root.tagModalBranches.length > 0 ? root.tagModalBranches : ["dev", "main", "master", "develop"]
+                        currentIndex: {
+                            var idx = model.indexOf(root.tagModalBranch);
+                            return idx >= 0 ? idx : 0;
+                        }
+                        onEditTextChanged: {
+                            root.tagModalBranch = editText.trim();
+                            root.tagModalComment = "Tag Day release " + root.tagModalTagName + " from branch '" + root.tagModalBranch + "'";
+                        }
+                        onActivated: {
+                            root.tagModalBranch = currentText;
+                            root.tagModalComment = "Tag Day release " + root.tagModalTagName + " from branch '" + root.tagModalBranch + "'";
+                        }
+                    }
+                }
+
+                // Proposed Tag Name Field
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "Tag Name:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        Rectangle {
+                            implicitHeight: 18
+                            implicitWidth: 90
+                            radius: 9
+                            color: "#1f293d"
+                            border.color: "#388bfd"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Weekly <YYWW>"
+                                font.pixelSize: 9
+                                font.weight: Font.DemiBold
+                                color: "#58a6ff"
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Bump quick buttons in modal
+                        Button {
+                            text: "Patch"
+                            font.pixelSize: 10
+                            background: Rectangle {
+                                implicitHeight: 20
+                                implicitWidth: 50
+                                radius: 3
+                                color: parent.hovered ? "#21262d" : "#0d1117"
+                                border.color: "#30363d"
+                            }
+                            onClicked: root.setTagModalBump("patch")
+                        }
+
+                        Button {
+                            text: "+Minor"
+                            font.pixelSize: 10
+                            background: Rectangle {
+                                implicitHeight: 20
+                                implicitWidth: 55
+                                radius: 3
+                                color: parent.hovered ? "#21262d" : "#0d1117"
+                                border.color: "#30363d"
+                            }
+                            onClicked: root.setTagModalBump("minor")
+                        }
+
+                        Button {
+                            text: "+Major"
+                            font.pixelSize: 10
+                            background: Rectangle {
+                                implicitHeight: 20
+                                implicitWidth: 55
+                                radius: 3
+                                color: parent.hovered ? "#21262d" : "#0d1117"
+                                border.color: "#30363d"
+                            }
+                            onClicked: root.setTagModalBump("major")
+                        }
+                    }
+
+                    TextField {
+                        id: modalTagField
+                        Layout.fillWidth: true
+                        text: root.tagModalTagName
+                        font.family: "Consolas, monospace"
+                        font.pixelSize: 13
+                        font.weight: Font.Bold
+                        color: "#58a6ff"
+                        background: Rectangle {
+                            implicitHeight: 34
+                            radius: 6
+                            color: "#0d1117"
+                            border.color: modalTagField.activeFocus ? "#388bfd" : "#30363d"
+                            border.width: modalTagField.activeFocus ? 2 : 1
+                        }
+                        onTextChanged: {
+                            root.tagModalTagName = text.trim();
+                        }
+                    }
+                }
+
+                // Tag Annotation / Comment
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Text {
+                        text: "Tag Message / Annotation:"
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: "#c9d1d9"
+                    }
+
+                    TextField {
+                        id: modalCommentField
+                        Layout.fillWidth: true
+                        text: root.tagModalComment
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        color: "#f0f6fc"
+                        background: Rectangle {
+                            implicitHeight: 34
+                            radius: 6
+                            color: "#0d1117"
+                            border.color: modalCommentField.activeFocus ? "#388bfd" : "#30363d"
+                            border.width: modalCommentField.activeFocus ? 2 : 1
+                        }
+                        onTextChanged: {
+                            root.tagModalComment = text;
+                        }
+                    }
+                }
+
+                // Status Banner / Feedback
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: statusText.implicitHeight + 16
+                    radius: 6
+                    visible: root.tagModalStatus !== ""
+                    color: root.tagModalIsError ? "#3d1414" : (root.tagModalIsSuccess ? "#12261a" : "#1f293d")
+                    border.color: root.tagModalIsError ? "#f85149" : (root.tagModalIsSuccess ? "#3fb950" : "#388bfd")
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+                        Text {
+                            text: root.tagModalIsError ? "❌" : (root.tagModalIsSuccess ? "✅" : "⏳")
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            id: statusText
+                            text: root.tagModalStatus
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: root.tagModalIsError ? "#f85149" : (root.tagModalIsSuccess ? "#3fb950" : "#58a6ff")
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                // Modal Actions Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Button {
+                        text: root.tagModalIsSuccess ? "Done" : "Cancel"
+                        enabled: backend ? !backend.isBusy : true
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#c9d1d9"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 32
+                            implicitWidth: 90
+                            radius: 6
+                            color: parent.hovered ? "#30363d" : "#21262d"
+                            border.color: "#30363d"
+                        }
+                        onClicked: root.tagModalOpen = false
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: (backend && backend.isBusy) ? "Tagging..." : ("🏷️ Create Tag '" + root.tagModalTagName + "'")
+                        enabled: backend ? !backend.isBusy && root.tagModalRepo !== "" && root.tagModalTagName !== "" : false
+                        font.weight: Font.Bold
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#ffffff"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 34
+                            implicitWidth: 210
+                            radius: 6
+                            color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#30363d"
+                            border.color: parent.enabled ? "#3fb950" : "#30363d"
+                        }
+                        onClicked: {
+                            root.tagModalStatus = "Tagging branch '" + root.tagModalBranch + "' in " + root.tagModalRepo + "...";
+                            root.tagModalIsError = false;
+                            root.tagModalIsSuccess = false;
+                            if (backend) {
+                                backend.create_tag_async(
+                                    root.tagModalRepo,
+                                    root.tagModalTagName,
+                                    root.tagModalBranch,
+                                    root.tagModalComment
+                                );
                             }
                         }
                     }

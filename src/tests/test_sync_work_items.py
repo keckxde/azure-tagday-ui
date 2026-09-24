@@ -51,6 +51,8 @@ class TestSyncWorkItems(unittest.TestCase):
                 raise urllib.error.HTTPError(None, 404, "Work item does not exist", None, None)
             raise ValueError(f"Unexpected task id: {task_id}")
 
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[1001, 1002])
+        self.handler.get_work_items_batch = MagicMock(side_effect=Exception("batch not supported"))
         self.handler.get_work_item = MagicMock(side_effect=mock_get_wi)
 
         summary = self.handler.sync_work_items(self.cache)
@@ -76,6 +78,8 @@ class TestSyncWorkItems(unittest.TestCase):
         self.cache.save_work_item(1003, "Important Task", "Task", "Active", "Dev C", "2025-01-01", {"id": 1003})
 
         # Server error 500 should NOT mark work item deleted
+        self.handler.query_work_item_ids_wiql = MagicMock(return_value=[1003])
+        self.handler.get_work_items_batch = MagicMock(side_effect=Exception("batch not supported"))
         self.handler.get_work_item = MagicMock(
             side_effect=urllib.error.HTTPError(None, 500, "Internal Server Error", None, None)
         )

@@ -1,14 +1,52 @@
 # -*- coding: UTF-8 -*-
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
 import base64
 import ssl
 import re
-
+import socket
+import http.client
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class AzureServerConnectionError(ConnectionError):
+    """Raised when communication with the TFS / Azure DevOps server fails due to lost connection, timeout, or server unavailability."""
+    def __init__(self, message, original_error=None, status_code=None):
+        super().__init__(message)
+        self.original_error = original_error
+        self.status_code = status_code
+
+
+def is_connection_error(exc):
+    """
+    Returns True if the exception represents a lost connection or unreachable repository server.
+    """
+    if exc is None:
+        return False
+    if isinstance(exc, AzureServerConnectionError):
+        return True
+    if isinstance(exc, (ConnectionError, TimeoutError, socket.timeout, socket.gaierror, http.client.RemoteDisconnected)):
+        return True
+    if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError):
+        return True
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403, 408, 502, 503, 504):
+        return True
+    msg = str(exc).lower()
+    keywords = (
+        "connection refused", "connection reset", "connection timed out",
+        "connection aborted", "lost connection", "no connection", "unreachable",
+        "name or service not known", "getaddrinfo failed", "winerror 10060",
+        "winerror 10061", "winerror 10054", "remotedisconnected", "bad gateway",
+        "service unavailable", "gateway timeout", "timed out"
+    )
+    if any(k in msg for k in keywords):
+        return True
+    return False
+
 
 class AzureBaseClient:
     """
@@ -97,7 +135,17 @@ class AzureBaseClient:
                 err_body = ""
             print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
             logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
+            if err.code in (401, 403):
+                raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
+            elif err.code in (408, 502, 503, 504):
+                raise AzureServerConnectionError(f"Repository server unavailable ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             raise err
+        except urllib.error.URLError as err:
+            logger.error("Connection failed to repository server %s: %s", full_url, err.reason)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err.reason}", original_error=err) from err
+        except (TimeoutError, ConnectionError, OSError) as err:
+            logger.error("Network/Socket error connecting to repository server %s: %s", full_url, err)
+            raise AzureServerConnectionError(f"Lost connection to repository server ({self.url}): {err}", original_error=err) from err
 
     def get_distributed_task_tasks(self):
         """
@@ -202,12 +250,113 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/pipelines", params={"api-version": "6.0-preview.1"})
         return res.get("value", [])
 
+    def get_project_builds(self, project_id):
+        """
+        Retrieves builds definitions for a specific project.
+
+        Args:
+            project_id (str): The target project ID or name.
+
+        Returns:
+            list: List of build definition dictionaries.
+        """
+        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={})
+        return res.get("value", [])
+
+    def get_all_build_artifacts(self, project_id, cache_db=None):
+        """
+        Retrieves build definitions and artifacts for a specific project.
+        Saves builds and artifacts into SQLite cache if cache_db is provided.
+
+        Args:
+            project_id (str): The target project ID or name.
+            cache_db (AzureDevOpsCache, optional): Database cache instance.
+
+        Returns:
+            list: List of build dictionaries with associated artifacts.
+        """
+        builds = self.get_project_builds(project_id)
+        count = 0
+        for i, build in enumerate(builds):
+            try:
+                build_id = build["id"]
+                build_number = build.get("buildNumber", "")
+                artifacts = self.get_build_artifacts(project_id, build_id, cache_db=cache_db)
+
+                builds[i]["artifacts"] = artifacts or []
+
+                if artifacts:
+                    for artifact in artifacts:
+                        artifact_name = artifact.get("name", "")
+                        resource = artifact.get("resource") or {}
+                        props = resource.get("properties") or {} if isinstance(resource, dict) else {}
+                        artifact_size = props.get("artifactsize", 0) if isinstance(props, dict) else 0
+                        try:
+                            artifact_size_mb = int(artifact_size) / 1024 / 1024
+                        except (ValueError, TypeError):
+                            artifact_size_mb = 0.0
+
+                        count += artifact_size_mb
+
+                if cache_db:
+                    cache_db.save_build(project_id, builds[i])
+            except Exception as e:
+                logger.warning("Error processing build %s: %s", build.get('id'), e)
+
+        return builds
+
+    def delete_artifact(self, project_id, build_id, artifact_name, cache_db=None):
+        """Deletes a specific artifact from a build and marks it deleted in cache_db if provided."""
+        res, _ = self._request("DELETE", f"{project_id}/_apis/build/builds/{build_id}/artifacts", params={"artifactName": artifact_name})
+        if cache_db:
+            cache_db.mark_artifact_deleted(build_id, artifact_name)
+        return res
+
+    def get_build_artifacts(self, project_id, build_id, cache_db=None):
+        """
+        Retrieves build artifacts for a specific build.
+        If a failure occurs in the response (e.g. 404, 410, or network exception),
+        it assumes that the build artifact was deleted and records this deleted information
+        in the database cache.
+
+        Args:
+            project_id (str): The target project ID or name.
+            build_id (int/str): The build ID.
+            cache_db (AzureDevOpsCache, optional): Database cache instance.
+
+        Returns:
+            list: List of artifact dictionaries, or marked deleted artifact records on failure.
+        """
+        try:
+            res, status = self._request("GET", f"{project_id}/_apis/build/builds/{build_id}/artifacts", params={})
+            if status >= 400:
+                raise urllib.error.HTTPError(None, status, f"HTTP {status}", None, None)
+            artifacts = res.get("value", []) if isinstance(res, dict) else []
+            if cache_db and artifacts:
+                cache_db.save_artifacts(build_id, artifacts)
+            return artifacts
+        except Exception as e:
+            logger.warning("Failed to retrieve artifacts for build %s in %s: %s. Assuming artifact was deleted.", build_id, project_id, e)
+            if cache_db:
+                cache_db.mark_build_artifacts_deleted(build_id)
+            return [{
+                "id": None,
+                "build_id": build_id,
+                "name": "[deleted]",
+                "type": "Deleted",
+                "size_bytes": 0,
+                "size_mb": 0.0,
+                "is_deleted": 1,
+                "deleted": True
+            }]
+
     def get_work_item(self, task_id, expand="all"):
         """
         Retrieves details of a specific work item by ID.
 
         Args:
             task_id (int/str): The ID of the work item.
+            expand (str, optional): Expand parameter ('all', 'fields', 'relations', etc.). Defaults to 'all'.
 
         Returns:
             dict: The work item details dictionary.
@@ -450,16 +599,26 @@ class AzureBaseClient:
         res, _ = self._request("GET", "_apis/wit/workitems/recents", params={"api-version": "6.0"})
         return res.get("value", [])
 
-    def get_pull_request(self, pr_id):
+    def get_pull_request(self, pr_id, project_id=None, repo_id=None):
         """
-        Retrieves details of a specific pull request by ID.
+        Retrieves details of a specific pull request by ID. Supports repository-scoped and collection-level endpoints.
 
         Args:
             pr_id (int/str): The ID of the pull request.
+            project_id (str, optional): The target project ID or name.
+            repo_id (str, optional): The target repository ID or name.
 
         Returns:
             dict: Pull request details dictionary.
         """
+        if project_id and repo_id:
+            try:
+                res, status = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}", params={"api-version": "6.0"})
+                if res and status == 200:
+                    return res
+            except Exception as e:
+                logger.debug("Failed repo-level get_pull_request for PR %s (project=%s, repo=%s): %s", pr_id, project_id, repo_id, e)
+
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
 
@@ -653,4 +812,96 @@ class AzureBaseClient:
             params["searchCriteria.itemVersion.versionType"] = "branch"
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/commits", params=params)
         return res.get("value", [])
+
+    def create_annotated_tag(self, project_id, repo_id, tag_name, object_id, message=""):
+        """
+        Creates an annotated tag in Azure DevOps / TFS Git repository.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            tag_name (str): The name of the tag (e.g. 'v01.02.2638').
+            object_id (str): The commit SHA to tag.
+            message (str, optional): Tag annotation message.
+
+        Returns:
+            dict: The created annotated tag object.
+        """
+        clean_name = tag_name.replace("refs/tags/", "")
+        payload = {
+            "name": clean_name,
+            "taggedObject": {
+                "objectId": object_id
+            },
+            "message": message or f"Release tag {clean_name}"
+        }
+        res, _ = self._request(
+            "POST",
+            f"{project_id}/_apis/git/repositories/{repo_id}/annotatedtags",
+            params={"api-version": "6.0-preview.1"},
+            data=payload
+        )
+        return res
+
+    def create_tag_ref(self, project_id, repo_id, tag_name, object_id):
+        """
+        Creates a Git tag reference (lightweight tag ref) in Azure DevOps / TFS.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            tag_name (str): The name of the tag (e.g. 'v01.02.2638').
+            object_id (str): The commit SHA to point the tag to.
+
+        Returns:
+            dict: Response object containing created ref details.
+        """
+        clean_name = tag_name.replace("refs/tags/", "")
+        ref_name = f"refs/tags/{clean_name}"
+        payload = [
+            {
+                "name": ref_name,
+                "oldObjectId": "0000000000000000000000000000000000000000",
+                "newObjectId": object_id
+            }
+        ]
+        res, _ = self._request(
+            "POST",
+            f"{project_id}/_apis/git/repositories/{repo_id}/refs",
+            params={"api-version": "6.0"},
+            data=payload
+        )
+        return res
+
+    def get_branch_commit_id(self, project_id, repo_id, branch_name):
+        """
+        Resolves the latest commit SHA for a specified branch.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID.
+            branch_name (str): Branch name (e.g. 'dev', 'main', 'refs/heads/dev').
+
+        Returns:
+            str: Commit SHA if resolved, or empty string.
+        """
+        clean_branch = branch_name.replace("refs/heads/", "")
+        try:
+            refs = self.get_repository_refs(project_id, repo_id, filter_str=f"heads/{clean_branch}")
+            for r in refs:
+                r_name = r.get("name", "").replace("refs/heads/", "")
+                if r_name == clean_branch and r.get("objectId"):
+                    return r["objectId"]
+        except Exception as e:
+            logger.debug(f"Failed to query refs for branch {branch_name}: {e}")
+
+        # Fallback: query commits endpoint for branch
+        try:
+            commits = self.get_commits(project_id, repo_id, branch_name=clean_branch, limit=1)
+            if commits and commits[0].get("commitId"):
+                return commits[0]["commitId"]
+        except Exception as e:
+            logger.debug(f"Failed to query commits for branch {branch_name}: {e}")
+
+        return ""
 

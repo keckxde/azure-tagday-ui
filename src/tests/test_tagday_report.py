@@ -375,7 +375,38 @@ class TestTagDayReport(unittest.TestCase):
         app_branches = [b["branch_name"] for b in data["all_repositories"]["repo-app"]["unmerged_branches"]]
         self.assertNotIn("archive/old-experiment", app_branches)
 
+    def test_branches_referencing_abandoned_prs_marked_abandoned(self):
+        """Tests that branches referencing abandoned PRs are marked as is_abandoned."""
+        self._seed_sample_repo_data()
+
+        with self.cache._connection() as conn:
+            # Add an abandoned PR for branch 'features/pending-work'
+            conn.execute("""
+                INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
+                VALUES (777, 'r-app', 'PR for pending work', 'abandoned', 'refs/heads/dev', 'refs/heads/features/pending-work', 'Dev1', '2026-08-20 12:00:00', '{}')
+            """)
+
+        data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJ")
+        app_branches = data["all_repositories"]["repo-app"]["unmerged_branches"]
+
+        pending_branch = next(b for b in app_branches if b["branch_name"] == "features/pending-work")
+        self.assertTrue(pending_branch["is_abandoned"])
+        self.assertEqual(pending_branch["prepared_pr"]["pr_id"], 777)
+        self.assertEqual(pending_branch["prepared_pr"]["status"], "abandoned")
+
+        # Active PR branch (feat3) should NOT be abandoned
+        feat3_branch = next(b for b in app_branches if b["branch_name"] == "feat3")
+        self.assertFalse(feat3_branch["is_abandoned"])
+
+        # Timeline check: abandoned branch should have status 'abandoned'
+        timeline_items = [t for t in data["all_changes_timeline"] if "features/pending-work" in t.get("title", "")]
+        if timeline_items:
+            self.assertEqual(timeline_items[0]["status"], "abandoned")
+            self.assertTrue(timeline_items[0]["is_abandoned"])
+            self.assertIn("ABANDONED", timeline_items[0]["status_str"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
