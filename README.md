@@ -10,7 +10,7 @@ A modern desktop application and Python automation suite for Azure DevOps / TFS 
 - **Agile Weekly Sprint Reports**: Automated sprint reports for weekly iterations (`week-YYWW`), detailing velocity, completed vs active User Stories / Requirements, Bugs / Defects, and Technical Tasks with Markdown and CSV export.
 - **Team Workload & Capacity Explorer**: Interactive calendar matrix visualizing team member workload across **4, 8, or 12 iterations** (1 month, 2 months, 1 quarter) with real-time capacity heatmap and item drill-down drawer.
 - **Deadlines & Urgency Visualizer**: Automatic milestone deadline detection with visual urgency countdown badges (`🚨 Overdue`, `⏳ Due This Week`, `📅 Due Next Week`, `🔮 Upcoming`, `✓ Closed`).
-- **Tag Day Audits & Reporting**: Multi-view release readiness evaluation comparing repos against reference tags, analyzing unmerged branches, ahead/behind commit counts, and pull request activity.
+- **Tag Day Audits, Proposed Tags & UI Dev Branch Tagging**: Multi-view release readiness evaluation, automated weekly proposed tag generation (`<YYWW>`), and 1-click Git tagging of the `dev` branch directly from the desktop UI with instant Azure DevOps / TFS synchronization.
 - **Build & Artifact Storage Analytics**: Tracks build executions, container/file sizes, reclaimed space, and pipeline storage trends across SQLite databases.
 - **Automated Documentation**: Generates `REVISION.md` / `REVISION.docx` tracking history, `SPRINT_REPORT_<sprint>.md` / `.csv`, and `BUILD_ARTIFACTS.md` / `BUILD_ARTIFACTS.csv` summaries.
 - **Local SQLite Caching**: Offline-first architecture caching repositories, branches, tags, PRs, work items, builds, and artifacts.
@@ -199,6 +199,24 @@ Track strategic deadlines, external audits, quality gates, and release phases ac
   - Includes a quick 1-click clear button (`✖`).
 - **Milestones Manager Dialog**:
   - Accessible via the **🚩 Milestones** header button to create, edit, customize colors and icons, set date ranges with calendar pickers and duration presets (`+1 Day`, `+2 Days`, `+1 Wk`, `+2 Wks`), and delete milestones.
+
+### 10. Weekly Proposed Tagging & Direct 'dev' Branch Tagging in Tagday Explorer
+Streamline release tagging and Git Tag creation on Tag Days directly from the desktop interface:
+- **Weekly `<YYWW>` Proposed Tag Format**:
+  - Automatically proposes the next release tag based on repository tag history and the current ISO calendar week.
+  - Default patch level format is `<YYWW>` (e.g., Year 2026, Week 39 $\rightarrow$ `2639`).
+  - Automatically preserves leading `v` / `V` prefixes and 2-digit major/minor padding (e.g., `v01.02.2638` $\rightarrow$ `v01.02.2639`).
+  - Gracefully handles same-week increments (e.g., if `v01.02.2639` already exists, next proposal is `v01.02.2640`).
+- **1-Click Quick Version Bumps**:
+  - `Weekly Patch (<YYWW>)`: Sets patch level to current calendar week (e.g. `v01.02.2639`).
+  - `+0.1 Minor`: Increments minor version and resets patch to current week (e.g. `v01.03.2639`).
+  - `+1.0 Major`: Increments major version and resets minor to `00` (e.g. `v02.00.2639`).
+- **Direct Tagging of `dev` Branch in the UI**:
+  - **Top Action Bar**: `🏷️ Tag Dev Branch...` button in Tagday Explorer.
+  - **Left Repository List**: Displays `➔ <proposed_tag>` badge and quick `🏷️` tag action for each repository with candidate updates.
+  - **Repository Inspector**: Dedicated **Proposed Release Tag & Quick Tagging** card with branch selector and quick bump chips.
+  - **Tagging Modal Dialog**: Pre-populates repository and proposed tag, allows selecting target branch (default `dev` with fallback to `develop`/`development`/`main`), entering release annotation comments, and executing asynchronous tag creation via Azure DevOps / TFS Git REST APIs.
+  - **Instant Local Cache Update**: Updates local SQLite database immediately upon creation and refreshes UI release views without requiring a full TFS resynchronization.
 
 ---
 
