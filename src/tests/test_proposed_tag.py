@@ -184,3 +184,39 @@ def test_proposed_tag_only_when_untagged_prs_exist(tmp_path):
     assert r_branches_only["proposed_major_tag"] == ""
 
 
+def test_create_tag_async_worker():
+    if not QCoreApplication.instance():
+        app = QCoreApplication([])
+    else:
+        app = QCoreApplication.instance()
+
+    from src.gui.backend import DevOpsBackend
+
+    backend = DevOpsBackend()
+    
+    # Mock info_handler
+    mock_handler = MagicMock()
+    mock_handler.create_repository_tag.return_value = {
+        "success": True,
+        "tag_name": "v01.00.2639",
+        "commit_id": "c123456"
+    }
+    backend._info_handler = mock_handler
+    backend._project_id = "test-proj"
+    
+    emitted_tags = []
+    backend.tagCreated.connect(lambda r, t, s, m: emitted_tags.append((r, t, s, m)))
+    
+    # Trigger create_tag_async
+    worker = backend.create_tag_async("RepoA", "v01.00.2639", "dev", "Release tag")
+    assert worker is not None
+    worker.wait(5000)
+    app.processEvents()
+    
+    assert len(emitted_tags) == 1
+    assert emitted_tags[0][0] == "RepoA"
+    assert emitted_tags[0][1] == "v01.00.2639"
+    assert emitted_tags[0][2] is True
+
+
+

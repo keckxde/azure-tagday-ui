@@ -1263,49 +1263,6 @@ class DevOpsBackend(QObject):
             self.statusMessageChanged.emit()
         self.busyChanged.emit()
 
-    def _run_worker(self, task_func, status_msg="Working...", on_success=None, on_error=None):
-        """Helper to run a TaskWorker thread with standard busy state, progress tracking, and logging."""
-        self._set_busy(True, status_msg)
-        self._progress = 0
-        self.progressChanged.emit()
-
-        worker = TaskWorker(task_func)
-        self._worker = worker
-
-        def _on_progress(pct, msg):
-            self._progress = pct
-            self.progressChanged.emit()
-            if msg:
-                self._status_message = msg
-                self.statusMessageChanged.emit()
-
-        def _on_log(msg):
-            pass
-
-        def _on_finished(success, result):
-            self._set_busy(False, "Ready")
-            self._progress = 100 if success else 0
-            self.progressChanged.emit()
-            if success:
-                if on_success:
-                    try:
-                        on_success(result)
-                    except Exception as e:
-                        logger.error(f"Error in on_success callback: {e}")
-            else:
-                if on_error:
-                    try:
-                        on_error(result)
-                    except Exception as e:
-                        logger.error(f"Error in on_error callback: {e}")
-            self._worker = None
-
-        worker.progress.connect(_on_progress)
-        worker.log_message.connect(_on_log)
-        worker.finished_task.connect(_on_finished)
-        worker.start()
-        return worker
-
     @Slot()
     def _compute_all_cache_data(self, worker=None):
         """
@@ -2318,7 +2275,7 @@ class DevOpsBackend(QObject):
             worker.log_message.emit(
                 f"Connecting to Azure DevOps to tag branch '{target_branch}' on repository '{repo_name_or_id}' with tag '{tag_name}'..."
             )
-            azHandler = devops_helper._getHandler()
+            azHandler = self._info_handler or devops_helper._getHandler()
             if not azHandler:
                 raise RuntimeError(
                     "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID."
@@ -2356,7 +2313,7 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"❌ Failed to create tag '{tag_name}' on '{repo_name_or_id}': {err_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), False, str(err_msg))
 
-        self._run_worker(
+        return self._run_worker(
             _work,
             f"Tagging {repo_name_or_id}...",
             on_success=_on_success,
@@ -3856,7 +3813,7 @@ class DevOpsBackend(QObject):
         else:
             self.logMessage.emit(f"Report file does not exist: {path}. Please generate it first.")
 
-    def _run_worker(self, task_func, busy_msg):
+    def _run_worker(self, task_func, busy_msg="Working...", on_success=None, on_error=None):
         logger.info(f"Starting background task: {busy_msg}")
         self.reset_auto_sync_timer()
         self._progress = 0
@@ -3865,8 +3822,9 @@ class DevOpsBackend(QObject):
         self._worker = TaskWorker(task_func)
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.log_message.connect(self._on_worker_log)
-        self._worker.finished_task.connect(self._on_worker_finished)
+        self._worker.finished_task.connect(lambda success, result: self._on_worker_finished(success, result, on_success=on_success, on_error=on_error))
         self._worker.start()
+        return self._worker
 
     def _on_worker_progress(self, percent, message):
         self._progress = percent
@@ -3878,7 +3836,7 @@ class DevOpsBackend(QObject):
     def _on_worker_log(self, msg):
         logger.info(msg)
 
-    def _on_worker_finished(self, success, result_msg):
+    def _on_worker_finished(self, success, result_msg, on_success=None, on_error=None):
         self._progress = 100 if success else 0
         self.progressChanged.emit()
         self.reset_auto_sync_timer()
@@ -3892,6 +3850,11 @@ class DevOpsBackend(QObject):
             self._set_busy(False, "Ready")
             log_text = result_msg if isinstance(result_msg, str) else "Completed successfully"
             logger.info(f"[COMPLETED] {log_text}")
+            if on_success:
+                try:
+                    on_success(result_msg)
+                except Exception as e:
+                    logger.error(f"Error in on_success callback: {e}")
         else:
             err_text = str(result_msg or "Unknown error")
             logger.error(f"[FAILED] {err_text}")
@@ -3906,6 +3869,11 @@ class DevOpsBackend(QObject):
             else:
                 self._set_busy(False, f"⚠️ Sync failed: {err_text}")
                 self.logMessage.emit(f"⚠️ Task failed: {err_text}")
+            if on_error:
+                try:
+                    on_error(result_msg)
+                except Exception as e:
+                    logger.error(f"Error in on_error callback: {e}")
         self._worker = None
 
     @Slot()

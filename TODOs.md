@@ -6,11 +6,15 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
-- when tagging, I get an exception "run_worker() got an unexpected keyword argument 'on_success'
-
 - the PR list now can contain duplicates with the same PR ID, please remove duplicates
 
 ## DONE
+
+- Fix Tagging Exception (`run_worker() got an unexpected keyword argument 'on_success'`):
+  - **Single Unified `_run_worker` Implementation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Removed the duplicate `_run_worker` function definition that had overwritten the earlier signature without `on_success`/`on_error` support. Unified `_run_worker` and `_on_worker_finished` to accept optional `on_success` and `on_error` callbacks, pass results safely, manage progress, handle auto-sync timers, and return the spawned worker instance.
+  - **Handler Resolution in `create_tag_async` ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Ensured `create_tag_async` utilizes `self._info_handler` if configured before falling back to `devops_helper._getHandler()`.
+  - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_create_tag_async_worker` validating that `backend.create_tag_async` starts the background task worker and fires `tagCreated` and callback signals correctly (262/262 tests passed).
+
 
 - TagDay Explorer: Propose Release Tag Only When Untagged Merged PRs Exist:
   - **Conditional Proposed Tag Computation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Updated `repos_summary` generation in both `_compute_all_cache_data` and `load_interactive_reports` so `proposed_tag`, `proposed_minor_tag`, and `proposed_major_tag` are only calculated when the repository has untagged completed pull requests (`has_untagged_prs = len(prs_after_tag) > 0`). When there are no untagged merged PRs, proposed tags default to `""`.
