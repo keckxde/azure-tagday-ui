@@ -416,6 +416,10 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "area_path": "MyProject\\Alpha Team",
             }
             backend._cache_db = mock_db
+            self.assertEqual(
+                backend.defaultSprintUrlTemplate,
+                "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
+            )
 
             # 1. Preset: Team Sprints Leaf
             preset_leaf = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}"

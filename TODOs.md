@@ -6,6 +6,10 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
+- In Tagday View - or when looking for modified / untagged repositories, only consider repositories where the tag starts with "v*", we ignore tags with other prefixes
+
+- Create TAG Dialog does not create a TAG at all. Please update, and also log if the tag was done sucessfully
+
 ## DONE
 
 - Weekly Proposed Release Tagging Engine & Direct 'dev' Branch Tagging in Tagday Explorer:

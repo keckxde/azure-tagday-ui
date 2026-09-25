@@ -198,6 +198,9 @@ def classify_tag(tag, tag_categories):
     return "Other"
 
 
+DEFAULT_SPRINT_URL_TEMPLATE = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
+
+
 class DevOpsBackend(QObject):
     """
     Main backend interface for QML.
@@ -490,6 +493,11 @@ class DevOpsBackend(QObject):
     def sprintUrlTemplate(self):
         """Returns the configured TFS / Azure DevOps sprint URL syntax template."""
         return self._sprint_url_template or ""
+
+    @Property(str, constant=True)
+    def defaultSprintUrlTemplate(self):
+        """Returns the default sprint URL template."""
+        return DEFAULT_SPRINT_URL_TEMPLATE
 
     @Slot(str)
     def setSprintUrlTemplate(self, template_str):
