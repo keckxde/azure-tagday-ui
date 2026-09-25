@@ -2328,9 +2328,9 @@ class DevOpsBackend(QObject):
             actual_repo = res.get("repo_name", repo_name_or_id)
             actual_tag = res.get("tag_name", tag_name)
             cid = res.get("commit_id", "")[:8]
-            worker.log_message.emit(
-                f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
-            )
+            success_msg = f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
+            worker.log_message.emit(success_msg)
+            logger.info(success_msg)
 
             try:
                 self.load_interactive_reports()
@@ -2338,12 +2338,14 @@ class DevOpsBackend(QObject):
             except Exception as ref_err:
                 logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
 
-            return f"Tag '{actual_tag}' created successfully on '{actual_repo}'"
+            return success_msg
 
         def _on_success(result_msg):
+            self.logMessage.emit(f"✅ {result_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
 
         def _on_error(err_msg):
+            self.logMessage.emit(f"❌ Failed to create tag '{tag_name}' on '{repo_name_or_id}': {err_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), False, str(err_msg))
 
         self._run_worker(

@@ -6,9 +6,14 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
-- Create TAG Dialog does not create a TAG at all. Please update, and also log if the tag was done sucessfully
-
 ## DONE
+
+- Git Tag Creation & Dialog Fix:
+  - **Tag Reference Publishing ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py), [`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py))**: Fixed tag creation in `AzureInfoHandler.create_repository_tag` so that creating an annotated tag object is immediately followed by publishing the actual Git tag reference (`refs/tags/<tag_name>`) via `create_tag_ref`.
+  - **Response Validation ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py))**: Added `updateStatus` validation to `create_tag_ref` ensuring failures or permissions issues returned by TFS/Azure DevOps are raised immediately with explanatory messages instead of silently ignored.
+  - **Commit SHA Resolution & Local Cache Fallback ([`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py))**: Added local cache fallback to resolve branch commit SHAs when target branch info is stored locally.
+  - **Real-Time Logging & Feedback ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py), [`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Added informative console/UI logs (`✅ Successfully created tag ...`) and modal status indicators.
+  - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Updated unit tests to assert both annotated tag object and ref creation.
 
 - Tagday View & Modified / Untagged Repositories Strict `v*` Tag Filter:
   - **Tag Classification Helper ([`src/utils.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/utils.py))**: Implemented `is_version_tag(tag_name)` to strictly validate that tags start with `v` or `V` (e.g. `v01.02.2632`, `v1.0.0`), ignoring tags with other prefixes (`release-`, `build-`, `nightly-`, or numeric tags without `v`).

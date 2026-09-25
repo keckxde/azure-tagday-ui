@@ -70,7 +70,11 @@ def test_create_repository_tag_handler():
     handler.get_branch_commit_id = MagicMock(return_value="deadbeef12345678")
     handler.create_annotated_tag = MagicMock(return_value={
         "name": "v01.02.2639",
+        "objectId": "tagobject12345678",
         "taggedObject": {"objectId": "deadbeef12345678"}
+    })
+    handler.create_tag_ref = MagicMock(return_value={
+        "value": [{"name": "refs/tags/v01.02.2639", "updateStatus": "succeeded", "success": True}]
     })
     
     res = handler.create_repository_tag("my-project", "MyRepo", "v01.02.2639", branch_name="dev", message="Weekly Tag", cache_db=mock_db)
@@ -78,6 +82,8 @@ def test_create_repository_tag_handler():
     assert res["tag_name"] == "v01.02.2639"
     assert res["commit_id"] == "deadbeef12345678"
     handler.get_branch_commit_id.assert_called_with("my-project", "repo-guid-123", "dev")
+    handler.create_annotated_tag.assert_called_once()
+    handler.create_tag_ref.assert_called_once_with("my-project", "repo-guid-123", "v01.02.2639", "tagobject12345678")
     mock_db.save_single_tag.assert_called_once()
 
 

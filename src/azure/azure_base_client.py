@@ -853,13 +853,13 @@ class AzureBaseClient:
 
     def create_tag_ref(self, project_id, repo_id, tag_name, object_id):
         """
-        Creates a Git tag reference (lightweight tag ref) in Azure DevOps / TFS.
+        Creates a Git tag reference (annotated or lightweight ref) in Azure DevOps / TFS.
 
         Args:
             project_id (str): The project ID or name.
             repo_id (str): The repository ID.
             tag_name (str): The name of the tag (e.g. 'v01.02.2638').
-            object_id (str): The commit SHA to point the tag to.
+            object_id (str): The commit SHA or annotated tag object SHA to point the tag to.
 
         Returns:
             dict: Response object containing created ref details.
@@ -879,6 +879,22 @@ class AzureBaseClient:
             params={"api-version": "6.0"},
             data=payload
         )
+        if isinstance(res, dict):
+            val = res.get("value", [])
+            if isinstance(val, list) and val:
+                ref_res = val[0]
+                update_status = ref_res.get("updateStatus")
+                success = ref_res.get("success", True)
+                if update_status and str(update_status).lower() not in ("succeeded", "success") or not success:
+                    err_custom = ref_res.get("customMessage") or f"Status: {update_status}"
+                    raise RuntimeError(f"Failed to create tag reference '{ref_name}': {err_custom}")
+        elif isinstance(res, list) and res:
+            ref_res = res[0]
+            update_status = ref_res.get("updateStatus")
+            success = ref_res.get("success", True)
+            if update_status and str(update_status).lower() not in ("succeeded", "success") or not success:
+                err_custom = ref_res.get("customMessage") or f"Status: {update_status}"
+                raise RuntimeError(f"Failed to create tag reference '{ref_name}': {err_custom}")
         return res
 
     def get_branch_commit_id(self, project_id, repo_id, branch_name):
