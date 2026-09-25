@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "jinja2>=3.1.2",
+    "openpyxl>=3.1.0",
     "pyside6>=6.5.0",
     "python-docx>=1.0.0",
     "python-dotenv>=1.0.0",
