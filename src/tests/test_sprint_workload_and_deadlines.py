@@ -354,7 +354,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         url_space = backend.get_sprint_taskboard_url("Sprint 2026.1")
         self.assertEqual(url_space, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Core%20Dev%20Team/MyProject/Sprint%202026.1")
 
-        # 3. URL from work item in cache DB with team in iteration path (includes ?workitem=ID)
+        # 3. URL from work item in cache DB when no team is assigned in settings (uses default team)
         backend._tfs_team_name = ""
         mock_db = MagicMock()
         mock_db.get_work_item.return_value = {
@@ -364,9 +364,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         }
         backend._cache_db = mock_db
         url_wi = backend.get_sprint_taskboard_url(999)
-        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/Alpha%20Team/Sprint-33?workitem=999")
+        self.assertEqual(url_wi, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team/MyProject/Alpha%20Team/Sprint-33?workitem=999")
 
-        # 3b. URL from work item with Project\\sprints\\sprint format (like http://<URL>/<COLLECTION>/<PROJECT>/_sprints/taskboard/<TEAM>/<PROJECT>/sprints/<sprint>?workitem=5634858)
+        # 3b. URL from work item with Project\\sprints\\sprint format when no team is assigned in settings (uses default team)
         mock_db.get_work_item.return_value = {
             "id": 5634858,
             "title": "Sprint Task",
@@ -376,7 +376,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         url_sprints_format = backend.get_sprint_taskboard_url(5634858)
         self.assertEqual(
             url_sprints_format,
-            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team/MyProject/sprints/week-2634?workitem=5634858"
+            "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team/MyProject/sprints/week-2634?workitem=5634858"
         )
 
         # 4. URL for unplanned work item falling back to current sprint taskboard
@@ -387,7 +387,7 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             "area_path": "MyProject\\Alpha Team",
         }
         url_current = backend.get_sprint_taskboard_url(1001)
-        self.assertEqual(url_current, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/Alpha%20Team?workitem=1001")
+        self.assertEqual(url_current, "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team?workitem=1001")
 
         # 5. open_sprint_in_browser calls open_url with team-aware URL
         backend._tfs_team_name = "Alpha Team"
@@ -511,11 +511,11 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
             self.assertEqual(len(items), 1)
             wi = items[0]
             self.assertEqual(wi["id"], 1234)
-            self.assertEqual(wi["team_name"], "AlphaTeam")
+            self.assertEqual(wi["team_name"], "MyProject Team")
             self.assertEqual(wi["area_path"], "MyProject\\AlphaTeam")
             self.assertEqual(
                 wi["tfs_sprint_url"],
-                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/AlphaTeam/MyProject/AlphaTeam/week-2635?workitem=1234"
+                "https://tfs.mycompany.com/tfs/DefaultCollection/MyProject/_sprints/taskboard/MyProject%20Team/MyProject/AlphaTeam/week-2635?workitem=1234"
             )
         finally:
             if os.path.exists(tmp_db.name):
@@ -523,6 +523,24 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                     os.remove(tmp_db.name)
                 except Exception:
                     pass
+
+    def test_default_team_properties_and_fallback(self):
+        from src.gui.backend import DevOpsBackend
+        import devops_helper
+
+        backend = DevOpsBackend()
+        devops_helper.AZURE_PROJECT_ID = "CustomProject"
+        backend._tfs_team_name = ""
+
+        # Default team dynamically reflects project
+        self.assertEqual(backend.defaultTfsTeam, "CustomProject Team")
+        self.assertEqual(backend.effectiveTfsTeam, "CustomProject Team")
+
+        # When team is assigned in settings, effectiveTfsTeam returns it
+        backend._tfs_team_name = "Core Team"
+        self.assertEqual(backend.tfsTeamName, "Core Team")
+        self.assertEqual(backend.effectiveTfsTeam, "Core Team")
+        self.assertEqual(backend.defaultTfsTeam, "CustomProject Team")
 
 
     def test_workload_matrix_ignores_epics_and_features(self):

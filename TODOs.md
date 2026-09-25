@@ -8,6 +8,11 @@
 
 ## DONE
 
+- Default Team Assignment in Settings & Sprint URL Fallback:
+  - **Backend Properties & Resolution ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `defaultTfsTeam` and `effectiveTfsTeam` properties to `DevOpsBackend`. When no team is assigned in Settings (`tfsTeamName` is empty), the application now automatically falls back to the Default Team (`{Project} Team`) across sprint link generation and work item data enrichment.
+  - **Settings UI Enhancements ([`src/gui/qml/views/SettingsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/SettingsView.qml))**: In the "Team Name Assignment" section, added a visual status badge (`Using Default: {Project} Team`), dynamic placeholder text (`Default: {Project} Team`), and updated description explaining the default team assignment.
+  - **Automated Verification ([`src/tests/test_sprint_workload_and_deadlines.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_sprint_workload_and_deadlines.py))**: Added `test_default_team_properties_and_fallback` and updated URL generation tests (260/260 tests passed).
+
 - Workload Explorer Epics & Features Exclusion:
   - **Workload Matrix & Assignee Allocation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Excluded `Epic` and `Feature` work item types from sprint iteration key discovery, assignee cell allocations, and workload total counts in `DevOpsBackend.getWorkloadMatrix`.
   - **Due Date & Deadline Isolation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Prevented Epic and Feature deadlines from contributing to overdue badges, urgency counters, or container deadlines in Workload Explorer views.

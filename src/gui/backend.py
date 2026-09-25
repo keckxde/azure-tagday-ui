@@ -473,6 +473,22 @@ class DevOpsBackend(QObject):
         """Returns the configured TFS / Azure DevOps team name used for sprint URLs."""
         return self._tfs_team_name or ""
 
+    @Property(str, notify=settingsChanged)
+    def defaultTfsTeam(self):
+        """Returns the default TFS / Azure DevOps team name based on the active project ('{Project} Team')."""
+        proj = (
+            getattr(devops_helper, "AZURE_PROJECT_ID", "")
+            or self._stats.get("project_name", "")
+            or getattr(devops_helper, "DEFAULT_PROJECT", "")
+            or "Project"
+        ).strip()
+        return f"{proj} Team"
+
+    @Property(str, notify=settingsChanged)
+    def effectiveTfsTeam(self):
+        """Returns the effective team name: configured team if assigned, otherwise the default team."""
+        return self._tfs_team_name or self.defaultTfsTeam
+
     @Slot(str)
     def setTfsTeamName(self, team_name):
         """Persists the TFS team name used to build sprint taskboard URLs."""
@@ -1607,19 +1623,9 @@ class DevOpsBackend(QObject):
             elif s_count > 0:
                 s_badge = f"🔄 Shifted ({s_count}x)"
 
-            # Area Path & Team resolution
+            # Area Path & Team resolution (uses configured team or default '{Project} Team')
             area_path = raw_fields.get("System.AreaPath") or wi.get("area_path") or ""
-            norm_ap = area_path.replace("\\", "/").strip("/") if area_path else ""
-            ap_parts = [p for p in norm_ap.split("/") if p]
-            team_name = ""
-            if self._tfs_team_name:
-                team_name = self._tfs_team_name
-            elif len(ap_parts) > 1:
-                team_name = ap_parts[-1]
-            elif len(ip_parts) > 2:
-                team_name = ip_parts[1]
-            else:
-                team_name = f"{tfs_proj} Team"
+            team_name = (self._tfs_team_name or f"{tfs_proj} Team").strip()
 
             sprint_leaf = (base_sprint_name or iter_name or "").strip()
             
@@ -3649,8 +3655,7 @@ class DevOpsBackend(QObject):
             col = col or "DefaultCollection"
             proj = proj or "Project"
 
-        team = (team_name or self._tfs_team_name or "").strip()
-        extracted_team = ""
+        team = (team_name or self._tfs_team_name or f"{proj} Team").strip()
         sprint_leaf = ""
         iteration_subpath_parts = []
         clean_id = None
@@ -3674,24 +3679,16 @@ class DevOpsBackend(QObject):
                                     apath = fields.get("System.AreaPath") or ""
                             except Exception:
                                 pass
-                        if apath:
-                            a_parts = [p for p in apath.replace("\\", "/").strip("/").split("/") if p]
-                            if len(a_parts) >= 2:
-                                extracted_team = a_parts[-1]
                         if ipath:
                             i_parts = [p for p in ipath.replace("\\", "/").strip("/").split("/") if p]
                             if i_parts:
                                 sprint_leaf = i_parts[-1]
                                 iteration_subpath_parts = i_parts if i_parts[0].lower() == proj.lower() else [proj] + i_parts
-                            if not extracted_team and len(i_parts) >= 3 and i_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                                extracted_team = i_parts[1]
             except (ValueError, TypeError):
                 t_parts = [p for p in str(target).replace("\\", "/").strip("/").split("/") if p]
                 if t_parts:
                     sprint_leaf = t_parts[-1]
                     iteration_subpath_parts = t_parts if t_parts[0].lower() == proj.lower() else [proj] + t_parts
-                if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower() and t_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                    extracted_team = t_parts[1]
 
         if sprint_name:
             s_parts = [p for p in str(sprint_name).replace("\\", "/").strip("/").split("/") if p]
@@ -3699,11 +3696,9 @@ class DevOpsBackend(QObject):
                 sprint_leaf = s_parts[-1]
                 if not iteration_subpath_parts:
                     iteration_subpath_parts = s_parts if s_parts[0].lower() == proj.lower() else [proj] + s_parts
-            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team and s_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                extracted_team = s_parts[1]
 
         if not team:
-            team = extracted_team or f"{proj} Team"
+            team = f"{proj} Team"
 
         has_specific_sprint = (
             sprint_leaf
