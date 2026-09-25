@@ -945,14 +945,20 @@ class AzureInfoHandler(AzureBaseClient):
 
             # 1. Try fetching annotated tag info
             tag_object_id = tag.get("objectId", "")
-            try:
-                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag_object_id)
-                if tag["addinfo"]:
-                    try:
-                        tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
-                    except Exception:
-                        tag["CommitId"] = tag_object_id[:7]
-            except Exception:
+            peeled_id = tag.get("peeledObjectId", "")
+            # If peeledObjectId is provided and matches objectId, it is guaranteed to be a lightweight tag
+            is_definitely_lightweight = bool(peeled_id and peeled_id == tag_object_id)
+            if not is_definitely_lightweight:
+                try:
+                    tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag_object_id)
+                    if tag["addinfo"]:
+                        try:
+                            tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
+                        except Exception:
+                            tag["CommitId"] = (peeled_id or tag_object_id)[:7]
+                except Exception:
+                    tag["addinfo"] = None
+            else:
                 tag["addinfo"] = None
 
             if tag.get("addinfo"):

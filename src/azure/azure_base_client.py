@@ -74,7 +74,7 @@ class AzureBaseClient:
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
 
-    def _request(self, method, path, params=None, data=None, raw_text=False, content_type=None):
+    def _request(self, method, path, params=None, data=None, raw_text=False, content_type=None, suppress_error_log=False):
         """
         Sends an HTTP request to the Azure DevOps API.
 
@@ -85,6 +85,7 @@ class AzureBaseClient:
             data (dict/list, optional): Request JSON body. Defaults to None.
             raw_text (bool, optional): If True, returns decoded text response instead of JSON. Defaults to False.
             content_type (str, optional): Custom content-type header (e.g. 'application/json-patch+json').
+            suppress_error_log (bool, optional): If True, suppresses error console logging on non-fatal HTTP errors.
 
         Returns:
             tuple: A tuple containing the response content (dict/str) and status code (int).
@@ -133,8 +134,9 @@ class AzureBaseClient:
                 err_body = err.read().decode('utf-8', errors='replace')
             except Exception:
                 err_body = ""
-            print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
-            logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
+            if not suppress_error_log:
+                print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
+                logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
             if err.code in (401, 403):
                 raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             elif err.code in (408, 502, 503, 504):
@@ -691,7 +693,10 @@ class AzureBaseClient:
         Returns:
             list: List of reference dictionaries.
         """
-        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/refs", params={"filter": filter_str, "api-version": "6.0"})
+        params = {"filter": filter_str, "api-version": "6.0"}
+        if filter_str and "tags" in str(filter_str).lower():
+            params["peelTags"] = "true"
+        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/refs", params=params)
         return res.get("value", [])
 
     def get_commit(self, project_id, repo_id, object_id):
@@ -759,10 +764,13 @@ class AzureBaseClient:
             object_id (str): The object ID (annotated tag ID).
 
         Returns:
-            dict: Annotated tag details dictionary.
+            dict: Annotated tag details dictionary, or None if not an annotated tag.
         """
-        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/annotatedtags/{object_id}", params={"api-version": "6.0"})
-        return res
+        try:
+            res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/annotatedtags/{object_id}", params={"api-version": "6.0"}, suppress_error_log=True)
+            return res
+        except Exception:
+            return None
 
     def get_pushes(self, project_id, repo_id):
         """
