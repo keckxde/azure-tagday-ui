@@ -525,6 +525,77 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                     pass
 
 
+    def test_workload_matrix_ignores_epics_and_features(self):
+        from src.gui.backend import DevOpsBackend
+
+        backend = DevOpsBackend()
+        backend._work_items = [
+            {
+                "id": 2001,
+                "title": "Epic Root",
+                "type": "Epic",
+                "state": "Active",
+                "assigned_to": "Carol",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "sprint_week_name": "week-2633",
+                "deadline_str": "2026-08-01",
+                "urgency_status": "overdue",
+            },
+            {
+                "id": 2002,
+                "title": "Feature Container",
+                "type": "Feature",
+                "state": "Active",
+                "assigned_to": "Dave",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "sprint_week_name": "week-2633",
+                "deadline_str": "2026-08-01",
+                "urgency_status": "overdue",
+            },
+            {
+                "id": 2003,
+                "title": "User Story A",
+                "type": "User Story",
+                "state": "Active",
+                "assigned_to": "Eve",
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "sprint_week_name": "week-2633",
+                "deadline_str": "2026-08-14",
+                "urgency_status": "none",
+            },
+            {
+                "id": 2004,
+                "title": "Task Under Feature",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Eve",
+                "parent_id": 2002,
+                "iteration_path": "Project\\week-2633",
+                "iteration_name": "week-2633",
+                "sprint_week_name": "week-2633",
+                "deadline_str": "2026-08-14",
+                "urgency_status": "none",
+            },
+        ]
+
+        matrix = backend.getWorkloadMatrix(horizon_weeks=4)
+        assignees = [r["assignee"] for r in matrix.get("assignee_rows", [])]
+
+        # Epics (Carol) and Features (Dave) should NOT appear in workload matrix rows
+        self.assertNotIn("Carol", assignees)
+        self.assertNotIn("Dave", assignees)
+        self.assertIn("Eve", assignees)
+
+        # Totals should not count Epics or Features
+        self.assertEqual(matrix["total_items"], 2)  # User Story + Task
+        self.assertEqual(matrix["total_stories"], 1)
+        self.assertEqual(matrix["total_tasks"], 1)
+        # Due dates/overdue from Epic (2001) and Feature (2002) should NOT be counted
+        self.assertEqual(matrix["total_overdue"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2412,6 +2412,9 @@ class DevOpsBackend(QObject):
         """
         sprint_keys = set()
         for wi in self._work_items:
+            t_low = (wi.get("type") or "").lower()
+            if t_low in ("epic", "feature"):
+                continue
             s_name = wi.get("sprint_week_name")
             if s_name:
                 y, w, b_name = utils.parse_sprint_week(s_name)
@@ -2544,6 +2547,10 @@ class DevOpsBackend(QObject):
         for wi in self._work_items:
             if wi.get("deleted"):
                 continue
+            t_lower = (wi.get("type") or "").lower()
+            if t_lower in ("epic", "feature"):
+                continue
+
             wi_sprint = wi.get("sprint_week_name")
             if not wi_sprint:
                 _, _, wi_sprint = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
@@ -2551,7 +2558,6 @@ class DevOpsBackend(QObject):
             if not wi_sprint or wi_sprint not in target_sprint_names:
                 continue
 
-            t_lower = (wi.get("type") or "").lower()
             is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
             is_bug = t_lower in ("bug", "defect", "problem")
             is_task = t_lower in ("task",)
@@ -2935,7 +2941,7 @@ class DevOpsBackend(QObject):
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
         - If bug_mode == 'like_task': Bugs are child tasks grouped under parent User Stories / Requirements.
         """
-        story_types = {"requirement", "user story", "story", "product backlog item", "feature", "epic"}
+        story_types = {"requirement", "user story", "story", "product backlog item"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
         m_map = milestones_by_date or {}
 
@@ -3056,6 +3062,7 @@ class DevOpsBackend(QObject):
                 if pid not in container_map:
                     p_done = _is_item_done(p_wi)
                     matched_p_m = utils.match_work_item_to_milestone(p_wi, all_milestones, m_map)
+                    is_p_epic_or_feature = (p_wi.get("type") or "").lower() in ("epic", "feature")
                     container_map[pid] = {
                         "id": pid,
                         "title": p_wi.get("title") or f"#{pid}",
@@ -3065,15 +3072,15 @@ class DevOpsBackend(QObject):
                         "is_parent_in_cell": False,
                         "is_external_parent": True,
                         "tfs_url": p_wi.get("tfs_url", ""),
-                        "deadline_str": p_wi.get("deadline_str", ""),
+                        "deadline_str": "" if is_p_epic_or_feature else p_wi.get("deadline_str", ""),
                         "milestone_name": matched_p_m.get("name", "") if matched_p_m else "",
                         "milestone_icon": matched_p_m.get("category_icon", "") if matched_p_m else "",
                         "milestone_color": matched_p_m.get("category_color", "") if matched_p_m else "",
                         "milestone_bg": matched_p_m.get("category_bg_color", "") if matched_p_m else "",
                         "milestone_category": matched_p_m.get("category_name", "") if matched_p_m else "",
-                        "urgency_status": p_wi.get("urgency_status", "none"),
-                        "urgency_badge": p_wi.get("urgency_badge", "—"),
-                        "urgency_color": p_wi.get("urgency_color", "#8b949e"),
+                        "urgency_status": "none" if is_p_epic_or_feature else p_wi.get("urgency_status", "none"),
+                        "urgency_badge": "—" if is_p_epic_or_feature else p_wi.get("urgency_badge", "—"),
+                        "urgency_color": "#8b949e" if is_p_epic_or_feature else p_wi.get("urgency_color", "#8b949e"),
                         "iteration_path": p_wi.get("iteration_path", ""),
                         "is_done": p_done,
                         "shift_count": p_wi.get("shift_count", 0),

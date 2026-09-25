@@ -8,6 +8,12 @@
 
 ## DONE
 
+- Workload Explorer Epics & Features Exclusion:
+  - **Workload Matrix & Assignee Allocation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Excluded `Epic` and `Feature` work item types from sprint iteration key discovery, assignee cell allocations, and workload total counts in `DevOpsBackend.getWorkloadMatrix`.
+  - **Due Date & Deadline Isolation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Prevented Epic and Feature deadlines from contributing to overdue badges, urgency counters, or container deadlines in Workload Explorer views.
+  - **Container Grouping Adjustment ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Updated `_group_items_into_containers` so only deliverable items (`User Story`, `Requirement`, `Product Backlog Item`, `Bug`, `Task`) are treated as container types and suppressed due dates on external Epic/Feature parents.
+  - **Automated Verification ([`src/tests/test_sprint_workload_and_deadlines.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_sprint_workload_and_deadlines.py))**: Added `test_workload_matrix_ignores_epics_and_features` verifying Epics/Features and their deadlines are ignored.
+
 - Git Tag Creation & Dialog Fix:
   - **Tag Reference Publishing ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py), [`src/azure/azure_info_handler.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_info_handler.py))**: Fixed tag creation in `AzureInfoHandler.create_repository_tag` so that creating an annotated tag object is immediately followed by publishing the actual Git tag reference (`refs/tags/<tag_name>`) via `create_tag_ref`.
   - **Response Validation ([`src/azure/azure_base_client.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_base_client.py))**: Added `updateStatus` validation to `create_tag_ref` ensuring failures or permissions issues returned by TFS/Azure DevOps are raised immediately with explanatory messages instead of silently ignored.
