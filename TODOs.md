@@ -6,11 +6,15 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
-- In Tagday View - or when looking for modified / untagged repositories, only consider repositories where the tag starts with "v*", we ignore tags with other prefixes
-
 - Create TAG Dialog does not create a TAG at all. Please update, and also log if the tag was done sucessfully
 
 ## DONE
+
+- Tagday View & Modified / Untagged Repositories Strict `v*` Tag Filter:
+  - **Tag Classification Helper ([`src/utils.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/utils.py))**: Implemented `is_version_tag(tag_name)` to strictly validate that tags start with `v` or `V` (e.g. `v01.02.2632`, `v1.0.0`), ignoring tags with other prefixes (`release-`, `build-`, `nightly-`, or numeric tags without `v`).
+  - **Tag Day Data & Change Calculation ([`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Restricted tag mapping in `load_tagday_data` and PR release window association to `v*` tags so repositories with non-version tags are properly identified as untagged/modified when pending commits/PRs exist.
+  - **Backend Cache Analysis & Views ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py), [`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py))**: Filtered repository tag markers in `_compute_all_cache_data` and updated the `v_pull_requests_tagged` database view to only associate `v*` tags.
+  - **Automated Verification ([`src/tests/test_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_tagday_report.py))**: Added test coverage verifying `is_version_tag` and ensuring tags with non-`v` prefixes are excluded from latest tag calculations.
 
 - Weekly Proposed Release Tagging Engine & Direct 'dev' Branch Tagging in Tagday Explorer:
   - **Weekly `<YYWW>` Proposed Tag Calculation ([`src/utils.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/utils.py))**: Implemented `propose_next_tag(latest_tag_name, target_date, bump, pad_digits)` calculating weekly ISO calendar patch numbers (`<YYWW>`), preserving leading `v` and 2-digit padding, handling same-week increments (`2639` ➔ `2640`), and supporting minor/major version bumps.

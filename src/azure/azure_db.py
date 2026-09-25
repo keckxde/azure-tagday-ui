@@ -516,11 +516,12 @@ class AzureDevOpsCache:
                 p.name AS project_name,
                 json_extract(pr.raw_json, '$.lastMergeCommit.commitId') AS merge_commit_id,
                 t.name AS tag_name,
-                CASE WHEN t.name IS NOT NULL THEN 1 ELSE 0 END AS is_tagged
+                CASE WHEN t.name IS NOT NULL AND (t.name LIKE 'v%' OR t.name LIKE 'V%') THEN 1 ELSE 0 END AS is_tagged
             FROM pull_requests pr
             JOIN repositories r ON pr.repo_id = r.id
             LEFT JOIN projects p ON r.project_id = p.id
             LEFT JOIN tags t ON pr.repo_id = t.repo_id AND 
+                (t.name LIKE 'v%' OR t.name LIKE 'V%') AND
                 json_extract(pr.raw_json, '$.lastMergeCommit.commitId') = 
                 COALESCE(json_extract(t.raw_json, '$.addinfo.taggedObject.objectId'), json_extract(t.raw_json, '$.objectId'))
             """)

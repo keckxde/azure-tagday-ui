@@ -216,6 +216,23 @@ def UpdateDateString(date_val):
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def is_version_tag(tag_name):
+    """
+    Checks whether a tag name is a valid version tag starting with 'v' or 'V'
+    (e.g., 'v01.02.2632', 'v1.0.0', 'V2.1').
+    Tags with any other prefix (or without 'v') are ignored.
+
+    Args:
+        tag_name (str): The tag name to evaluate.
+
+    Returns:
+        bool: True if the tag starts with 'v' or 'V', False otherwise.
+    """
+    if not tag_name or not isinstance(tag_name, str):
+        return False
+    return tag_name.strip().lower().startswith("v")
+
+
 def parse_semver_tuple(tag_name):
     """
     Parses a tag or version string like 'v01.02.2632' or 'v1.2.3' into an integer tuple (major, minor, patch)

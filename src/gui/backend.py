@@ -1315,9 +1315,9 @@ class DevOpsBackend(QObject):
                 JOIN repositories r ON t.repo_id = r.id
             """).fetchall()
 
-        # Sort tags by commit_date and semver descending
+        # Sort tags by commit_date and semver descending (only consider tags starting with "v*")
         sorted_tag_rows = sorted(
-            [t for t in tag_rows if (t["name"] or "").lower().startswith("v") or utils.parse_semver_tuple(t["name"]) != (0, 0, 0)],
+            [t for t in tag_rows if utils.is_version_tag(t["name"])],
             key=lambda t: (t["commit_date"] or "1970-01-01", utils.parse_semver_tuple(t["name"])),
             reverse=True
         )
