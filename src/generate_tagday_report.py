@@ -237,7 +237,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 pr.status_str,
                 pr.raw_json,
                 r.name AS repo_name,
-                t_direct.name AS direct_tag_name
+                MAX(t_direct.name) AS direct_tag_name
             FROM pull_requests pr
             JOIN repositories r ON pr.repo_id = r.id
             LEFT JOIN tags t_direct ON pr.repo_id = t_direct.repo_id AND 
@@ -249,13 +249,20 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                         json_extract(pr.raw_json, '$.lastMergeCommit.commitId') LIKE (t_direct.commit_id || '%')
                     )
                 )
+            GROUP BY pr.id
             ORDER BY pr.closed_date DESC, pr.id DESC
         """).fetchall()
 
         all_changes_timeline = []
         prs_by_repo_and_source = {}
+        seen_pr_ids = set()
 
         for pr in prs_rows:
+            pr_id = pr["pr_id"]
+            if pr_id in seen_pr_ids:
+                continue
+            seen_pr_ids.add(pr_id)
+
             rname = pr["repo_name"]
             if rname not in repositories:
                 continue

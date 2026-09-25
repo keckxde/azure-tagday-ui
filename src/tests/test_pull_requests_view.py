@@ -422,7 +422,62 @@ class TestPullRequestsViewData(unittest.TestCase):
         self.assertEqual(active_pr["status"], "active")
         self.assertEqual(active_pr["repo_name"], "cmake-scripts")
 
+    def test_no_duplicate_prs_when_commit_has_multiple_tags(self):
+        """Tests that a PR is never duplicated in get_all_prs, load_tagday_data, or backend even if multiple tags point to its commit."""
+        merge_commit = "deadbeef9999"
+        with self.cache._connection() as conn:
+            # Update PR 1001 with merge commit
+            conn.execute("""
+                UPDATE pull_requests
+                SET raw_json = ?
+                WHERE id = 1001
+            """, (json.dumps({
+                "pullRequestId": 1001,
+                "creationDate": "2026-08-01T09:00:00Z",
+                "description": "Fixes #145000",
+                "lastMergeCommit": {"commitId": merge_commit}
+            }),))
+            # Insert 3 different tags pointing to the same commit
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, raw_json)
+                VALUES ('repo-uuid-1', 'v01.00.2630', ?, '2026-08-02 12:00:00', ?)
+            """, (merge_commit, json.dumps({"objectId": merge_commit})))
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, raw_json)
+                VALUES ('repo-uuid-1', 'v01.00.2630-rc1', ?, '2026-08-02 12:00:00', ?)
+            """, (merge_commit, json.dumps({"objectId": merge_commit})))
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, raw_json)
+                VALUES ('repo-uuid-1', 'build-20260802', ?, '2026-08-02 12:00:00', ?)
+            """, (merge_commit, json.dumps({"objectId": merge_commit})))
+
+        # 1. Test get_all_prs returns exactly 3 total PRs (1001, 1002, 1003) with no duplicates
+        prs = self.cache.get_all_prs()
+        pr_ids = [p["pr_id"] for p in prs]
+        self.assertEqual(len(pr_ids), len(set(pr_ids)), "PR IDs must be unique in get_all_prs")
+        self.assertEqual(len(prs), 3)
+
+        # 2. Test generate_tagday_report.load_tagday_data
+        import generate_tagday_report
+        td_data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJECT")
+        all_prs_td = td_data["all_repositories"]["repo-alpha"]["all_prs"]
+        all_td_ids = [p["pr_id"] for p in all_prs_td]
+        self.assertEqual(len(all_td_ids), len(set(all_td_ids)), "PR IDs must be unique in tagday all_prs")
+
+        # 3. Test backend pullRequests property
+        from gui.backend import DevOpsBackend
+        backend = DevOpsBackend()
+        backend._db_path = self.db_path
+        backend._cache_db = self.cache
+        backend.refresh_all_data()
+
+        b_prs = backend.pullRequests
+        b_pr_ids = [p["id"] for p in b_prs]
+        self.assertEqual(len(b_pr_ids), len(set(b_pr_ids)), "PR IDs must be unique in backend.pullRequests")
+        self.assertEqual(backend.stats["prs_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

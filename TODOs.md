@@ -6,9 +6,13 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
-- the PR list now can contain duplicates with the same PR ID, please remove duplicates
-
 ## DONE
+
+- Eliminate Duplicate Pull Requests in PR List & TagDay Explorer:
+  - **SQL Join Grouping & Tag Aggregation ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py), [`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Updated `get_all_prs()`, `load_tagday_data()`, and `v_pull_requests_tagged` database view to use `GROUP BY pr.id` with `MAX(t_direct.name) AS direct_tag_name`. This prevents commits with multiple tag markers (e.g., lightweight tags, release candidates, build tags) from producing multiple duplicate row copies per PR.
+  - **Python Deduplication Layers ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py), [`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py), [`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Added `seen_pr_ids` tracking across `get_all_prs()`, `load_tagday_data()`, `wi_to_prs` cross-referencing, and `_compute_all_cache_data()`, guaranteeing that every PR ID appears at most once in `backend.pullRequests`, TagDay timeline, repository PR breakdowns, and Work Item linking chips.
+  - **Automated Verification ([`src/tests/test_pull_requests_view.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_pull_requests_view.py))**: Added `test_no_duplicate_prs_when_commit_has_multiple_tags` verifying that multi-tagged commits never duplicate PR records across `get_all_prs()`, `load_tagday_data()`, and `backend.pullRequests` (263/263 tests passed).
+
 
 - Fix Tagging Exception (`run_worker() got an unexpected keyword argument 'on_success'`):
   - **Single Unified `_run_worker` Implementation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Removed the duplicate `_run_worker` function definition that had overwritten the earlier signature without `on_success`/`on_error` support. Unified `_run_worker` and `_on_worker_finished` to accept optional `on_success` and `on_error` callbacks, pass results safely, manage progress, handle auto-sync timers, and return the spawned worker instance.

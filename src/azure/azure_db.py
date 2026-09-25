@@ -515,8 +515,8 @@ class AzureDevOpsCache:
                 r.name AS repo_name,
                 p.name AS project_name,
                 json_extract(pr.raw_json, '$.lastMergeCommit.commitId') AS merge_commit_id,
-                t.name AS tag_name,
-                CASE WHEN t.name IS NOT NULL AND (t.name LIKE 'v%' OR t.name LIKE 'V%') THEN 1 ELSE 0 END AS is_tagged
+                MAX(t.name) AS tag_name,
+                CASE WHEN MAX(t.name) IS NOT NULL AND (MAX(t.name) LIKE 'v%' OR MAX(t.name) LIKE 'V%') THEN 1 ELSE 0 END AS is_tagged
             FROM pull_requests pr
             JOIN repositories r ON pr.repo_id = r.id
             LEFT JOIN projects p ON r.project_id = p.id
@@ -524,6 +524,7 @@ class AzureDevOpsCache:
                 (t.name LIKE 'v%' OR t.name LIKE 'V%') AND
                 json_extract(pr.raw_json, '$.lastMergeCommit.commitId') = 
                 COALESCE(json_extract(t.raw_json, '$.addinfo.taggedObject.objectId'), json_extract(t.raw_json, '$.objectId'))
+            GROUP BY pr.id
             """)
 
             # View: v_tags
@@ -2075,11 +2076,12 @@ class AzureDevOpsCache:
     def get_all_prs(self):
         """
         Retrieves all cached pull requests with repository names and direct tag matching if available.
+        Guarantees that each pull request ID appears at most once in the returned list.
         """
         with self._connection() as conn:
             rows = conn.execute("""
             SELECT r.name AS repo_name, pr.target_branch, pr.source_branch, pr.id AS pr_id, pr.title, pr.status, pr.created_by, pr.closed_by, pr.closed_date, pr.status_str, pr.raw_json,
-                   t_direct.name AS direct_tag_name
+                   MAX(t_direct.name) AS direct_tag_name
             FROM pull_requests pr
             JOIN repositories r ON pr.repo_id = r.id
             LEFT JOIN tags t_direct ON pr.repo_id = t_direct.repo_id AND 
@@ -2091,9 +2093,17 @@ class AzureDevOpsCache:
                         json_extract(pr.raw_json, '$.lastMergeCommit.commitId') LIKE (t_direct.commit_id || '%')
                     )
                 )
+            GROUP BY pr.id
             ORDER BY pr.closed_date DESC, pr.id DESC
             """).fetchall()
-            return [dict(r) for r in rows]
+            seen_ids = set()
+            result = []
+            for r in rows:
+                pid = r["pr_id"]
+                if pid not in seen_ids:
+                    seen_ids.add(pid)
+                    result.append(dict(r))
+            return result
 
     def get_project_last_synced(self, project_id):
         """

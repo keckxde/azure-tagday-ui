@@ -1388,11 +1388,12 @@ class DevOpsBackend(QObject):
                     wi_id_ref = int(m.group(1))
                     if wi_id_ref not in wi_to_prs:
                         wi_to_prs[wi_id_ref] = []
-                    wi_to_prs[wi_id_ref].append({
-                        "pr_id": pr_id,
-                        "repo_name": repo_name,
-                        "title": pr_title[:60],
-                    })
+                    if not any(p.get("pr_id") == pr_id for p in wi_to_prs[wi_id_ref]):
+                        wi_to_prs[wi_id_ref].append({
+                            "pr_id": pr_id,
+                            "repo_name": repo_name,
+                            "title": pr_title[:60],
+                        })
                     if wi_id_ref not in wi_to_repos:
                         wi_to_repos[wi_id_ref] = set()
                     wi_to_repos[wi_id_ref].add(repo_name)
@@ -1671,10 +1672,15 @@ class DevOpsBackend(QObject):
 
         pr_list = []
         repos_with_prs = set()
+        seen_pr_ids = set()
         for pr in all_prs_raw:
+            pr_id = pr.get("pr_id")
+            if pr_id in seen_pr_ids:
+                continue
+            seen_pr_ids.add(pr_id)
+
             rname = pr.get("repo_name") or "Unknown"
             repos_with_prs.add(rname)
-            pr_id = pr.get("pr_id")
             raw_str = pr.get("raw_json")
             raw_dict = {}
             if raw_str and isinstance(raw_str, str):
