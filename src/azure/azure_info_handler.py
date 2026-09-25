@@ -945,14 +945,20 @@ class AzureInfoHandler(AzureBaseClient):
 
             # 1. Try fetching annotated tag info
             tag_object_id = tag.get("objectId", "")
-            try:
-                tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag_object_id)
-                if tag["addinfo"]:
-                    try:
-                        tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
-                    except Exception:
-                        tag["CommitId"] = tag_object_id[:7]
-            except Exception:
+            peeled_id = tag.get("peeledObjectId", "")
+            # If peeledObjectId is provided and matches objectId, it is guaranteed to be a lightweight tag
+            is_definitely_lightweight = bool(peeled_id and peeled_id == tag_object_id)
+            if not is_definitely_lightweight:
+                try:
+                    tag["addinfo"] = self.get_annotated_tag(project_id, repo_id, tag_object_id)
+                    if tag["addinfo"]:
+                        try:
+                            tag["CommitId"] = tag["addinfo"]["taggedObject"]["objectId"][:7]
+                        except Exception:
+                            tag["CommitId"] = (peeled_id or tag_object_id)[:7]
+                except Exception:
+                    tag["addinfo"] = None
+            else:
                 tag["addinfo"] = None
 
             if tag.get("addinfo"):
@@ -1627,6 +1633,18 @@ class AzureInfoHandler(AzureBaseClient):
                         clean_branch = alt
                         break
 
+        # Fallback to local cache for branch SHA if server branch query didn't resolve
+        if not commit_id and cache_db:
+            try:
+                cached_branches = cache_db.get_branches(repo_id)
+                for b in cached_branches:
+                    b_name = (b.get("name") or "").replace("refs/heads/", "")
+                    if b_name.lower() == clean_branch.lower() and b.get("commit_id"):
+                        commit_id = b["commit_id"]
+                        break
+            except Exception:
+                pass
+
         if not commit_id:
             raise RuntimeError(
                 f"Could not resolve commit SHA for branch '{branch_name}' in repository '{repo_name}'. "
@@ -1634,31 +1652,39 @@ class AzureInfoHandler(AzureBaseClient):
             )
 
         tag_comment = message or f"Tag Day release {clean_tag} from branch '{clean_branch}'"
+        target_ref_object_id = commit_id
         created_tag_obj = None
 
-        # Try creating annotated tag first
+        # 1. Try creating annotated tag object first
         try:
-            created_tag_obj = self.create_annotated_tag(
+            annotated_tag_obj = self.create_annotated_tag(
                 project_id,
                 repo_id,
                 clean_tag,
                 commit_id,
                 message=tag_comment
             )
-            logger.info("Successfully created annotated tag %s on repo %s (commit %s)", clean_tag, repo_name, commit_id[:8])
+            if annotated_tag_obj and isinstance(annotated_tag_obj, dict) and annotated_tag_obj.get("objectId"):
+                target_ref_object_id = annotated_tag_obj["objectId"]
+                created_tag_obj = annotated_tag_obj
+                logger.info("Created annotated tag object %s on repo %s (target commit %s)", target_ref_object_id[:8], repo_name, commit_id[:8])
         except Exception as e:
-            logger.warning("Annotated tag creation failed for %s on %s: %s. Falling back to tag ref creation...", clean_tag, repo_name, e)
-            try:
-                created_tag_obj = self.create_tag_ref(
-                    project_id,
-                    repo_id,
-                    clean_tag,
-                    commit_id
-                )
-                logger.info("Successfully created tag ref %s on repo %s (commit %s)", clean_tag, repo_name, commit_id[:8])
-            except Exception as ref_err:
-                logger.error("Failed to create tag %s on repo %s: %s", clean_tag, repo_name, ref_err)
-                raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
+            logger.warning("Annotated tag object creation failed for %s on %s: %s. Falling back to direct commit ref creation...", clean_tag, repo_name, e)
+
+        # 2. Crucial: Publish the git tag reference (refs/tags/<clean_tag>)
+        try:
+            created_ref_obj = self.create_tag_ref(
+                project_id,
+                repo_id,
+                clean_tag,
+                target_ref_object_id
+            )
+            if not created_tag_obj:
+                created_tag_obj = created_ref_obj
+            logger.info("Successfully created and published tag refs/tags/%s on repo %s (branch '%s', commit %s)", clean_tag, repo_name, clean_branch, commit_id[:8])
+        except Exception as ref_err:
+            logger.error("Failed to create tag reference refs/tags/%s on repo %s: %s", clean_tag, repo_name, ref_err)
+            raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
 
         # Update local cache if available
         if cache_db:

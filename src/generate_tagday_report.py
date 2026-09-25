@@ -36,6 +36,7 @@ from utils import (
     categorize_repository,
     sort_categories_for_report,
     parse_semver_tuple,
+    is_version_tag,
     UpdateDateString,
     parse_sprint_week,
     get_sprint_date_range,
@@ -152,8 +153,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         for t in all_tags:
             rname = t["repo_name"]
             tname = t["tag_name"] or ""
-            # Include tags that start with v/V or parse as valid semver
-            if not (tname.lower().startswith("v") or parse_semver_tuple(tname) != (0, 0, 0)):
+            # Only consider tags that start with "v" or "V" (ignore other prefixes)
+            if not is_version_tag(tname):
                 continue
 
             t_dict = dict(t)
@@ -236,7 +237,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 pr.status_str,
                 pr.raw_json,
                 r.name AS repo_name,
-                t_direct.name AS direct_tag_name
+                MAX(t_direct.name) AS direct_tag_name
             FROM pull_requests pr
             JOIN repositories r ON pr.repo_id = r.id
             LEFT JOIN tags t_direct ON pr.repo_id = t_direct.repo_id AND 
@@ -248,13 +249,20 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                         json_extract(pr.raw_json, '$.lastMergeCommit.commitId') LIKE (t_direct.commit_id || '%')
                     )
                 )
+            GROUP BY pr.id
             ORDER BY pr.closed_date DESC, pr.id DESC
         """).fetchall()
 
         all_changes_timeline = []
         prs_by_repo_and_source = {}
+        seen_pr_ids = set()
 
         for pr in prs_rows:
+            pr_id = pr["pr_id"]
+            if pr_id in seen_pr_ids:
+                continue
+            seen_pr_ids.add(pr_id)
+
             rname = pr["repo_name"]
             if rname not in repositories:
                 continue
@@ -280,21 +288,24 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             if patch_titles and patch_pr_title_for_release_notes:
                 pr_title = patch_pr_title_for_release_notes(pr, cache_db=cache_db, default_title=pr_title)
 
-            # Determine tag association: direct tag match or release tag based on closed_date
+            # Determine tag association: direct tag match (only v* tags) or release tag based on closed_date
             direct_tag = pr["direct_tag_name"]
+            if direct_tag and not is_version_tag(direct_tag):
+                direct_tag = None
             assigned_tag = direct_tag
             tag_type = "direct" if direct_tag else "untagged"
 
             # Check if PR title matches a known tag in this repo (e.g. PR titled 'v1.00.2616')
             if not assigned_tag:
                 clean_title = (pr_title or "").strip()
-                title_semver = parse_semver_tuple(clean_title)
-                if title_semver != (0, 0, 0):
-                    for t in repo_tags_chronological.get(rname, []):
-                        if parse_semver_tuple(t["tag_name"]) == title_semver:
-                            assigned_tag = t["tag_name"]
-                            tag_type = "direct"
-                            break
+                if is_version_tag(clean_title):
+                    title_semver = parse_semver_tuple(clean_title)
+                    if title_semver != (0, 0, 0):
+                        for t in repo_tags_chronological.get(rname, []):
+                            if parse_semver_tuple(t["tag_name"]) == title_semver:
+                                assigned_tag = t["tag_name"]
+                                tag_type = "direct"
+                                break
 
             # Chronological release window match for completed PRs
             if not assigned_tag and closed_date and status in ("completed", "3"):

@@ -1053,16 +1053,41 @@ Item {
                         Layout.fillWidth: true
                         spacing: 6
 
-                        Text {
-                            text: "Team Name Assignment:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: "#c9d1d9"
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "Team Name Assignment:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#c9d1d9"
+                            }
+
+                            Rectangle {
+                                visible: !(backend && backend.tfsTeamName)
+                                implicitHeight: 18
+                                implicitWidth: defaultBadgeTxt.implicitWidth + 12
+                                radius: 9
+                                color: "#1f2937"
+                                border.color: "#374151"
+                                border.width: 1
+
+                                Text {
+                                    id: defaultBadgeTxt
+                                    anchors.centerIn: parent
+                                    text: "Using Default: " + ((backend && backend.defaultTfsTeam) ? backend.defaultTfsTeam : "{Project} Team")
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#58a6ff"
+                                }
+                            }
                         }
 
                         Text {
-                            text: "Specify the Team Name that sprint iterations are assigned to. If left empty, the application will infer the team from the work item's area or iteration path, or default to '{Project} Team'."
+                            text: "Specify the Team Name that sprint iterations are assigned to. When left empty, the application will use the Default Team ('" + ((backend && backend.defaultTfsTeam) ? backend.defaultTfsTeam : "{Project} Team") + "')."
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 11
                             color: "#8b949e"
@@ -1081,7 +1106,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 12
                                 text: (backend && backend.tfsTeamName) ? backend.tfsTeamName : ""
-                                placeholderText: "e.g. MyTeam or Core Team (leave empty for automatic detection / default)"
+                                placeholderText: (backend && backend.defaultTfsTeam) ? ("Default: " + backend.defaultTfsTeam) : "Default: {Project} Team"
                                 placeholderTextColor: "#484f58"
                                 color: "#f0f6fc"
                                 background: Rectangle {
@@ -1108,7 +1133,8 @@ Item {
                                 onClicked: {
                                     if (backend) {
                                         backend.setTfsTeamName(teamNameInput.text);
-                                        root.bannerMsg = "TFS Team Name updated to: " + (teamNameInput.text.trim() || "Default / Auto-detected");
+                                        var savedTeam = teamNameInput.text.trim();
+                                        root.bannerMsg = "TFS Team Name updated to: " + (savedTeam || ("Default Team (" + (backend.defaultTfsTeam || "Project Team") + ")"));
                                         root.bannerType = "success";
                                     }
                                 }

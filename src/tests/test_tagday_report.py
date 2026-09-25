@@ -405,6 +405,43 @@ class TestTagDayReport(unittest.TestCase):
             self.assertTrue(timeline_items[0]["is_abandoned"])
             self.assertIn("ABANDONED", timeline_items[0]["status_str"])
 
+    def test_is_version_tag(self):
+        from utils import is_version_tag
+        self.assertTrue(is_version_tag("v01.02.2632"))
+        self.assertTrue(is_version_tag("v1.0.0"))
+        self.assertTrue(is_version_tag("V2.1.0"))
+        self.assertTrue(is_version_tag("v2026.39"))
+        self.assertFalse(is_version_tag("1.0.0"))
+        self.assertFalse(is_version_tag("release-1.0"))
+        self.assertFalse(is_version_tag("build-1234"))
+        self.assertFalse(is_version_tag("nightly-2026"))
+        self.assertFalse(is_version_tag(""))
+        self.assertFalse(is_version_tag(None))
+
+    def test_tagday_ignores_non_v_prefix_tags(self):
+        """Verifies that tags with prefixes other than 'v*' are ignored for repository latest tag calculation."""
+        with self.cache._connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO projects (id, name) VALUES (?, ?)", ("TEST_PROJ", "Test Project"))
+            conn.execute("INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url) VALUES (?, ?, ?, ?, ?)",
+                         ("r-custom", "TEST_PROJ", "repo-custom-tags", "refs/heads/main", "http://tfs/custom"))
+            
+            # Insert a non-v tag (newer date) and a v tag (older date)
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("r-custom", "release-2026.99", "sha999", "2026-09-01 10:00:00", "Dev", "Non-v release tag", 1, 0, "{}"))
+            conn.execute("""
+                INSERT OR REPLACE INTO tags (repo_id, name, commit_id, commit_date, committer_name, comment, is_stable, is_unstable, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("r-custom", "v01.00.2630", "sha111", "2026-08-01 10:00:00", "Dev", "Valid v tag", 1, 0, "{}"))
+
+        data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJ")
+        repo_info = data["all_repositories"]["repo-custom-tags"]
+        
+        # The latest tag must be 'v01.00.2630' and NOT 'release-2026.99'
+        self.assertIsNotNone(repo_info["latest_tag"])
+        self.assertEqual(repo_info["latest_tag"]["name"], "v01.00.2630")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -198,6 +198,9 @@ def classify_tag(tag, tag_categories):
     return "Other"
 
 
+DEFAULT_SPRINT_URL_TEMPLATE = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
+
+
 class DevOpsBackend(QObject):
     """
     Main backend interface for QML.
@@ -470,6 +473,22 @@ class DevOpsBackend(QObject):
         """Returns the configured TFS / Azure DevOps team name used for sprint URLs."""
         return self._tfs_team_name or ""
 
+    @Property(str, notify=settingsChanged)
+    def defaultTfsTeam(self):
+        """Returns the default TFS / Azure DevOps team name based on the active project ('{Project} Team')."""
+        proj = (
+            getattr(devops_helper, "AZURE_PROJECT_ID", "")
+            or self._stats.get("project_name", "")
+            or getattr(devops_helper, "DEFAULT_PROJECT", "")
+            or "Project"
+        ).strip()
+        return f"{proj} Team"
+
+    @Property(str, notify=settingsChanged)
+    def effectiveTfsTeam(self):
+        """Returns the effective team name: configured team if assigned, otherwise the default team."""
+        return self._tfs_team_name or self.defaultTfsTeam
+
     @Slot(str)
     def setTfsTeamName(self, team_name):
         """Persists the TFS team name used to build sprint taskboard URLs."""
@@ -490,6 +509,11 @@ class DevOpsBackend(QObject):
     def sprintUrlTemplate(self):
         """Returns the configured TFS / Azure DevOps sprint URL syntax template."""
         return self._sprint_url_template or ""
+
+    @Property(str, constant=True)
+    def defaultSprintUrlTemplate(self):
+        """Returns the default sprint URL template."""
+        return DEFAULT_SPRINT_URL_TEMPLATE
 
     @Slot(str)
     def setSprintUrlTemplate(self, template_str):
@@ -1239,49 +1263,6 @@ class DevOpsBackend(QObject):
             self.statusMessageChanged.emit()
         self.busyChanged.emit()
 
-    def _run_worker(self, task_func, status_msg="Working...", on_success=None, on_error=None):
-        """Helper to run a TaskWorker thread with standard busy state, progress tracking, and logging."""
-        self._set_busy(True, status_msg)
-        self._progress = 0
-        self.progressChanged.emit()
-
-        worker = TaskWorker(task_func)
-        self._worker = worker
-
-        def _on_progress(pct, msg):
-            self._progress = pct
-            self.progressChanged.emit()
-            if msg:
-                self._status_message = msg
-                self.statusMessageChanged.emit()
-
-        def _on_log(msg):
-            pass
-
-        def _on_finished(success, result):
-            self._set_busy(False, "Ready")
-            self._progress = 100 if success else 0
-            self.progressChanged.emit()
-            if success:
-                if on_success:
-                    try:
-                        on_success(result)
-                    except Exception as e:
-                        logger.error(f"Error in on_success callback: {e}")
-            else:
-                if on_error:
-                    try:
-                        on_error(result)
-                    except Exception as e:
-                        logger.error(f"Error in on_error callback: {e}")
-            self._worker = None
-
-        worker.progress.connect(_on_progress)
-        worker.log_message.connect(_on_log)
-        worker.finished_task.connect(_on_finished)
-        worker.start()
-        return worker
-
     @Slot()
     def _compute_all_cache_data(self, worker=None):
         """
@@ -1307,9 +1288,9 @@ class DevOpsBackend(QObject):
                 JOIN repositories r ON t.repo_id = r.id
             """).fetchall()
 
-        # Sort tags by commit_date and semver descending
+        # Sort tags by commit_date and semver descending (only consider tags starting with "v*")
         sorted_tag_rows = sorted(
-            [t for t in tag_rows if (t["name"] or "").lower().startswith("v") or utils.parse_semver_tuple(t["name"]) != (0, 0, 0)],
+            [t for t in tag_rows if utils.is_version_tag(t["name"])],
             key=lambda t: (t["commit_date"] or "1970-01-01", utils.parse_semver_tuple(t["name"])),
             reverse=True
         )
@@ -1407,11 +1388,12 @@ class DevOpsBackend(QObject):
                     wi_id_ref = int(m.group(1))
                     if wi_id_ref not in wi_to_prs:
                         wi_to_prs[wi_id_ref] = []
-                    wi_to_prs[wi_id_ref].append({
-                        "pr_id": pr_id,
-                        "repo_name": repo_name,
-                        "title": pr_title[:60],
-                    })
+                    if not any(p.get("pr_id") == pr_id for p in wi_to_prs[wi_id_ref]):
+                        wi_to_prs[wi_id_ref].append({
+                            "pr_id": pr_id,
+                            "repo_name": repo_name,
+                            "title": pr_title[:60],
+                        })
                     if wi_id_ref not in wi_to_repos:
                         wi_to_repos[wi_id_ref] = set()
                     wi_to_repos[wi_id_ref].add(repo_name)
@@ -1599,19 +1581,9 @@ class DevOpsBackend(QObject):
             elif s_count > 0:
                 s_badge = f"🔄 Shifted ({s_count}x)"
 
-            # Area Path & Team resolution
+            # Area Path & Team resolution (uses configured team or default '{Project} Team')
             area_path = raw_fields.get("System.AreaPath") or wi.get("area_path") or ""
-            norm_ap = area_path.replace("\\", "/").strip("/") if area_path else ""
-            ap_parts = [p for p in norm_ap.split("/") if p]
-            team_name = ""
-            if self._tfs_team_name:
-                team_name = self._tfs_team_name
-            elif len(ap_parts) > 1:
-                team_name = ap_parts[-1]
-            elif len(ip_parts) > 2:
-                team_name = ip_parts[1]
-            else:
-                team_name = f"{tfs_proj} Team"
+            team_name = (self._tfs_team_name or f"{tfs_proj} Team").strip()
 
             sprint_leaf = (base_sprint_name or iter_name or "").strip()
             
@@ -1700,10 +1672,15 @@ class DevOpsBackend(QObject):
 
         pr_list = []
         repos_with_prs = set()
+        seen_pr_ids = set()
         for pr in all_prs_raw:
+            pr_id = pr.get("pr_id")
+            if pr_id in seen_pr_ids:
+                continue
+            seen_pr_ids.add(pr_id)
+
             rname = pr.get("repo_name") or "Unknown"
             repos_with_prs.add(rname)
-            pr_id = pr.get("pr_id")
             raw_str = pr.get("raw_json")
             raw_dict = {}
             if raw_str and isinstance(raw_str, str):
@@ -1866,6 +1843,8 @@ class DevOpsBackend(QObject):
                     "is_abandoned": is_abandoned,
                 })
 
+            has_untagged_prs = len(prs_after_tag) > 0
+
             repos_summary.append({
                 "name": rname,
                 "id": rinfo.get("id", ""),
@@ -1875,9 +1854,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
@@ -2302,7 +2281,7 @@ class DevOpsBackend(QObject):
             worker.log_message.emit(
                 f"Connecting to Azure DevOps to tag branch '{target_branch}' on repository '{repo_name_or_id}' with tag '{tag_name}'..."
             )
-            azHandler = devops_helper._getHandler()
+            azHandler = self._info_handler or devops_helper._getHandler()
             if not azHandler:
                 raise RuntimeError(
                     "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID."
@@ -2320,9 +2299,9 @@ class DevOpsBackend(QObject):
             actual_repo = res.get("repo_name", repo_name_or_id)
             actual_tag = res.get("tag_name", tag_name)
             cid = res.get("commit_id", "")[:8]
-            worker.log_message.emit(
-                f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
-            )
+            success_msg = f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
+            worker.log_message.emit(success_msg)
+            logger.info(success_msg)
 
             try:
                 self.load_interactive_reports()
@@ -2330,15 +2309,17 @@ class DevOpsBackend(QObject):
             except Exception as ref_err:
                 logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
 
-            return f"Tag '{actual_tag}' created successfully on '{actual_repo}'"
+            return success_msg
 
         def _on_success(result_msg):
+            self.logMessage.emit(f"✅ {result_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
 
         def _on_error(err_msg):
+            self.logMessage.emit(f"❌ Failed to create tag '{tag_name}' on '{repo_name_or_id}': {err_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), False, str(err_msg))
 
-        self._run_worker(
+        return self._run_worker(
             _work,
             f"Tagging {repo_name_or_id}...",
             on_success=_on_success,
@@ -2402,6 +2383,9 @@ class DevOpsBackend(QObject):
         """
         sprint_keys = set()
         for wi in self._work_items:
+            t_low = (wi.get("type") or "").lower()
+            if t_low in ("epic", "feature"):
+                continue
             s_name = wi.get("sprint_week_name")
             if s_name:
                 y, w, b_name = utils.parse_sprint_week(s_name)
@@ -2534,6 +2518,10 @@ class DevOpsBackend(QObject):
         for wi in self._work_items:
             if wi.get("deleted"):
                 continue
+            t_lower = (wi.get("type") or "").lower()
+            if t_lower in ("epic", "feature"):
+                continue
+
             wi_sprint = wi.get("sprint_week_name")
             if not wi_sprint:
                 _, _, wi_sprint = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
@@ -2541,7 +2529,6 @@ class DevOpsBackend(QObject):
             if not wi_sprint or wi_sprint not in target_sprint_names:
                 continue
 
-            t_lower = (wi.get("type") or "").lower()
             is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
             is_bug = t_lower in ("bug", "defect", "problem")
             is_task = t_lower in ("task",)
@@ -2925,7 +2912,7 @@ class DevOpsBackend(QObject):
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
         - If bug_mode == 'like_task': Bugs are child tasks grouped under parent User Stories / Requirements.
         """
-        story_types = {"requirement", "user story", "story", "product backlog item", "feature", "epic"}
+        story_types = {"requirement", "user story", "story", "product backlog item"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
         m_map = milestones_by_date or {}
 
@@ -3046,6 +3033,7 @@ class DevOpsBackend(QObject):
                 if pid not in container_map:
                     p_done = _is_item_done(p_wi)
                     matched_p_m = utils.match_work_item_to_milestone(p_wi, all_milestones, m_map)
+                    is_p_epic_or_feature = (p_wi.get("type") or "").lower() in ("epic", "feature")
                     container_map[pid] = {
                         "id": pid,
                         "title": p_wi.get("title") or f"#{pid}",
@@ -3055,15 +3043,15 @@ class DevOpsBackend(QObject):
                         "is_parent_in_cell": False,
                         "is_external_parent": True,
                         "tfs_url": p_wi.get("tfs_url", ""),
-                        "deadline_str": p_wi.get("deadline_str", ""),
+                        "deadline_str": "" if is_p_epic_or_feature else p_wi.get("deadline_str", ""),
                         "milestone_name": matched_p_m.get("name", "") if matched_p_m else "",
                         "milestone_icon": matched_p_m.get("category_icon", "") if matched_p_m else "",
                         "milestone_color": matched_p_m.get("category_color", "") if matched_p_m else "",
                         "milestone_bg": matched_p_m.get("category_bg_color", "") if matched_p_m else "",
                         "milestone_category": matched_p_m.get("category_name", "") if matched_p_m else "",
-                        "urgency_status": p_wi.get("urgency_status", "none"),
-                        "urgency_badge": p_wi.get("urgency_badge", "—"),
-                        "urgency_color": p_wi.get("urgency_color", "#8b949e"),
+                        "urgency_status": "none" if is_p_epic_or_feature else p_wi.get("urgency_status", "none"),
+                        "urgency_badge": "—" if is_p_epic_or_feature else p_wi.get("urgency_badge", "—"),
+                        "urgency_color": "#8b949e" if is_p_epic_or_feature else p_wi.get("urgency_color", "#8b949e"),
                         "iteration_path": p_wi.get("iteration_path", ""),
                         "is_done": p_done,
                         "shift_count": p_wi.get("shift_count", 0),
@@ -3632,8 +3620,7 @@ class DevOpsBackend(QObject):
             col = col or "DefaultCollection"
             proj = proj or "Project"
 
-        team = (team_name or self._tfs_team_name or "").strip()
-        extracted_team = ""
+        team = (team_name or self._tfs_team_name or f"{proj} Team").strip()
         sprint_leaf = ""
         iteration_subpath_parts = []
         clean_id = None
@@ -3657,24 +3644,16 @@ class DevOpsBackend(QObject):
                                     apath = fields.get("System.AreaPath") or ""
                             except Exception:
                                 pass
-                        if apath:
-                            a_parts = [p for p in apath.replace("\\", "/").strip("/").split("/") if p]
-                            if len(a_parts) >= 2:
-                                extracted_team = a_parts[-1]
                         if ipath:
                             i_parts = [p for p in ipath.replace("\\", "/").strip("/").split("/") if p]
                             if i_parts:
                                 sprint_leaf = i_parts[-1]
                                 iteration_subpath_parts = i_parts if i_parts[0].lower() == proj.lower() else [proj] + i_parts
-                            if not extracted_team and len(i_parts) >= 3 and i_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                                extracted_team = i_parts[1]
             except (ValueError, TypeError):
                 t_parts = [p for p in str(target).replace("\\", "/").strip("/").split("/") if p]
                 if t_parts:
                     sprint_leaf = t_parts[-1]
                     iteration_subpath_parts = t_parts if t_parts[0].lower() == proj.lower() else [proj] + t_parts
-                if len(t_parts) >= 3 and t_parts[0].lower() == proj.lower() and t_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                    extracted_team = t_parts[1]
 
         if sprint_name:
             s_parts = [p for p in str(sprint_name).replace("\\", "/").strip("/").split("/") if p]
@@ -3682,11 +3661,9 @@ class DevOpsBackend(QObject):
                 sprint_leaf = s_parts[-1]
                 if not iteration_subpath_parts:
                     iteration_subpath_parts = s_parts if s_parts[0].lower() == proj.lower() else [proj] + s_parts
-            if len(s_parts) >= 3 and s_parts[0].lower() == proj.lower() and not extracted_team and s_parts[1].lower() not in ("sprints", "iterations", "iteration", "sprint"):
-                extracted_team = s_parts[1]
 
         if not team:
-            team = extracted_team or f"{proj} Team"
+            team = f"{proj} Team"
 
         has_specific_sprint = (
             sprint_leaf
@@ -3842,7 +3819,7 @@ class DevOpsBackend(QObject):
         else:
             self.logMessage.emit(f"Report file does not exist: {path}. Please generate it first.")
 
-    def _run_worker(self, task_func, busy_msg):
+    def _run_worker(self, task_func, busy_msg="Working...", on_success=None, on_error=None):
         logger.info(f"Starting background task: {busy_msg}")
         self.reset_auto_sync_timer()
         self._progress = 0
@@ -3851,8 +3828,9 @@ class DevOpsBackend(QObject):
         self._worker = TaskWorker(task_func)
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.log_message.connect(self._on_worker_log)
-        self._worker.finished_task.connect(self._on_worker_finished)
+        self._worker.finished_task.connect(lambda success, result: self._on_worker_finished(success, result, on_success=on_success, on_error=on_error))
         self._worker.start()
+        return self._worker
 
     def _on_worker_progress(self, percent, message):
         self._progress = percent
@@ -3864,7 +3842,7 @@ class DevOpsBackend(QObject):
     def _on_worker_log(self, msg):
         logger.info(msg)
 
-    def _on_worker_finished(self, success, result_msg):
+    def _on_worker_finished(self, success, result_msg, on_success=None, on_error=None):
         self._progress = 100 if success else 0
         self.progressChanged.emit()
         self.reset_auto_sync_timer()
@@ -3878,6 +3856,11 @@ class DevOpsBackend(QObject):
             self._set_busy(False, "Ready")
             log_text = result_msg if isinstance(result_msg, str) else "Completed successfully"
             logger.info(f"[COMPLETED] {log_text}")
+            if on_success:
+                try:
+                    on_success(result_msg)
+                except Exception as e:
+                    logger.error(f"Error in on_success callback: {e}")
         else:
             err_text = str(result_msg or "Unknown error")
             logger.error(f"[FAILED] {err_text}")
@@ -3892,6 +3875,11 @@ class DevOpsBackend(QObject):
             else:
                 self._set_busy(False, f"⚠️ Sync failed: {err_text}")
                 self.logMessage.emit(f"⚠️ Task failed: {err_text}")
+            if on_error:
+                try:
+                    on_error(result_msg)
+                except Exception as e:
+                    logger.error(f"Error in on_error callback: {e}")
         self._worker = None
 
     @Slot()
@@ -5697,6 +5685,8 @@ class DevOpsBackend(QObject):
                     "is_abandoned": is_abandoned,
                 })
 
+            has_untagged_prs = len(prs_after_tag) > 0
+
             repos_summary.append({
                 "name": rname,
                 "id": rinfo.get("id", ""),
@@ -5706,9 +5696,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
