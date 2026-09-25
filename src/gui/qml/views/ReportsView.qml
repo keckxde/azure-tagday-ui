@@ -1214,6 +1214,7 @@ Item {
 
                                             Button {
                                                 text: "🏷️"
+                                                visible: !!modelData.proposed_tag
                                                 ToolTip.visible: hovered
                                                 ToolTip.text: "Tag dev branch with proposed " + (modelData.proposed_tag || "")
                                                 ToolTip.delay: 300
@@ -1566,9 +1567,9 @@ Item {
                             Rectangle {
                                 Layout.fillWidth: true
                                 height: 60
-                                color: "#0d1f33"
+                                color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#0d1f33" : "#0d1912"
                                 radius: 6
-                                border.color: "#1f6feb"
+                                border.color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#1f6feb" : "#238636"
                                 border.width: 1
 
                                 RowLayout {
@@ -1580,11 +1581,11 @@ Item {
                                         width: 36
                                         height: 36
                                         radius: 6
-                                        color: "#162a45"
-                                        border.color: "#58a6ff"
+                                        color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#162a45" : "#13231b"
+                                        border.color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#58a6ff" : "#3fb950"
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "🚀"
+                                            text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "🚀" : "✅"
                                             font.pixelSize: 16
                                         }
                                     }
@@ -1596,19 +1597,20 @@ Item {
                                         RowLayout {
                                             spacing: 8
                                             Text {
-                                                text: "Proposed Release Tag:"
+                                                text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "Proposed Release Tag:" : "Repository Release Status:"
                                                 font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 11
                                                 color: "#8b949e"
                                             }
                                             Text {
-                                                text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? root.selectedRepo.proposed_tag : "Calculating..."
-                                                font.family: "Consolas, monospace"
+                                                text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? root.selectedRepo.proposed_tag : "Up to Date"
+                                                font.family: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "Consolas, monospace" : "Segoe UI, sans-serif"
                                                 font.pixelSize: 13
                                                 font.weight: Font.Bold
-                                                color: "#58a6ff"
+                                                color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#58a6ff" : "#3fb950"
                                             }
                                             Rectangle {
+                                                visible: !!(root.selectedRepo && root.selectedRepo.proposed_tag)
                                                 implicitHeight: 18
                                                 implicitWidth: 86
                                                 radius: 3
@@ -1625,7 +1627,9 @@ Item {
                                         }
 
                                         Text {
-                                            text: "Default: weekly patch increment format (<YYWW>). Click 'Tag Dev Branch' to create and push tag directly to Azure DevOps."
+                                            text: (root.selectedRepo && root.selectedRepo.proposed_tag) ?
+                                                "Untagged merged pull requests detected. Click 'Tag Dev Branch' to create and push tag directly to Azure DevOps." :
+                                                ("No untagged merged pull requests in this repository. Latest tag " + ((root.selectedRepo && root.selectedRepo.latest_tag && root.selectedRepo.latest_tag !== "-") ? ("(" + root.selectedRepo.latest_tag + ") ") : "") + "is current.")
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
                                             color: "#8b949e"
@@ -1638,7 +1642,7 @@ Item {
                                         spacing: 6
 
                                         Button {
-                                            text: "Tag 'dev' Branch"
+                                            text: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "Tag 'dev' Branch" : "Tag 'dev'..."
                                             font.pixelSize: 11
                                             font.weight: Font.DemiBold
                                             contentItem: Text {

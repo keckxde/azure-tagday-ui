@@ -6,7 +6,19 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
+- when tagging, I get an exception "run_worker() got an unexpected keyword argument 'on_success'
+
+- the PR list now can contain duplicates with the same PR ID, please remove duplicates
+
 ## DONE
+
+- TagDay Explorer: Propose Release Tag Only When Untagged Merged PRs Exist:
+  - **Conditional Proposed Tag Computation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Updated `repos_summary` generation in both `_compute_all_cache_data` and `load_interactive_reports` so `proposed_tag`, `proposed_minor_tag`, and `proposed_major_tag` are only calculated when the repository has untagged completed pull requests (`has_untagged_prs = len(prs_after_tag) > 0`). When there are no untagged merged PRs, proposed tags default to `""`.
+  - **Quick Tagging UI & Up-to-Date Release Status ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**:
+    - Repository row quick tag action button `🏷️` is now conditionally visible only when `modelData.proposed_tag` is present (`visible: !!modelData.proposed_tag`).
+    - Repository Inspector proposed tag card now dynamically switches to a clean green "Repository Release Status: Up to Date" card (`No untagged merged pull requests in this repository. Latest tag is current.`) when there are no untagged PRs.
+  - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_proposed_tag_only_when_untagged_prs_exist` verifying that repos with untagged PRs propose a new tag and repos without untagged PRs have empty proposed tags.
+
 
 - Default Team Assignment in Settings & Sprint URL Fallback:
   - **Backend Properties & Resolution ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `defaultTfsTeam` and `effectiveTfsTeam` properties to `DevOpsBackend`. When no team is assigned in Settings (`tfsTeamName` is empty), the application now automatically falls back to the Default Team (`{Project} Team`) across sprint link generation and work item data enrichment.

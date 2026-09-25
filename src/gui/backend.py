@@ -1880,6 +1880,8 @@ class DevOpsBackend(QObject):
                     "is_abandoned": is_abandoned,
                 })
 
+            has_untagged_prs = len(prs_after_tag) > 0
+
             repos_summary.append({
                 "name": rname,
                 "id": rinfo.get("id", ""),
@@ -1889,9 +1891,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
@@ -5709,6 +5711,8 @@ class DevOpsBackend(QObject):
                     "is_abandoned": is_abandoned,
                 })
 
+            has_untagged_prs = len(prs_after_tag) > 0
+
             repos_summary.append({
                 "name": rname,
                 "id": rinfo.get("id", ""),
@@ -5718,9 +5722,9 @@ class DevOpsBackend(QObject):
                 "is_disabled": rinfo.get("is_disabled", False),
                 "latest_tag": tag_name,
                 "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch"),
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor"),
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major"),
+                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
                 "prs_count": len(prs_after_tag),
                 "active_prs_count": len(active_prs),
                 "all_prs_count": len(all_prs),
