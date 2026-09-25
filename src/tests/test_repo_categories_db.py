@@ -159,6 +159,11 @@ class TestRepoCategoriesDatabase(unittest.TestCase):
         self.assertEqual(imported_cfg["repositories"].get("tool-deploy"), "TOOLS")
 
     def test_export_and_import_excel(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed in the test environment")
+
         self.cache.save_repo_category("PLATFORM", "#3fb950", bg_color="#163c20", sort_order=3, is_default=False)
         self.cache.save_repo_prefix_rule("plat-", "PLATFORM")
         self.cache.save_repo_category_override("plat-gateway", "PLATFORM")
