@@ -119,7 +119,7 @@ Item {
             // ==========================================
             GridLayout {
                 Layout.fillWidth: true
-                columns: 2
+                columns: parent.width > 1000 ? 3 : (parent.width > 680 ? 2 : 1)
                 rowSpacing: 18
                 columnSpacing: 18
 
@@ -174,33 +174,7 @@ Item {
                     }
                 }
 
-                // Card 2: Coming Milestones (Starting with current week)
-                StatCard {
-                    Layout.fillWidth: true
-                    icon: "🚩"
-                    title: "Coming Milestones"
-                    showMilestonesPreview: true
-                    value: (backend && backend.comingMilestones ? backend.comingMilestones.length : 0) + " Upcoming"
-                    milestonesList: backend ? backend.comingMilestones : []
-                    status: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? "clean" : "neutral"
-                    badgeText: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? (backend.comingMilestones.length + " COMING") : "NO MILESTONES"
-                    subtitle: {
-                        if (backend && backend.comingMilestones && backend.comingMilestones.length > 0) {
-                            var nextM = backend.comingMilestones[0];
-                            var lbl = nextM.relative_label || nextM.target_date || "";
-                            return "Next: " + nextM.name + " (" + lbl + ")" + (nextM.category_name ? (" • " + nextM.category_name) : "") + " • Click to manage";
-                        }
-                        return "No milestones scheduled starting current week • Click to configure";
-                    }
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined" && window.openMilestonesManager) {
-                            window.openMilestonesManager();
-                        }
-                    }
-                }
-
-                // Card 3: Latest Stable Tag (with Pending Release info)
+                // Card 2: Latest Stable Tag (with Pending Release info)
                 StatCard {
                     Layout.fillWidth: true
                     icon: "🛡️"
@@ -229,7 +203,7 @@ Item {
                     }
                 }
 
-                // Card 4: Latest Unstable Tag (with Pending Release info)
+                // Card 3: Latest Unstable Tag (with Pending Release info)
                 StatCard {
                     Layout.fillWidth: true
                     icon: "⚡"
@@ -268,56 +242,340 @@ Item {
                         }
                     }
                 }
+            }
 
-                // Card 5: Active Work Items (Spans full width across both columns)
-                StatCard {
-                    Layout.columnSpan: 2
-                    Layout.fillWidth: true
-                    icon: "📋"
-                    title: "Active Work Items"
-                    showWorkItemsBreakdown: true
-                    value: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0) + " Active"
-                    activeWiCount: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0)
-                    closedWiCount: ((backend && backend.stats && backend.stats.closed_work_items_count !== undefined) ? backend.stats.closed_work_items_count : 0)
-                    investigatedCount: ((backend && backend.stats && backend.stats.to_be_investigated_count !== undefined) ? backend.stats.to_be_investigated_count : 0)
-                    ignoredCount: ((backend && backend.stats && backend.stats.ignored_work_items_count !== undefined) ? backend.stats.ignored_work_items_count : 0)
-                    status: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? (backend.stats.active_work_items_count + " ACTIVE") : "ALL RESOLVED"
-                    subtitle: {
-                        if (!backend || !backend.stats) return "Loading work items...";
-                        var act = backend.stats.active_work_items_count || 0;
-                        var cl = backend.stats.closed_work_items_count || 0;
-                        var tot = backend.stats.work_items_count || 0;
-                        var toInv = backend.stats.to_be_investigated_count || 0;
-                        var ign = backend.stats.ignored_work_items_count || 0;
-                        if (act > 0) {
-                            var extra = [];
-                            if (toInv > 0) extra.push(toInv + " to be investigated");
-                            if (ign > 0) extra.push(ign + " ignored");
-                            var extraStr = extra.length > 0 ? " (" + extra.join(" · ") + ")" : "";
-                            return act + " active" + extraStr + " · " + cl + " closed out of " + tot + " total • Click to view";
+            // ==========================================
+            // Coming Milestones List Card (Starting Current Week)
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: comingMilestonesCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: comingMilestonesCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 12
+
+                    // Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text {
+                            text: "🚩"
+                            font.pixelSize: 18
                         }
-                        return "All " + tot + " work items closed / resolved • Nothing pending";
-                    }
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined") {
-                            window.currentTabIndex = 3;
+
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+
+                            RowLayout {
+                                spacing: 8
+                                Text {
+                                    text: "Coming Milestones"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 15
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+
+                                Rectangle {
+                                    implicitHeight: 20
+                                    implicitWidth: comingCountText.implicitWidth + 12
+                                    radius: 10
+                                    color: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? Qt.rgba(210/255, 153/255, 34/255, 0.18) : "#21262d"
+                                    border.color: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? "#d29922" : "#30363d"
+
+                                    Text {
+                                        id: comingCountText
+                                        anchors.centerIn: parent
+                                        text: ((backend && backend.comingMilestones) ? backend.comingMilestones.length : 0) + " Upcoming"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? "#d29922" : "#8b949e"
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Target dates and delivery milestones scheduled starting from current week"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
                         }
-                    }
-                    onInvestigatedPillClicked: {
-                        if (typeof window !== "undefined") {
-                            window.currentTabIndex = 3;
-                            if (workItemsView && typeof workItemsView.selectStateFilter === "function") {
-                                workItemsView.selectStateFilter("to be investigated");
+
+                        Button {
+                            text: "⚙ Manage Milestones"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#58a6ff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 28
+                                implicitWidth: 140
+                                radius: 5
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: "#30363d"
+                            }
+                            onClicked: {
+                                if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                    window.openMilestonesManager();
+                                }
                             }
                         }
                     }
-                    onIgnoredPillClicked: {
-                        if (typeof window !== "undefined") {
-                            window.currentTabIndex = 3;
-                            if (workItemsView && typeof workItemsView.selectStateFilter === "function") {
-                                workItemsView.selectStateFilter("ignored");
+
+                    // Empty State
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 70
+                        radius: 6
+                        color: "#0d1117"
+                        border.color: "#30363d"
+                        visible: !backend || !backend.comingMilestones || backend.comingMilestones.length === 0
+
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 12
+
+                            Text {
+                                text: "🚩"
+                                font.pixelSize: 22
+                                opacity: 0.6
+                            }
+
+                            ColumnLayout {
+                                spacing: 2
+                                Text {
+                                    text: "No upcoming milestones scheduled starting current week"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: "#f0f6fc"
+                                }
+                                Text {
+                                    text: "Click 'Manage Milestones' to create milestones or auto-detect from work item tags"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    color: "#8b949e"
+                                }
+                            }
+                        }
+                    }
+
+                    // Milestones List (Repeater)
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        visible: backend && backend.comingMilestones && backend.comingMilestones.length > 0
+
+                        Repeater {
+                            model: (backend && backend.comingMilestones) ? backend.comingMilestones : []
+
+                            delegate: Rectangle {
+                                id: msItemRect
+                                Layout.fillWidth: true
+                                implicitHeight: msRowContent.implicitHeight + 16
+                                radius: 6
+                                color: msItemMa.containsMouse ? "#21262d" : "#0d1117"
+                                border.color: msItemMa.containsMouse ? (modelData.category_color || "#58a6ff") : (modelData.is_current_week ? Qt.rgba(210/255, 153/255, 34/255, 0.4) : "#30363d")
+                                border.width: 1
+
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on border.color { ColorAnimation { duration: 120 } }
+
+                                // Left accent bar
+                                Rectangle {
+                                    width: 4
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    radius: 2
+                                    color: modelData.category_color || (modelData.is_current_week ? "#d29922" : "#58a6ff")
+                                }
+
+                                RowLayout {
+                                    id: msRowContent
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 14
+                                    anchors.rightMargin: 14
+                                    anchors.topMargin: 8
+                                    anchors.bottomMargin: 8
+                                    spacing: 12
+
+                                    // Category Pill
+                                    Rectangle {
+                                        implicitHeight: 24
+                                        implicitWidth: catRow.implicitWidth + 14
+                                        radius: 12
+                                        color: modelData.category_bg_color || "#1f242c"
+                                        border.color: modelData.category_color || "#8b949e"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: catRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+
+                                            Text {
+                                                text: modelData.category_icon || "🚩"
+                                                font.pixelSize: 11
+                                            }
+
+                                            Text {
+                                                text: modelData.category_name || "Milestone"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: modelData.category_color || "#f0f6fc"
+                                            }
+                                        }
+                                    }
+
+                                    // Milestone Title and Description
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            spacing: 8
+                                            Text {
+                                                text: modelData.name || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 13
+                                                font.weight: Font.Bold
+                                                color: "#f0f6fc"
+                                            }
+
+                                            // Team badge (if present)
+                                            Rectangle {
+                                                visible: !!modelData.team
+                                                implicitHeight: 18
+                                                implicitWidth: teamTxt.implicitWidth + 10
+                                                radius: 4
+                                                color: "#21262d"
+                                                border.color: "#30363d"
+
+                                                Row {
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+                                                    Text { text: "👥"; font.pixelSize: 9 }
+                                                    Text {
+                                                        id: teamTxt
+                                                        text: modelData.team || ""
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: "#8b949e"
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: modelData.description || ""
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#8b949e"
+                                            visible: !!modelData.description
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    // Date Range / Target Date
+                                    RowLayout {
+                                        spacing: 6
+
+                                        Text {
+                                            text: "📅"
+                                            font.pixelSize: 11
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: {
+                                                var s = modelData.start_date || "";
+                                                var e = modelData.end_date || "";
+                                                var t = modelData.target_date || "";
+                                                if (s && e && s !== e) return s + " → " + e;
+                                                return t || s || e;
+                                            }
+                                            font.family: "Consolas, 'Segoe UI', monospace"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Medium
+                                            color: "#c9d1d9"
+                                        }
+                                    }
+
+                                    // Relative Label Badge (This week, Next week, Today, In Xd)
+                                    Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: relLblText.implicitWidth + 14
+                                        radius: 11
+                                        color: {
+                                            if (modelData.is_current_week || modelData.relative_label === "This week") return Qt.rgba(210/255, 153/255, 34/255, 0.2);
+                                            if (modelData.relative_label === "Today") return Qt.rgba(63/255, 185/255, 80/255, 0.2);
+                                            if (modelData.relative_label === "Next week") return Qt.rgba(88/255, 166/255, 255/255, 0.2);
+                                            return Qt.rgba(163/255, 113/255, 247/255, 0.15);
+                                        }
+                                        border.color: {
+                                            if (modelData.is_current_week || modelData.relative_label === "This week") return "#d29922";
+                                            if (modelData.relative_label === "Today") return "#3fb950";
+                                            if (modelData.relative_label === "Next week") return "#58a6ff";
+                                            return "#a371f7";
+                                        }
+                                        border.width: 1
+
+                                        Text {
+                                            id: relLblText
+                                            anchors.centerIn: parent
+                                            text: modelData.relative_label || modelData.target_date || ""
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: {
+                                                if (modelData.is_current_week || modelData.relative_label === "This week") return "#d29922";
+                                                if (modelData.relative_label === "Today") return "#3fb950";
+                                                if (modelData.relative_label === "Next week") return "#58a6ff";
+                                                return "#a371f7";
+                                            }
+                                        }
+                                    }
+
+                                    // Chevron Arrow
+                                    Text {
+                                        text: "➔"
+                                        font.pixelSize: 12
+                                        color: msItemMa.containsMouse ? "#58a6ff" : "#484f58"
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: msItemMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                            window.openMilestonesManager();
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
