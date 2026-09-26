@@ -7,11 +7,25 @@ Item {
     id: root
     property string searchQuery: ""
     property string selectedCategory: (pendingPrsCount > 0) ? "🏷️ PENDING PRs" : (unmergedBranchesCount > 0 ? "🌿 UNMERGED BRANCHES" : "ALL")
+    property bool showDeleted: false
     property int currentPage: 1
     property int pageSize: 15
     property int totalPages: 1
     property int totalMatchingCount: 0
     property int contentMargins: 20
+
+    readonly property int deletedReposCount: {
+        if (!backend || !backend.repositories)
+            return 0;
+        var count = 0;
+        var list = backend.repositories;
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i];
+            if (item.is_deleted === true || (item.category && item.category.toUpperCase() === "DELETED"))
+                count++;
+        }
+        return count;
+    }
 
     readonly property int pendingPrsCount: {
         if (!backend || !backend.repositories)
@@ -19,6 +33,8 @@ Item {
         var count = 0;
         var list = backend.repositories;
         for (var i = 0; i < list.length; i++) {
+            if (list[i].is_deleted === true || (list[i].category && list[i].category.toUpperCase() === "DELETED"))
+                continue;
             if (list[i].has_untagged_prs || (list[i].prs_after_tag_count && list[i].prs_after_tag_count > 0))
                 count++;
         }
@@ -31,6 +47,8 @@ Item {
         var count = 0;
         var list = backend.repositories;
         for (var i = 0; i < list.length; i++) {
+            if (list[i].is_deleted === true || (list[i].category && list[i].category.toUpperCase() === "DELETED"))
+                continue;
             if (list[i].has_unmerged_branches || (list[i].unmerged_branches_count && list[i].unmerged_branches_count > 0))
                 count++;
         }
@@ -43,6 +61,8 @@ Item {
         var count = 0;
         var list = backend.repositories;
         for (var i = 0; i < list.length; i++) {
+            if (list[i].is_deleted === true || (list[i].category && list[i].category.toUpperCase() === "DELETED"))
+                continue;
             if (list[i].has_pending_changes)
                 count++;
         }
@@ -143,6 +163,27 @@ Item {
                 }
             }
 
+            CheckBox {
+                id: showDeletedCb
+                visible: root.deletedReposCount > 0
+                text: "Show deleted (" + root.deletedReposCount + ")"
+                checked: root.showDeleted
+                font.family: "Segoe UI, sans-serif"
+                font.pixelSize: 11
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#f85149" : "#8b949e"
+                    verticalAlignment: Text.AlignVCenter
+                    leftPadding: parent.indicator.width + 4
+                }
+                onToggled: {
+                    root.showDeleted = checked;
+                    root.currentPage = 1;
+                    root.updateFilteredModel();
+                }
+            }
+
             SearchBar {
                 placeholder: "Filter repositories..."
                 onSearchUpdated: function (query) {
@@ -193,12 +234,24 @@ Item {
                             base.push("⚠️ PENDING");
                         }
                         base.push("ALL");
+                        var hasDeletedCat = false;
                         if (backend && backend.repoCategories) {
                             for (var i = 0; i < backend.repoCategories.length; i++) {
-                                base.push(backend.repoCategories[i].name);
+                                var cname = backend.repoCategories[i].name;
+                                if (cname === "DELETED") {
+                                    hasDeletedCat = true;
+                                    if (root.deletedReposCount > 0) {
+                                        base.push("DELETED");
+                                    }
+                                } else {
+                                    base.push(cname);
+                                }
                             }
                         } else {
                             base.push("GENERIC", "3RDPARTY", "OTHERS");
+                        }
+                        if (!hasDeletedCat && root.deletedReposCount > 0) {
+                            base.push("DELETED");
                         }
                         return base;
                     }
@@ -210,6 +263,8 @@ Item {
                                 return "🌿 UNMERGED BRANCHES (" + root.unmergedBranchesCount + ")";
                             if (modelData === "⚠️ PENDING")
                                 return "⚠️ ALL PENDING (" + root.pendingCount + ")";
+                            if (modelData === "DELETED")
+                                return "🗑️ DELETED (" + root.deletedReposCount + ")";
                             return modelData;
                         }
                         checkable: true
@@ -228,6 +283,7 @@ Item {
                                 if (modelData === "🏷️ PENDING PRs") return "#f0883e";
                                 if (modelData === "🌿 UNMERGED BRANCHES") return "#bc8cff";
                                 if (modelData === "⚠️ PENDING") return "#f0883e";
+                                if (modelData === "DELETED") return "#f85149";
                                 return "#8b949e";
                             }
                             horizontalAlignment: Text.AlignHCenter
@@ -241,6 +297,7 @@ Item {
                                     if (modelData === "🏷️ PENDING PRs") return "#d29922";
                                     if (modelData === "🌿 UNMERGED BRANCHES") return "#8957e5";
                                     if (modelData === "⚠️ PENDING") return "#d29922";
+                                    if (modelData === "DELETED") return "#cf222e";
                                     return (backend ? backend.get_category_color(modelData) : "#1f6feb");
                                 }
                                 return parent.hovered ? "#21262d" : "#161b22";
@@ -250,11 +307,13 @@ Item {
                                     if (modelData === "🏷️ PENDING PRs") return "#e3b341";
                                     if (modelData === "🌿 UNMERGED BRANCHES") return "#a371f7";
                                     if (modelData === "⚠️ PENDING") return "#e3b341";
+                                    if (modelData === "DELETED") return "#ff7b72";
                                     return "#388bfd";
                                 }
                                 if (modelData === "🏷️ PENDING PRs") return "#6e4b10";
                                 if (modelData === "🌿 UNMERGED BRANCHES") return "#5a3e85";
                                 if (modelData === "⚠️ PENDING") return "#6e4b10";
+                                if (modelData === "DELETED") return "#4c1c1b";
                                 return "#30363d";
                             }
                         }
@@ -881,16 +940,25 @@ Item {
         var matched = [];
         for (var i = 0; i < list.length; i++) {
             var item = list[i];
+            var isItemDeleted = !!item.is_deleted || (item.category && item.category.toUpperCase() === "DELETED");
+
+            // By default, don't show deleted repos unless explicitly viewing DELETED category or showDeleted is checked
+            if (isItemDeleted && cat !== "DELETED" && !root.showDeleted) {
+                continue;
+            }
+
             var matchesQuery = !q || item.name.toLowerCase().indexOf(q) !== -1;
             var matchesCategory = false;
             if (cat === "ALL") {
                 matchesCategory = true;
+            } else if (cat === "DELETED") {
+                matchesCategory = isItemDeleted;
             } else if (cat === "🏷️ PENDING PRs" || cat === "PENDING_PRS") {
-                matchesCategory = !!item.has_untagged_prs || (item.prs_after_tag_count > 0);
+                matchesCategory = !isItemDeleted && (!!item.has_untagged_prs || (item.prs_after_tag_count > 0));
             } else if (cat === "🌿 UNMERGED BRANCHES" || cat === "UNMERGED_BRANCHES") {
-                matchesCategory = !!item.has_unmerged_branches || (item.unmerged_branches_count > 0);
+                matchesCategory = !isItemDeleted && (!!item.has_unmerged_branches || (item.unmerged_branches_count > 0));
             } else if (cat === "⚠️ PENDING" || cat === "PENDING") {
-                matchesCategory = !!item.has_pending_changes;
+                matchesCategory = !isItemDeleted && !!item.has_pending_changes;
             } else {
                 matchesCategory = (item.category === cat);
             }
