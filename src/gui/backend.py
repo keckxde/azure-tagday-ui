@@ -326,6 +326,8 @@ class DevOpsBackend(QObject):
         self._is_pr_titles_patched = False
         self._tagday_data = {}
         self._storage_data = {}
+        self._last_week_activity = {}
+        self._current_week_planned = {}
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
         self._info_handler = None
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
@@ -774,6 +776,14 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=statsChanged)
     def stats(self):
         return self._stats
+
+    @Property(dict, notify=statsChanged)
+    def lastWeekActivity(self):
+        return self._last_week_activity
+
+    @Property(dict, notify=statsChanged)
+    def currentWeekPlanned(self):
+        return self._current_week_planned
 
     @Property(list, notify=repositoriesChanged)
     def repositories(self):
@@ -1904,6 +1914,113 @@ class DevOpsBackend(QObject):
             "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
         }
 
+        # 7. Compute Last Week Activities and Current Week Planned
+        now = datetime.now()
+        cur_year, cur_week, _ = now.isocalendar()
+        cur_sprint_name = f"week-{str(cur_year)[-2:]}{cur_week:02d}"
+        cur_s_d, cur_e_d, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
+        cur_range_label = utils.format_sprint_range_label(cur_year, cur_week)
+
+        if cur_week > 1:
+            last_year = cur_year
+            last_week = cur_week - 1
+        else:
+            last_year = cur_year - 1
+            last_week = date(last_year, 12, 28).isocalendar()[1]
+        last_sprint_name = f"week-{str(last_year)[-2:]}{last_week:02d}"
+        last_s_d, last_e_d, last_start_str, last_end_str = utils.get_sprint_date_range(last_year, last_week)
+        last_range_label = utils.format_sprint_range_label(last_year, last_week)
+
+        # Last Week Closed/Completed PRs
+        last_closed_prs = [
+            p for p in sorted_prs
+            if p.get("closed_date") and (last_start_str <= p.get("closed_date")[:10] <= last_end_str or (last_start_str <= p.get("closed_date") < cur_start_str))
+        ]
+        # Last Week Created PRs
+        last_created_prs = [
+            p for p in sorted_prs
+            if p.get("created_date") and (last_start_str <= p.get("created_date")[:10] <= last_end_str or (last_start_str <= p.get("created_date") < cur_start_str))
+        ]
+        # Last Week Tags
+        last_tags = []
+        try:
+            with self._cache_db._connection() as conn:
+                t_rows = conn.execute("""
+                    SELECT t.name as tag_name, t.commit_date, t.committer_name, r.name as repo_name
+                    FROM tags t
+                    JOIN repositories r ON t.repo_id = r.id
+                    WHERE t.commit_date >= ? AND t.commit_date < ?
+                    ORDER BY t.commit_date DESC
+                """, (last_start_str, cur_start_str)).fetchall()
+                for tr in t_rows:
+                    last_tags.append({
+                        "tag_name": tr["tag_name"],
+                        "commit_date": tr["commit_date"] or "",
+                        "committer": tr["committer_name"] or "",
+                        "repo_name": tr["repo_name"] or "",
+                    })
+        except Exception as e:
+            logger.debug(f"Could not query last week tags: {e}")
+
+        # Last Week Completed / Resolved Work Items
+        last_completed_wis = [
+            w for w in sorted_wis
+            if w.get("state") in ("Closed", "Resolved", "Done", "Completed")
+            and (
+                (w.get("changed_date") and last_start_str <= w.get("changed_date")[:10] < cur_start_str)
+                or w.get("sprint_week_name") == last_sprint_name
+            )
+        ]
+
+        last_week_activity = {
+            "sprint_name": last_sprint_name,
+            "range_label": last_range_label,
+            "start_date": last_start_str,
+            "end_date": last_end_str,
+            "closed_prs_count": len(last_closed_prs),
+            "created_prs_count": len(last_created_prs),
+            "tags_count": len(last_tags),
+            "completed_wis_count": len(last_completed_wis),
+            "total_count": len(last_closed_prs) + len(last_tags) + len(last_completed_wis),
+            "closed_prs": last_closed_prs[:8],
+            "tags": last_tags[:8],
+            "completed_wis": last_completed_wis[:8],
+        }
+
+        # Current Week Planned Work Items
+        cur_planned_wis = [
+            w for w in sorted_wis
+            if not w.get("deleted")
+            and (
+                w.get("sprint_week_name") == cur_sprint_name
+                or w.get("urgency_status") == "due_this_week"
+                or (w.get("target_date") and cur_start_str <= w.get("target_date")[:10] <= cur_end_str)
+            )
+        ]
+        cur_planned_wis.sort(key=lambda x: (
+            0 if x.get("urgency_status") == "due_this_week" else (
+                1 if x.get("state") in ("Active", "In Progress", "In Planning") else 2
+            ),
+            x.get("id")
+        ), reverse=False)
+
+        cur_active_prs = [p for p in sorted_prs if p.get("status") == "active"]
+        due_this_week_count = sum(1 for w in cur_planned_wis if w.get("urgency_status") == "due_this_week")
+
+        current_week_planned = {
+            "sprint_name": cur_sprint_name,
+            "range_label": cur_range_label,
+            "start_date": cur_start_str,
+            "end_date": cur_end_str,
+            "planned_wis_count": len(cur_planned_wis),
+            "due_this_week_count": due_this_week_count,
+            "active_prs_count": len(cur_active_prs),
+            "pending_releases_count": pending_repos_count,
+            "total_count": len(cur_planned_wis) + len(cur_active_prs),
+            "planned_wis": cur_planned_wis[:8],
+            "active_prs": cur_active_prs[:8],
+        }
+
         return {
             "repositories": sorted_repos,
             "work_items": sorted_wis,
@@ -1914,6 +2031,8 @@ class DevOpsBackend(QObject):
             "storage_data": storage_data,
             "stats": stats,
             "shift_summary_map": shift_summary_map,
+            "last_week_activity": last_week_activity,
+            "current_week_planned": current_week_planned,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -1928,6 +2047,8 @@ class DevOpsBackend(QObject):
         self._tagday_data = data.get("tagday_data", {})
         self._storage_data = data.get("storage_data", {})
         self._shift_summary_map = data.get("shift_summary_map", {})
+        self._last_week_activity = data.get("last_week_activity", {})
+        self._current_week_planned = data.get("current_week_planned", {})
         if "stats" in data:
             self._stats = data["stats"]
 
