@@ -73,13 +73,18 @@ def test_gui_backend_search_text_precomputation(tmp_path):
     db_file = str(tmp_path / "test_backend_search.db")
     cache = AzureDevOpsCache(db_file)
 
+    from datetime import date
+    today_obj = date.today()
+    cy, cw, _ = today_obj.isocalendar()
+    curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+
     raw_json_obj = {
         "id": 202,
         "fields": {
             "System.Title": "Fast search index verification",
             "System.WorkItemType": "User Story",
             "System.State": "Active",
-            "System.IterationPath": "Project\\week-2637",
+            "System.IterationPath": f"Project\\{curr_sprint}",
             "System.AssignedTo": {"displayName": "Alice Smith"}
         }
     }

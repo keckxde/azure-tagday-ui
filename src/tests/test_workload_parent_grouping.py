@@ -254,6 +254,11 @@ class TestWorkloadParentGrouping(unittest.TestCase):
 
     def test_task_state_relations_and_distribution(self):
         """Test calculation of not started, active, and closed tasks across matrix and containers."""
+        from datetime import date
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+
         all_wis_by_id = {
             100: {
                 "id": 100,
@@ -262,8 +267,8 @@ class TestWorkloadParentGrouping(unittest.TestCase):
                 "state": "Active",
                 "assigned_to": "Alice",
                 "parent_id": None,
-                "iteration_path": "Project\\week-2636",
-                "sprint_week_name": "week-2636",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
             },
             101: {
                 "id": 101,
@@ -272,8 +277,8 @@ class TestWorkloadParentGrouping(unittest.TestCase):
                 "state": "New",
                 "assigned_to": "Alice",
                 "parent_id": 100,
-                "iteration_path": "Project\\week-2636",
-                "sprint_week_name": "week-2636",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
             },
             102: {
                 "id": 102,
@@ -282,8 +287,8 @@ class TestWorkloadParentGrouping(unittest.TestCase):
                 "state": "In Progress",
                 "assigned_to": "Alice",
                 "parent_id": 100,
-                "iteration_path": "Project\\week-2636",
-                "sprint_week_name": "week-2636",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
             },
             103: {
                 "id": 103,
@@ -292,8 +297,8 @@ class TestWorkloadParentGrouping(unittest.TestCase):
                 "state": "Done",
                 "assigned_to": "Alice",
                 "parent_id": 100,
-                "iteration_path": "Project\\week-2636",
-                "sprint_week_name": "week-2636",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
             },
         }
 
@@ -326,10 +331,10 @@ class TestWorkloadParentGrouping(unittest.TestCase):
         self.assertEqual(alice_row["stats"]["tasks_closed"], 1)
 
         # Check cell
-        cell_w36 = next(c for c in alice_row["cells"] if "2636" in c["sprint_name"])
-        self.assertEqual(cell_w36["tasks_not_started_count"], 1)
-        self.assertEqual(cell_w36["tasks_active_count"], 1)
-        self.assertEqual(cell_w36["tasks_closed_count"], 1)
+        cell_curr = next(c for c in alice_row["cells"] if curr_sprint == c["sprint_name"])
+        self.assertEqual(cell_curr["tasks_not_started_count"], 1)
+        self.assertEqual(cell_curr["tasks_active_count"], 1)
+        self.assertEqual(cell_curr["tasks_closed_count"], 1)
 
 
 if __name__ == "__main__":

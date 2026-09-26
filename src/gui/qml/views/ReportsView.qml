@@ -3282,6 +3282,7 @@ Item {
 
                 // Interactive Artifacts Table - Grouped by Repository
                 Rectangle {
+                    id: artifactsExplorerCard
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: "#161b22"
@@ -3290,7 +3291,18 @@ Item {
                     border.width: 1
 
                     property string filterText: ""
-                    property bool allExpanded: true
+                    property bool allExpanded: false
+                    property int expandCollapseTrigger: 0
+
+                    function expandAll() {
+                        allExpanded = true;
+                        expandCollapseTrigger++;
+                    }
+
+                    function collapseAll() {
+                        allExpanded = false;
+                        expandCollapseTrigger++;
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -3364,7 +3376,7 @@ Item {
                                         font.pixelSize: 11
                                         clip: true
                                         selectByMouse: true
-                                        onTextChanged: parent.parent.parent.parent.parent.filterText = text.trim().toLowerCase()
+                                        onTextChanged: artifactsExplorerCard.filterText = text.trim().toLowerCase()
 
                                         Text {
                                             text: "Filter repositories or artifacts..."
@@ -3388,9 +3400,9 @@ Item {
                                 }
                             }
 
-                            // Toggle Expand/Collapse Button
+                            // Expand All Button
                             Button {
-                                text: parent.parent.allExpanded ? "Collapse All" : "Expand All"
+                                text: "📂  Expand All"
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                                 contentItem: Text {
@@ -3402,13 +3414,37 @@ Item {
                                 }
                                 background: Rectangle {
                                     implicitHeight: 28
-                                    implicitWidth: 90
+                                    implicitWidth: 95
                                     radius: 6
                                     color: parent.hovered ? "#30363d" : "#21262d"
                                     border.color: "#30363d"
                                 }
                                 onClicked: {
-                                    parent.parent.allExpanded = !parent.parent.allExpanded;
+                                    artifactsExplorerCard.expandAll();
+                                }
+                            }
+
+                            // Collapse All Button
+                            Button {
+                                text: "📁  Collapse All"
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: "#c9d1d9"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 28
+                                    implicitWidth: 95
+                                    radius: 6
+                                    color: parent.hovered ? "#30363d" : "#21262d"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: {
+                                    artifactsExplorerCard.collapseAll();
                                 }
                             }
                         }
@@ -3428,7 +3464,7 @@ Item {
 
                             model: {
                                 var allRepos = (backend && backend.storageData && backend.storageData.artifacts_by_repo) ? backend.storageData.artifacts_by_repo : [];
-                                var filter = parent.parent.filterText;
+                                var filter = artifactsExplorerCard.filterText;
                                 if (!filter) return allRepos;
                                 return allRepos.filter(function(r) {
                                     if (r.repo_name.toLowerCase().indexOf(filter) !== -1) return true;
@@ -3464,7 +3500,7 @@ Item {
                                         Layout.alignment: Qt.AlignHCenter
                                     }
                                     Text {
-                                        text: parent.parent.parent.parent.parent.filterText ? "No matching repositories or artifacts found" : "No build artifacts recorded in cache"
+                                        text: artifactsExplorerCard.filterText ? "No matching repositories or artifacts found" : "No build artifacts recorded in cache"
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 13
                                         font.weight: Font.DemiBold
@@ -3484,7 +3520,14 @@ Item {
                                 border.width: 1
 
                                 property bool isHovered: false
-                                property bool isExpanded: repoGroupList.parent.parent.allExpanded
+                                property bool isExpanded: artifactsExplorerCard.allExpanded
+
+                                Connections {
+                                    target: artifactsExplorerCard
+                                    function onExpandCollapseTriggerChanged() {
+                                        repoCard.isExpanded = artifactsExplorerCard.allExpanded;
+                                    }
+                                }
 
                                 ColumnLayout {
                                     id: repoCol

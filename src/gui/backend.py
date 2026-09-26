@@ -9,7 +9,7 @@ import logging
 import re
 import threading
 import urllib.parse
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from PySide6.QtCore import QObject, Signal, Slot, Property, QTimer
 
 # Ensure scripts/py is in sys.path
@@ -2615,51 +2615,6 @@ class DevOpsBackend(QObject):
         Level 1, Level 2, priority, grouping, completion status, search query, or milestone.
         lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
-        sprint_keys = set()
-        for wi in self._work_items:
-            t_low = (wi.get("type") or "").lower()
-            if t_low in ("epic", "feature"):
-                continue
-            s_name = wi.get("sprint_week_name")
-            if s_name:
-                y, w, b_name = utils.parse_sprint_week(s_name)
-                if y and w and b_name:
-                    sprint_keys.add((y, w, b_name))
-            else:
-                iter_n = wi.get("iteration_name") or wi.get("iteration_path") or ""
-                y, w, b_name = utils.parse_sprint_week(iter_n)
-                if y and w and b_name:
-                    sprint_keys.add((y, w, b_name))
-
-        if self._cache_db:
-            try:
-                cached_iters = self._cache_db.get_cached_iterations(project=self.selectedProject)
-                for ci in cached_iters:
-                    cname = ci.get("iteration_name")
-                    if cname:
-                        y, w, b_name = utils.parse_sprint_week(cname)
-                        if y and w and b_name:
-                            sprint_keys.add((y, w, b_name))
-            except Exception:
-                pass
-
-        if not sprint_keys:
-            adv = utils.generate_weekly_iterations_advance(weeks_count=horizon_weeks)
-            for it in adv:
-                sprint_keys.add((it["year"], it["week"], it["sprint_name"]))
-
-        # Sort sprints chronologically ascending
-        sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
-
-        # Select the window: take last horizon_weeks sprints, then shift left by lookback_weeks
-        if horizon_weeks <= 0:
-            horizon_weeks = 4
-        lookback_weeks = max(0, int(lookback_weeks or 0))
-        end_idx = len(sorted_sprints) - lookback_weeks
-        start_idx = max(0, end_idx - horizon_weeks)
-        end_idx = max(start_idx, end_idx)  # guard
-        target_sprints = sorted_sprints[start_idx:end_idx]
-
         # Current date and ISO week determination
         today_obj = date.today()
         curr_y, curr_w, curr_wd = today_obj.isocalendar()
@@ -2668,6 +2623,23 @@ class DevOpsBackend(QObject):
         curr_date_full = today_obj.strftime("%A, %B %d, %Y")
         curr_sprint_name = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
         curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
+
+        if horizon_weeks <= 0:
+            horizon_weeks = 4
+        lookback_weeks = max(0, int(lookback_weeks or 0))
+
+        # Anchor window: Default view (lookback_weeks=0) starts with the previous week (curr_w - 1)
+        # and contains the current week (curr_w).
+        # Shifting lookback_weeks > 0 navigates further back into history.
+        curr_monday = date.fromisocalendar(curr_y, curr_w, 1)
+        base_start_monday = curr_monday - timedelta(weeks=1)
+        start_monday = base_start_monday - timedelta(weeks=lookback_weeks)
+
+        adv_iters = utils.generate_weekly_iterations_advance(
+            start_date_or_week=start_monday,
+            weeks_count=horizon_weeks
+        )
+        target_sprints = [(it["year"], it["week"], it["sprint_name"]) for it in adv_iters]
 
         # Load configured milestones for sprint header and work item alignment
         all_milestones = self.get_milestones()

@@ -177,6 +177,11 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
         from unittest.mock import MagicMock
 
         backend = DevOpsBackend()
+        from datetime import date
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+
         # Mock database work items
         mock_items = [
             {
@@ -184,7 +189,8 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
                 "type": "Task",
                 "title": "Task In Chassis",
                 "assigned_to": "Alice",
-                "iteration_path": "week-2610",
+                "iteration_path": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "state": "Active",
                 "parent_id": 30,
             },
@@ -193,7 +199,8 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
                 "type": "Task",
                 "title": "Closed Task In Powertrain",
                 "assigned_to": "Bob",
-                "iteration_path": "week-2610",
+                "iteration_path": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "state": "Closed",
                 "parent_id": 40,
             },
@@ -238,7 +245,8 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
                 "type": "Task",
                 "title": "Unparented Task Without PBS",
                 "assigned_to": "Charlie",
-                "iteration_path": "week-2610",
+                "iteration_path": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "state": "Active",
                 "parent_id": None,
             },
@@ -247,7 +255,8 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
                 "type": "Task",
                 "title": "Task Under Plain Feature Without PBS",
                 "assigned_to": "Dana",
-                "iteration_path": "week-2610",
+                "iteration_path": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "state": "Active",
                 "parent_id": 50,
             },
