@@ -6,6 +6,126 @@ import "../components"
 Item {
     id: root
 
+    function getGanttWeeks() {
+        var weeks = [];
+        var now = new Date();
+        var day = now.getDay();
+        var diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        var monday = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0, 0);
+
+        for (var i = 0; i < 6; i++) {
+            var start = new Date(monday.getTime() + (i * 7 * 86400000));
+            var end = new Date(start.getTime() + (6 * 86400000));
+
+            var d = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
+            var dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            var weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+
+            var startMonth = start.toLocaleString('en-US', { month: 'short' });
+            var endMonth = end.toLocaleString('en-US', { month: 'short' });
+            var rangeText = startMonth + " " + start.getDate() + " - " + (startMonth === endMonth ? "" : (endMonth + " ")) + end.getDate();
+
+            var sy = start.getFullYear();
+            var sm = String(start.getMonth() + 1).padStart(2, '0');
+            var sd = String(start.getDate()).padStart(2, '0');
+            var isoStart = sy + "-" + sm + "-" + sd;
+
+            var ey = end.getFullYear();
+            var em = String(end.getMonth() + 1).padStart(2, '0');
+            var ed = String(end.getDate()).padStart(2, '0');
+            var isoEnd = ey + "-" + em + "-" + ed;
+
+            weeks.push({
+                index: i,
+                weekNo: weekNo,
+                title: i === 0 ? ("W" + weekNo + " (This)") : (i === 1 ? ("W" + weekNo + " (Next)") : (i === 5 ? ("W" + weekNo + "+") : ("W" + weekNo))),
+                range: rangeText,
+                isoStart: isoStart,
+                isoEnd: isoEnd,
+                isCurrent: (i === 0),
+                isLast: (i === 5)
+            });
+        }
+        return weeks;
+    }
+
+    function getGanttRows() {
+        var list = (backend && backend.comingMilestones) ? backend.comingMilestones : [];
+        var catMap = {};
+        var rows = [];
+
+        if (backend && backend.milestoneCategories) {
+            for (var c = 0; c < backend.milestoneCategories.length; c++) {
+                var cat = backend.milestoneCategories[c];
+                catMap[cat.name] = {
+                    category_name: cat.name,
+                    category_icon: cat.icon || "🚩",
+                    category_color: cat.color || "#58a6ff",
+                    category_bg_color: cat.bg_color || "#13233a",
+                    milestones: []
+                };
+            }
+        }
+
+        for (var i = 0; i < list.length; i++) {
+            var m = list[i];
+            var cName = m.category_name || "General";
+            if (!catMap[cName]) {
+                catMap[cName] = {
+                    category_name: cName,
+                    category_icon: m.category_icon || "🚩",
+                    category_color: m.category_color || "#58a6ff",
+                    category_bg_color: m.category_bg_color || "#13233a",
+                    milestones: []
+                };
+            }
+            catMap[cName].milestones.push(m);
+        }
+
+        for (var k in catMap) {
+            if (catMap[k].milestones.length > 0) {
+                rows.push(catMap[k]);
+            }
+        }
+
+        if (rows.length === 0 && backend && backend.milestoneCategories && backend.milestoneCategories.length > 0) {
+            for (var j = 0; j < Math.min(2, backend.milestoneCategories.length); j++) {
+                rows.push({
+                    category_name: backend.milestoneCategories[j].name,
+                    category_icon: backend.milestoneCategories[j].icon || "🚩",
+                    category_color: backend.milestoneCategories[j].color || "#58a6ff",
+                    category_bg_color: backend.milestoneCategories[j].bg_color || "#13233a",
+                    milestones: []
+                });
+            }
+        }
+        return rows;
+    }
+
+    function getMilestonesForWeek(rowMilestones, weekObj) {
+        if (!rowMilestones || rowMilestones.length === 0) return [];
+        var res = [];
+        for (var i = 0; i < rowMilestones.length; i++) {
+            var m = rowMilestones[i];
+            var mStart = (m.start_date || m.target_date || "").split("T")[0].split(" ")[0].trim();
+            var mEnd = (m.end_date || m.target_date || mStart).split("T")[0].split(" ")[0].trim();
+            if (!mStart && !mEnd) continue;
+
+            if (weekObj.isLast) {
+                if (mEnd >= weekObj.isoStart) {
+                    res.push(m);
+                }
+            } else {
+                if (mStart <= weekObj.isoEnd && mEnd >= weekObj.isoStart) {
+                    res.push(m);
+                }
+            }
+        }
+        return res;
+    }
+
     ScrollView {
         anchors.fill: parent
         contentWidth: parent.width
@@ -245,7 +365,7 @@ Item {
             }
 
             // ==========================================
-            // Coming Milestones List Card (Starting Current Week)
+            // Coming Milestones Timeline (Gantt-Style View)
             // ==========================================
             Rectangle {
                 Layout.fillWidth: true
@@ -259,7 +379,7 @@ Item {
                     id: comingMilestonesCol
                     anchors.fill: parent
                     anchors.margins: 18
-                    spacing: 12
+                    spacing: 14
 
                     // Header Row
                     RowLayout {
@@ -278,7 +398,7 @@ Item {
                             RowLayout {
                                 spacing: 8
                                 Text {
-                                    text: "Coming Milestones"
+                                    text: "Coming Milestones Timeline"
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 15
                                     font.weight: Font.Bold
@@ -305,7 +425,7 @@ Item {
                             }
 
                             Text {
-                                text: "Target dates and delivery milestones scheduled starting from current week"
+                                text: "Gantt timeline of scheduled delivery milestones by category along weekly timeline"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#8b949e"
@@ -339,240 +459,223 @@ Item {
                         }
                     }
 
-                    // Empty State
+                    // Gantt Table Container
                     Rectangle {
                         Layout.fillWidth: true
-                        implicitHeight: 70
+                        implicitHeight: ganttCol.implicitHeight + 2
                         radius: 6
                         color: "#0d1117"
                         border.color: "#30363d"
-                        visible: !backend || !backend.comingMilestones || backend.comingMilestones.length === 0
+                        border.width: 1
+                        clip: true
 
-                        RowLayout {
-                            anchors.centerIn: parent
-                            spacing: 12
+                        ColumnLayout {
+                            id: ganttCol
+                            anchors.fill: parent
+                            spacing: 0
 
-                            Text {
-                                text: "🚩"
-                                font.pixelSize: 22
-                                opacity: 0.6
-                            }
-
-                            ColumnLayout {
-                                spacing: 2
-                                Text {
-                                    text: "No upcoming milestones scheduled starting current week"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.DemiBold
-                                    color: "#f0f6fc"
-                                }
-                                Text {
-                                    text: "Click 'Manage Milestones' to create milestones or auto-detect from work item tags"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    color: "#8b949e"
-                                }
-                            }
-                        }
-                    }
-
-                    // Milestones List (Repeater)
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        visible: backend && backend.comingMilestones && backend.comingMilestones.length > 0
-
-                        Repeater {
-                            model: (backend && backend.comingMilestones) ? backend.comingMilestones : []
-
-                            delegate: Rectangle {
-                                id: msItemRect
+                            // 1. Time Axis Header Row
+                            RowLayout {
                                 Layout.fillWidth: true
-                                implicitHeight: msRowContent.implicitHeight + 16
-                                radius: 6
-                                color: msItemMa.containsMouse ? "#21262d" : "#0d1117"
-                                border.color: msItemMa.containsMouse ? (modelData.category_color || "#58a6ff") : (modelData.is_current_week ? Qt.rgba(210/255, 153/255, 34/255, 0.4) : "#30363d")
-                                border.width: 1
+                                implicitHeight: 38
+                                spacing: 0
 
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                                Behavior on border.color { ColorAnimation { duration: 120 } }
-
-                                // Left accent bar
+                                // Left Type Header
                                 Rectangle {
-                                    width: 4
-                                    anchors.left: parent.left
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-                                    radius: 2
-                                    color: modelData.category_color || (modelData.is_current_week ? "#d29922" : "#58a6ff")
+                                    Layout.preferredWidth: 140
+                                    Layout.fillHeight: true
+                                    color: "#161b22"
+                                    border.color: "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "TYPE / CATEGORY"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.5
+                                        color: "#8b949e"
+                                    }
                                 }
 
-                                RowLayout {
-                                    id: msRowContent
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 14
-                                    anchors.rightMargin: 14
-                                    anchors.topMargin: 8
-                                    anchors.bottomMargin: 8
-                                    spacing: 12
+                                // Timeline Week Columns
+                                Repeater {
+                                    model: root.getGanttWeeks()
 
-                                    // Category Pill
                                     Rectangle {
-                                        implicitHeight: 24
-                                        implicitWidth: catRow.implicitWidth + 14
-                                        radius: 12
-                                        color: modelData.category_bg_color || "#1f242c"
-                                        border.color: modelData.category_color || "#8b949e"
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        color: modelData.isCurrent ? Qt.rgba(210/255, 153/255, 34/255, 0.12) : "#161b22"
+                                        border.color: modelData.isCurrent ? "#d29922" : "#30363d"
                                         border.width: 1
 
-                                        RowLayout {
-                                            id: catRow
+                                        ColumnLayout {
                                             anchors.centerIn: parent
-                                            spacing: 4
+                                            spacing: 1
 
                                             Text {
-                                                text: modelData.category_icon || "🚩"
+                                                text: modelData.title
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: modelData.isCurrent ? "#d29922" : (modelData.index === 1 ? "#58a6ff" : "#f0f6fc")
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                            }
+
+                                            Text {
+                                                text: modelData.range
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 9
+                                                color: modelData.isCurrent ? "#e3b341" : "#8b949e"
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Rows per Type (Category)
+                            Repeater {
+                                model: root.getGanttRows()
+
+                                delegate: RowLayout {
+                                    id: rowLayoutItem
+                                    Layout.fillWidth: true
+                                    implicitHeight: Math.max(38, rowTrackCol.implicitHeight + 8)
+                                    spacing: 0
+
+                                    readonly property var categoryData: modelData
+
+                                    // Left Type / Category Cell
+                                    Rectangle {
+                                        Layout.preferredWidth: 140
+                                        Layout.fillHeight: true
+                                        color: "#0d1117"
+                                        border.color: "#21262d"
+                                        border.width: 1
+
+                                        // Left color indicator bar
+                                        Rectangle {
+                                            width: 3
+                                            anchors.left: parent.left
+                                            anchors.top: parent.top
+                                            anchors.bottom: parent.bottom
+                                            color: categoryData.category_color || "#58a6ff"
+                                        }
+
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 6
+
+                                            Text {
+                                                text: categoryData.category_icon || "🚩"
                                                 font.pixelSize: 11
                                             }
 
                                             Text {
-                                                text: modelData.category_name || "Milestone"
+                                                text: categoryData.category_name || "General"
                                                 font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 10
+                                                font.pixelSize: 11
                                                 font.weight: Font.Bold
-                                                color: modelData.category_color || "#f0f6fc"
+                                                color: categoryData.category_color || "#f0f6fc"
+                                                elide: Text.ElideRight
+                                                Layout.maximumWidth: 90
                                             }
                                         }
                                     }
 
-                                    // Milestone Title and Description
-                                    ColumnLayout {
+                                    // Week Track Grid Cells
+                                    RowLayout {
+                                        id: rowTrackCol
                                         Layout.fillWidth: true
-                                        spacing: 2
+                                        Layout.fillHeight: true
+                                        spacing: 0
 
-                                        RowLayout {
-                                            spacing: 8
-                                            Text {
-                                                text: modelData.name || ""
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 13
-                                                font.weight: Font.Bold
-                                                color: "#f0f6fc"
-                                            }
+                                        Repeater {
+                                            model: root.getGanttWeeks()
 
-                                            // Team badge (if present)
-                                            Rectangle {
-                                                visible: !!modelData.team
-                                                implicitHeight: 18
-                                                implicitWidth: teamTxt.implicitWidth + 10
-                                                radius: 4
-                                                color: "#21262d"
-                                                border.color: "#30363d"
+                                            delegate: Rectangle {
+                                                id: cellRect
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                implicitHeight: Math.max(38, chipsCol.implicitHeight + 8)
+                                                color: modelData.isCurrent ? Qt.rgba(210/255, 153/255, 34/255, 0.04) : "transparent"
+                                                border.color: "#21262d"
+                                                border.width: 1
 
-                                                Row {
-                                                    anchors.centerIn: parent
+                                                readonly property var currentWeekObj: modelData
+                                                readonly property var cellMilestones: root.getMilestonesForWeek(categoryData.milestones, currentWeekObj)
+
+                                                ColumnLayout {
+                                                    id: chipsCol
+                                                    anchors.fill: parent
+                                                    anchors.margins: 4
                                                     spacing: 3
-                                                    Text { text: "👥"; font.pixelSize: 9 }
-                                                    Text {
-                                                        id: teamTxt
-                                                        text: modelData.team || ""
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.DemiBold
-                                                        color: "#8b949e"
+
+                                                    Repeater {
+                                                        model: cellRect.cellMilestones
+
+                                                        delegate: Rectangle {
+                                                            Layout.fillWidth: true
+                                                            implicitHeight: 24
+                                                            radius: 4
+                                                            color: msChipMa.containsMouse ? Qt.darker(modelData.category_bg_color || "#1f242c", 1.2) : (modelData.category_bg_color || "#13233a")
+                                                            border.color: msChipMa.containsMouse ? "#ffffff" : (modelData.category_color || "#58a6ff")
+                                                            border.width: 1
+                                                            clip: true
+
+                                                            RowLayout {
+                                                                anchors.fill: parent
+                                                                anchors.leftMargin: 6
+                                                                anchors.rightMargin: 6
+                                                                spacing: 4
+
+                                                                Text {
+                                                                    text: modelData.name || ""
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 10
+                                                                    font.weight: Font.Bold
+                                                                    color: modelData.category_color || "#f0f6fc"
+                                                                    elide: Text.ElideRight
+                                                                    Layout.fillWidth: true
+                                                                }
+
+                                                                Text {
+                                                                    text: modelData.relative_label || modelData.target_date || ""
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 8
+                                                                    font.weight: Font.DemiBold
+                                                                    color: "#8b949e"
+                                                                }
+                                                            }
+
+                                                            ToolTip.visible: msChipMa.containsMouse
+                                                            ToolTip.text: {
+                                                                var t = modelData.name + " (" + (modelData.category_name || "Milestone") + ")\n";
+                                                                var dates = modelData.start_date && modelData.end_date && modelData.start_date !== modelData.end_date ? (modelData.start_date + " → " + modelData.end_date) : (modelData.target_date || modelData.start_date || "");
+                                                                if (dates) t += "Date: " + dates + "\n";
+                                                                if (modelData.relative_label) t += "Timeline: " + modelData.relative_label + "\n";
+                                                                if (modelData.team) t += "Team: " + modelData.team + "\n";
+                                                                if (modelData.description) t += "Description: " + modelData.description;
+                                                                return t.trim();
+                                                            }
+
+                                                            MouseArea {
+                                                                id: msChipMa
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: {
+                                                                    if (typeof window !== "undefined" && window.openMilestonesManager) {
+                                                                        window.openMilestonesManager();
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-
-                                        Text {
-                                            text: modelData.description || ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            color: "#8b949e"
-                                            visible: !!modelData.description
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-                                    }
-
-                                    // Date Range / Target Date
-                                    RowLayout {
-                                        spacing: 6
-
-                                        Text {
-                                            text: "📅"
-                                            font.pixelSize: 11
-                                            color: "#8b949e"
-                                        }
-
-                                        Text {
-                                            text: {
-                                                var s = modelData.start_date || "";
-                                                var e = modelData.end_date || "";
-                                                var t = modelData.target_date || "";
-                                                if (s && e && s !== e) return s + " → " + e;
-                                                return t || s || e;
-                                            }
-                                            font.family: "Consolas, 'Segoe UI', monospace"
-                                            font.pixelSize: 11
-                                            font.weight: Font.Medium
-                                            color: "#c9d1d9"
-                                        }
-                                    }
-
-                                    // Relative Label Badge (This week, Next week, Today, In Xd)
-                                    Rectangle {
-                                        implicitHeight: 22
-                                        implicitWidth: relLblText.implicitWidth + 14
-                                        radius: 11
-                                        color: {
-                                            if (modelData.is_current_week || modelData.relative_label === "This week") return Qt.rgba(210/255, 153/255, 34/255, 0.2);
-                                            if (modelData.relative_label === "Today") return Qt.rgba(63/255, 185/255, 80/255, 0.2);
-                                            if (modelData.relative_label === "Next week") return Qt.rgba(88/255, 166/255, 255/255, 0.2);
-                                            return Qt.rgba(163/255, 113/255, 247/255, 0.15);
-                                        }
-                                        border.color: {
-                                            if (modelData.is_current_week || modelData.relative_label === "This week") return "#d29922";
-                                            if (modelData.relative_label === "Today") return "#3fb950";
-                                            if (modelData.relative_label === "Next week") return "#58a6ff";
-                                            return "#a371f7";
-                                        }
-                                        border.width: 1
-
-                                        Text {
-                                            id: relLblText
-                                            anchors.centerIn: parent
-                                            text: modelData.relative_label || modelData.target_date || ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            font.weight: Font.Bold
-                                            color: {
-                                                if (modelData.is_current_week || modelData.relative_label === "This week") return "#d29922";
-                                                if (modelData.relative_label === "Today") return "#3fb950";
-                                                if (modelData.relative_label === "Next week") return "#58a6ff";
-                                                return "#a371f7";
-                                            }
-                                        }
-                                    }
-
-                                    // Chevron Arrow
-                                    Text {
-                                        text: "➔"
-                                        font.pixelSize: 12
-                                        color: msItemMa.containsMouse ? "#58a6ff" : "#484f58"
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: msItemMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (typeof window !== "undefined" && window.openMilestonesManager) {
-                                            window.openMilestonesManager();
                                         }
                                     }
                                 }
@@ -841,7 +944,7 @@ Item {
 
                             // Completed Work Items previews (Stories & Bugs with [xx_xxx] priority first)
                             Repeater {
-                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.completed_wis) ? backend.lastWeekActivity.completed_wis.slice(0, 3) : []
+                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.completed_wis) ? backend.lastWeekActivity.completed_wis.slice(0, 8) : []
 
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -923,7 +1026,7 @@ Item {
 
                             // Closed PRs previews
                             Repeater {
-                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.closed_prs) ? backend.lastWeekActivity.closed_prs.slice(0, 2) : []
+                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.closed_prs) ? backend.lastWeekActivity.closed_prs.slice(0, 6) : []
 
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -1280,7 +1383,7 @@ Item {
 
                             // Planned Work Items
                             Repeater {
-                                model: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.planned_wis) ? backend.currentWeekPlanned.planned_wis.slice(0, 3) : []
+                                model: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.planned_wis) ? backend.currentWeekPlanned.planned_wis.slice(0, 8) : []
 
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -1382,7 +1485,7 @@ Item {
 
                             // Active PRs
                             Repeater {
-                                model: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.active_prs) ? backend.currentWeekPlanned.active_prs.slice(0, 2) : []
+                                model: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.active_prs) ? backend.currentWeekPlanned.active_prs.slice(0, 6) : []
 
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
