@@ -6,9 +6,13 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
-- move the proposed Tag info into the same row as the latest semantic tag
-
 ## DONE
+
+- Unified Release & Semantic Tag Row in TagDay Explorer:
+  - **Single Consolidated Header Card ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Replaced the separate stacked cards with a unified, modern Release & Tag status card.
+  - **In-Line Tag Layout ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Positioned the **Latest Tag** (`vXX.YY.ZZZZ`) and **Proposed Tag** (`➔ Proposed Tag: vXX.YY.WWWW [Weekly <YYWW>]`) directly in the same horizontal row, alongside the `● Up to Date` badge and 1-click `🏷️ Tag Dev Branch` action button.
+  - **Comprehensive Commit Details**: Positioned baseline/commit timestamps, committer info, untagged merged PR count, and tag comment into concise secondary rows within the same card.
+
 
 - Tag Dialog Handler Resolution Fix (`'DevOpsBackend' object has no attribute '_info_handler'`):
   - **Attribute Initialization & Fallback ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Initialized `self._info_handler = None` and `self._project_id` in `DevOpsBackend.__init__` and guarded attribute lookup via `getattr(self, "_info_handler", None) or devops_helper._getHandler()`.
