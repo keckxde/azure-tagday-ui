@@ -1006,28 +1006,6 @@ Item {
                             }
                         }
 
-                        Button {
-                            text: "🏷️ Tag Dev Branch..."
-                            enabled: backend ? !backend.isBusy : false
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 32
-                                implicitWidth: 175
-                                radius: 6
-                                color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#30363d"
-                                border.color: parent.enabled ? "#3fb950" : "#30363d"
-                            }
-                            onClicked: {
-                                root.openTaggingModal(root.selectedRepoName || "");
-                            }
-                        }
 
                         Button {
                             text: "📑 Open TAGDAY.md"
