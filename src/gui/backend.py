@@ -2147,21 +2147,51 @@ class DevOpsBackend(QObject):
 
     @Slot()
     def generate_storage_report_async(self):
-        """Generates the Build Artifact Storage report in background."""
+        """Generates the Build Artifact Storage report in background, syncing live data from TFS if connected."""
         if self._is_busy:
             return
 
         def _work(worker):
-            worker.log_message.emit("Analyzing build artifacts and storage usage...")
+            # 1. Check if active TFS handler is available and sync live builds/artifacts
+            azHandler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+            project_id = devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", "") or "default"
+
+            if azHandler:
+                worker.report_progress(5, f"Connecting to TFS ({devops_helper.AZURE_BASE_URL})...")
+                worker.log_message.emit(f"Checking live build definitions and artifacts for project '{project_id}'...")
+                try:
+                    def _prog(msg, cur=0, tot=0):
+                        worker.log_message.emit(msg)
+                        if tot > 0:
+                            pct = 5 + int((cur / tot) * 75)
+                            worker.report_progress(pct, msg)
+
+                    builds = azHandler.get_all_build_artifacts(
+                        project_id,
+                        cache_db=self._cache_db,
+                        progress_callback=_prog
+                    )
+                    worker.log_message.emit(f"Successfully processed and cached {len(builds)} builds with artifacts from TFS.")
+                except Exception as he:
+                    logger.warning(f"Could not sync live builds/artifacts from TFS: {he}")
+                    worker.log_message.emit(f"TFS sync notice: {he}. Proceeding with local cache...")
+
+            # 2. Analyze storage & generate Markdown + CSV reports
+            worker.report_progress(85, "Analyzing build artifacts and storage usage...")
+            worker.log_message.emit("Analyzing build artifacts and storage usage footprint...")
+            md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD)
+            csv_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_CSV)
             success = devops_helper.generate_artifacts_report(
                 db_path=self._db_path,
-                md_path=os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD),
-                csv_path=os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_CSV)
+                md_path=md_path,
+                csv_path=csv_path
             )
             if not success:
                 raise RuntimeError("Storage report generation returned failure")
-            worker.log_message.emit("Storage report generated successfully")
-            return "Storage report generated"
+
+            worker.report_progress(100, "Storage report generated successfully")
+            worker.log_message.emit(f"Storage report generated successfully: {md_path}")
+            return "Storage report generated successfully"
 
         self._run_worker(_work, "Generating Storage report...")
 

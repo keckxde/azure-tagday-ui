@@ -567,13 +567,13 @@ def patch_pr_title_for_release_notes(
     return final_title
 
 
-def check_artifacts():
+def check_artifacts(progress_callback=None):
     azHandler = _getHandler()
     if not azHandler:
         logger.warning("No handler available for check_artifacts")
         return []
     db_path, cache_db = _getDBCacheHandler()
-    builds = azHandler.get_all_build_artifacts(AZURE_PROJECT_ID, cache_db=cache_db)
+    builds = azHandler.get_all_build_artifacts(AZURE_PROJECT_ID, cache_db=cache_db, progress_callback=progress_callback)
     logger.info(f"Processed and cached {len(builds)} builds with artifacts into {db_path}")
     return builds
 

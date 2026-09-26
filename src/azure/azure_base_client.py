@@ -262,10 +262,14 @@ class AzureBaseClient:
         Returns:
             list: List of build definition dictionaries.
         """
-        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={})
-        return res.get("value", [])
+        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={"api-version": "6.0", "$top": 200})
+        if isinstance(res, dict):
+            return res.get("value", [])
+        elif isinstance(res, list):
+            return res
+        return []
 
-    def get_all_build_artifacts(self, project_id, cache_db=None):
+    def get_all_build_artifacts(self, project_id, cache_db=None, progress_callback=None):
         """
         Retrieves build definitions and artifacts for a specific project.
         Saves builds and artifacts into SQLite cache if cache_db is provided.
@@ -273,16 +277,23 @@ class AzureBaseClient:
         Args:
             project_id (str): The target project ID or name.
             cache_db (AzureDevOpsCache, optional): Database cache instance.
+            progress_callback (callable, optional): Callback for live progress updates.
 
         Returns:
             list: List of build dictionaries with associated artifacts.
         """
         builds = self.get_project_builds(project_id)
+        if not isinstance(builds, list):
+            builds = []
+        total = len(builds)
         count = 0
         for i, build in enumerate(builds):
             try:
-                build_id = build["id"]
-                build_number = build.get("buildNumber", "")
+                build_id = build.get("id")
+                build_number = build.get("buildNumber", build_id)
+                if progress_callback:
+                    progress_callback(f"Fetching artifacts for build {i+1}/{total} (Build #{build_number})...", i + 1, total)
+
                 artifacts = self.get_build_artifacts(project_id, build_id, cache_db=cache_db)
 
                 builds[i]["artifacts"] = artifacts or []
