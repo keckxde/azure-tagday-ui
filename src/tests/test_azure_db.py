@@ -482,6 +482,30 @@ class TestAzureDevOpsCache(unittest.TestCase):
         cached_ids = self.cache.get_cached_build_ids_with_artifacts()
         self.assertIn(8888, cached_ids)
 
+    def test_build_metadata_persistence_and_enrichment(self):
+        project_id = "proj-meta"
+        build = {
+            "id": 9999,
+            "buildNumber": "20260926.2",
+            "status": "completed",
+            "result": "succeeded",
+            "finishTime": "2026-09-26T07:30:00Z",
+            "requestedBy": {
+                "displayName": "Jane Developer",
+                "uniqueName": "jane@example.com"
+            },
+            "sourceBranch": "refs/heads/feature/awesome"
+        }
+        self.cache.save_build(project_id, build)
+        self.cache.save_artifact(9999, {"name": "binaries", "size_bytes": 10485760})
+
+        import generate_artifacts_report
+        artifacts = generate_artifacts_report.load_artifacts_data(self.cache)
+        match = next((a for a in artifacts if a["build_id"] == 9999), None)
+        self.assertIsNotNone(match)
+        self.assertEqual(match["requested_by"], "Jane Developer")
+        self.assertEqual(match["finish_time"], "2026-09-26T07:30:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

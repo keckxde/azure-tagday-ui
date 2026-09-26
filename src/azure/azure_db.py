@@ -2233,8 +2233,11 @@ class AzureDevOpsCache:
         finish_time = build.get("finishTime", "")
         source_branch = build.get("sourceBranch", "")
         source_version = build.get("sourceVersion", "")
-        requested_for = build.get("requestedFor") or {}
-        requested_by = requested_for.get("displayName", "") if isinstance(requested_for, dict) else (build.get("requested_by") or "")
+        requested_for = build.get("requestedFor") or build.get("requestedBy") or {}
+        if isinstance(requested_for, dict):
+            requested_by = requested_for.get("displayName") or requested_for.get("name") or requested_for.get("uniqueName") or ""
+        else:
+            requested_by = str(build.get("requested_by") or build.get("requestedBy") or "")
         url = build.get("url", "")
         raw_json = json.dumps(build, cls=DateTimeEncoder, ensure_ascii=False)
 

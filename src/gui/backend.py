@@ -1764,25 +1764,7 @@ class DevOpsBackend(QObject):
         # 4. Storage / Artifacts Data
         import generate_artifacts_report
         artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
-        if artifacts:
-            storage_metrics = generate_artifacts_report.calculate_metrics(artifacts)
-            storage_data = {
-                "total_builds": storage_metrics.get("total_builds", 0),
-                "total_artifacts": storage_metrics.get("total_artifacts", 0),
-                "active_artifacts_count": storage_metrics.get("active_artifacts_count", 0),
-                "deleted_artifacts_count": storage_metrics.get("deleted_artifacts_count", 0),
-                "total_size_gb": f"{storage_metrics.get('total_size_gb', 0.0):.2f}",
-                "active_size_gb": f"{storage_metrics.get('active_size_gb', 0.0):.2f}",
-                "deleted_size_gb": f"{storage_metrics.get('deleted_size_gb', 0.0):.2f}",
-                "artifacts_list": artifacts[:100],
-            }
-        else:
-            storage_data = {
-                "total_builds": 0, "total_artifacts": 0,
-                "active_artifacts_count": 0, "deleted_artifacts_count": 0,
-                "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
-                "artifacts_list": []
-            }
+        storage_data = self._build_storage_payload(artifacts)
 
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
@@ -2083,6 +2065,107 @@ class DevOpsBackend(QObject):
 
         self._run_worker(_work, "Running full sync...")
 
+
+    def _build_storage_payload(self, artifacts):
+        """Helper to build storage data metrics and group artifacts by repository with counts and sizes."""
+        if not artifacts:
+            return {
+                "total_builds": 0, "total_artifacts": 0,
+                "active_artifacts_count": 0, "deleted_artifacts_count": 0,
+                "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
+                "artifacts_list": [],
+                "artifacts_by_repo": []
+            }
+
+        import generate_artifacts_report
+        metrics = generate_artifacts_report.calculate_metrics(artifacts)
+
+        # Group artifacts by repository
+        by_repo = {}
+        for a in artifacts:
+            # Format build date nicely (e.g. YYYY-MM-DD HH:MM)
+            raw_date = a.get("finish_time") or a.get("start_time") or a.get("queue_time") or ""
+            date_str = ""
+            if raw_date:
+                s = str(raw_date).replace("T", " ").replace("Z", "").strip()
+                if "." in s:
+                    s = s.split(".")[0]
+                date_str = s[:16]  # e.g. "2026-09-25 14:30"
+            a["build_date"] = date_str or "-"
+
+            # Format requested_by / owner
+            owner = a.get("requested_by") or ""
+            a["owner"] = owner if owner else "System"
+
+            # Clean branch name
+            branch = a.get("source_branch") or ""
+            a["branch_clean"] = branch.replace("refs/heads/", "") if branch else "-"
+
+            # Size formatting
+            s_mb = a.get("size_mb", 0.0) or 0.0
+            a["size_mb_str"] = f"{s_mb:.2f} MB" if s_mb < 1024 else f"{s_mb / 1024:.2f} GB"
+
+            rname = a.get("repo_name") or "Unknown Repo"
+            if rname not in by_repo:
+                by_repo[rname] = {
+                    "repo_name": rname,
+                    "builds": set(),
+                    "artifacts_count": 0,
+                    "active_count": 0,
+                    "deleted_count": 0,
+                    "total_size_bytes": 0,
+                    "active_size_bytes": 0,
+                    "deleted_size_bytes": 0,
+                    "artifacts": []
+                }
+            grp = by_repo[rname]
+            grp["builds"].add(a.get("build_id"))
+            grp["artifacts_count"] += 1
+            s_bytes = a.get("size_bytes", 0) or 0
+            grp["total_size_bytes"] += s_bytes
+            if a.get("is_deleted"):
+                grp["deleted_count"] += 1
+                grp["deleted_size_bytes"] += s_bytes
+            else:
+                grp["active_count"] += 1
+                grp["active_size_bytes"] += s_bytes
+            grp["artifacts"].append(a)
+
+        repo_groups = []
+        for r in by_repo.values():
+            t_mb = round(r["total_size_bytes"] / (1024 * 1024), 2)
+            act_mb = round(r["active_size_bytes"] / (1024 * 1024), 2)
+            del_mb = round(r["deleted_size_bytes"] / (1024 * 1024), 2)
+            if t_mb >= 1024:
+                size_str = f"{t_mb / 1024:.2f} GB"
+            else:
+                size_str = f"{t_mb:.2f} MB"
+            repo_groups.append({
+                "repo_name": r["repo_name"],
+                "builds_count": len(r["builds"]),
+                "artifacts_count": r["artifacts_count"],
+                "active_count": r["active_count"],
+                "deleted_count": r["deleted_count"],
+                "total_size_mb": t_mb,
+                "active_size_mb": act_mb,
+                "deleted_size_mb": del_mb,
+                "total_size_str": size_str,
+                "artifacts": r["artifacts"]
+            })
+        repo_groups.sort(key=lambda x: x["total_size_mb"], reverse=True)
+
+        return {
+            "total_builds": metrics.get("total_builds", 0),
+            "total_artifacts": metrics.get("total_artifacts", 0),
+            "active_artifacts_count": metrics.get("active_artifacts_count", 0),
+            "deleted_artifacts_count": metrics.get("deleted_artifacts_count", 0),
+            "total_size_gb": f"{metrics.get('total_size_gb', 0.0):.2f}",
+            "active_size_gb": f"{metrics.get('active_size_gb', 0.0):.2f}",
+            "deleted_size_gb": f"{metrics.get('deleted_size_gb', 0.0):.2f}",
+            "artifacts_list": artifacts[:100],
+            "artifacts_by_repo": repo_groups
+        }
+
     @Slot()
     def load_interactive_reports(self, td_raw=None):
         """Loads and parses interactive report metrics and timelines directly from the SQLite database."""
@@ -2099,25 +2182,7 @@ class DevOpsBackend(QObject):
             # 2. Build Artifacts & Storage Interactive Data
             import generate_artifacts_report
             artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
-            if artifacts:
-                metrics = generate_artifacts_report.calculate_metrics(artifacts)
-                self._storage_data = {
-                    "total_builds": metrics.get("total_builds", 0),
-                    "total_artifacts": metrics.get("total_artifacts", 0),
-                    "active_artifacts_count": metrics.get("active_artifacts_count", 0),
-                    "deleted_artifacts_count": metrics.get("deleted_artifacts_count", 0),
-                    "total_size_gb": f"{metrics.get('total_size_gb', 0.0):.2f}",
-                    "active_size_gb": f"{metrics.get('active_size_gb', 0.0):.2f}",
-                    "deleted_size_gb": f"{metrics.get('deleted_size_gb', 0.0):.2f}",
-                    "artifacts_list": artifacts[:100], # Top 100 artifacts
-                }
-            else:
-                self._storage_data = {
-                    "total_builds": 0, "total_artifacts": 0,
-                    "active_artifacts_count": 0, "deleted_artifacts_count": 0,
-                    "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
-                    "artifacts_list": []
-                }
+            self._storage_data = self._build_storage_payload(artifacts)
             self.storageDataChanged.emit()
             self.iterationShiftsChanged.emit()
 
