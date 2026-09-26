@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
+import utils
 import devops_helper
 from azure.azure_db import AzureDevOpsCache, _is_scheduled_sprint
 

@@ -2675,9 +2675,6 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
-            self.open_path_in_explorer(path)
-        else:
-            self.logMessage.emit(f"File does not exist: {path}")
 
     @Slot(str, result=str)
     @Slot(str, str, result=str)
@@ -3688,10 +3685,11 @@ class DevOpsBackend(QObject):
         elif not clean_sprint:
             clean_sprint = "latest"
 
+        reports_dir = self.get_effective_reports_dir()
         if not md_path:
-            md_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
+            md_path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
         if not csv_path:
-            csv_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.csv")
+            csv_path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.csv")
 
         def _work(worker):
             worker.log_message.emit(f"Generating Sprint Report for '{clean_sprint}'...")
@@ -3719,7 +3717,10 @@ class DevOpsBackend(QObject):
             clean_sprint = self.availableSprintList[0]
         elif not clean_sprint:
             clean_sprint = "latest"
-        path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), f"SPRINT_REPORT_{clean_sprint}.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -4261,8 +4262,9 @@ class DevOpsBackend(QObject):
             return
 
         r_stat = None if review_filter in ("", "all") else review_filter.strip().lower()
-        md_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
-        csv_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+        reports_dir = self.get_effective_reports_dir()
+        md_path = os.path.join(reports_dir, "RESCHEDULING_REPORT.md")
+        csv_path = os.path.join(reports_dir, "RESCHEDULING_REPORT.csv")
 
         def _work(worker):
             worker.log_message.emit("Generating Sprint Rescheduling & Moved Items Report...")
@@ -4281,7 +4283,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_rescheduling_report_markdown(self):
         """Opens generated rescheduling report markdown file."""
-        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, "RESCHEDULING_REPORT.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "RESCHEDULING_REPORT.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -4290,7 +4295,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_rescheduling_report_csv(self):
         """Opens generated rescheduling report CSV file."""
-        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, "RESCHEDULING_REPORT.csv")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "RESCHEDULING_REPORT.csv")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -5987,7 +5995,7 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_tagday_markdown_report(self):
         """Opens the generated Tag Day Markdown report file in the default viewer/editor."""
-        output_path = os.path.normpath(os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD))
+        output_path = os.path.normpath(os.path.join(self.get_effective_reports_dir(), devops_helper.TAGDAY_FILE_MD))
         if os.path.exists(output_path):
             self.open_path_in_explorer(output_path)
             return

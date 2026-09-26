@@ -935,6 +935,206 @@ Item {
             }
 
             // ==========================================
+            // Reports Target & Baseline Directory Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: reportsDirCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: reportsDirCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "📊"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Reports Target & Baseline Directory"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Configure the target folder for reading baseline reports to extend (such as REVISION.md) and saving generated release reports (TAGDAY.md, REVISION.md/docx, SPRINT_REPORT, BUILD_ARTIFACTS)."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Status Pill
+                        Rectangle {
+                            implicitHeight: 22
+                            implicitWidth: reportsDirPillText.implicitWidth + 14
+                            radius: 11
+                            color: (backend && backend.reportsDir) ? "#16243b" : "#162b20"
+                            border.color: (backend && backend.reportsDir) ? "#388bfd" : "#238636"
+                            border.width: 1
+
+                            Text {
+                                id: reportsDirPillText
+                                anchors.centerIn: parent
+                                text: (backend && backend.reportsDir) ? "📁 Custom Directory" : "🏠 Default (Current Directory)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: (backend && backend.reportsDir) ? "#58a6ff" : "#3fb950"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Path Input & Browse Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        TextField {
+                            id: reportsDirInput
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            font.family: "Consolas, monospace"
+                            font.pixelSize: 12
+                            text: backend ? (backend.reportsDir || backend.effectiveReportsDir) : ""
+                            placeholderText: "e.g. C:/Projects/Reports or relative path (empty for current directory)"
+                            placeholderTextColor: "#484f58"
+                            color: "#f0f6fc"
+                            background: Rectangle {
+                                color: "#0d1117"
+                                radius: 6
+                                border.color: reportsDirInput.activeFocus ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                        }
+
+                        Button {
+                            text: "📁 Browse..."
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#f0f6fc"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 105; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: parent.hovered ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var chosen = backend.browse_reports_dir();
+                                    if (chosen) {
+                                        reportsDirInput.text = chosen;
+                                        root.bannerMsg = "Reports target directory set to: " + chosen;
+                                        root.bannerType = "success";
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "📂 Open Folder"
+                            font.pixelSize: 12
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#c9d1d9"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 110; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) backend.open_reports_folder();
+                            }
+                        }
+
+                        Button {
+                            text: "💾 Save"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 80; radius: 6
+                                color: parent.hovered ? "#2ea043" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setReportsDir(reportsDirInput.text.trim());
+                                    root.bannerMsg = reportsDirInput.text.trim()
+                                        ? ("Reports directory saved: " + reportsDirInput.text.trim())
+                                        : "Reports directory reset to current working directory.";
+                                    root.bannerType = "success";
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "↺ Reset"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 70; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: "#30363d"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setReportsDir("");
+                                    reportsDirInput.text = backend.effectiveReportsDir;
+                                    root.bannerMsg = "Reports target directory reset to default (current directory).";
+                                    root.bannerType = "info";
+                                }
+                            }
+                        }
+                    }
+
+                    // Informational notes row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text { text: "ℹ️"; font.pixelSize: 12 }
+                        Text {
+                            text: "Effective path: " + (backend ? backend.effectiveReportsDir : "N/A") + "  •  Applies to TAGDAY.md, REVISION.md, REVISION.docx, SPRINT_REPORT_*.md, RESCHEDULING_REPORT.*, and BUILD_ARTIFACTS.*"
+                            font.family: "Consolas, Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Agile & Deadline Attribute Configuration Card
             // ==========================================
             Rectangle {

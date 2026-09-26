@@ -25,6 +25,7 @@ import devops_helper
 
 from jinja2 import Template
 from azure import AzureDevOpsCache
+import utils
 from utils import load_status_icons
 
 logger = logging.getLogger(__name__)

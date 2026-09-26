@@ -26,6 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import devops_helper
 from azure import AzureDevOpsCache
+import utils
 from utils import (
     parse_iso_datetime,
     parse_sprint_week,
