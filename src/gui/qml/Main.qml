@@ -335,8 +335,8 @@ ApplicationWindow {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
                                         font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
                                         color: "#6e7681"
-                                        letterSpacing: 0.8
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -414,8 +414,8 @@ ApplicationWindow {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
                                         font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
                                         color: "#6e7681"
-                                        letterSpacing: 0.8
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -482,8 +482,8 @@ ApplicationWindow {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
                                         font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
                                         color: "#6e7681"
-                                        letterSpacing: 0.8
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -542,8 +542,8 @@ ApplicationWindow {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
                                         font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
                                         color: "#6e7681"
-                                        letterSpacing: 0.8
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
