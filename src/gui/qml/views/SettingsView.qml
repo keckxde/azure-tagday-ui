@@ -935,6 +935,206 @@ Item {
             }
 
             // ==========================================
+            // Reports Target & Baseline Directory Card
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: reportsDirCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: reportsDirCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "📊"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Reports Target & Baseline Directory"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Configure the target folder for reading baseline reports to extend (such as REVISION.md) and saving generated release reports (TAGDAY.md, REVISION.md/docx, SPRINT_REPORT, BUILD_ARTIFACTS)."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Status Pill
+                        Rectangle {
+                            implicitHeight: 22
+                            implicitWidth: reportsDirPillText.implicitWidth + 14
+                            radius: 11
+                            color: (backend && backend.reportsDir) ? "#16243b" : "#162b20"
+                            border.color: (backend && backend.reportsDir) ? "#388bfd" : "#238636"
+                            border.width: 1
+
+                            Text {
+                                id: reportsDirPillText
+                                anchors.centerIn: parent
+                                text: (backend && backend.reportsDir) ? "📁 Custom Directory" : "🏠 Default (Current Directory)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: (backend && backend.reportsDir) ? "#58a6ff" : "#3fb950"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Path Input & Browse Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        TextField {
+                            id: reportsDirInput
+                            Layout.fillWidth: true
+                            implicitHeight: 34
+                            font.family: "Consolas, monospace"
+                            font.pixelSize: 12
+                            text: backend ? (backend.reportsDir || backend.effectiveReportsDir) : ""
+                            placeholderText: "e.g. C:/Projects/Reports or relative path (empty for current directory)"
+                            placeholderTextColor: "#484f58"
+                            color: "#f0f6fc"
+                            background: Rectangle {
+                                color: "#0d1117"
+                                radius: 6
+                                border.color: reportsDirInput.activeFocus ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                        }
+
+                        Button {
+                            text: "📁 Browse..."
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#f0f6fc"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 105; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: parent.hovered ? "#58a6ff" : "#30363d"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var chosen = backend.browse_reports_dir();
+                                    if (chosen) {
+                                        reportsDirInput.text = chosen;
+                                        root.bannerMsg = "Reports target directory set to: " + chosen;
+                                        root.bannerType = "success";
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "📂 Open Folder"
+                            font.pixelSize: 12
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#c9d1d9"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 110; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) backend.open_reports_folder();
+                            }
+                        }
+
+                        Button {
+                            text: "💾 Save"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 80; radius: 6
+                                color: parent.hovered ? "#2ea043" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setReportsDir(reportsDirInput.text.trim());
+                                    root.bannerMsg = reportsDirInput.text.trim()
+                                        ? ("Reports directory saved: " + reportsDirInput.text.trim())
+                                        : "Reports directory reset to current working directory.";
+                                    root.bannerType = "success";
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "↺ Reset"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 70; radius: 6
+                                color: parent.hovered ? "#30363d" : "#21262d"
+                                border.color: "#30363d"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    backend.setReportsDir("");
+                                    reportsDirInput.text = backend.effectiveReportsDir;
+                                    root.bannerMsg = "Reports target directory reset to default (current directory).";
+                                    root.bannerType = "info";
+                                }
+                            }
+                        }
+                    }
+
+                    // Informational notes row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text { text: "ℹ️"; font.pixelSize: 12 }
+                        Text {
+                            text: "Effective path: " + (backend ? backend.effectiveReportsDir : "N/A") + "  •  Applies to TAGDAY.md, REVISION.md, REVISION.docx, SPRINT_REPORT_*.md, RESCHEDULING_REPORT.*, and BUILD_ARTIFACTS.*"
+                            font.family: "Consolas, Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Agile & Deadline Attribute Configuration Card
             // ==========================================
             Rectangle {
@@ -1461,164 +1661,6 @@ Item {
                                             );
                                             root.bannerMsg = "Opened sprint URL in system browser for verification.";
                                             root.bannerType = "info";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Bug Hierarchy & Container Grouping Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: bugHierarchyCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: bugHierarchyCol
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 14
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text { text: "🪲"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Bug Hierarchy & Workload Container Grouping"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Configure how Bugs are structured and grouped in the Workload Explorer & Agile views"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: 10
-                        columnSpacing: 10
-
-                        Repeater {
-                            model: [
-                                {
-                                    mode: "like_user_story",
-                                    title: "Bugs as Stories (Containers)",
-                                    desc: "Bugs are top-level backlog items that contain individual tasks. Recommended for Scrum / Agile projects where bugs are tracked like User Stories.",
-                                    badge: "Top-Level Container"
-                                },
-                                {
-                                    mode: "like_task",
-                                    title: "Bugs as Tasks (Child Items)",
-                                    desc: "Bugs are child work items contained within parent User Stories or Requirements. Recommended for projects where bugs belong directly to stories.",
-                                    badge: "Child Task Item"
-                                }
-                            ]
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: 80
-                                radius: 6
-                                property bool isSelected: backend && backend.bugHierarchyMode === modelData.mode
-                                color: isSelected ? "#0d2344" : (bugOptMa.containsMouse ? "#21262d" : "#0d1117")
-                                border.color: isSelected ? "#1f6feb" : (bugOptMa.containsMouse ? "#388bfd" : "#30363d")
-                                border.width: isSelected ? 2 : 1
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
-
-                                    // Radio Indicator
-                                    Rectangle {
-                                        width: 18
-                                        height: 18
-                                        radius: 9
-                                        color: parent.parent.isSelected ? "#1f6feb" : "#161b22"
-                                        border.color: parent.parent.isSelected ? "#58a6ff" : "#30363d"
-                                        border.width: 1
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 8
-                                            height: 8
-                                            radius: 4
-                                            color: "#ffffff"
-                                            visible: parent.parent.parent.isSelected
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 3
-
-                                        RowLayout {
-                                            spacing: 8
-                                            Text {
-                                                text: modelData.title
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 12
-                                                font.weight: Font.Bold
-                                                color: parent.parent.parent.parent.isSelected ? "#f0f6fc" : "#e6edf3"
-                                            }
-
-                                            Rectangle {
-                                                implicitHeight: 16
-                                                implicitWidth: bugBadgeLabel.implicitWidth + 8
-                                                radius: 8
-                                                color: parent.parent.parent.parent.isSelected ? "#1f6feb" : "#21262d"
-                                                Text {
-                                                    id: bugBadgeLabel
-                                                    anchors.centerIn: parent
-                                                    text: modelData.badge
-                                                    font.pixelSize: 9
-                                                    font.weight: Font.DemiBold
-                                                    color: parent.parent.parent.parent.parent.isSelected ? "#ffffff" : "#8b949e"
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            text: modelData.desc
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                            wrapMode: Text.WordWrap
-                                            Layout.fillWidth: true
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: bugOptMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (backend) {
-                                            backend.setBugHierarchyMode(modelData.mode);
-                                            root.bannerMsg = "Bug hierarchy mode updated to: " + modelData.title;
-                                            root.bannerType = "success";
                                         }
                                     }
                                 }
@@ -3083,6 +3125,336 @@ Item {
                                             root.bannerMsg = "Font size updated to " + modelData.title;
                                             root.bannerType = "success";
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Export & Import Specific User Settings Card
+            // ==========================================
+            Rectangle {
+                id: exportImportCard
+                Layout.fillWidth: true
+                implicitHeight: exportImportCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                function getSelectedSections() {
+                    var secs = [];
+                    if (chkRepoCats.checked) secs.push("repo_categories");
+                    if (chkBranchFilters.checked) secs.push("git_branch_filters");
+                    if (chkMilestones.checked) secs.push("milestones");
+                    if (chkWorkItemCats.checked) secs.push("work_item_categories");
+                    if (chkTeamSprint.checked) secs.push("team_and_sprint_url");
+                    return secs;
+                }
+
+                function selectAllSections(enable) {
+                    chkRepoCats.checked = enable;
+                    chkBranchFilters.checked = enable;
+                    chkMilestones.checked = enable;
+                    chkWorkItemCats.checked = enable;
+                    chkTeamSprint.checked = enable;
+                }
+
+                ColumnLayout {
+                    id: exportImportCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // Card Title & Icon
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "📦"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Export & Import Specific User Settings"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Backup, share, or restore specific user configuration sections in YAML or JSON format."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            implicitHeight: 22
+                            implicitWidth: formatPillText.implicitWidth + 14
+                            radius: 11
+                            color: "#1f6feb22"
+                            border.color: "#58a6ff"
+                            border.width: 1
+
+                            Text {
+                                id: formatPillText
+                                anchors.centerIn: parent
+                                text: "YAML / JSON Supported"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: "#58a6ff"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Section Selection Controls
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Select Sections to Include:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "Select All"
+                            font.pixelSize: 11
+                            background: Rectangle {
+                                color: parent.hovered ? "#21262d" : "transparent"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#79c0ff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: exportImportCard.selectAllSections(true)
+                        }
+
+                        Button {
+                            text: "Deselect All"
+                            font.pixelSize: 11
+                            background: Rectangle {
+                                color: parent.hovered ? "#21262d" : "transparent"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: exportImportCard.selectAllSections(false)
+                        }
+                    }
+
+                    // Checkbox Pills Grid
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 16
+
+                        CheckBox {
+                            id: chkRepoCats
+                            text: "Repository Categories (rules, colors, overrides, default category)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkBranchFilters
+                            text: "Git Branch & Category Filters (branch_filter_patterns, notifications)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkMilestones
+                            text: "Milestones (categories, target dates, end dates, team assignment, descriptions)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkWorkItemCats
+                            text: "Work Item Categories & Deadlines (tag pattern mapping, custom deadline field, reports directory)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkTeamSprint
+                            text: "Team Assignment & Sprint URL (tfs_team_name, sprint_url_template, default_tfs_team)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Options & Action Buttons Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        CheckBox {
+                            id: chkClearExisting
+                            text: "Clear existing records on import (Full replace instead of merge)"
+                            checked: false
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: parent.checked ? "#f85149" : "#8b949e"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Export Button
+                        Button {
+                            text: "📤 Export Settings..."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: 155
+                                radius: 6
+                                color: parent.hovered ? "#1f6feb" : "#238636"
+                                border.color: parent.hovered ? "#58a6ff" : "#2ea043"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    if (secs.length === 0) {
+                                        root.bannerMsg = "Please select at least one settings section to export.";
+                                        root.bannerType = "error";
+                                        return;
+                                    }
+                                    var res = backend.exportAllUserSettings("", JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = res.message || ("Settings exported to: " + res.file_path);
+                                        root.bannerType = "success";
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Export failed: " + res.error;
+                                        root.bannerType = "error";
+                                    }
+                                }
+                            }
+                        }
+
+                        // Import Button
+                        Button {
+                            text: "📥 Import Settings..."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: 155
+                                radius: 6
+                                color: parent.hovered ? "#388bfd" : "#1f6feb"
+                                border.color: "#58a6ff"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    if (secs.length === 0) {
+                                        root.bannerMsg = "Please select at least one settings section to import.";
+                                        root.bannerType = "error";
+                                        return;
+                                    }
+                                    var res = backend.importAllUserSettings("", chkClearExisting.checked, JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = res.message || "User settings imported successfully.";
+                                        root.bannerType = "success";
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Import failed: " + res.error;
+                                        root.bannerType = "error";
                                     }
                                 }
                             }

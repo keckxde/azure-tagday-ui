@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
+import utils
 import devops_helper
 from azure.azure_db import AzureDevOpsCache, _is_scheduled_sprint
 
@@ -230,9 +231,13 @@ def generate_rescheduling_report(cache_db=None, output_md=None, output_csv=None,
     """
     data = get_rescheduled_items_data(cache_db=cache_db, review_status=review_status)
 
-    base_folder = devops_helper.BASE_FOLDER
+    base_folder = utils.get_reports_dir()
     md_file = output_md or os.path.normpath(os.path.join(base_folder, "RESCHEDULING_REPORT.md"))
+    if not os.path.isabs(md_file):
+        md_file = os.path.normpath(os.path.join(base_folder, md_file))
     csv_file = output_csv or os.path.normpath(os.path.join(base_folder, "RESCHEDULING_REPORT.csv"))
+    if not os.path.isabs(csv_file):
+        csv_file = os.path.normpath(os.path.join(base_folder, csv_file))
 
     # Render & write Markdown
     md_content = render_rescheduling_markdown(data)

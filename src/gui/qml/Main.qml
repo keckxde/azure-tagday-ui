@@ -65,6 +65,15 @@ ApplicationWindow {
         }
     }
 
+    function navigateToStorageReport() {
+        window.currentTabIndex = 5;
+        if (reportsView && typeof reportsView.openStorageReport === "function") {
+            reportsView.openStorageReport();
+        } else if (reportsView) {
+            reportsView.activeReportTab = 2;
+        }
+    }
+
     function navigateToWorkloadSprint(assignee, sprintName) {
         window.currentTabIndex = 4;
         if (workloadExplorerView) {
@@ -269,70 +278,334 @@ ApplicationWindow {
                         }
                     }
 
-                    // Nav Links
-                    ColumnLayout {
+                    // Nav Links (Scrollable Grouped Navigation)
+                    ScrollView {
                         Layout.fillWidth: true
-                        spacing: 4
-
-                        NavItem {
-                            iconText: "📊"
-                            label: "Dashboard"
-                            active: window.currentTabIndex === 0
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 0
-                        }
-
-                        NavItem {
-                            iconText: "📦"
-                            label: "Repositories"
-                            active: window.currentTabIndex === 1
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 1
-                        }
-
-                        NavItem {
-                            iconText: "🔀"
-                            label: "Pull Requests"
-                            active: window.currentTabIndex === 2
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 2
-                        }
-
-                        NavItem {
-                            iconText: "📋"
-                            label: "Work Items"
-                            active: window.currentTabIndex === 3
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 3
-                        }
-
-                        NavItem {
-                            iconText: "👥"
-                            label: "Workload Explorer"
-                            active: window.currentTabIndex === 4
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 4
-                        }
-
-                        NavItem {
-                            iconText: "📈"
-                            label: "Reports & Analytics"
-                            active: window.currentTabIndex === 5
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 5
-                        }
-
-                        NavItem {
-                            iconText: "⚙️"
-                            label: "Settings"
-                            active: window.currentTabIndex === 6
-                            isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 6
-                        }
-                    }
-
-                    Item {
                         Layout.fillHeight: true
+                        clip: true
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical: ScrollBar {
+                            parent: parent
+                            anchors.right: parent.right
+                            anchors.rightMargin: 1
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            active: true
+                            policy: ScrollBar.AsNeeded
+                            contentItem: Rectangle {
+                                implicitWidth: 4
+                                radius: 2
+                                color: "#30363d"
+                            }
+                            background: Rectangle {
+                                color: "transparent"
+                            }
+                        }
+
+                        ColumnLayout {
+                            width: sidebarRect.width
+                            spacing: 3
+
+                            // Top-Level Dashboard
+                            NavItem {
+                                iconText: "📊"
+                                label: "Dashboard"
+                                active: window.currentTabIndex === 0
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 0
+                            }
+
+                            // ==========================================
+                            // GIT Group
+                            // ==========================================
+                            Item {
+                                visible: !window.isSidebarCollapsed
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 18
+                                Layout.topMargin: 8
+                                Layout.bottomMargin: 2
+                                Layout.leftMargin: 14
+                                Layout.rightMargin: 12
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
+                                    Text {
+                                        text: "GIT"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
+                                        color: "#6e7681"
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: "#21262d"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: window.isSidebarCollapsed
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.preferredWidth: 32
+                                height: 1
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                color: "#30363d"
+                            }
+
+                            NavItem {
+                                iconText: "📦"
+                                label: "Repositories"
+                                active: window.currentTabIndex === 1
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 1
+                            }
+
+                            NavItem {
+                                iconText: "🔀"
+                                label: "Pull Requests"
+                                active: window.currentTabIndex === 2
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openPullRequestsPage()
+                            }
+
+                            NavItem {
+                                iconText: "🏷️"
+                                label: "Tagday Explorer"
+                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 1 : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    window.currentTabIndex = 5;
+                                    if (reportsView) reportsView.activeReportTab = 1;
+                                }
+                            }
+
+                            NavItem {
+                                iconText: "🚀"
+                                label: "Release Generation"
+                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 3 : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    window.currentTabIndex = 5;
+                                    if (reportsView) reportsView.activeReportTab = 3;
+                                }
+                            }
+
+                            // ==========================================
+                            // WorkItem Group
+                            // ==========================================
+                            Item {
+                                visible: !window.isSidebarCollapsed
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 18
+                                Layout.topMargin: 8
+                                Layout.bottomMargin: 2
+                                Layout.leftMargin: 14
+                                Layout.rightMargin: 12
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
+                                    Text {
+                                        text: "WORK ITEMS"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
+                                        color: "#6e7681"
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: "#21262d"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: window.isSidebarCollapsed
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.preferredWidth: 32
+                                height: 1
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                color: "#30363d"
+                            }
+
+                            NavItem {
+                                iconText: "👥"
+                                label: "Workload Explorer"
+                                active: window.currentTabIndex === 4
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 4
+                            }
+
+                            NavItem {
+                                iconText: "📋"
+                                label: "Work Items"
+                                active: window.currentTabIndex === 3
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 3
+                            }
+
+                            NavItem {
+                                iconText: "📈"
+                                label: "Activity Reports"
+                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 4 : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    window.currentTabIndex = 5;
+                                    if (reportsView) reportsView.activeReportTab = 4;
+                                }
+                            }
+
+                            // ==========================================
+                            // Storage Group
+                            // ==========================================
+                            Item {
+                                visible: !window.isSidebarCollapsed
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 18
+                                Layout.topMargin: 8
+                                Layout.bottomMargin: 2
+                                Layout.leftMargin: 14
+                                Layout.rightMargin: 12
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
+                                    Text {
+                                        text: "STORAGE"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
+                                        color: "#6e7681"
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: "#21262d"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: window.isSidebarCollapsed
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.preferredWidth: 32
+                                height: 1
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                color: "#30363d"
+                            }
+
+                            NavItem {
+                                iconText: "🗄️"
+                                label: "Storage & Artifacts"
+                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 2 : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.navigateToStorageReport()
+                            }
+
+                            NavItem {
+                                iconText: "📑"
+                                label: "Report"
+                                active: window.currentTabIndex === 5 && (reportsView ? (reportsView.activeReportTab === 0 || reportsView.activeReportTab === 5) : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    window.currentTabIndex = 5;
+                                    if (reportsView) reportsView.activeReportTab = 0;
+                                }
+                            }
+
+                            // ==========================================
+                            // Settings Group
+                            // ==========================================
+                            Item {
+                                visible: !window.isSidebarCollapsed
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 18
+                                Layout.topMargin: 8
+                                Layout.bottomMargin: 2
+                                Layout.leftMargin: 14
+                                Layout.rightMargin: 12
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
+                                    Text {
+                                        text: "SETTINGS"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.8
+                                        color: "#6e7681"
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: "#21262d"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: window.isSidebarCollapsed
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.preferredWidth: 32
+                                height: 1
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 4
+                                color: "#30363d"
+                            }
+
+                            NavItem {
+                                iconText: "⚙️"
+                                label: "Settings Page"
+                                active: window.currentTabIndex === 6
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 6
+                            }
+
+                            NavItem {
+                                iconText: "🔤"
+                                label: "Font"
+                                badgeText: backend ? backend.fontSizeMode.toUpperCase() : "M"
+                                active: false
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    if (backend) {
+                                        var cur = backend.fontSizeMode;
+                                        var next = "medium";
+                                        if (cur === "small") next = "medium";
+                                        else if (cur === "medium") next = "large";
+                                        else if (cur === "large") next = "xlarge";
+                                        else if (cur === "xlarge") next = "small";
+                                        backend.setFontSizeMode(next);
+                                    }
+                                }
+                            }
+
+                            NavItem {
+                                iconText: "⏱️"
+                                label: "Sync Settings"
+                                badgeText: backend && backend.autoSyncEnabled ? "AUTO" : ""
+                                active: false
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: {
+                                    window.currentTabIndex = 6;
+                                }
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 8
+                            }
+                        }
                     }
 
                     // ==========================================

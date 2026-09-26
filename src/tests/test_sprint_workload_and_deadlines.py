@@ -295,6 +295,11 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
 
     def test_workload_matrix_overdue_only_filter(self):
         from src.gui.backend import DevOpsBackend
+        from datetime import date
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+
         backend = DevOpsBackend()
         backend._work_items = [
             {
@@ -303,8 +308,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "type": "Requirement",
                 "state": "Active",
                 "assigned_to": "Alice",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-08-01",
                 "urgency_status": "overdue",
             },
@@ -314,8 +320,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Bob",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-09-30",
                 "urgency_status": "future",
             }
@@ -545,6 +552,10 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
 
     def test_workload_matrix_ignores_epics_and_features(self):
         from src.gui.backend import DevOpsBackend
+        from datetime import date
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
 
         backend = DevOpsBackend()
         backend._work_items = [
@@ -554,9 +565,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "type": "Epic",
                 "state": "Active",
                 "assigned_to": "Carol",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "sprint_week_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-08-01",
                 "urgency_status": "overdue",
             },
@@ -566,9 +577,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "type": "Feature",
                 "state": "Active",
                 "assigned_to": "Dave",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "sprint_week_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-08-01",
                 "urgency_status": "overdue",
             },
@@ -578,9 +589,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "type": "User Story",
                 "state": "Active",
                 "assigned_to": "Eve",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "sprint_week_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-08-14",
                 "urgency_status": "none",
             },
@@ -591,9 +602,9 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
                 "state": "Active",
                 "assigned_to": "Eve",
                 "parent_id": 2002,
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "sprint_week_name": "week-2633",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
                 "deadline_str": "2026-08-14",
                 "urgency_status": "none",
             },

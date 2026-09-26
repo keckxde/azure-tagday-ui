@@ -9,7 +9,7 @@ import logging
 import re
 import threading
 import urllib.parse
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from PySide6.QtCore import QObject, Signal, Slot, Property, QTimer
 
 # Ensure scripts/py is in sys.path
@@ -45,7 +45,12 @@ class QtLogHandler(logging.Handler):
             return
         if record.name.startswith("gui.qt_log"):
             return
-        self._in_emit = True
+        try:
+            from shiboken6 import isValid
+            if not isValid(self.emitter):
+                return
+        except Exception:
+            pass
         try:
             msg = self.format(record)
             ts = datetime.now().strftime("%H:%M:%S")
@@ -56,7 +61,8 @@ class QtLogHandler(logging.Handler):
                 lvl = "ERROR"
             else:
                 lvl = "INFO"
-            self.emitter.recordReady.emit(ts, lvl, record.name, msg)
+            if self.emitter is not None:
+                self.emitter.recordReady.emit(ts, lvl, record.name, msg)
         except Exception:
             pass
         finally:
@@ -235,6 +241,7 @@ class DevOpsBackend(QObject):
     progressChanged = Signal()
     connectionLost = Signal(str)            # error description on repository server disconnect
     tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
+    reportsDirChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -285,9 +292,16 @@ class DevOpsBackend(QObject):
         self._log_emitter = QtLogEmitter()
         self._log_emitter.recordReady.connect(self._on_incoming_log_record)
 
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, QtLogHandler):
+                try:
+                    root_logger.removeHandler(h)
+                except Exception:
+                    pass
+
         self._qt_log_handler = QtLogHandler(self._log_emitter)
         self._qt_log_handler.setFormatter(logging.Formatter("%(message)s"))
-        root_logger = logging.getLogger()
         if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
             root_logger.setLevel(logging.INFO)
         root_logger.addHandler(self._qt_log_handler)
@@ -326,7 +340,12 @@ class DevOpsBackend(QObject):
         self._is_pr_titles_patched = False
         self._tagday_data = {}
         self._storage_data = {}
+        self._last_week_activity = {}
+        self._current_week_planned = {}
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
+        self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
+        if self._reports_dir:
+            devops_helper.BASE_FOLDER = self._reports_dir
         self._info_handler = None
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
 
@@ -338,6 +357,9 @@ class DevOpsBackend(QObject):
             cfg = _load_user_settings()
             if cfg.get("custom_deadline_field"):
                 self._custom_deadline_field = cfg["custom_deadline_field"]
+            if cfg.get("reports_dir"):
+                self._reports_dir = cfg["reports_dir"]
+                devops_helper.BASE_FOLDER = self._reports_dir
             custom_db = cfg.get("db_path")
             if custom_db and os.path.exists(custom_db):
                 self._db_path = os.path.abspath(custom_db)
@@ -392,14 +414,14 @@ class DevOpsBackend(QObject):
                 self._stats["project_name"] = p_name
             if db_cfg.get("AZURE_PERSONAL_ACCESS_TOKEN"):
                 devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = db_cfg["AZURE_PERSONAL_ACCESS_TOKEN"]
-            if db_cfg.get("WORK_ITEM_DEADLINE_FIELD"):
-                self._custom_deadline_field = db_cfg["WORK_ITEM_DEADLINE_FIELD"]
+            if db_cfg.get("WORK_ITEM_DEADLINE_FIELD") or db_cfg.get("custom_deadline_field"):
+                self._custom_deadline_field = db_cfg.get("WORK_ITEM_DEADLINE_FIELD") or db_cfg.get("custom_deadline_field")
             if db_cfg.get("bug_behavior"):
                 self._bug_hierarchy_mode = db_cfg["bug_behavior"]
-            if db_cfg.get("AZURE_TEAM"):
-                self._tfs_team_name = db_cfg["AZURE_TEAM"]
-            if db_cfg.get("SPRINT_URL_TEMPLATE"):
-                self._sprint_url_template = db_cfg["SPRINT_URL_TEMPLATE"]
+            if db_cfg.get("AZURE_TEAM") or db_cfg.get("tfs_team_name"):
+                self._tfs_team_name = db_cfg.get("AZURE_TEAM") or db_cfg.get("tfs_team_name")
+            if db_cfg.get("SPRINT_URL_TEMPLATE") or db_cfg.get("sprint_url_template"):
+                self._sprint_url_template = db_cfg.get("SPRINT_URL_TEMPLATE") or db_cfg.get("sprint_url_template")
             if "AUTO_SYNC_ENABLED" in db_cfg:
                 self._auto_sync_enabled = str(db_cfg["AUTO_SYNC_ENABLED"]).lower() in ("true", "1", "yes")
             if "AUTO_SYNC_INTERVAL_MINUTES" in db_cfg:
@@ -421,6 +443,9 @@ class DevOpsBackend(QObject):
                 devops_helper.BUILD_ARTIFACTS_MD = db_cfg["BUILD_ARTIFACTS_MD"]
             if "BUILD_ARTIFACTS_CSV" in db_cfg:
                 devops_helper.BUILD_ARTIFACTS_CSV = db_cfg["BUILD_ARTIFACTS_CSV"]
+            if db_cfg.get("REPORTS_DIR") or db_cfg.get("reports_dir") or db_cfg.get("BASE_FOLDER") or db_cfg.get("base_folder"):
+                self._reports_dir = db_cfg.get("REPORTS_DIR") or db_cfg.get("reports_dir") or db_cfg.get("BASE_FOLDER") or db_cfg.get("base_folder")
+                devops_helper.BASE_FOLDER = self._reports_dir
             if "RECENT_DELAY" in db_cfg:
                 try:
                     devops_helper.RECENT_DELAY = int(db_cfg["RECENT_DELAY"])
@@ -775,6 +800,14 @@ class DevOpsBackend(QObject):
     def stats(self):
         return self._stats
 
+    @Property(dict, notify=statsChanged)
+    def lastWeekActivity(self):
+        return self._last_week_activity
+
+    @Property(dict, notify=statsChanged)
+    def currentWeekPlanned(self):
+        return self._current_week_planned
+
     @Property(list, notify=repositoriesChanged)
     def repositories(self):
         return self._repositories
@@ -1078,13 +1111,21 @@ class DevOpsBackend(QObject):
     def storageData(self):
         return self._storage_data
 
+    @Property(str, notify=reportsDirChanged)
+    def reportsDir(self):
+        return self._reports_dir or ""
+
+    @Property(str, notify=reportsDirChanged)
+    def effectiveReportsDir(self):
+        return self.get_effective_reports_dir()
+
     @Property(str, notify=statsChanged)
     def revisionFilePath(self):
-        return os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        return os.path.join(self.get_effective_reports_dir(), devops_helper.REVISION_FILE_MD)
 
     @Property(str, notify=statsChanged)
     def tagdayFilePath(self):
-        return os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD)
+        return os.path.join(self.get_effective_reports_dir(), devops_helper.TAGDAY_FILE_MD)
 
     @Property(list, notify=syncLogsChanged)
     def syncLogs(self):
@@ -1186,6 +1227,11 @@ class DevOpsBackend(QObject):
     @Property(list, notify=milestonesChanged)
     def milestones(self):
         return self.get_milestones()
+
+    @Property(list, notify=milestonesChanged)
+    def comingMilestones(self):
+        """Returns configured milestones starting from the current week sorted ascending by target date."""
+        return self.get_coming_milestones()
 
     @Property(list, notify=milestoneCategoriesChanged)
     def milestoneCategories(self):
@@ -1764,25 +1810,7 @@ class DevOpsBackend(QObject):
         # 4. Storage / Artifacts Data
         import generate_artifacts_report
         artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
-        if artifacts:
-            storage_metrics = generate_artifacts_report.calculate_metrics(artifacts)
-            storage_data = {
-                "total_builds": storage_metrics.get("total_builds", 0),
-                "total_artifacts": storage_metrics.get("total_artifacts", 0),
-                "active_artifacts_count": storage_metrics.get("active_artifacts_count", 0),
-                "deleted_artifacts_count": storage_metrics.get("deleted_artifacts_count", 0),
-                "total_size_gb": f"{storage_metrics.get('total_size_gb', 0.0):.2f}",
-                "active_size_gb": f"{storage_metrics.get('active_size_gb', 0.0):.2f}",
-                "deleted_size_gb": f"{storage_metrics.get('deleted_size_gb', 0.0):.2f}",
-                "artifacts_list": artifacts[:100],
-            }
-        else:
-            storage_data = {
-                "total_builds": 0, "total_artifacts": 0,
-                "active_artifacts_count": 0, "deleted_artifacts_count": 0,
-                "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
-                "artifacts_list": []
-            }
+        storage_data = self._build_storage_payload(artifacts)
 
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
@@ -1898,10 +1926,15 @@ class DevOpsBackend(QObject):
         prs_completed_count = sum(1 for p in sorted_prs if p.get("status") == "completed")
         prs_abandoned_count = sum(1 for p in sorted_prs if p.get("status") == "abandoned")
 
+        ignored_wi_count = sum(1 for w in sorted_wis if not w.get("deleted") and w.get("is_ignored"))
+        to_be_investigated_count = sum(1 for w in sorted_wis if not w.get("deleted") and w.get("is_to_be_investigated"))
+        active_valid_wi_count = sum(1 for w in sorted_wis if not w.get("deleted") and not w.get("is_ignored") and w.get("state", "").lower() not in ("closed", "done", "resolved", "completed", "removed", "cut"))
+
         stats = {
             "repos_count": len(sorted_repos),
             "pending_repos_count": pending_repos_count,
             "untagged_prs_repos_count": untagged_prs_repos_count,
+            "pending_releases_count": untagged_prs_repos_count,
             "unmerged_branches_repos_count": unmerged_branches_repos_count,
             "latest_stable_tag": global_latest_stable["tag"] if global_latest_stable else "-",
             "latest_stable_repo": global_latest_stable["repo"] if global_latest_stable else "",
@@ -1911,7 +1944,10 @@ class DevOpsBackend(QObject):
             "latest_unstable_date": global_latest_unstable["date"] if global_latest_unstable else "",
             "work_items_count": len(sorted_wis),
             "active_work_items_count": active_wi_count,
+            "active_valid_work_items_count": active_valid_wi_count,
             "closed_work_items_count": closed_wi_count,
+            "ignored_work_items_count": ignored_wi_count,
+            "to_be_investigated_count": to_be_investigated_count,
             "deleted_work_items_count": deleted_count,
             "prs_count": len(sorted_prs),
             "prs_open_count": prs_open_count,
@@ -1920,6 +1956,203 @@ class DevOpsBackend(QObject):
             "project_name": devops_helper.AZURE_PROJECT_ID or self._stats.get("project_name", "TFS Project"),
             "db_path": self._db_path or "tfs_cache.db",
             "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
+        }
+
+        # 7. Compute Last Week Activities and Current Week Planned
+        now = datetime.now()
+        cur_year, cur_week, _ = now.isocalendar()
+        cur_sprint_name = f"week-{str(cur_year)[-2:]}{cur_week:02d}"
+        cur_s_d, cur_e_d, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
+        cur_range_label = utils.format_sprint_range_label(cur_year, cur_week)
+
+        if cur_week > 1:
+            last_year = cur_year
+            last_week = cur_week - 1
+        else:
+            last_year = cur_year - 1
+            last_week = date(last_year, 12, 28).isocalendar()[1]
+        last_sprint_name = f"week-{str(last_year)[-2:]}{last_week:02d}"
+        last_s_d, last_e_d, last_start_str, last_end_str = utils.get_sprint_date_range(last_year, last_week)
+        last_range_label = utils.format_sprint_range_label(last_year, last_week)
+
+        # Milestones determination for Last Week and Current Week
+        all_milestones = self._cache_db.get_milestones() if self._cache_db else []
+
+        def _get_milestones_for_range(start_str, end_str, y, w):
+            ms_list = []
+            for m in all_milestones:
+                m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+                m_end = (m.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
+                in_range = False
+                if start_str and end_str and m_start and m_end:
+                    if m_start <= end_str and m_end >= start_str:
+                        in_range = True
+                if not in_range and m_start:
+                    try:
+                        s_obj = datetime.strptime(m_start, "%Y-%m-%d").date()
+                        sy, sw, _ = s_obj.isocalendar()
+                        e_obj = datetime.strptime(m_end, "%Y-%m-%d").date()
+                        ey, ew, _ = e_obj.isocalendar()
+                        if (sy, sw) <= (y, w) <= (ey, ew):
+                            in_range = True
+                    except Exception:
+                        pass
+                if not in_range and m_start:
+                    sy, sw, _ = utils.parse_sprint_week(m_start)
+                    ey, ew, _ = utils.parse_sprint_week(m_end)
+                    if sy and ey and (sy, sw) <= (y, w) <= (ey, ew):
+                        in_range = True
+                    elif sy and (sy, sw) == (y, w):
+                        in_range = True
+                if in_range:
+                    ms_list.append(m)
+            return ms_list
+
+        last_week_milestones = _get_milestones_for_range(last_start_str, last_end_str, last_year, last_week)
+        cur_week_milestones = _get_milestones_for_range(cur_start_str, cur_end_str, cur_year, cur_week)
+
+        def _extract_bracket_tag(title):
+            if not title:
+                return ""
+            m = re.search(r"\[([a-zA-Z0-9]{2,6}_[^\]]+)\]", str(title))
+            if m:
+                return f"[{m.group(1)}]"
+            return ""
+
+        def _wi_priority_rank(w):
+            t_low = (w.get("type") or "").lower()
+            is_story = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story")
+            is_bug = t_low in ("bug", "defect", "problem") or w.get("is_bug")
+            is_task = t_low == "task" or w.get("is_task")
+
+            # 1. Type Priority (Stories & Bugs = 0, Tasks = 1, Others = 2)
+            if is_story or is_bug:
+                type_prio = 0
+            elif is_task:
+                type_prio = 1
+            else:
+                type_prio = 2
+
+            # 2. Bracket Notation Priority ([xx_xxx] e.g. OI, MP, SCN, SCEN, SPEC, PA, CS, DOC, PBS)
+            title_str = str(w.get("title") or "")
+            bracket_tag = _extract_bracket_tag(title_str)
+            has_bracket = bool(bracket_tag or w.get("is_prio1") or utils.parse_level3_priority(title_str).get("is_prio1"))
+            bracket_prio = 0 if has_bracket else 1
+
+            # 3. Urgency / Status Priority
+            urg = w.get("urgency_status")
+            if urg in ("overdue", "due_this_week"):
+                urg_prio = 0
+            elif w.get("state") in ("Active", "In Progress", "In Planning", "Doing", "Committed"):
+                urg_prio = 1
+            else:
+                urg_prio = 2
+
+            return (type_prio, bracket_prio, urg_prio, -(w.get("id") or 0))
+
+        # Last Week Closed/Completed PRs
+        last_closed_prs = [
+            p for p in sorted_prs
+            if p.get("closed_date") and (last_start_str <= p.get("closed_date")[:10] <= last_end_str or (last_start_str <= p.get("closed_date") < cur_start_str))
+        ]
+        # Last Week Created PRs
+        last_created_prs = [
+            p for p in sorted_prs
+            if p.get("created_date") and (last_start_str <= p.get("created_date")[:10] <= last_end_str or (last_start_str <= p.get("created_date") < cur_start_str))
+        ]
+        # Last Week Tags
+        last_tags = []
+        try:
+            with self._cache_db._connection() as conn:
+                t_rows = conn.execute("""
+                    SELECT t.name as tag_name, t.commit_date, t.committer_name, r.name as repo_name
+                    FROM tags t
+                    JOIN repositories r ON t.repo_id = r.id
+                    WHERE t.commit_date >= ? AND t.commit_date < ?
+                    ORDER BY t.commit_date DESC
+                """, (last_start_str, cur_start_str)).fetchall()
+                for tr in t_rows:
+                    last_tags.append({
+                        "tag_name": tr["tag_name"],
+                        "commit_date": tr["commit_date"] or "",
+                        "committer": tr["committer_name"] or "",
+                        "repo_name": tr["repo_name"] or "",
+                    })
+        except Exception as e:
+            logger.debug(f"Could not query last week tags: {e}")
+
+        # Last Week Completed / Resolved Work Items (excluding ignored items)
+        last_completed_wis_all = [
+            w for w in sorted_wis
+            if not w.get("deleted")
+            and not w.get("is_ignored")
+            and w.get("state") in ("Closed", "Resolved", "Done", "Completed")
+            and (
+                (w.get("changed_date") and last_start_str <= w.get("changed_date")[:10] < cur_start_str)
+                or w.get("sprint_week_name") == last_sprint_name
+            )
+        ]
+        last_completed_wis = sorted(last_completed_wis_all, key=_wi_priority_rank)
+        for w in last_completed_wis:
+            w["bracket_tag"] = _extract_bracket_tag(w.get("title"))
+            t_low = (w.get("type") or "").lower()
+            w["is_story"] = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story", False)
+            w["is_bug"] = t_low in ("bug", "defect", "problem") or w.get("is_bug", False)
+            w["is_task"] = t_low == "task" or w.get("is_task", False)
+
+        last_week_activity = {
+            "sprint_name": last_sprint_name,
+            "range_label": last_range_label,
+            "start_date": last_start_str,
+            "end_date": last_end_str,
+            "closed_prs_count": len(last_closed_prs),
+            "created_prs_count": len(last_created_prs),
+            "tags_count": len(last_tags),
+            "completed_wis_count": len(last_completed_wis),
+            "milestones": last_week_milestones,
+            "milestones_count": len(last_week_milestones),
+            "total_count": len(last_closed_prs) + len(last_tags) + len(last_completed_wis),
+            "closed_prs": last_closed_prs[:8],
+            "tags": last_tags[:8],
+            "completed_wis": last_completed_wis[:8],
+        }
+
+        # Current Week Planned Work Items (excluding ignored items)
+        cur_planned_wis_all = [
+            w for w in sorted_wis
+            if not w.get("deleted")
+            and not w.get("is_ignored")
+            and (
+                w.get("sprint_week_name") == cur_sprint_name
+                or w.get("urgency_status") == "due_this_week"
+                or (w.get("target_date") and cur_start_str <= w.get("target_date")[:10] <= cur_end_str)
+            )
+        ]
+        cur_planned_wis = sorted(cur_planned_wis_all, key=_wi_priority_rank)
+        for w in cur_planned_wis:
+            w["bracket_tag"] = _extract_bracket_tag(w.get("title"))
+            t_low = (w.get("type") or "").lower()
+            w["is_story"] = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story", False)
+            w["is_bug"] = t_low in ("bug", "defect", "problem") or w.get("is_bug", False)
+            w["is_task"] = t_low == "task" or w.get("is_task", False)
+
+        cur_active_prs = [p for p in sorted_prs if p.get("status") == "active"]
+        due_this_week_count = sum(1 for w in cur_planned_wis if w.get("urgency_status") == "due_this_week")
+
+        current_week_planned = {
+            "sprint_name": cur_sprint_name,
+            "range_label": cur_range_label,
+            "start_date": cur_start_str,
+            "end_date": cur_end_str,
+            "planned_wis_count": len(cur_planned_wis),
+            "due_this_week_count": due_this_week_count,
+            "active_prs_count": len(cur_active_prs),
+            "pending_releases_count": untagged_prs_repos_count,
+            "milestones": cur_week_milestones,
+            "milestones_count": len(cur_week_milestones),
+            "total_count": len(cur_planned_wis) + len(cur_active_prs),
+            "planned_wis": cur_planned_wis[:8],
+            "active_prs": cur_active_prs[:8],
         }
 
         return {
@@ -1932,6 +2165,8 @@ class DevOpsBackend(QObject):
             "storage_data": storage_data,
             "stats": stats,
             "shift_summary_map": shift_summary_map,
+            "last_week_activity": last_week_activity,
+            "current_week_planned": current_week_planned,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -1946,6 +2181,8 @@ class DevOpsBackend(QObject):
         self._tagday_data = data.get("tagday_data", {})
         self._storage_data = data.get("storage_data", {})
         self._shift_summary_map = data.get("shift_summary_map", {})
+        self._last_week_activity = data.get("last_week_activity", {})
+        self._current_week_planned = data.get("current_week_planned", {})
         if "stats" in data:
             self._stats = data["stats"]
 
@@ -1957,6 +2194,7 @@ class DevOpsBackend(QObject):
         self.storageDataChanged.emit()
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
+        self.milestonesChanged.emit()
 
     @Slot()
     def startup_load_async(self):
@@ -2083,6 +2321,107 @@ class DevOpsBackend(QObject):
 
         self._run_worker(_work, "Running full sync...")
 
+
+    def _build_storage_payload(self, artifacts):
+        """Helper to build storage data metrics and group artifacts by repository with counts and sizes."""
+        if not artifacts:
+            return {
+                "total_builds": 0, "total_artifacts": 0,
+                "active_artifacts_count": 0, "deleted_artifacts_count": 0,
+                "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
+                "artifacts_list": [],
+                "artifacts_by_repo": []
+            }
+
+        import generate_artifacts_report
+        metrics = generate_artifacts_report.calculate_metrics(artifacts)
+
+        # Group artifacts by repository
+        by_repo = {}
+        for a in artifacts:
+            # Format build date nicely (e.g. YYYY-MM-DD HH:MM)
+            raw_date = a.get("finish_time") or a.get("start_time") or a.get("queue_time") or ""
+            date_str = ""
+            if raw_date:
+                s = str(raw_date).replace("T", " ").replace("Z", "").strip()
+                if "." in s:
+                    s = s.split(".")[0]
+                date_str = s[:16]  # e.g. "2026-09-25 14:30"
+            a["build_date"] = date_str or "-"
+
+            # Format requested_by / owner
+            owner = a.get("requested_by") or ""
+            a["owner"] = owner if owner else "System"
+
+            # Clean branch name
+            branch = a.get("source_branch") or ""
+            a["branch_clean"] = branch.replace("refs/heads/", "") if branch else "-"
+
+            # Size formatting
+            s_mb = a.get("size_mb", 0.0) or 0.0
+            a["size_mb_str"] = f"{s_mb:.2f} MB" if s_mb < 1024 else f"{s_mb / 1024:.2f} GB"
+
+            rname = a.get("repo_name") or "Unknown Repo"
+            if rname not in by_repo:
+                by_repo[rname] = {
+                    "repo_name": rname,
+                    "builds": set(),
+                    "artifacts_count": 0,
+                    "active_count": 0,
+                    "deleted_count": 0,
+                    "total_size_bytes": 0,
+                    "active_size_bytes": 0,
+                    "deleted_size_bytes": 0,
+                    "artifacts": []
+                }
+            grp = by_repo[rname]
+            grp["builds"].add(a.get("build_id"))
+            grp["artifacts_count"] += 1
+            s_bytes = a.get("size_bytes", 0) or 0
+            grp["total_size_bytes"] += s_bytes
+            if a.get("is_deleted"):
+                grp["deleted_count"] += 1
+                grp["deleted_size_bytes"] += s_bytes
+            else:
+                grp["active_count"] += 1
+                grp["active_size_bytes"] += s_bytes
+            grp["artifacts"].append(a)
+
+        repo_groups = []
+        for r in by_repo.values():
+            t_mb = round(r["total_size_bytes"] / (1024 * 1024), 2)
+            act_mb = round(r["active_size_bytes"] / (1024 * 1024), 2)
+            del_mb = round(r["deleted_size_bytes"] / (1024 * 1024), 2)
+            if t_mb >= 1024:
+                size_str = f"{t_mb / 1024:.2f} GB"
+            else:
+                size_str = f"{t_mb:.2f} MB"
+            repo_groups.append({
+                "repo_name": r["repo_name"],
+                "builds_count": len(r["builds"]),
+                "artifacts_count": r["artifacts_count"],
+                "active_count": r["active_count"],
+                "deleted_count": r["deleted_count"],
+                "total_size_mb": t_mb,
+                "active_size_mb": act_mb,
+                "deleted_size_mb": del_mb,
+                "total_size_str": size_str,
+                "artifacts": r["artifacts"]
+            })
+        repo_groups.sort(key=lambda x: x["total_size_mb"], reverse=True)
+
+        return {
+            "total_builds": metrics.get("total_builds", 0),
+            "total_artifacts": metrics.get("total_artifacts", 0),
+            "active_artifacts_count": metrics.get("active_artifacts_count", 0),
+            "deleted_artifacts_count": metrics.get("deleted_artifacts_count", 0),
+            "total_size_gb": f"{metrics.get('total_size_gb', 0.0):.2f}",
+            "active_size_gb": f"{metrics.get('active_size_gb', 0.0):.2f}",
+            "deleted_size_gb": f"{metrics.get('deleted_size_gb', 0.0):.2f}",
+            "artifacts_list": artifacts[:100],
+            "artifacts_by_repo": repo_groups
+        }
+
     @Slot()
     def load_interactive_reports(self, td_raw=None):
         """Loads and parses interactive report metrics and timelines directly from the SQLite database."""
@@ -2099,31 +2438,91 @@ class DevOpsBackend(QObject):
             # 2. Build Artifacts & Storage Interactive Data
             import generate_artifacts_report
             artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
-            if artifacts:
-                metrics = generate_artifacts_report.calculate_metrics(artifacts)
-                self._storage_data = {
-                    "total_builds": metrics.get("total_builds", 0),
-                    "total_artifacts": metrics.get("total_artifacts", 0),
-                    "active_artifacts_count": metrics.get("active_artifacts_count", 0),
-                    "deleted_artifacts_count": metrics.get("deleted_artifacts_count", 0),
-                    "total_size_gb": f"{metrics.get('total_size_gb', 0.0):.2f}",
-                    "active_size_gb": f"{metrics.get('active_size_gb', 0.0):.2f}",
-                    "deleted_size_gb": f"{metrics.get('deleted_size_gb', 0.0):.2f}",
-                    "artifacts_list": artifacts[:100], # Top 100 artifacts
-                }
-            else:
-                self._storage_data = {
-                    "total_builds": 0, "total_artifacts": 0,
-                    "active_artifacts_count": 0, "deleted_artifacts_count": 0,
-                    "total_size_gb": "0.00", "active_size_gb": "0.00", "deleted_size_gb": "0.00",
-                    "artifacts_list": []
-                }
+            self._storage_data = self._build_storage_payload(artifacts)
             self.storageDataChanged.emit()
             self.iterationShiftsChanged.emit()
 
         except Exception as e:
             logger.error(f"Error loading interactive reports data: {e}", exc_info=True)
             self.logMessage.emit(f"Error loading report metrics: {e}")
+
+    def get_effective_reports_dir(self):
+        """Returns the configured reports target folder, or BASE_FOLDER / os.getcwd() by default."""
+        if self._reports_dir and str(self._reports_dir).strip():
+            return os.path.normpath(str(self._reports_dir).strip())
+        if devops_helper.BASE_FOLDER and os.path.isabs(devops_helper.BASE_FOLDER) and devops_helper.BASE_FOLDER != os.getcwd():
+            return os.path.normpath(devops_helper.BASE_FOLDER)
+        return os.getcwd()
+
+    @Slot(str)
+    def setReportsDir(self, path):
+        """Sets the configured target directory for reports and persists it."""
+        clean_path = (path or "").strip()
+        if clean_path:
+            clean_path = os.path.normpath(clean_path)
+        self._reports_dir = clean_path
+        devops_helper.BASE_FOLDER = clean_path if clean_path else os.getcwd()
+
+        cfg = _load_user_settings()
+        cfg["reports_dir"] = clean_path
+        _save_user_settings(cfg)
+
+        if self._cache_db:
+            try:
+                self._cache_db.set_config("REPORTS_DIR", clean_path)
+            except Exception as e:
+                logger.warning(f"Could not persist REPORTS_DIR to SQLite project_config: {e}")
+
+        self.reportsDirChanged.emit()
+        self.settingsChanged.emit()
+        self.statsChanged.emit()
+
+    @Slot(str)
+    def set_reports_dir(self, path):
+        """Snake_case alias for setReportsDir."""
+        self.setReportsDir(path)
+
+    @Slot(result=str)
+    def browse_reports_dir(self):
+        """Opens native directory picker dialog to select reports target directory."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            chosen = QFileDialog.getExistingDirectory(
+                None,
+                "Select Reports Target & Baseline Directory",
+                initial_dir
+            )
+            if chosen:
+                norm = os.path.normpath(chosen)
+                self.setReportsDir(norm)
+                return norm
+            return ""
+        except Exception as e:
+            logger.error(f"Error opening directory picker: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseReportsDir(self):
+        """CamelCase alias for browse_reports_dir."""
+        return self.browse_reports_dir()
+
+    @Slot()
+    def open_reports_folder(self):
+        """Opens the configured reports folder in Windows File Explorer."""
+        folder = self.get_effective_reports_dir()
+        if not os.path.exists(folder):
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except Exception:
+                pass
+        self.open_path_in_explorer(folder)
+
+    @Slot()
+    def open_db_folder(self):
+        """Opens the folder containing the active database or current project in Windows File Explorer."""
+        folder = os.path.dirname(os.path.abspath(self._db_path)) if self._db_path else self.get_effective_reports_dir()
+        self.open_path_in_explorer(folder)
 
     @Slot()
     def generate_tagday_report_async(self):
@@ -2133,14 +2532,16 @@ class DevOpsBackend(QObject):
 
         def _work(worker):
             worker.log_message.emit("Generating Tag Day release notes report...")
+            reports_dir = self.get_effective_reports_dir()
             success = devops_helper.generate_tagday_report(
                 db_path=self._db_path,
-                output_path=os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD),
-                project_id=devops_helper.AZURE_PROJECT_ID
+                output_path=os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD),
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Tag Day report generation returned failure")
-            worker.log_message.emit("Tag Day report generated successfully")
+            worker.log_message.emit(f"Tag Day report generated successfully: {os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD)}")
             return "Tag Day report generated"
 
         self._run_worker(_work, "Generating Tag Day report...")
@@ -2179,12 +2580,14 @@ class DevOpsBackend(QObject):
             # 2. Analyze storage & generate Markdown + CSV reports
             worker.report_progress(85, "Analyzing build artifacts and storage usage...")
             worker.log_message.emit("Analyzing build artifacts and storage usage footprint...")
-            md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD)
-            csv_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_CSV)
+            reports_dir = self.get_effective_reports_dir()
+            md_path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_MD)
+            csv_path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_CSV)
             success = devops_helper.generate_artifacts_report(
                 db_path=self._db_path,
                 md_path=md_path,
-                csv_path=csv_path
+                csv_path=csv_path,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Storage report generation returned failure")
@@ -2203,10 +2606,12 @@ class DevOpsBackend(QObject):
 
         def _work(worker):
             worker.log_message.emit("Generating Release Notes (REVISION.md & REVISION.docx)...")
-            revision_md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+            reports_dir = self.get_effective_reports_dir()
+            revision_md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
             success = devops_helper.generate_revision_report(
                 db_path=self._db_path,
-                revision_md_path=revision_md_path
+                revision_md_path=revision_md_path,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Revision report generation returned failure")
@@ -2218,7 +2623,15 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_revision_file(self):
         """Opens REVISION.md in default editor or viewer."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
+        if not os.path.exists(path):
+            path = os.path.join(reports_dir, "doc", "04_Development", "REVISION.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "REVISION.md")
+
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -2227,8 +2640,14 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_revision_docx(self):
         """Opens REVISION.docx in Microsoft Word or default viewer."""
-        md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
         docx_path = os.path.splitext(md_path)[0] + ".docx"
+        if not os.path.exists(docx_path):
+            docx_path = os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.docx")
+        if not os.path.exists(docx_path):
+            docx_path = os.path.join(os.getcwd(), "REVISION.docx")
+
         if os.path.exists(docx_path):
             self.open_path_in_explorer(docx_path)
         else:
@@ -2238,7 +2657,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_tagday_file(self):
         """Opens TAGDAY.md in default editor."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.TAGDAY_FILE_MD)
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -2247,11 +2669,14 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_storage_report_file(self):
         """Opens generated storage report markdown in default editor."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_MD)
         if not os.path.exists(path):
-            path = os.path.join(devops_helper.BASE_FOLDER, "doc", "04_Development", "test_report.md")
+            path = os.path.join(reports_dir, "doc", "04_Development", "test_report.md")
         if not os.path.exists(path):
-            path = os.path.join(devops_helper.BASE_FOLDER, "test_report.md")
+            path = os.path.join(reports_dir, "test_report.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_ARTIFACTS_MD)
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -2429,51 +2854,6 @@ class DevOpsBackend(QObject):
         Level 1, Level 2, priority, grouping, completion status, search query, or milestone.
         lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
-        sprint_keys = set()
-        for wi in self._work_items:
-            t_low = (wi.get("type") or "").lower()
-            if t_low in ("epic", "feature"):
-                continue
-            s_name = wi.get("sprint_week_name")
-            if s_name:
-                y, w, b_name = utils.parse_sprint_week(s_name)
-                if y and w and b_name:
-                    sprint_keys.add((y, w, b_name))
-            else:
-                iter_n = wi.get("iteration_name") or wi.get("iteration_path") or ""
-                y, w, b_name = utils.parse_sprint_week(iter_n)
-                if y and w and b_name:
-                    sprint_keys.add((y, w, b_name))
-
-        if self._cache_db:
-            try:
-                cached_iters = self._cache_db.get_cached_iterations(project=self.selectedProject)
-                for ci in cached_iters:
-                    cname = ci.get("iteration_name")
-                    if cname:
-                        y, w, b_name = utils.parse_sprint_week(cname)
-                        if y and w and b_name:
-                            sprint_keys.add((y, w, b_name))
-            except Exception:
-                pass
-
-        if not sprint_keys:
-            adv = utils.generate_weekly_iterations_advance(weeks_count=horizon_weeks)
-            for it in adv:
-                sprint_keys.add((it["year"], it["week"], it["sprint_name"]))
-
-        # Sort sprints chronologically ascending
-        sorted_sprints = sorted(list(sprint_keys), key=lambda x: (x[0], x[1]))
-
-        # Select the window: take last horizon_weeks sprints, then shift left by lookback_weeks
-        if horizon_weeks <= 0:
-            horizon_weeks = 4
-        lookback_weeks = max(0, int(lookback_weeks or 0))
-        end_idx = len(sorted_sprints) - lookback_weeks
-        start_idx = max(0, end_idx - horizon_weeks)
-        end_idx = max(start_idx, end_idx)  # guard
-        target_sprints = sorted_sprints[start_idx:end_idx]
-
         # Current date and ISO week determination
         today_obj = date.today()
         curr_y, curr_w, curr_wd = today_obj.isocalendar()
@@ -2482,6 +2862,54 @@ class DevOpsBackend(QObject):
         curr_date_full = today_obj.strftime("%A, %B %d, %Y")
         curr_sprint_name = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
         curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
+
+        if horizon_weeks <= 0:
+            horizon_weeks = 4
+        lookback_weeks = max(0, int(lookback_weeks or 0))
+
+        # Anchor window: Default view (lookback_weeks=0) starts with the previous week (curr_w - 1)
+        # and contains the current week (curr_w).
+        # Shifting lookback_weeks > 0 navigates further back into history.
+        curr_monday = date.fromisocalendar(curr_y, curr_w, 1)
+        base_start_monday = curr_monday - timedelta(weeks=1)
+        start_monday = base_start_monday - timedelta(weeks=lookback_weeks)
+
+        # Collect project sprint metadata to assist navigation
+        all_sprint_weeks = {}
+        total_all_sprint_items = 0
+        for wi in self._work_items:
+            if wi.get("deleted"):
+                continue
+            t_low = (wi.get("type") or "").lower()
+            if t_low in ("epic", "feature"):
+                continue
+            s_name = wi.get("sprint_week_name")
+            if not s_name:
+                _, _, s_name = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
+            if s_name:
+                sy, sw, _ = utils.parse_sprint_week(s_name)
+                if sy and sw:
+                    all_sprint_weeks[(sy, sw)] = all_sprint_weeks.get((sy, sw), 0) + 1
+                    total_all_sprint_items += 1
+
+        latest_active_sprint_name = ""
+        latest_active_sprint_label = ""
+        suggested_lookback_offset = 0
+        if all_sprint_weeks:
+            max_s_key = max(all_sprint_weeks.keys())
+            max_y, max_w = max_s_key
+            latest_active_sprint_name = f"week-{str(max_y)[-2:]}{max_w:02d}"
+            latest_active_sprint_label = f"W{max_w:02d}"
+            latest_monday = date.fromisocalendar(max_y, max_w, 1)
+            target_start = latest_monday - timedelta(weeks=max(0, horizon_weeks - 2))
+            diff_w = int(round((base_start_monday - target_start).days / 7.0))
+            suggested_lookback_offset = max(0, diff_w)
+
+        adv_iters = utils.generate_weekly_iterations_advance(
+            start_date_or_week=start_monday,
+            weeks_count=horizon_weeks
+        )
+        target_sprints = [(it["year"], it["week"], it["sprint_name"]) for it in adv_iters]
 
         # Load configured milestones for sprint header and work item alignment
         all_milestones = self.get_milestones()
@@ -2952,6 +3380,10 @@ class DevOpsBackend(QObject):
             "assignees_count": len(assignee_rows),
             "bug_hierarchy_mode": self._bug_hierarchy_mode,
             "lookback_weeks": lookback_weeks,
+            "total_all_sprint_items": total_all_sprint_items,
+            "latest_active_sprint_name": latest_active_sprint_name,
+            "latest_active_sprint_label": latest_active_sprint_label,
+            "suggested_lookback_offset": suggested_lookback_offset,
         }
 
     def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None):
@@ -3259,10 +3691,11 @@ class DevOpsBackend(QObject):
         elif not clean_sprint:
             clean_sprint = "latest"
 
+        reports_dir = self.get_effective_reports_dir()
         if not md_path:
-            md_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
+            md_path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
         if not csv_path:
-            csv_path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.csv")
+            csv_path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.csv")
 
         def _work(worker):
             worker.log_message.emit(f"Generating Sprint Report for '{clean_sprint}'...")
@@ -3290,7 +3723,10 @@ class DevOpsBackend(QObject):
             clean_sprint = self.availableSprintList[0]
         elif not clean_sprint:
             clean_sprint = "latest"
-        path = os.path.join(devops_helper.BASE_FOLDER, f"SPRINT_REPORT_{clean_sprint}.md")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), f"SPRINT_REPORT_{clean_sprint}.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -3832,8 +4268,9 @@ class DevOpsBackend(QObject):
             return
 
         r_stat = None if review_filter in ("", "all") else review_filter.strip().lower()
-        md_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
-        csv_path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+        reports_dir = self.get_effective_reports_dir()
+        md_path = os.path.join(reports_dir, "RESCHEDULING_REPORT.md")
+        csv_path = os.path.join(reports_dir, "RESCHEDULING_REPORT.csv")
 
         def _work(worker):
             worker.log_message.emit("Generating Sprint Rescheduling & Moved Items Report...")
@@ -3852,7 +4289,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_rescheduling_report_markdown(self):
         """Opens generated rescheduling report markdown file."""
-        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.md")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, "RESCHEDULING_REPORT.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "RESCHEDULING_REPORT.md")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -3861,7 +4301,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_rescheduling_report_csv(self):
         """Opens generated rescheduling report CSV file."""
-        path = os.path.join(devops_helper.BASE_FOLDER, "RESCHEDULING_REPORT.csv")
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, "RESCHEDULING_REPORT.csv")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "RESCHEDULING_REPORT.csv")
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -4281,6 +4724,65 @@ class DevOpsBackend(QObject):
         if self._cache_db:
             return self._cache_db.get_milestones()
         return []
+
+    @Slot(result=list)
+    def get_coming_milestones(self):
+        """Returns configured milestones starting from the current week sorted ascending by target date."""
+        all_milestones = self.get_milestones()
+        cur_year, cur_week, _ = datetime.now().isocalendar()
+        _, _, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
+
+        coming = []
+        today = datetime.now().date()
+        for m in all_milestones:
+            m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+            m_end = (m.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
+            is_coming = False
+            if cur_start_str and m_end:
+                if m_end >= cur_start_str:
+                    is_coming = True
+            elif m_start:
+                try:
+                    s_obj = datetime.strptime(m_start, "%Y-%m-%d").date()
+                    sy, sw, _ = s_obj.isocalendar()
+                    if (sy, sw) >= (cur_year, cur_week):
+                        is_coming = True
+                except Exception:
+                    pass
+
+            if is_coming:
+                m_copy = dict(m)
+                is_cw = False
+                if cur_start_str and cur_end_str and m_start and m_end:
+                    if m_start <= cur_end_str and m_end >= cur_start_str:
+                        is_cw = True
+                m_copy["is_current_week"] = is_cw
+
+                if m_start:
+                    try:
+                        t_d = datetime.strptime(m_start, "%Y-%m-%d").date()
+                        diff_days = (t_d - today).days
+                        m_copy["days_until"] = diff_days
+                        if is_cw:
+                            m_copy["relative_label"] = "This week"
+                        elif 0 < diff_days <= 7:
+                            m_copy["relative_label"] = "Next week"
+                        elif diff_days > 7:
+                            m_copy["relative_label"] = f"In {diff_days}d"
+                        elif diff_days == 0:
+                            m_copy["relative_label"] = "Today"
+                        else:
+                            m_copy["relative_label"] = m_start
+                    except Exception:
+                        m_copy["days_until"] = 0
+                        m_copy["relative_label"] = m_start
+                else:
+                    m_copy["days_until"] = 0
+                    m_copy["relative_label"] = ""
+                coming.append(m_copy)
+
+        coming.sort(key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        return coming
 
     @Slot(result=list)
     def getAvailableTeams(self):
@@ -5289,6 +5791,176 @@ class DevOpsBackend(QObject):
         """CamelCase alias for import_repo_categories."""
         return self.import_repo_categories(file_path, merge)
 
+    @property
+    def db(self):
+        """Cache database instance property."""
+        return self._cache_db
+
+    @db.setter
+    def db(self, val):
+        self._cache_db = val
+        if val and hasattr(val, "db_path"):
+            self._db_path = val.db_path
+
+    @Slot(result=str)
+    def browse_user_settings_export_path(self):
+        """Opens native file dialog to select save destination for user settings export (.yaml, .json)."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            proj_slug = (self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or "settings").replace(" ", "_").lower()
+            default_path = os.path.join(initial_dir, f"user_settings_{proj_slug}_{timestamp}.yaml")
+            file_path, _ = QFileDialog.getSaveFileName(
+                None, "Export User Settings & Configurations", default_path,
+                "YAML Configuration (*.yaml *.yml);;JSON Configuration (*.json);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening user settings export dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseUserSettingsExportPath(self):
+        """CamelCase alias for browse_user_settings_export_path."""
+        return self.browse_user_settings_export_path()
+
+    @Slot(result=str)
+    def browse_user_settings_import_file(self):
+        """Opens native file dialog to select a YAML or JSON user settings file to import."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Select User Settings File to Import", initial_dir,
+                "User Settings Files (*.yaml *.yml *.json);;YAML Files (*.yaml *.yml);;JSON Files (*.json);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening user settings import dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseUserSettingsImportFile(self):
+        """CamelCase alias for browse_user_settings_import_file."""
+        return self.browse_user_settings_import_file()
+
+    @Slot(str, "QVariantList", result=dict)
+    @Slot(str, str, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def export_all_user_settings(self, file_path="", sections_json=None, selected_sections=None):
+        """Exports user settings to YAML or JSON file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_user_settings_export_path()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+
+        sections = selected_sections if selected_sections is not None else sections_json
+        if isinstance(sections, str) and sections:
+            try:
+                sections = json.loads(sections)
+            except Exception:
+                pass
+
+        try:
+            data = self._cache_db.export_user_settings(include_sections=sections)
+            data["project_name"] = self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or ""
+            ok = utils.export_user_settings_to_file(data, file_path)
+            if ok:
+                msg = f"User settings exported successfully to: {file_path}"
+                logger.info(msg)
+                self.logMessage.emit(f"✅ {msg}")
+                return {"success": True, "file_path": file_path, "message": msg}
+            else:
+                err = f"Failed to write settings file: {file_path}"
+                self.logMessage.emit(f"❌ {err}")
+                return {"success": False, "error": err}
+        except Exception as e:
+            err = f"Error exporting user settings: {e}"
+            logger.error(err, exc_info=True)
+            self.logMessage.emit(f"❌ {err}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, "QVariantList", result=dict)
+    @Slot(str, str, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def exportAllUserSettings(self, file_path="", sections_json=None, selected_sections=None):
+        """CamelCase alias for export_all_user_settings."""
+        return self.export_all_user_settings(file_path=file_path, sections_json=sections_json, selected_sections=selected_sections)
+
+    @Slot(str, bool, "QVariantList", result=dict)
+    @Slot(str, bool, str, result=dict)
+    @Slot(str, bool, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def import_all_user_settings(self, file_path="", clear_existing=False, sections_json=None, selected_sections=None):
+        """Imports user settings from YAML or JSON file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_user_settings_import_file()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+
+        sections = selected_sections if selected_sections is not None else sections_json
+        if isinstance(sections, str) and sections:
+            try:
+                sections = json.loads(sections)
+            except Exception:
+                pass
+
+        try:
+            raw_data = utils.import_user_settings_from_file(file_path)
+            if not raw_data:
+                err = f"Failed to read or parse settings from: {file_path}"
+                self.logMessage.emit(f"❌ {err}")
+                return {"success": False, "error": err}
+
+            summary = self._cache_db.import_user_settings(raw_data, clear_existing=clear_existing, include_sections=sections)
+            
+            # Reload backend state from DB
+            self._load_project_config_from_db(self._cache_db)
+            self._recalculate_repo_categories()
+            self._enrich_work_items_with_milestones()
+            
+            # Emit signals so all views update immediately
+            self.settingsChanged.emit()
+            self.milestonesChanged.emit()
+            self.milestoneCategoriesChanged.emit()
+            self.repoCategoriesChanged.emit()
+            self.repositoriesChanged.emit()
+            self.changeFiltersChanged.emit()
+            self.tagCategoriesChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.workItemsChanged.emit()
+            self.reportsDirChanged.emit()
+            self.statsChanged.emit()
+
+            sec_str = ", ".join(summary.get("imported_sections", [])) or "all selected"
+            msg = f"Imported user settings from {os.path.basename(file_path)} ({sec_str})."
+            logger.info(msg)
+            self.logMessage.emit(f"✅ {msg}")
+            summary["message"] = msg
+            return summary
+        except Exception as e:
+            err = f"Error importing user settings: {e}"
+            logger.error(err, exc_info=True)
+            self.logMessage.emit(f"❌ {err}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, bool, "QVariantList", result=dict)
+    @Slot(str, bool, str, result=dict)
+    @Slot(str, bool, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def importAllUserSettings(self, file_path="", clear_existing=False, sections_json=None, selected_sections=None):
+        """CamelCase alias for import_all_user_settings."""
+        return self.import_all_user_settings(file_path=file_path, clear_existing=clear_existing, sections_json=sections_json, selected_sections=selected_sections)
+
     @Slot(str, str, result=bool)
     def save_change_filters(self, repo_category_patterns_json, branch_patterns_json):
         """
@@ -5558,7 +6230,7 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_tagday_markdown_report(self):
         """Opens the generated Tag Day Markdown report file in the default viewer/editor."""
-        output_path = os.path.normpath(os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD))
+        output_path = os.path.normpath(os.path.join(self.get_effective_reports_dir(), devops_helper.TAGDAY_FILE_MD))
         if os.path.exists(output_path):
             self.open_path_in_explorer(output_path)
             return

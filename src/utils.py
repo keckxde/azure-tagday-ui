@@ -148,6 +148,8 @@ def GetEnvVariable(name, default=None, prefer_env=False):
                 "AZURE_PROJECT_ID": cfg.get("project_id") or cfg.get("project_name"),
                 "AZURE_TEAM": cfg.get("team") or cfg.get("tfs_team_name"),
                 "WORK_ITEM_DEADLINE_FIELD": cfg.get("custom_deadline_field"),
+                "REPORTS_DIR": cfg.get("reports_dir") or cfg.get("base_folder"),
+                "BASE_FOLDER": cfg.get("reports_dir") or cfg.get("base_folder"),
             }
             if mapping.get(name):
                 return mapping[name]
@@ -166,6 +168,20 @@ def GetEnvVariable(name, default=None, prefer_env=False):
         return default
 
     return ""
+
+
+def get_reports_dir(default=None):
+    """
+    Returns the configured target directory for reading baseline reports and writing generated reports.
+    Checks database / user configuration ('REPORTS_DIR', 'reports_dir', 'BASE_FOLDER', 'base_folder'),
+    falling back to environment variables, and defaulting to default or os.getcwd().
+    """
+    configured = GetEnvVariable("REPORTS_DIR") or GetEnvVariable("BASE_FOLDER")
+    if configured and str(configured).strip():
+        return os.path.normpath(str(configured).strip())
+    if default is not None:
+        return os.path.normpath(default)
+    return os.getcwd()
         
 
 def parse_iso_datetime(date_str):
@@ -882,6 +898,84 @@ def import_repo_categories_from_file(file_path):
     else:
         log.error(f"Unsupported import file format: {ext}")
         return None
+
+
+def export_user_settings_to_file(settings_data, file_path):
+    """
+    Exports full or partial user settings dictionary to a YAML or JSON file.
+
+    Args:
+        settings_data (dict): User settings dictionary.
+        file_path (str): Target output file path (.yaml, .yml, .json).
+
+    Returns:
+        bool: True if export succeeded, False otherwise.
+    """
+    if not settings_data or not isinstance(settings_data, dict) or not file_path:
+        return False
+
+    ext = os.path.splitext(file_path)[1].lower()
+    parent_dir = os.path.dirname(os.path.abspath(file_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    if ext in [".yaml", ".yml"]:
+        try:
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(settings_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings to YAML {file_path}: {e}")
+            return False
+    elif ext == ".json":
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings to JSON {file_path}: {e}")
+            return False
+    else:
+        # Default to YAML export
+        try:
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(settings_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings {file_path}: {e}")
+            return False
+
+
+def import_user_settings_from_file(file_path):
+    """
+    Imports user settings from a YAML or JSON file.
+
+    Args:
+        file_path (str): Path to input file (.yaml, .yml, .json).
+
+    Returns:
+        dict: Parsed user settings dictionary, or empty dict if loading fails.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return {}
+
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if ext == ".json":
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        else:
+            import yaml
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception as e:
+        log.error(f"Failed to import user settings from {file_path}: {e}")
+        return {}
+
 
 
 def categorize_repository(repo_name, config=None, cache_db=None, config_path=None):
@@ -1672,6 +1766,46 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
     is_grouped = bool(l1_pbs and l2_pbs)
     grouping_status = "grouped" if is_grouped else "ungrouped"
 
+    # Category classification rules:
+    # 1. Epics that do not follow [<ID>] <Title> pattern and all their children -> "ignored"
+    # 2. Features that do not follow [<ID>] <Title> pattern and all their children -> "ignored"
+    # 3. Unparented User Stories, Bugs and Tasks -> "to be investigated"
+    # Otherwise -> "standard"
+    category = "standard"
+    category_reason = ""
+
+    if curr_level == 1:
+        # Epic
+        curr_pbs, _, _ = parse_pbs_tag(curr_title)
+        if not curr_pbs:
+            category = "ignored"
+            category_reason = "Epic does not follow [<ID>] <Title> pattern"
+    elif curr_level == 2:
+        # Feature
+        curr_pbs, _, _ = parse_pbs_tag(curr_title)
+        if l1_item and not l1_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Epic does not follow [<ID>] <Title> pattern"
+        elif not curr_pbs:
+            category = "ignored"
+            category_reason = "Feature does not follow [<ID>] <Title> pattern"
+    elif curr_level in (3, 4):
+        # User Story, Requirement, Bug, Task
+        if l1_item and not l1_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Epic does not follow [<ID>] <Title> pattern"
+        elif l2_item and not l2_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Feature does not follow [<ID>] <Title> pattern"
+        elif not wi.get("parent_id") or not all_wis_by_id.get(wi.get("parent_id")):
+            category = "to be investigated"
+            category_reason = f"Unparented {curr_type}"
+        else:
+            # Parent exists in map, but neither Level 1 Epic nor Level 2 Feature exist in ancestor chain
+            if not l1_item and not l2_item:
+                category = "to be investigated"
+                category_reason = f"Unparented hierarchy for {curr_type}"
+
     # Check Level 3 Prioritization:
     # Evaluate Level 3 title for [<Type>_<Number>] (OI, MP, SCEN, SPEC, PA, CS, DOC)
     prio_info = parse_level3_priority(l3_title if l3_title else curr_title)
@@ -1694,6 +1828,10 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
         "level3_title": l3_title,
         "is_grouped": is_grouped,
         "grouping_status": grouping_status,
+        "category": category,
+        "category_reason": category_reason,
+        "is_ignored": category == "ignored",
+        "is_to_be_investigated": category == "to be investigated",
         "is_prio1": prio_info["is_prio1"],
         "prio_category": prio_info["prio_category"],
         "prio_type": prio_info["prio_type"],

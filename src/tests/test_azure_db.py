@@ -451,6 +451,61 @@ class TestAzureDevOpsCache(unittest.TestCase):
         self.assertEqual(decoded["date"], "2026-09-06")
         self.assertEqual(decoded["text"], "sample")
 
+    def test_pipeline_name_auto_persistence(self):
+        project_id = "proj-auto"
+        # Save a build where pipeline definition is embedded inside the build payload
+        build = {
+            "id": 8888,
+            "buildNumber": "20260926.1",
+            "status": "completed",
+            "result": "succeeded",
+            "definition": {
+                "id": 55,
+                "name": "Auto-Discovered-Pipeline",
+                "path": "\\Production"
+            }
+        }
+        self.cache.save_build(project_id, build)
+
+        # 1. Pipeline should be auto-persisted in pipelines table
+        p = self.cache.get_pipeline(55)
+        self.assertIsNotNone(p)
+        self.assertEqual(p["name"], "Auto-Discovered-Pipeline")
+
+        # 2. Build should resolve pipeline_name properly
+        b = self.cache.get_build(8888)
+        self.assertIsNotNone(b)
+        self.assertEqual(b["pipeline_name"], "Auto-Discovered-Pipeline")
+
+        # 3. get_cached_build_ids_with_artifacts
+        self.cache.save_artifact(8888, {"name": "app.zip", "size_bytes": 1024})
+        cached_ids = self.cache.get_cached_build_ids_with_artifacts()
+        self.assertIn(8888, cached_ids)
+
+    def test_build_metadata_persistence_and_enrichment(self):
+        project_id = "proj-meta"
+        build = {
+            "id": 9999,
+            "buildNumber": "20260926.2",
+            "status": "completed",
+            "result": "succeeded",
+            "finishTime": "2026-09-26T07:30:00Z",
+            "requestedBy": {
+                "displayName": "Jane Developer",
+                "uniqueName": "jane@example.com"
+            },
+            "sourceBranch": "refs/heads/feature/awesome"
+        }
+        self.cache.save_build(project_id, build)
+        self.cache.save_artifact(9999, {"name": "binaries", "size_bytes": 10485760})
+
+        import generate_artifacts_report
+        artifacts = generate_artifacts_report.load_artifacts_data(self.cache)
+        match = next((a for a in artifacts if a["build_id"] == 9999), None)
+        self.assertIsNotNone(match)
+        self.assertEqual(match["requested_by"], "Jane Developer")
+        self.assertEqual(match["finish_time"], "2026-09-26T07:30:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,7 @@ import devops_helper
 
 from jinja2 import Template
 from azure import AzureDevOpsCache
+import utils
 from utils import load_status_icons
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def load_artifacts_data(cache_db):
             b.start_time,
             b.finish_time,
             b.requested_by,
-            COALESCE(p.name, 'Unknown Pipeline') AS pipeline_name,
+            COALESCE(p.name, NULLIF(b.pipeline_name, ''), 'Unknown Pipeline') AS pipeline_name,
             COALESCE(r.name, 'Unknown Repo') AS repo_name,
             COALESCE(pr.name, 'Unknown Project') AS project_name
         FROM artifacts a
@@ -352,11 +353,23 @@ def generate_csv_report(artifacts, output_path):
     logger.info(f"Generated CSV report: {output_path}")
 
 
-def run_reports(db_path, md_path, csv_path, auto_seed=True, config_path=None, template_path=None):
+def run_reports(db_path=None, md_path=None, csv_path=None, auto_seed=True, config_path=None, template_path=None):
     """
     Main execution pipeline for generating both Markdown and CSV reports.
     """
-    base_folder = devops_helper.BASE_FOLDER
+    reports_dir = utils.get_reports_dir()
+    if not md_path:
+        md_path = os.path.join(reports_dir, "BUILD_ARTIFACTS.md")
+    elif not os.path.isabs(md_path):
+        md_path = os.path.join(reports_dir, md_path)
+
+    if not csv_path:
+        csv_path = os.path.join(reports_dir, "BUILD_ARTIFACTS.csv")
+    elif not os.path.isabs(csv_path):
+        csv_path = os.path.join(reports_dir, csv_path)
+
+    if not db_path:
+        db_path, _ = devops_helper._getDBCacheHandler()
 
     logger.info(f"Connecting to Cache DB: {db_path}")
     cache = AzureDevOpsCache(db_path)

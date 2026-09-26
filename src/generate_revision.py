@@ -71,10 +71,16 @@ def get_last_change(unstable,stable,last_change):
         return match.group(0)
     return last_change
 
-def generate_revision_md(db_path, revision_md_path):
+def generate_revision_md(db_path, revision_md_path=None):
     if not db_path or not os.path.exists(db_path):
         logger.error(f"TFS SQLite cache database not found at: {db_path}")
         return False
+
+    reports_dir = utils.get_reports_dir()
+    if not revision_md_path:
+        revision_md_path = os.path.join(reports_dir, REVISION_FILE_MD)
+    elif not os.path.isabs(revision_md_path):
+        revision_md_path = os.path.join(reports_dir, revision_md_path)
 
     # Connect to SQLite Cache DB
     conn = sqlite3.connect(db_path)
@@ -91,9 +97,24 @@ def generate_revision_md(db_path, revision_md_path):
     repos_data = {}
     header_block = "# Revision History\n\n| Package | SuperInstaller | Unstable (Nightly) | Stable | Last Change | Owner |\n| ------- | -------------- | ------------------ | ------ | ----------- | ----- |"
 
-    if os.path.exists(revision_md_path):
+    # Find baseline file to extend: check target path first, then configured reports dir / cwd candidates
+    baseline_candidates = [
+        revision_md_path,
+        os.path.join(reports_dir, "REVISION.md"),
+        os.path.join(reports_dir, "doc", "04_Development", "REVISION.md"),
+        os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.md"),
+        os.path.join(os.getcwd(), "REVISION.md"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "doc", "04_Development", "REVISION.md"),
+    ]
+    baseline_file = None
+    for cand in baseline_candidates:
+        if cand and os.path.exists(cand):
+            baseline_file = cand
+            break
+
+    if baseline_file:
         try:
-            with open(revision_md_path, "r", encoding="utf-8") as f:
+            with open(baseline_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
             if content.strip():

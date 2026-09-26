@@ -92,16 +92,29 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertEqual(len(self.cache.get_milestones()), 0)
 
     def test_workload_matrix_milestone_matching(self):
+        from datetime import date, timedelta
+        import utils
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_monday = date.fromisocalendar(cy, cw, 1)
+        prev_monday = curr_monday - timedelta(weeks=1)
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+        _, _, _, curr_end_str = utils.get_sprint_date_range(cy, cw)
+
+        py, pw, _ = prev_monday.isocalendar()
+        prev_sprint = f"week-{str(py)[-2:]}{pw:02d}"
+        _, _, _, prev_end_str = utils.get_sprint_date_range(py, pw)
+
         # Create sample milestones across different sprint weeks
         self.cache.save_milestone(
             name="DDQS Gate 1",
-            target_date="2026-08-14",
+            target_date=prev_end_str,
             category_id="ddqs",
             description="DDQS internal review"
         )
         self.cache.save_milestone(
             name="Scenario Bravo",
-            target_date="2026-08-21",
+            target_date=curr_end_str,
             category_id="scenario",
             description="External scenario demo"
         )
@@ -115,9 +128,10 @@ class TestMilestonesAndCategories(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Alice",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "target_date": "2026-08-14",
+                "iteration_path": f"Project\\{prev_sprint}",
+                "iteration_name": prev_sprint,
+                "sprint_week_name": prev_sprint,
+                "target_date": prev_end_str,
                 "remaining_work": 4.0,
                 "completed_work": 4.0,
             },
@@ -127,9 +141,10 @@ class TestMilestonesAndCategories(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Bob",
-                "iteration_path": "Project\\week-2634",
-                "iteration_name": "week-2634",
-                "target_date": "2026-08-21",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
+                "target_date": curr_end_str,
                 "remaining_work": 8.0,
                 "completed_work": 2.0,
             }
@@ -495,6 +510,25 @@ class TestMilestonesAndCategories(unittest.TestCase):
             description="Beta milestone"
         )
 
+        from datetime import date, timedelta
+        import utils
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_monday = date.fromisocalendar(cy, cw, 1)
+        prev_monday = curr_monday - timedelta(weeks=1)
+        next_monday = curr_monday + timedelta(weeks=1)
+
+        curr_sprint = f"week-{str(cy)[-2:]}{cw:02d}"
+        _, _, _, curr_end_str = utils.get_sprint_date_range(cy, cw)
+
+        py, pw, _ = prev_monday.isocalendar()
+        prev_sprint = f"week-{str(py)[-2:]}{pw:02d}"
+        _, _, _, prev_end_str = utils.get_sprint_date_range(py, pw)
+
+        ny, nw, _ = next_monday.isocalendar()
+        next_sprint = f"week-{str(ny)[-2:]}{nw:02d}"
+        _, _, _, next_end_str = utils.get_sprint_date_range(ny, nw)
+
         backend = DevOpsBackend()
         backend._cache_db = self.cache
         backend._work_items = [
@@ -504,9 +538,10 @@ class TestMilestonesAndCategories(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Alice",
-                "iteration_path": "Project\\week-2633",
-                "iteration_name": "week-2633",
-                "target_date": "2026-08-14",
+                "iteration_path": f"Project\\{prev_sprint}",
+                "iteration_name": prev_sprint,
+                "sprint_week_name": prev_sprint,
+                "target_date": prev_end_str,
                 "tags": "Target:Milestone Alpha",
                 "remaining_work": 4.0,
             },
@@ -516,9 +551,10 @@ class TestMilestonesAndCategories(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Bob",
-                "iteration_path": "Project\\week-2634",
-                "iteration_name": "week-2634",
-                "target_date": "2026-08-21",
+                "iteration_path": f"Project\\{curr_sprint}",
+                "iteration_name": curr_sprint,
+                "sprint_week_name": curr_sprint,
+                "target_date": curr_end_str,
                 "tags": "Target:Milestone Beta",
                 "remaining_work": 8.0,
             },
@@ -528,9 +564,10 @@ class TestMilestonesAndCategories(unittest.TestCase):
                 "type": "Task",
                 "state": "Active",
                 "assigned_to": "Charlie",
-                "iteration_path": "Project\\week-2635",
-                "iteration_name": "week-2635",
-                "target_date": "2026-08-28",
+                "iteration_path": f"Project\\{next_sprint}",
+                "iteration_name": next_sprint,
+                "sprint_week_name": next_sprint,
+                "target_date": next_end_str,
                 "tags": "General",
                 "remaining_work": 2.0,
             }
@@ -736,6 +773,47 @@ class TestMilestonesAndCategories(unittest.TestCase):
 
         future_m = next(m for m in milestones if m["name"] == "Future Milestone")
         self.assertFalse(future_m["is_historic"])
+
+    def test_coming_milestones_starting_current_week(self):
+        from datetime import date, timedelta
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_monday = date.fromisocalendar(cy, cw, 1)
+        prev_monday = curr_monday - timedelta(weeks=2)
+        next_monday = curr_monday + timedelta(weeks=1)
+
+        # 1. Past milestone (2 weeks ago)
+        self.cache.save_milestone(
+            name="Old Past Milestone",
+            target_date=prev_monday.strftime("%Y-%m-%d"),
+            category_id="ddqs"
+        )
+        # 2. Current week milestone
+        self.cache.save_milestone(
+            name="Current Week Gate",
+            target_date=curr_monday.strftime("%Y-%m-%d"),
+            category_id="release"
+        )
+        # 3. Next week milestone
+        self.cache.save_milestone(
+            name="Next Week Gate",
+            target_date=next_monday.strftime("%Y-%m-%d"),
+            category_id="qiav"
+        )
+
+        coming = backend.get_coming_milestones()
+        coming_names = [m["name"] for m in coming]
+
+        self.assertNotIn("Old Past Milestone", coming_names)
+        self.assertIn("Current Week Gate", coming_names)
+        self.assertIn("Next Week Gate", coming_names)
+
+        cw_item = next(m for m in coming if m["name"] == "Current Week Gate")
+        self.assertTrue(cw_item["is_current_week"])
+        self.assertEqual(cw_item["relative_label"], "This week")
 
 
 if __name__ == "__main__":

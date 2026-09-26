@@ -375,8 +375,8 @@ class TestTagDayReport(unittest.TestCase):
         app_branches = [b["branch_name"] for b in data["all_repositories"]["repo-app"]["unmerged_branches"]]
         self.assertNotIn("archive/old-experiment", app_branches)
 
-    def test_branches_referencing_abandoned_prs_marked_abandoned(self):
-        """Tests that branches referencing abandoned PRs are marked as is_abandoned."""
+    def test_branches_referencing_abandoned_or_completed_prs_excluded(self):
+        """Tests that branches referencing abandoned or completed PRs are excluded from unmerged branches and timeline."""
         self._seed_sample_repo_data()
 
         with self.cache._connection() as conn:
@@ -385,25 +385,32 @@ class TestTagDayReport(unittest.TestCase):
                 INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_date, raw_json)
                 VALUES (777, 'r-app', 'PR for pending work', 'abandoned', 'refs/heads/dev', 'refs/heads/features/pending-work', 'Dev1', '2026-08-20 12:00:00', '{}')
             """)
+            # Add a branch referencing a completed PR (e.g. feat1 from seed data which has completed PR 101)
+            conn.execute("""
+                INSERT OR REPLACE INTO branches (repo_id, name, commit_id, commit_date, committer_name, comment, ahead_count, behind_count)
+                VALUES ('r-app', 'refs/heads/feat1', 'b_hash_feat1', '2026-08-01 12:00:00', 'Dev1', 'Old merged branch', 5, 0)
+            """)
 
         data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJ")
         app_branches = data["all_repositories"]["repo-app"]["unmerged_branches"]
+        branch_names = [b["branch_name"] for b in app_branches]
 
-        pending_branch = next(b for b in app_branches if b["branch_name"] == "features/pending-work")
-        self.assertTrue(pending_branch["is_abandoned"])
-        self.assertEqual(pending_branch["prepared_pr"]["pr_id"], 777)
-        self.assertEqual(pending_branch["prepared_pr"]["status"], "abandoned")
+        # Abandoned PR branch (features/pending-work) should NOT be in unmerged_branches
+        self.assertNotIn("features/pending-work", branch_names)
 
-        # Active PR branch (feat3) should NOT be abandoned
+        # Completed PR branch (feat1) should NOT be in unmerged_branches
+        self.assertNotIn("feat1", branch_names)
+
+        # Active PR branch (feat3) SHOULD be in unmerged_branches
+        self.assertIn("feat3", branch_names)
         feat3_branch = next(b for b in app_branches if b["branch_name"] == "feat3")
-        self.assertFalse(feat3_branch["is_abandoned"])
+        self.assertIsNotNone(feat3_branch["prepared_pr"])
+        self.assertEqual(feat3_branch["prepared_pr"]["pr_id"], 103)
 
-        # Timeline check: abandoned branch should have status 'abandoned'
-        timeline_items = [t for t in data["all_changes_timeline"] if "features/pending-work" in t.get("title", "")]
-        if timeline_items:
-            self.assertEqual(timeline_items[0]["status"], "abandoned")
-            self.assertTrue(timeline_items[0]["is_abandoned"])
-            self.assertIn("ABANDONED", timeline_items[0]["status_str"])
+        # Timeline check: abandoned/completed branch updates should NOT be in timeline
+        timeline_titles = [t.get("title", "") for t in data["all_changes_timeline"] if t.get("item_type") == "BRANCH_UPDATE"]
+        self.assertFalse(any("features/pending-work" in title for title in timeline_titles))
+        self.assertFalse(any("feat1" in title for title in timeline_titles))
 
     def test_is_version_tag(self):
         from utils import is_version_tag

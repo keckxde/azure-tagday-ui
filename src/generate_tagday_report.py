@@ -45,6 +45,7 @@ from utils import (
     load_change_filter_patterns,
     get_default_ignore_category_patterns,
     get_default_ignore_branch_patterns,
+    normalize_pr_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -255,6 +256,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
 
         all_changes_timeline = []
         prs_by_repo_and_source = {}
+        prs_by_repo_and_source_lower = {}
         seen_pr_ids = set()
 
         for pr in prs_rows:
@@ -345,6 +347,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             }
 
             prs_by_repo_and_source.setdefault((rname, source_branch), []).append(pr_item)
+            prs_by_repo_and_source_lower.setdefault((rname.lower(), source_branch.lower()), []).append(pr_item)
             repositories[rname]["all_prs"].append(pr_item)
 
             # Per-repository baseline cutoff date
@@ -396,10 +399,18 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 continue
 
             matching_prs = prs_by_repo_and_source.get((rname, bname), [])
-            active_matching = [p for p in matching_prs if p.get("status") in ("active", "1")]
-            prepared_pr = active_matching[0] if active_matching else (matching_prs[0] if matching_prs else None)
-            has_abandoned_pr = any(p.get("status") in ("abandoned", "2") for p in matching_prs)
-            is_abandoned = bool((has_abandoned_pr or (prepared_pr and prepared_pr.get("status") in ("abandoned", "2"))) and not active_matching)
+            if not matching_prs:
+                matching_prs = prs_by_repo_and_source_lower.get((rname.lower(), bname.lower()), [])
+
+            active_matching = [p for p in matching_prs if normalize_pr_status(p.get("status")) == "active"]
+            has_completed_pr = any(normalize_pr_status(p.get("status")) == "completed" for p in matching_prs)
+            has_abandoned_pr = any(normalize_pr_status(p.get("status")) == "abandoned" for p in matching_prs)
+
+            # Skip branches that have a completed or abandoned PR referenced (unless there is an active PR)
+            if (has_completed_pr or has_abandoned_pr) and not active_matching:
+                continue
+
+            prepared_pr = active_matching[0] if active_matching else None
 
             branch_item = {
                 "repo_name": rname,
@@ -414,8 +425,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 "date": b["commit_date"] or "",
                 "item_type": "BRANCH",
                 "prepared_pr": prepared_pr,
-                "prepared_prs": active_matching if active_matching else matching_prs,
-                "is_abandoned": is_abandoned,
+                "prepared_prs": active_matching,
+                "is_abandoned": False,
             }
             
             is_branch_important = check_branch_important(bname, ignore_patterns=ignore_branch_patterns)
@@ -430,14 +441,14 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
 
                 # If commit date of ahead branch is after repo's latest tag, add to changes timeline
                 if branch_item["commit_date"] and branch_item["commit_date"] > repo_cutoff_date:
-                    pr_note = f" (PR !{prepared_pr['pr_id']} [ABANDONED])" if (prepared_pr and is_abandoned) else (f" (PR !{prepared_pr['pr_id']})" if prepared_pr else (" [ABANDONED]" if is_abandoned else ""))
-                    status_text = f"ABANDONED +{branch_item['ahead']}" if is_abandoned else f"AHEAD +{branch_item['ahead']}"
+                    pr_note = f" (PR !{prepared_pr['pr_id']})" if prepared_pr else ""
+                    status_text = f"AHEAD +{branch_item['ahead']}"
                     all_changes_timeline.append({
                         "pr_id": f"Branch:{branch_item['short_hash']}",
                         "repo_name": rname,
                         "title": f"[{bname}]{pr_note} {branch_item['comment']}",
-                        "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']} (Abandoned)" if (prepared_pr and is_abandoned) else (f", PR !{prepared_pr['pr_id']}" if prepared_pr else "")),
-                        "status": "abandoned" if is_abandoned else "unmerged",
+                        "description": f"Ahead by {branch_item['ahead']} commits" + (f", PR !{prepared_pr['pr_id']}" if prepared_pr else ""),
+                        "status": "unmerged",
                         "status_str": status_text,
                         "target_branch": bname,
                         "source_branch": bname,
@@ -446,7 +457,7 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                         "creation_date": branch_item["commit_date"],
                         "date": branch_item["commit_date"],
                         "item_type": "BRANCH_UPDATE",
-                        "is_abandoned": is_abandoned,
+                        "is_abandoned": False,
                     })
 
         # Sort timeline chronologically descending
@@ -531,6 +542,9 @@ def generate_tagday_markdown(data, output_path=None, template_path=None, config_
     """
     Renders the Tag Day release overview report into Markdown using Jinja2 templates.
     """
+    if output_path and not os.path.isabs(output_path):
+        output_path = os.path.join(utils.get_reports_dir(), output_path)
+
     gen_time = data.get("generated_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Load status icons from YAML configuration file
@@ -751,11 +765,15 @@ def generate_tagday_markdown(data, output_path=None, template_path=None, config_
     return rendered
 
 
-def run_tagday_report(db_path, output_path, project_id, config_path=None, template_path=None):
+def run_tagday_report(db_path, output_path=None, project_id=None, config_path=None, template_path=None):
     """
     Executes Tag Day report generation workflow end-to-end.
-    All path and project parameters are mandatory and provided by the caller.
     """
+    if not output_path:
+        output_path = os.path.join(utils.get_reports_dir(), "TAGDAY.md")
+    elif not os.path.isabs(output_path):
+        output_path = os.path.join(utils.get_reports_dir(), output_path)
+
     if not os.path.exists(db_path):
         logger.error(f"TFS SQLite cache database not found at: {db_path}")
         return False
