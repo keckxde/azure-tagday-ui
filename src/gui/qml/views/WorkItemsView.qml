@@ -1605,9 +1605,10 @@ Item {
 
                 property bool expanded: false
                 property int expandedHeight: {
-                    var prs = model.linked_prs || []
-                    var repos = model.linked_repos || []
-                    return Math.max(120, 115 + prs.length * 22 + repos.length * 18 + 36)
+                    if (typeof model === "undefined" || !model) return 120;
+                    var prs = model.linked_prs || [];
+                    var repos = model.linked_repos || [];
+                    return Math.max(120, 115 + prs.length * 22 + repos.length * 18 + 36);
                 }
 
                 Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -1796,10 +1797,12 @@ Item {
                             Repeater {
                                 model: {
                                     var list = [];
-                                    if (model.tag_list && model.tag_list.length > 0) {
-                                        list = model.tag_list;
-                                    } else if (model.tags && model.tags.trim() !== "") {
-                                        list = model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                                    if (typeof model !== "undefined" && model) {
+                                        if (model.tag_list && model.tag_list.length > 0) {
+                                            list = model.tag_list;
+                                        } else if (model.tags && model.tags.trim() !== "") {
+                                            list = model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                                        }
                                     }
                                     return list.slice(0, 3);
                                 }
@@ -1850,6 +1853,7 @@ Item {
                             // Extra Tags "+N" Counter Chip if > 3 tags
                             Rectangle {
                                 property int totalTags: {
+                                    if (typeof model === "undefined" || !model) return 0;
                                     if (model.tag_list && model.tag_list.length > 0) return model.tag_list.length;
                                     if (model.tags && model.tags.trim() !== "") return model.tags.split(";").filter(function(t){ return t.trim().length > 0; }).length;
                                     return 0;
@@ -2285,6 +2289,7 @@ Item {
 
                                         Repeater {
                                             model: {
+                                                if (typeof model === "undefined" || !model) return [];
                                                 if (model.tag_list && model.tag_list.length > 0) {
                                                     return model.tag_list;
                                                 } else if (model.tags && model.tags.trim() !== "") {
@@ -2354,7 +2359,7 @@ Item {
                                         }
 
                                         Text {
-                                            visible: (!model.tag_list || model.tag_list.length === 0) && (!model.tags || model.tags.trim() === "")
+                                            visible: (typeof model !== "undefined" && model) ? ((!model.tag_list || model.tag_list.length === 0) && (!model.tags || model.tags.trim() === "")) : false
                                             text: "No tags assigned"
                                             font.pixelSize: 11
                                             font.italic: true
@@ -2369,7 +2374,7 @@ Item {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                visible: (model.linked_pr_count || 0) > 0
+                                visible: (typeof model !== "undefined" && model && model.linked_pr_count) ? (model.linked_pr_count > 0) : false
 
                                 Text {
                                     text: "🔀 Referenced Pull Requests"
@@ -2380,7 +2385,7 @@ Item {
                                 }
 
                                 Repeater {
-                                    model: model.linked_prs || []
+                                    model: (typeof model !== "undefined" && model && model.linked_prs) ? model.linked_prs : []
                                     Rectangle {
                                         Layout.fillWidth: true
                                         height: 20
@@ -2439,7 +2444,7 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 6
-                                visible: (model.linked_repo_count || 0) > 0
+                                visible: (typeof model !== "undefined" && model && model.linked_repo_count) ? (model.linked_repo_count > 0) : false
 
                                 Text {
                                     text: "📦 Repositories:"
@@ -2453,7 +2458,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 4
                                     Repeater {
-                                        model: model.linked_repos || []
+                                        model: (typeof model !== "undefined" && model && model.linked_repos) ? model.linked_repos : []
                                         Rectangle {
                                             implicitHeight: 18
                                             implicitWidth: repoTagText.implicitWidth + 8

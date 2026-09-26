@@ -371,8 +371,8 @@ def run_reports(db_path, md_path, csv_path, auto_seed=True, config_path=None, te
 
     artifacts = load_artifacts_data(cache)
     if not artifacts:
-        logger.warning("No artifacts found to report.")
-        return False
+        logger.info("No artifacts found to report in database. Generating empty storage report.")
+        artifacts = []
 
     metrics = calculate_metrics(artifacts)
 

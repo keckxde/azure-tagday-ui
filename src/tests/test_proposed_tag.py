@@ -219,4 +219,41 @@ def test_create_tag_async_worker():
     assert emitted_tags[0][2] is True
 
 
+def test_create_tag_async_default_instance_no_attribute_error(monkeypatch):
+    if not QCoreApplication.instance():
+        app = QCoreApplication([])
+    else:
+        app = QCoreApplication.instance()
+
+    from src.gui.backend import DevOpsBackend
+    import devops_helper
+
+    backend = DevOpsBackend()
+    assert hasattr(backend, "_info_handler")
+    assert backend._info_handler is None
+
+    mock_handler = MagicMock()
+    mock_handler.create_repository_tag.return_value = {
+        "success": True,
+        "tag_name": "v01.00.2639",
+        "commit_id": "c987654"
+    }
+    monkeypatch.setattr(devops_helper, "_getHandler", lambda: mock_handler)
+    monkeypatch.setattr(devops_helper, "AZURE_PROJECT_ID", "p-test")
+
+    emitted_tags = []
+    backend.tagCreated.connect(lambda r, t, s, m: emitted_tags.append((r, t, s, m)))
+
+    worker = backend.create_tag_async("DefaultRepo", "v01.00.2639", "dev", "Release tag")
+    assert worker is not None
+    worker.wait(5000)
+    app.processEvents()
+
+    assert len(emitted_tags) == 1
+    assert emitted_tags[0][0] == "DefaultRepo"
+    assert emitted_tags[0][1] == "v01.00.2639"
+    assert emitted_tags[0][2] is True
+
+
+
 
