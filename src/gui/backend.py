@@ -327,6 +327,8 @@ class DevOpsBackend(QObject):
         self._tagday_data = {}
         self._storage_data = {}
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
+        self._info_handler = None
+        self._project_id = devops_helper.AZURE_PROJECT_ID or ""
 
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
@@ -2281,14 +2283,15 @@ class DevOpsBackend(QObject):
             worker.log_message.emit(
                 f"Connecting to Azure DevOps to tag branch '{target_branch}' on repository '{repo_name_or_id}' with tag '{tag_name}'..."
             )
-            azHandler = self._info_handler or devops_helper._getHandler()
+            azHandler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
             if not azHandler:
                 raise RuntimeError(
                     "Azure DevOps client could not be initialized: missing Server URL, PAT, or Project ID."
                 )
 
+            project_id = getattr(self, "_project_id", None) or devops_helper.AZURE_PROJECT_ID or getattr(self, "selectedProject", "")
             res = azHandler.create_repository_tag(
-                project_id=devops_helper.AZURE_PROJECT_ID,
+                project_id=project_id,
                 repo_id_or_name=repo_name_or_id,
                 tag_name=tag_name,
                 branch_name=target_branch,

@@ -6,19 +6,25 @@
 
 - are azure_base_client.py and azure_info_base_client.py duplicates and redundant?
 
+- move the proposed Tag info into the same row as the latest semantic tag
+
 ## DONE
+
+- Tag Dialog Handler Resolution Fix (`'DevOpsBackend' object has no attribute '_info_handler'`):
+  - **Attribute Initialization & Fallback ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Initialized `self._info_handler = None` and `self._project_id` in `DevOpsBackend.__init__` and guarded attribute lookup via `getattr(self, "_info_handler", None) or devops_helper._getHandler()`.
+  - **Project ID Resolution ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added safe project ID fallback (`getattr(self, "_project_id", None) or devops_helper.AZURE_PROJECT_ID or getattr(self, "selectedProject", "")`) when executing Git tagging requests.
+  - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_create_tag_async_default_instance_no_attribute_error` verifying default backend instances invoke `create_tag_async` without raising `AttributeError` (264/264 tests passed).
+
 
 - Eliminate Duplicate Pull Requests in PR List & TagDay Explorer:
   - **SQL Join Grouping & Tag Aggregation ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py), [`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Updated `get_all_prs()`, `load_tagday_data()`, and `v_pull_requests_tagged` database view to use `GROUP BY pr.id` with `MAX(t_direct.name) AS direct_tag_name`. This prevents commits with multiple tag markers (e.g., lightweight tags, release candidates, build tags) from producing multiple duplicate row copies per PR.
   - **Python Deduplication Layers ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py), [`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py), [`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Added `seen_pr_ids` tracking across `get_all_prs()`, `load_tagday_data()`, `wi_to_prs` cross-referencing, and `_compute_all_cache_data()`, guaranteeing that every PR ID appears at most once in `backend.pullRequests`, TagDay timeline, repository PR breakdowns, and Work Item linking chips.
   - **Automated Verification ([`src/tests/test_pull_requests_view.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_pull_requests_view.py))**: Added `test_no_duplicate_prs_when_commit_has_multiple_tags` verifying that multi-tagged commits never duplicate PR records across `get_all_prs()`, `load_tagday_data()`, and `backend.pullRequests` (263/263 tests passed).
 
-
 - Fix Tagging Exception (`run_worker() got an unexpected keyword argument 'on_success'`):
   - **Single Unified `_run_worker` Implementation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Removed the duplicate `_run_worker` function definition that had overwritten the earlier signature without `on_success`/`on_error` support. Unified `_run_worker` and `_on_worker_finished` to accept optional `on_success` and `on_error` callbacks, pass results safely, manage progress, handle auto-sync timers, and return the spawned worker instance.
   - **Handler Resolution in `create_tag_async` ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Ensured `create_tag_async` utilizes `self._info_handler` if configured before falling back to `devops_helper._getHandler()`.
   - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_create_tag_async_worker` validating that `backend.create_tag_async` starts the background task worker and fires `tagCreated` and callback signals correctly (262/262 tests passed).
-
 
 - TagDay Explorer: Propose Release Tag Only When Untagged Merged PRs Exist:
   - **Conditional Proposed Tag Computation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Updated `repos_summary` generation in both `_compute_all_cache_data` and `load_interactive_reports` so `proposed_tag`, `proposed_minor_tag`, and `proposed_major_tag` are only calculated when the repository has untagged completed pull requests (`has_untagged_prs = len(prs_after_tag) > 0`). When there are no untagged merged PRs, proposed tags default to `""`.
@@ -26,7 +32,6 @@
     - Repository row quick tag action button `🏷️` is now conditionally visible only when `modelData.proposed_tag` is present (`visible: !!modelData.proposed_tag`).
     - Repository Inspector proposed tag card now dynamically switches to a clean green "Repository Release Status: Up to Date" card (`No untagged merged pull requests in this repository. Latest tag is current.`) when there are no untagged PRs.
   - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_proposed_tag_only_when_untagged_prs_exist` verifying that repos with untagged PRs propose a new tag and repos without untagged PRs have empty proposed tags.
-
 
 - Default Team Assignment in Settings & Sprint URL Fallback:
   - **Backend Properties & Resolution ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added `defaultTfsTeam` and `effectiveTfsTeam` properties to `DevOpsBackend`. When no team is assigned in Settings (`tfsTeamName` is empty), the application now automatically falls back to the Default Team (`{Project} Team`) across sprint link generation and work item data enrichment.
