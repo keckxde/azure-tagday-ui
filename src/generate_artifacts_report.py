@@ -55,7 +55,7 @@ def load_artifacts_data(cache_db):
             b.start_time,
             b.finish_time,
             b.requested_by,
-            COALESCE(p.name, 'Unknown Pipeline') AS pipeline_name,
+            COALESCE(p.name, NULLIF(b.pipeline_name, ''), 'Unknown Pipeline') AS pipeline_name,
             COALESCE(r.name, 'Unknown Repo') AS repo_name,
             COALESCE(pr.name, 'Unknown Project') AS project_name
         FROM artifacts a

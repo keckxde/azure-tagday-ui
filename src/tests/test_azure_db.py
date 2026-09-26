@@ -451,6 +451,37 @@ class TestAzureDevOpsCache(unittest.TestCase):
         self.assertEqual(decoded["date"], "2026-09-06")
         self.assertEqual(decoded["text"], "sample")
 
+    def test_pipeline_name_auto_persistence(self):
+        project_id = "proj-auto"
+        # Save a build where pipeline definition is embedded inside the build payload
+        build = {
+            "id": 8888,
+            "buildNumber": "20260926.1",
+            "status": "completed",
+            "result": "succeeded",
+            "definition": {
+                "id": 55,
+                "name": "Auto-Discovered-Pipeline",
+                "path": "\\Production"
+            }
+        }
+        self.cache.save_build(project_id, build)
+
+        # 1. Pipeline should be auto-persisted in pipelines table
+        p = self.cache.get_pipeline(55)
+        self.assertIsNotNone(p)
+        self.assertEqual(p["name"], "Auto-Discovered-Pipeline")
+
+        # 2. Build should resolve pipeline_name properly
+        b = self.cache.get_build(8888)
+        self.assertIsNotNone(b)
+        self.assertEqual(b["pipeline_name"], "Auto-Discovered-Pipeline")
+
+        # 3. get_cached_build_ids_with_artifacts
+        self.cache.save_artifact(8888, {"name": "app.zip", "size_bytes": 1024})
+        cached_ids = self.cache.get_cached_build_ids_with_artifacts()
+        self.assertIn(8888, cached_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

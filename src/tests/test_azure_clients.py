@@ -154,6 +154,23 @@ class TestAzureInfoBaseClient(unittest.TestCase):
         self.assertEqual(builds[0]["artifacts"][0]["name"], "dist")
         mock_db.save_build.assert_called_once()
 
+    @patch.object(AzureInfoBaseClient, "get_project_builds")
+    @patch.object(AzureInfoBaseClient, "get_build_artifacts")
+    def test_get_all_build_artifacts_cache_skip(self, mock_get_arts, mock_get_builds):
+        mock_get_builds.return_value = [
+            {"id": 6001, "buildNumber": "2026.2", "status": "completed", "definition": {"id": 12, "name": "Main-CI"}}
+        ]
+        mock_db = MagicMock()
+        mock_db.get_cached_build_ids_with_artifacts.return_value = {6001}
+        mock_db.get_build_artifacts.return_value = [{"id": 99, "name": "cached-binary", "size_bytes": 500}]
+
+        builds = self.client.get_all_build_artifacts("proj-1", cache_db=mock_db)
+        self.assertEqual(len(builds), 1)
+        self.assertEqual(builds[0]["pipeline_name"], "Main-CI")
+        self.assertEqual(builds[0]["artifacts"][0]["name"], "cached-binary")
+        # Network request should be skipped because it was loaded from cache!
+        mock_get_arts.assert_not_called()
+
     @patch.object(AzureInfoBaseClient, "_request")
     def test_get_build_artifacts_success(self, mock_request):
         mock_request.return_value = ({"value": [{"id": 10, "name": "binaries"}]}, 200)

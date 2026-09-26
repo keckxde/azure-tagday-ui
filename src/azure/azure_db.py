@@ -242,6 +242,7 @@ class AzureDevOpsCache:
                 project_id TEXT NOT NULL,
                 repo_id TEXT,
                 pipeline_id INTEGER,
+                pipeline_name TEXT,
                 build_number TEXT,
                 status TEXT,
                 result TEXT,
@@ -254,6 +255,12 @@ class AzureDevOpsCache:
                 url TEXT,
                 raw_json TEXT
             )""")
+
+            # Schema migration for existing builds table
+            try:
+                conn.execute("ALTER TABLE builds ADD COLUMN pipeline_name TEXT")
+            except Exception:
+                pass
 
             # Table: artifacts
             conn.execute("""
@@ -553,6 +560,7 @@ class AzureDevOpsCache:
             """)
 
             # View: v_builds
+            conn.execute("DROP VIEW IF EXISTS v_builds")
             conn.execute("""
             CREATE VIEW IF NOT EXISTS v_builds AS
             SELECT 
@@ -572,7 +580,7 @@ class AzureDevOpsCache:
                 b.url,
                 p.name AS project_name,
                 r.name AS repo_name,
-                pl.name AS pipeline_name,
+                COALESCE(pl.name, NULLIF(b.pipeline_name, ''), 'Unknown Pipeline') AS pipeline_name,
                 b.raw_json
             FROM builds b
             LEFT JOIN repositories r ON b.repo_id = r.id
@@ -599,6 +607,7 @@ class AzureDevOpsCache:
                 b.repo_id,
                 r.name AS repo_name,
                 p.name AS project_name,
+                COALESCE(pl.name, NULLIF(b.pipeline_name, ''), 'Unknown Pipeline') AS pipeline_name,
                 b.finish_time AS build_finish_time,
                 b.status AS build_status,
                 b.result AS build_result,
@@ -607,6 +616,7 @@ class AzureDevOpsCache:
             JOIN builds b ON a.build_id = b.id
             LEFT JOIN repositories r ON b.repo_id = r.id
             LEFT JOIN projects p ON b.project_id = p.id
+            LEFT JOIN pipelines pl ON b.pipeline_id = pl.id
             """)
 
     def get_config(self, key, default=None):
@@ -2190,15 +2200,31 @@ class AzureDevOpsCache:
 
     def save_build(self, project_id, build):
         """
-        Saves or updates a build execution record and any associated artifacts.
+        Saves or updates a build execution record, its pipeline definition, and any associated artifacts.
         """
         build_id = build.get("id")
         if not build_id:
             return
         repo = build.get("repository") or {}
         repo_id = repo.get("id") if isinstance(repo, dict) else None
-        definition = build.get("definition") or {}
-        pipeline_id = definition.get("id") if isinstance(definition, dict) else None
+        definition = build.get("definition") or build.get("pipeline") or {}
+        pipeline_id = definition.get("id") if isinstance(definition, dict) else (build.get("pipeline_id") or build.get("pipelineId") or build.get("definitionId"))
+        pipeline_name = definition.get("name") if isinstance(definition, dict) else (build.get("pipeline_name") or build.get("definitionName") or build.get("pipelineName") or "")
+        if not pipeline_name and isinstance(definition, dict):
+            pipeline_name = (definition.get("path") or "").strip("\\/ ") or ""
+
+        # Auto-upsert pipeline definition into pipelines table if pipeline ID and name exist
+        if pipeline_id and pipeline_name:
+            folder = definition.get("path") or definition.get("folder") or "" if isinstance(definition, dict) else ""
+            revision = definition.get("revision", 1) if isinstance(definition, dict) else 1
+            pipe_url = definition.get("url", "") if isinstance(definition, dict) else ""
+            pipe_raw = json.dumps(definition, cls=DateTimeEncoder, ensure_ascii=False) if isinstance(definition, dict) else "{}"
+            with self._connection() as conn:
+                conn.execute("""
+                INSERT OR REPLACE INTO pipelines (id, project_id, name, folder, revision, url, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (pipeline_id, project_id, pipeline_name, folder, revision, pipe_url, pipe_raw))
+
         build_number = build.get("buildNumber", "")
         status = build.get("status", "")
         result = build.get("result", "")
@@ -2208,17 +2234,17 @@ class AzureDevOpsCache:
         source_branch = build.get("sourceBranch", "")
         source_version = build.get("sourceVersion", "")
         requested_for = build.get("requestedFor") or {}
-        requested_by = requested_for.get("displayName", "") if isinstance(requested_for, dict) else ""
+        requested_by = requested_for.get("displayName", "") if isinstance(requested_for, dict) else (build.get("requested_by") or "")
         url = build.get("url", "")
         raw_json = json.dumps(build, cls=DateTimeEncoder, ensure_ascii=False)
 
         with self._connection() as conn:
             conn.execute("""
-            INSERT OR REPLACE INTO builds (id, project_id, repo_id, pipeline_id, build_number, status, result,
+            INSERT OR REPLACE INTO builds (id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result,
                                            queue_time, start_time, finish_time, source_branch, source_version,
                                            requested_by, url, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (build_id, project_id, repo_id, pipeline_id, build_number, status, result,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (build_id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result,
                   queue_time, start_time, finish_time, source_branch, source_version,
                   requested_by, url, raw_json))
 
@@ -2347,7 +2373,7 @@ class AzureDevOpsCache:
 
         with self._connection() as conn:
             row = conn.execute("""
-            SELECT b.*, r.name AS repo_name, p.name AS project_name, pl.name AS pipeline_name
+            SELECT b.*, r.name AS repo_name, p.name AS project_name, COALESCE(pl.name, NULLIF(b.pipeline_name, ''), '') AS pipeline_name
             FROM builds b
             LEFT JOIN repositories r ON b.repo_id = r.id
             LEFT JOIN projects p ON b.project_id = p.id
@@ -2361,7 +2387,7 @@ class AzureDevOpsCache:
                     alt_cache = AzureDevOpsCache(alt_db)
                     with alt_cache._connection() as alt_conn:
                         alt_row = alt_conn.execute("""
-                        SELECT b.*, r.name AS repo_name, p.name AS project_name, pl.name AS pipeline_name
+                        SELECT b.*, r.name AS repo_name, p.name AS project_name, COALESCE(pl.name, NULLIF(b.pipeline_name, ''), '') AS pipeline_name
                         FROM builds b
                         LEFT JOIN repositories r ON b.repo_id = r.id
                         LEFT JOIN projects p ON b.project_id = p.id
@@ -2406,6 +2432,15 @@ class AzureDevOpsCache:
             "artifacts": artifacts,
             "raw": raw
         }
+
+    def get_cached_build_ids_with_artifacts(self, project_id=None):
+        """
+        Returns a set of build IDs that are already recorded in SQLite and have artifact records.
+        """
+        query = "SELECT DISTINCT build_id FROM artifacts"
+        with self._connection() as conn:
+            rows = conn.execute(query).fetchall()
+            return {int(r[0]) for r in rows if r[0] is not None}
 
     def get_build_artifacts(self, build_id, include_deleted=True):
         """
@@ -2453,7 +2488,7 @@ class AzureDevOpsCache:
         SELECT b.id AS build_id, b.project_id, b.pipeline_id, b.repo_id, b.build_number,
                b.status, b.result, b.source_branch, b.source_version, b.start_time,
                b.finish_time, b.requested_by, r.name AS repo_name, p.name AS project_name,
-               pl.name AS pipeline_name
+               COALESCE(pl.name, NULLIF(b.pipeline_name, ''), '') AS pipeline_name
         FROM builds b
         LEFT JOIN repositories r ON b.repo_id = r.id
         LEFT JOIN projects p ON b.project_id = p.id

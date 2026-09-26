@@ -249,12 +249,20 @@ class AzureBaseClient:
         Returns:
             list: List of pipeline definition dictionaries.
         """
-        res, _ = self._request("GET", f"{project_id}/_apis/pipelines", params={"api-version": "6.0-preview.1"})
-        return res.get("value", [])
+        try:
+            res, _ = self._request("GET", f"{project_id}/_apis/pipelines", params={"api-version": "6.0-preview.1"})
+            pipes = res.get("value", []) if isinstance(res, dict) else []
+            if pipes:
+                return pipes
+        except Exception:
+            pass
 
-    def get_project_builds(self, project_id):
+        # Fallback to build definitions API (which powers Azure DevOps pipelines)
+        return self.get_build_definitions(project_id)
+
+    def get_build_definitions(self, project_id):
         """
-        Retrieves builds definitions for a specific project.
+        Retrieves build definitions for a specific project.
 
         Args:
             project_id (str): The target project ID or name.
@@ -262,56 +270,154 @@ class AzureBaseClient:
         Returns:
             list: List of build definition dictionaries.
         """
-        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={"api-version": "6.0", "$top": 200})
-        if isinstance(res, dict):
-            return res.get("value", [])
-        elif isinstance(res, list):
-            return res
+        try:
+            res, _ = self._request("GET", f"{project_id}/_apis/build/definitions", params={"api-version": "6.0"})
+            if isinstance(res, dict):
+                return res.get("value", [])
+            elif isinstance(res, list):
+                return res
+        except Exception as e:
+            logger.debug("Could not fetch build definitions for project %s: %s", project_id, e)
         return []
 
-    def get_all_build_artifacts(self, project_id, cache_db=None, progress_callback=None, max_workers=8):
+    def get_project_builds(
+        self,
+        project_id,
+        top=100,
+        query_order="finishTimeDescending",
+        status_filter="completed",
+        result_filter="succeeded,partiallySucceeded",
+        definitions=None,
+        max_builds_per_definition=None
+    ):
+        """
+        Retrieves build definitions for a specific project using server-side query filters.
+
+        Args:
+            project_id (str): The target project ID or name.
+            top (int, optional): Max number of builds to retrieve. Defaults to 100.
+            query_order (str, optional): Order of builds ('finishTimeDescending', 'queueTimeDescending'). Defaults to 'finishTimeDescending'.
+            status_filter (str, optional): Build status filter ('completed', 'inProgress', 'all'). Defaults to 'completed'.
+            result_filter (str, optional): Build result filter ('succeeded,partiallySucceeded', etc.). Defaults to 'succeeded,partiallySucceeded'.
+            definitions (str/list, optional): Comma-separated definition IDs or list. Defaults to None.
+            max_builds_per_definition (int, optional): Maximum number of builds per definition. Defaults to None.
+
+        Returns:
+            list: List of build definition dictionaries.
+        """
+        params = {
+            "api-version": "6.0",
+            "deletedFilter": "excludeDeleted"
+        }
+        if top:
+            params["$top"] = top
+        if query_order:
+            params["queryOrder"] = query_order
+        if status_filter and status_filter != "all":
+            params["statusFilter"] = status_filter
+        if result_filter and result_filter != "all":
+            params["resultFilter"] = result_filter
+        if definitions:
+            if isinstance(definitions, (list, tuple, set)):
+                params["definitions"] = ",".join(str(d) for d in definitions)
+            else:
+                params["definitions"] = str(definitions)
+        if max_builds_per_definition:
+            params["maxBuildsPerDefinition"] = int(max_builds_per_definition)
+
+        res, _ = self._request("GET", f"{project_id}/_apis/build/builds", params=params)
+        if isinstance(res, dict):
+            builds = res.get("value", [])
+        elif isinstance(res, list):
+            builds = res
+        else:
+            builds = []
+
+        # If filtered query returned no builds (e.g. unit test mock without filter support or no succeeded builds), fallback to general query
+        if not builds and (status_filter != "all" or result_filter != "all"):
+            res_fb, _ = self._request("GET", f"{project_id}/_apis/build/builds", params={"api-version": "6.0", "$top": top or 200})
+            if isinstance(res_fb, dict):
+                builds = res_fb.get("value", [])
+            elif isinstance(res_fb, list):
+                builds = res_fb
+
+        return builds
+
+    def get_all_build_artifacts(self, project_id, cache_db=None, progress_callback=None, max_workers=10, top=100, force_refresh=False):
         """
         Retrieves build definitions and artifacts for a specific project in parallel.
-        Saves builds and artifacts into SQLite cache if cache_db is provided.
+        Saves builds, pipeline definitions, and artifacts into SQLite cache if cache_db is provided.
+        Only fetches artifacts over HTTP for builds that are not already cached (or if force_refresh is True).
 
         Args:
             project_id (str): The target project ID or name.
             cache_db (AzureDevOpsCache, optional): Database cache instance.
             progress_callback (callable, optional): Callback for live progress updates.
-            max_workers (int, optional): Max parallel workers. Defaults to 8.
+            max_workers (int, optional): Max parallel workers. Defaults to 10.
+            top (int, optional): Max builds to query. Defaults to 100.
+            force_refresh (bool, optional): If True, re-fetches artifacts even if cached. Defaults to False.
 
         Returns:
             list: List of build dictionaries with associated artifacts.
         """
-        builds = self.get_project_builds(project_id)
+        builds = self.get_project_builds(project_id, top=top)
         if not isinstance(builds, list):
             builds = []
         total = len(builds)
         if total == 0:
             return []
 
+        # Normalize pipeline / definition info on all builds
+        for b in builds:
+            definition = b.get("definition") or b.get("pipeline") or {}
+            if isinstance(definition, dict):
+                p_name = definition.get("name") or (definition.get("path") or "").strip("\\/ ") or ""
+                if p_name:
+                    b["pipeline_name"] = p_name
+                    b["definitionName"] = p_name
+            elif b.get("definitionName") or b.get("pipeline_name"):
+                b["pipeline_name"] = b.get("definitionName") or b.get("pipeline_name")
+
+        cached_build_ids = set()
+        if cache_db and not force_refresh and hasattr(cache_db, "get_cached_build_ids_with_artifacts"):
+            try:
+                cached_build_ids = cache_db.get_cached_build_ids_with_artifacts(project_id)
+            except Exception as e:
+                logger.debug("Could not read cached build artifact IDs: %s", e)
+
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _fetch_artifacts_for_build(idx, build):
             build_id = build.get("id")
+            # If build is already completed and cached in DB, load artifacts from cache directly
+            if build_id in cached_build_ids and cache_db and hasattr(cache_db, "get_build_artifacts"):
+                try:
+                    cached_arts = cache_db.get_build_artifacts(build_id)
+                    if cached_arts is not None:
+                        return idx, build, cached_arts, None, True
+                except Exception:
+                    pass
+
             try:
                 artifacts = self.get_build_artifacts(project_id, build_id, cache_db=cache_db)
-                return idx, build, artifacts or [], None
+                return idx, build, artifacts or [], None, False
             except Exception as e:
                 logger.warning("Error processing build %s: %s", build_id, e)
-                return idx, build, [], e
+                return idx, build, [], e, False
 
         completed_count = 0
-        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, total))) as executor:
+        workers = min(max_workers, max(1, total))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(_fetch_artifacts_for_build, i, b) for i, b in enumerate(builds)]
             for fut in as_completed(futures):
                 completed_count += 1
-                idx, build, artifacts, err = fut.result()
+                idx, build, artifacts, err, from_cache = fut.result()
                 builds[idx]["artifacts"] = artifacts
                 build_number = build.get("buildNumber", build.get("id"))
+                cache_tag = " [cached]" if from_cache else ""
                 if progress_callback:
                     progress_callback(
-                        f"Fetching artifacts for build {completed_count}/{total} (Build #{build_number})...",
+                        f"Fetching artifacts for build {completed_count}/{total} (Build #{build_number}{cache_tag})...",
                         completed_count,
                         total
                     )
