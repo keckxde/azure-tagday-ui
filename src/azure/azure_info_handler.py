@@ -1806,20 +1806,24 @@ class AzureInfoHandler(AzureBaseClient):
                 logger.error("Failed to create tag reference refs/tags/%s on repo %s: %s", clean_tag, repo_name, ref_err)
                 raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
 
-        # Update local cache if available
+        # Update local cache and auto-sync repository tags, branches, and references
         if cache_db:
             try:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cache_db.save_single_tag(
-                    repo_id=repo_id,
-                    tag_name=clean_tag,
-                    commit_id=commit_id,
-                    commit_date=now_str,
-                    committer="GUI User",
-                    comment=tag_comment
-                )
-            except Exception as db_err:
-                logger.warning("Failed to save newly created tag into local cache DB: %s", db_err)
+                self.sync_single_repository(project_id, repo_id, cache_db=cache_db)
+            except Exception as sync_err:
+                logger.warning("Failed to auto-sync repository '%s' after tag creation: %s. Saving single tag fallback...", repo_name, sync_err)
+                try:
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cache_db.save_single_tag(
+                        repo_id=repo_id,
+                        tag_name=clean_tag,
+                        commit_id=commit_id,
+                        commit_date=now_str,
+                        committer="GUI User",
+                        comment=tag_comment
+                    )
+                except Exception as db_err:
+                    logger.warning("Failed to save newly created tag into local cache DB: %s", db_err)
 
         return {
             "success": True,
@@ -1830,6 +1834,83 @@ class AzureInfoHandler(AzureBaseClient):
             "commit_id": commit_id,
             "message": tag_comment,
             "created_tag": created_tag_obj
+        }
+
+    def sync_single_repository(self, project_id, repo_id_or_name, cache_db=None):
+        """
+        Synchronizes all tags, branches, references, and PRs for a single repository
+        from Azure DevOps / TFS into the local cache database.
+
+        Args:
+            project_id (str): The Azure DevOps project ID or name.
+            repo_id_or_name (str): Repository ID or repository name.
+            cache_db (AzureDevOpsCache, optional): The database cache instance.
+
+        Returns:
+            dict: The refreshed repository data structure.
+        """
+        repos = self.get_repositories(project_id)
+        if not repos:
+            return None
+
+        target_repo = None
+        for r in repos:
+            if r.get("id") == repo_id_or_name or r.get("name") == repo_id_or_name:
+                target_repo = r
+                break
+
+        if not target_repo:
+            logger.warning("sync_single_repository: Could not find repository %s in project %s", repo_id_or_name, project_id)
+            return None
+
+        repo_id = target_repo["id"]
+        repo_name = target_repo.get("name", "")
+
+        # 1. Fetch and process branches / branch references
+        branches = []
+        try:
+            branches = self.get_repository_refs(project_id, repo_id, "heads/")
+            self._process_branches(project_id, target_repo, branches)
+        except Exception as e:
+            logger.warning("Could not refresh branches for %s: %s", repo_name, e)
+
+        # 2. Fetch and process tags / tag references
+        tags_filtered = []
+        try:
+            tags_filtered, last_stable, last_unstable = self._process_tags(
+                project_id, target_repo, filter_version_tags_format=False
+            )
+        except Exception as e:
+            logger.warning("Could not refresh tags for %s: %s", repo_name, e)
+
+        # 3. Incrementally fetch/refresh PRs
+        prs = []
+        try:
+            dev_prs, stable_prs = self._process_pushes_and_prs(project_id, target_repo, cache_db=cache_db)
+            prs = dev_prs + stable_prs
+        except Exception as e:
+            logger.warning("Could not refresh PRs for %s: %s", repo_name, e)
+
+        # 4. Save everything to SQLite cache
+        if cache_db:
+            try:
+                cache_db.save_repository(project_id, target_repo)
+                if branches:
+                    cache_db.save_branches(repo_id, branches)
+                if tags_filtered:
+                    cache_db.save_tags(repo_id, tags_filtered)
+                if prs:
+                    cache_db.save_pull_requests(repo_id, prs)
+                logger.info("Successfully synced repository %s (%d tags, %d branches, %d PRs) to cache",
+                            repo_name, len(tags_filtered), len(branches), len(prs))
+            except Exception as db_err:
+                logger.warning("Failed writing synced repo %s to database: %s", repo_name, db_err)
+
+        return {
+            "info": target_repo,
+            "branches": branches,
+            "tags": tags_filtered,
+            "prs": prs
         }
 
 

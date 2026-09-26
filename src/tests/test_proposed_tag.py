@@ -76,6 +76,7 @@ def test_create_repository_tag_handler():
     handler.create_tag_ref = MagicMock(return_value={
         "value": [{"name": "refs/tags/v01.02.2639", "updateStatus": "succeeded", "success": True}]
     })
+    handler.sync_single_repository = MagicMock(return_value={"info": {"id": "repo-guid-123"}})
     
     res = handler.create_repository_tag("my-project", "MyRepo", "v01.02.2639", branch_name="dev", message="Weekly Tag", cache_db=mock_db)
     assert res["success"] is True
@@ -85,7 +86,7 @@ def test_create_repository_tag_handler():
     handler.create_annotated_tag.assert_called_once()
     # create_tag_ref is NOT called when create_annotated_tag succeeds (Azure DevOps creates ref automatically)
     handler.create_tag_ref.assert_not_called()
-    mock_db.save_single_tag.assert_called_once()
+    handler.sync_single_repository.assert_called_once_with("my-project", "repo-guid-123", cache_db=mock_db)
 
 
 def test_create_repository_tag_fallback_to_lightweight_ref():
@@ -102,13 +103,36 @@ def test_create_repository_tag_fallback_to_lightweight_ref():
     handler.create_tag_ref = MagicMock(return_value={
         "value": [{"name": "refs/tags/v01.02.2639", "updateStatus": "succeeded", "success": True}]
     })
+    handler.sync_single_repository = MagicMock(return_value={"info": {"id": "repo-guid-123"}})
     
     res = handler.create_repository_tag("my-project", "MyRepo", "v01.02.2639", branch_name="dev", message="Weekly Tag", cache_db=mock_db)
     assert res["success"] is True
     assert res["tag_name"] == "v01.02.2639"
     handler.create_annotated_tag.assert_called_once()
     handler.create_tag_ref.assert_called_once_with("my-project", "repo-guid-123", "v01.02.2639", "deadbeef12345678")
-    mock_db.save_single_tag.assert_called_once()
+    handler.sync_single_repository.assert_called_once_with("my-project", "repo-guid-123", cache_db=mock_db)
+
+
+def test_sync_single_repository_fetches_and_persists():
+    from src.azure.azure_info_handler import AzureInfoHandler
+
+    mock_client = MagicMock()
+    mock_db = MagicMock()
+
+    handler = AzureInfoHandler(mock_client, mock_db)
+    handler.get_repositories = MagicMock(return_value=[{"id": "repo-guid-123", "name": "MyRepo"}])
+    handler.get_repository_refs = MagicMock(return_value=[{"name": "refs/heads/dev", "objectId": "c1"}])
+    handler._process_branches = MagicMock(return_value=True)
+    handler._process_tags = MagicMock(return_value=([{"name": "v01.00.2639", "commit_id": "c1"}], None, None))
+    handler._process_pushes_and_prs = MagicMock(return_value=([], []))
+
+    res = handler.sync_single_repository("my-project", "MyRepo", cache_db=mock_db)
+    assert res is not None
+    assert len(res["branches"]) == 1
+    assert len(res["tags"]) == 1
+    mock_db.save_repository.assert_called_once_with("my-project", {"id": "repo-guid-123", "name": "MyRepo"})
+    mock_db.save_branches.assert_called_once()
+    mock_db.save_tags.assert_called_once()
 
 
 def test_backend_propose_and_branches():
