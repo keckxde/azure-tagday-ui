@@ -23,10 +23,25 @@ ApplicationWindow {
 
     property int currentTabIndex: 0
 
+    readonly property var reposView: reposViewLoader ? reposViewLoader.item : null
+    readonly property var pullRequestsView: pullRequestsViewLoader ? pullRequestsViewLoader.item : null
+    readonly property var workItemsView: workItemsViewLoader ? workItemsViewLoader.item : null
+    readonly property var workloadExplorerView: workloadExplorerViewLoader ? workloadExplorerViewLoader.item : null
+    readonly property var reportsView: reportsViewLoader ? reportsViewLoader.item : null
+    readonly property var settingsView: settingsViewLoader ? settingsViewLoader.item : null
+
     function navigateToTagDayRepo(repoName) {
         window.currentTabIndex = 5;
         if (reportsView) {
             reportsView.openTagDayRepo(repoName);
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item) {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    reportsViewLoader.item.openTagDayRepo(repoName);
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
         }
     }
 
@@ -35,22 +50,43 @@ ApplicationWindow {
         if (reposView && categoryFilter) {
             reposView.selectedCategory = categoryFilter;
             reposView.currentPage = 1;
+        } else if (categoryFilter && reposViewLoader) {
+            var conn = function() {
+                if (reposViewLoader.item) {
+                    reposViewLoader.loaded.disconnect(conn);
+                    reposViewLoader.item.selectedCategory = categoryFilter;
+                    reposViewLoader.item.currentPage = 1;
+                }
+            };
+            reposViewLoader.loaded.connect(conn);
         }
     }
 
     function navigateToPullRequests(filterArg, isStatus) {
         window.currentTabIndex = 2;
-        if (pullRequestsView) {
+        var applyPr = function(view) {
+            if (!view) return;
             if (isStatus) {
-                pullRequestsView.filterByStatus(filterArg);
-                pullRequestsView.filterByRepo("ALL");
+                view.filterByStatus(filterArg);
+                view.filterByRepo("ALL");
             } else if (filterArg) {
-                pullRequestsView.filterByRepo(filterArg);
-                pullRequestsView.filterByStatus("ALL");
+                view.filterByRepo(filterArg);
+                view.filterByStatus("ALL");
             } else {
-                pullRequestsView.filterByRepo("ALL");
-                pullRequestsView.filterByStatus("ALL");
+                view.filterByRepo("ALL");
+                view.filterByStatus("ALL");
             }
+        };
+        if (pullRequestsView) {
+            applyPr(pullRequestsView);
+        } else if (pullRequestsViewLoader) {
+            var conn = function() {
+                if (pullRequestsViewLoader.item) {
+                    pullRequestsViewLoader.loaded.disconnect(conn);
+                    applyPr(pullRequestsViewLoader.item);
+                }
+            };
+            pullRequestsViewLoader.loaded.connect(conn);
         }
     }
 
@@ -62,6 +98,14 @@ ApplicationWindow {
         window.currentTabIndex = 5;
         if (reportsView && typeof reportsView.openSprintReport === "function") {
             reportsView.openSprintReport(sprintName);
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item && typeof reportsViewLoader.item.openSprintReport === "function") {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    reportsViewLoader.item.openSprintReport(sprintName);
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
         }
     }
 
@@ -71,19 +115,43 @@ ApplicationWindow {
             reportsView.openStorageReport();
         } else if (reportsView) {
             reportsView.activeReportTab = 2;
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item) {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    if (typeof reportsViewLoader.item.openStorageReport === "function") {
+                        reportsViewLoader.item.openStorageReport();
+                    } else {
+                        reportsViewLoader.item.activeReportTab = 2;
+                    }
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
         }
     }
 
     function navigateToWorkloadSprint(assignee, sprintName) {
         window.currentTabIndex = 4;
-        if (workloadExplorerView) {
+        var applyWl = function(view) {
+            if (!view) return;
             if (assignee && assignee !== "Unassigned" && assignee !== "ALL") {
-                workloadExplorerView.searchQuery = assignee;
+                view.searchQuery = assignee;
             } else if (sprintName) {
-                workloadExplorerView.searchQuery = sprintName;
+                view.searchQuery = sprintName;
             } else {
-                workloadExplorerView.searchQuery = "";
+                view.searchQuery = "";
             }
+        };
+        if (workloadExplorerView) {
+            applyWl(workloadExplorerView);
+        } else if (workloadExplorerViewLoader) {
+            var conn = function() {
+                if (workloadExplorerViewLoader.item) {
+                    workloadExplorerViewLoader.loaded.disconnect(conn);
+                    applyWl(workloadExplorerViewLoader.item);
+                }
+            };
+            workloadExplorerViewLoader.loaded.connect(conn);
         }
     }
 
@@ -91,6 +159,14 @@ ApplicationWindow {
         window.currentTabIndex = 3;
         if (workItemsView && typeof workItemsView.searchQuery !== "undefined") {
             workItemsView.searchQuery = "#" + workItemId;
+        } else if (workItemsViewLoader) {
+            var conn = function() {
+                if (workItemsViewLoader.item && typeof workItemsViewLoader.item.searchQuery !== "undefined") {
+                    workItemsViewLoader.loaded.disconnect(conn);
+                    workItemsViewLoader.item.searchQuery = "#" + workItemId;
+                }
+            };
+            workItemsViewLoader.loaded.connect(conn);
         }
     }
 
@@ -1369,22 +1445,60 @@ ApplicationWindow {
                     currentIndex: window.currentTabIndex
 
                     DashboardView {}
-                    ReposView {
-                        id: reposView
+
+                    Loader {
+                        id: reposViewLoader
+                        active: window.currentTabIndex === 1 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/ReposView.qml"
+                        onLoaded: _hasLoaded = true
                     }
-                    PullRequestsView {
-                        id: pullRequestsView
+
+                    Loader {
+                        id: pullRequestsViewLoader
+                        active: window.currentTabIndex === 2 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/PullRequestsView.qml"
+                        onLoaded: _hasLoaded = true
                     }
-                    WorkItemsView {
-                        id: workItemsView
+
+                    Loader {
+                        id: workItemsViewLoader
+                        active: window.currentTabIndex === 3 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/WorkItemsView.qml"
+                        onLoaded: _hasLoaded = true
                     }
-                    WorkloadExplorerView {
-                        id: workloadExplorerView
+
+                    Loader {
+                        id: workloadExplorerViewLoader
+                        active: window.currentTabIndex === 4 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/WorkloadExplorerView.qml"
+                        onLoaded: _hasLoaded = true
                     }
-                    ReportsView {
-                        id: reportsView
+
+                    Loader {
+                        id: reportsViewLoader
+                        active: window.currentTabIndex === 5 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/ReportsView.qml"
+                        onLoaded: _hasLoaded = true
                     }
-                    SettingsView {}
+
+                    Loader {
+                        id: settingsViewLoader
+                        active: window.currentTabIndex === 6 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/SettingsView.qml"
+                        onLoaded: _hasLoaded = true
+                    }
                 }
 
                 // =========================================
