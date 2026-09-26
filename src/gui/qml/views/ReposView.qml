@@ -6,7 +6,7 @@ import "../components"
 Item {
     id: root
     property string searchQuery: ""
-    property string selectedCategory: "🏷️ PENDING PRs"
+    property string selectedCategory: (pendingPrsCount > 0) ? "🏷️ PENDING PRs" : (unmergedBranchesCount > 0 ? "🌿 UNMERGED BRANCHES" : "ALL")
     property int currentPage: 1
     property int pageSize: 15
     property int totalPages: 1
@@ -48,6 +48,20 @@ Item {
         }
         return count;
     }
+
+    function validateSelectedCategory() {
+        if (selectedCategory === "🏷️ PENDING PRs" && root.pendingPrsCount === 0) {
+            selectedCategory = (root.unmergedBranchesCount > 0) ? "🌿 UNMERGED BRANCHES" : "ALL";
+        } else if (selectedCategory === "🌿 UNMERGED BRANCHES" && root.unmergedBranchesCount === 0) {
+            selectedCategory = (root.pendingPrsCount > 0) ? "🏷️ PENDING PRs" : "ALL";
+        } else if (selectedCategory === "⚠️ PENDING" && root.pendingCount === 0) {
+            selectedCategory = "ALL";
+        }
+    }
+
+    onPendingPrsCountChanged: validateSelectedCategory()
+    onUnmergedBranchesCountChanged: validateSelectedCategory()
+    onPendingCountChanged: validateSelectedCategory()
 
     // Shared Column Widths for pixel-perfect alignment across Header and Rows
     readonly property int colRepoWidth: 240
@@ -168,7 +182,17 @@ Item {
 
                 Repeater {
                     model: {
-                        var base = ["🏷️ PENDING PRs", "🌿 UNMERGED BRANCHES", "ALL"];
+                        var base = [];
+                        if (root.pendingPrsCount > 0) {
+                            base.push("🏷️ PENDING PRs");
+                        }
+                        if (root.unmergedBranchesCount > 0) {
+                            base.push("🌿 UNMERGED BRANCHES");
+                        }
+                        if (root.pendingCount > 0 && root.pendingPrsCount === 0 && root.unmergedBranchesCount === 0) {
+                            base.push("⚠️ PENDING");
+                        }
+                        base.push("ALL");
                         if (backend && backend.repoCategories) {
                             for (var i = 0; i < backend.repoCategories.length; i++) {
                                 base.push(backend.repoCategories[i].name);
@@ -846,6 +870,7 @@ Item {
     }
 
     function updateFilteredModel() {
+        root.validateSelectedCategory();
         filteredRepos.clear();
         if (!backend || !backend.repositories)
             return;
@@ -895,6 +920,7 @@ Item {
     Connections {
         target: backend
         function onRepositoriesChanged() {
+            root.validateSelectedCategory();
             root.updateFilteredModel();
         }
         function onRepoCategoriesChanged() {
