@@ -114,6 +114,10 @@ Item {
         }
     }
 
+    function openStorageReport() {
+        root.activeReportTab = 2;
+    }
+
     onSelectedSprintReportChanged: {
         if (backend && root.selectedSprintReport) {
             root.sprintReportData = backend.get_sprint_report_data(root.selectedSprintReport);

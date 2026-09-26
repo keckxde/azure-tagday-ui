@@ -65,6 +65,15 @@ ApplicationWindow {
         }
     }
 
+    function navigateToStorageReport() {
+        window.currentTabIndex = 5;
+        if (reportsView && typeof reportsView.openStorageReport === "function") {
+            reportsView.openStorageReport();
+        } else if (reportsView) {
+            reportsView.activeReportTab = 2;
+        }
+    }
+
     function navigateToWorkloadSprint(assignee, sprintName) {
         window.currentTabIndex = 4;
         if (workloadExplorerView) {
@@ -317,9 +326,22 @@ ApplicationWindow {
                         NavItem {
                             iconText: "📈"
                             label: "Reports & Analytics"
-                            active: window.currentTabIndex === 5
+                            active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab !== 2 : true)
                             isCollapsed: window.isSidebarCollapsed
-                            onClicked: window.currentTabIndex = 5
+                            onClicked: {
+                                window.currentTabIndex = 5;
+                                if (reportsView && reportsView.activeReportTab === 2) {
+                                    reportsView.activeReportTab = 0;
+                                }
+                            }
+                        }
+
+                        NavItem {
+                            iconText: "🗄️"
+                            label: "Storage & Artifacts"
+                            active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 2 : false)
+                            isCollapsed: window.isSidebarCollapsed
+                            onClicked: window.navigateToStorageReport()
                         }
 
                         NavItem {
