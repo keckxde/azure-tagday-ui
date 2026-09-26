@@ -20,6 +20,7 @@
     - Added sidebar filter pills for `All (<count>)`, `🏷️ PRs (<count>)`, and `🌿 Branches (<count>)` to instantly focus on repositories needing release tagging vs WIP branch updates.
     - Replaced the merged `X updates` badge with distinct `🏷️ X PRs` and `🌿 Y branches` badges.
     - Repositioned the Category badge to the first line alongside the repository name (`RowLayout`), freeing up width on the second row (latest & proposed tags) and eliminating layout overflow.
+    - Contextual default tab: Selecting a repository while the `🌿 Branches` category is active automatically opens the **"Unmerged Branches"** inspector sub-tab; selecting while `🏷️ PRs` is active opens **"Merged PRs"**.
     - Updated top overview metric cards to report `Pending Release Repos` and `Unmerged Branch Repos` separately.
   - **Automated Verification ([`src/tests/test_pending_and_unmerged_branches.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_pending_and_unmerged_branches.py))**: Added unit test suite validating flag separation, counts, and TagDay breakdown metrics across all repositories (265/265 tests passed).
 

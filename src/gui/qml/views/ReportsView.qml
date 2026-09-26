@@ -81,10 +81,16 @@ Item {
     }
     property int repoDetailSubTab: 0 // 0: Merged PRs, 1: Unmerged Branches, 2: Active PRs
 
-    function openTagDayRepo(repoName) {
+    function openTagDayRepo(repoName, defaultTab) {
         root.activeReportTab = 1;
         root.selectedRepoName = repoName;
-        root.repoDetailSubTab = 0;
+        if (defaultTab !== undefined) {
+            root.repoDetailSubTab = defaultTab;
+        } else if (root.tdRepoFilter === "branches") {
+            root.repoDetailSubTab = 1;
+        } else {
+            root.repoDetailSubTab = 0;
+        }
     }
 
     function openSprintReport(sprintName) {
@@ -1176,7 +1182,12 @@ Item {
                                         color: parent.checked ? "#d29922" : (parent.hovered ? "#21262d" : "#0d1117")
                                         border.color: parent.checked ? "#e3b341" : "#6e4b10"
                                     }
-                                    onClicked: root.tdRepoFilter = "prs"
+                                    onClicked: {
+                                        root.tdRepoFilter = "prs";
+                                        if (root.selectedRepoName) {
+                                            root.repoDetailSubTab = 0;
+                                        }
+                                    }
                                 }
 
                                 Button {
@@ -1203,7 +1214,12 @@ Item {
                                         color: parent.checked ? "#8957e5" : (parent.hovered ? "#21262d" : "#0d1117")
                                         border.color: parent.checked ? "#a371f7" : "#5a3e85"
                                     }
-                                    onClicked: root.tdRepoFilter = "branches"
+                                    onClicked: {
+                                        root.tdRepoFilter = "branches";
+                                        if (root.selectedRepoName) {
+                                            root.repoDetailSubTab = 1;
+                                        }
+                                    }
                                 }
                             }
 
@@ -1358,7 +1374,18 @@ Item {
                                                 root.selectedRepoName = "";
                                             } else {
                                                 root.selectedRepoName = modelData.name;
-                                                root.repoDetailSubTab = 0;
+                                                if (root.tdRepoFilter === "branches") {
+                                                    root.repoDetailSubTab = 1; // Unmerged Branches
+                                                } else if (root.tdRepoFilter === "prs") {
+                                                    root.repoDetailSubTab = 0; // Merged PRs
+                                                } else {
+                                                    // In "all" filter: if repo has no untagged PRs but has unmerged branches, default to Branches (1), otherwise Merged PRs (0)
+                                                    if ((modelData.prs_count || 0) === 0 && (modelData.branches_count || 0) > 0) {
+                                                        root.repoDetailSubTab = 1;
+                                                    } else {
+                                                        root.repoDetailSubTab = 0;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
