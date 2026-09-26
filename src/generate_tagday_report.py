@@ -542,6 +542,9 @@ def generate_tagday_markdown(data, output_path=None, template_path=None, config_
     """
     Renders the Tag Day release overview report into Markdown using Jinja2 templates.
     """
+    if output_path and not os.path.isabs(output_path):
+        output_path = os.path.join(utils.get_reports_dir(), output_path)
+
     gen_time = data.get("generated_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Load status icons from YAML configuration file
@@ -762,11 +765,15 @@ def generate_tagday_markdown(data, output_path=None, template_path=None, config_
     return rendered
 
 
-def run_tagday_report(db_path, output_path, project_id, config_path=None, template_path=None):
+def run_tagday_report(db_path, output_path=None, project_id=None, config_path=None, template_path=None):
     """
     Executes Tag Day report generation workflow end-to-end.
-    All path and project parameters are mandatory and provided by the caller.
     """
+    if not output_path:
+        output_path = os.path.join(utils.get_reports_dir(), "TAGDAY.md")
+    elif not os.path.isabs(output_path):
+        output_path = os.path.join(utils.get_reports_dir(), output_path)
+
     if not os.path.exists(db_path):
         logger.error(f"TFS SQLite cache database not found at: {db_path}")
         return False

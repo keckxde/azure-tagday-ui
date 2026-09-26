@@ -417,6 +417,12 @@ def generate_sprint_report(cache_db, sprint_name=None, start_date=None, end_date
     """
     High-level orchestrator to generate both Markdown report and CSV file.
     """
+    reports_dir = utils.get_reports_dir()
+    if output_md and not os.path.isabs(output_md):
+        output_md = os.path.join(reports_dir, output_md)
+    if output_csv and not os.path.isabs(output_csv):
+        output_csv = os.path.join(reports_dir, output_csv)
+
     data = generate_sprint_report_data(cache_db, sprint_name=sprint_name, start_date=start_date, end_date=end_date, now_dt=now_dt, work_items=work_items)
     md_content = render_sprint_markdown(data)
 

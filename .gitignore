@@ -16,3 +16,4 @@ src/config/user_settings.yaml
 *.pylog
 azure_tagday_ui-*/*
 BUILD_ARTIFACTS*
+cache.db

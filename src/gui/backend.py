@@ -45,7 +45,12 @@ class QtLogHandler(logging.Handler):
             return
         if record.name.startswith("gui.qt_log"):
             return
-        self._in_emit = True
+        try:
+            from shiboken6 import isValid
+            if not isValid(self.emitter):
+                return
+        except Exception:
+            pass
         try:
             msg = self.format(record)
             ts = datetime.now().strftime("%H:%M:%S")
@@ -56,7 +61,8 @@ class QtLogHandler(logging.Handler):
                 lvl = "ERROR"
             else:
                 lvl = "INFO"
-            self.emitter.recordReady.emit(ts, lvl, record.name, msg)
+            if self.emitter is not None:
+                self.emitter.recordReady.emit(ts, lvl, record.name, msg)
         except Exception:
             pass
         finally:
@@ -235,6 +241,7 @@ class DevOpsBackend(QObject):
     progressChanged = Signal()
     connectionLost = Signal(str)            # error description on repository server disconnect
     tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
+    reportsDirChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -285,9 +292,16 @@ class DevOpsBackend(QObject):
         self._log_emitter = QtLogEmitter()
         self._log_emitter.recordReady.connect(self._on_incoming_log_record)
 
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, QtLogHandler):
+                try:
+                    root_logger.removeHandler(h)
+                except Exception:
+                    pass
+
         self._qt_log_handler = QtLogHandler(self._log_emitter)
         self._qt_log_handler.setFormatter(logging.Formatter("%(message)s"))
-        root_logger = logging.getLogger()
         if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
             root_logger.setLevel(logging.INFO)
         root_logger.addHandler(self._qt_log_handler)
@@ -329,6 +343,9 @@ class DevOpsBackend(QObject):
         self._last_week_activity = {}
         self._current_week_planned = {}
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
+        self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
+        if self._reports_dir:
+            devops_helper.BASE_FOLDER = self._reports_dir
         self._info_handler = None
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
 
@@ -340,6 +357,9 @@ class DevOpsBackend(QObject):
             cfg = _load_user_settings()
             if cfg.get("custom_deadline_field"):
                 self._custom_deadline_field = cfg["custom_deadline_field"]
+            if cfg.get("reports_dir"):
+                self._reports_dir = cfg["reports_dir"]
+                devops_helper.BASE_FOLDER = self._reports_dir
             custom_db = cfg.get("db_path")
             if custom_db and os.path.exists(custom_db):
                 self._db_path = os.path.abspath(custom_db)
@@ -423,6 +443,9 @@ class DevOpsBackend(QObject):
                 devops_helper.BUILD_ARTIFACTS_MD = db_cfg["BUILD_ARTIFACTS_MD"]
             if "BUILD_ARTIFACTS_CSV" in db_cfg:
                 devops_helper.BUILD_ARTIFACTS_CSV = db_cfg["BUILD_ARTIFACTS_CSV"]
+            if db_cfg.get("REPORTS_DIR") or db_cfg.get("BASE_FOLDER"):
+                self._reports_dir = db_cfg.get("REPORTS_DIR") or db_cfg.get("BASE_FOLDER")
+                devops_helper.BASE_FOLDER = self._reports_dir
             if "RECENT_DELAY" in db_cfg:
                 try:
                     devops_helper.RECENT_DELAY = int(db_cfg["RECENT_DELAY"])
@@ -1088,13 +1111,21 @@ class DevOpsBackend(QObject):
     def storageData(self):
         return self._storage_data
 
+    @Property(str, notify=reportsDirChanged)
+    def reportsDir(self):
+        return self._reports_dir or ""
+
+    @Property(str, notify=reportsDirChanged)
+    def effectiveReportsDir(self):
+        return self.get_effective_reports_dir()
+
     @Property(str, notify=statsChanged)
     def revisionFilePath(self):
-        return os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        return os.path.join(self.get_effective_reports_dir(), devops_helper.REVISION_FILE_MD)
 
     @Property(str, notify=statsChanged)
     def tagdayFilePath(self):
-        return os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD)
+        return os.path.join(self.get_effective_reports_dir(), devops_helper.TAGDAY_FILE_MD)
 
     @Property(list, notify=syncLogsChanged)
     def syncLogs(self):
@@ -2409,6 +2440,84 @@ class DevOpsBackend(QObject):
             logger.error(f"Error loading interactive reports data: {e}", exc_info=True)
             self.logMessage.emit(f"Error loading report metrics: {e}")
 
+    def get_effective_reports_dir(self):
+        """Returns the configured reports target folder, or BASE_FOLDER / os.getcwd() by default."""
+        if self._reports_dir and str(self._reports_dir).strip():
+            return os.path.normpath(str(self._reports_dir).strip())
+        if devops_helper.BASE_FOLDER and os.path.isabs(devops_helper.BASE_FOLDER) and devops_helper.BASE_FOLDER != os.getcwd():
+            return os.path.normpath(devops_helper.BASE_FOLDER)
+        return os.getcwd()
+
+    @Slot(str)
+    def setReportsDir(self, path):
+        """Sets the configured target directory for reports and persists it."""
+        clean_path = (path or "").strip()
+        if clean_path:
+            clean_path = os.path.normpath(clean_path)
+        self._reports_dir = clean_path
+        devops_helper.BASE_FOLDER = clean_path if clean_path else os.getcwd()
+
+        cfg = _load_user_settings()
+        cfg["reports_dir"] = clean_path
+        _save_user_settings(cfg)
+
+        if self._cache_db:
+            try:
+                self._cache_db.set_config("REPORTS_DIR", clean_path)
+            except Exception as e:
+                logger.warning(f"Could not persist REPORTS_DIR to SQLite project_config: {e}")
+
+        self.reportsDirChanged.emit()
+        self.settingsChanged.emit()
+        self.statsChanged.emit()
+
+    @Slot(str)
+    def set_reports_dir(self, path):
+        """Snake_case alias for setReportsDir."""
+        self.setReportsDir(path)
+
+    @Slot(result=str)
+    def browse_reports_dir(self):
+        """Opens native directory picker dialog to select reports target directory."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            chosen = QFileDialog.getExistingDirectory(
+                None,
+                "Select Reports Target & Baseline Directory",
+                initial_dir
+            )
+            if chosen:
+                norm = os.path.normpath(chosen)
+                self.setReportsDir(norm)
+                return norm
+            return ""
+        except Exception as e:
+            logger.error(f"Error opening directory picker: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseReportsDir(self):
+        """CamelCase alias for browse_reports_dir."""
+        return self.browse_reports_dir()
+
+    @Slot()
+    def open_reports_folder(self):
+        """Opens the configured reports folder in Windows File Explorer."""
+        folder = self.get_effective_reports_dir()
+        if not os.path.exists(folder):
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except Exception:
+                pass
+        self.open_path_in_explorer(folder)
+
+    @Slot()
+    def open_db_folder(self):
+        """Opens the folder containing the active database or current project in Windows File Explorer."""
+        folder = os.path.dirname(os.path.abspath(self._db_path)) if self._db_path else self.get_effective_reports_dir()
+        self.open_path_in_explorer(folder)
+
     @Slot()
     def generate_tagday_report_async(self):
         """Generates the Tag Day release report in background."""
@@ -2417,14 +2526,16 @@ class DevOpsBackend(QObject):
 
         def _work(worker):
             worker.log_message.emit("Generating Tag Day release notes report...")
+            reports_dir = self.get_effective_reports_dir()
             success = devops_helper.generate_tagday_report(
                 db_path=self._db_path,
-                output_path=os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD),
-                project_id=devops_helper.AZURE_PROJECT_ID
+                output_path=os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD),
+                project_id=devops_helper.AZURE_PROJECT_ID,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Tag Day report generation returned failure")
-            worker.log_message.emit("Tag Day report generated successfully")
+            worker.log_message.emit(f"Tag Day report generated successfully: {os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD)}")
             return "Tag Day report generated"
 
         self._run_worker(_work, "Generating Tag Day report...")
@@ -2463,12 +2574,14 @@ class DevOpsBackend(QObject):
             # 2. Analyze storage & generate Markdown + CSV reports
             worker.report_progress(85, "Analyzing build artifacts and storage usage...")
             worker.log_message.emit("Analyzing build artifacts and storage usage footprint...")
-            md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD)
-            csv_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_CSV)
+            reports_dir = self.get_effective_reports_dir()
+            md_path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_MD)
+            csv_path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_CSV)
             success = devops_helper.generate_artifacts_report(
                 db_path=self._db_path,
                 md_path=md_path,
-                csv_path=csv_path
+                csv_path=csv_path,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Storage report generation returned failure")
@@ -2487,10 +2600,12 @@ class DevOpsBackend(QObject):
 
         def _work(worker):
             worker.log_message.emit("Generating Release Notes (REVISION.md & REVISION.docx)...")
-            revision_md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+            reports_dir = self.get_effective_reports_dir()
+            revision_md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
             success = devops_helper.generate_revision_report(
                 db_path=self._db_path,
-                revision_md_path=revision_md_path
+                revision_md_path=revision_md_path,
+                reports_dir=reports_dir
             )
             if not success:
                 raise RuntimeError("Revision report generation returned failure")
@@ -2502,7 +2617,15 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_revision_file(self):
         """Opens REVISION.md in default editor or viewer."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
+        if not os.path.exists(path):
+            path = os.path.join(reports_dir, "doc", "04_Development", "REVISION.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), "REVISION.md")
+
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -2511,8 +2634,14 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_revision_docx(self):
         """Opens REVISION.docx in Microsoft Word or default viewer."""
-        md_path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.REVISION_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
         docx_path = os.path.splitext(md_path)[0] + ".docx"
+        if not os.path.exists(docx_path):
+            docx_path = os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.docx")
+        if not os.path.exists(docx_path):
+            docx_path = os.path.join(os.getcwd(), "REVISION.docx")
+
         if os.path.exists(docx_path):
             self.open_path_in_explorer(docx_path)
         else:
@@ -2522,7 +2651,10 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_tagday_file(self):
         """Opens TAGDAY.md in default editor."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.TAGDAY_FILE_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.TAGDAY_FILE_MD)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.TAGDAY_FILE_MD)
         if os.path.exists(path):
             self.open_path_in_explorer(path)
         else:
@@ -2531,12 +2663,18 @@ class DevOpsBackend(QObject):
     @Slot()
     def open_storage_report_file(self):
         """Opens generated storage report markdown in default editor."""
-        path = os.path.join(devops_helper.BASE_FOLDER, devops_helper.BUILD_ARTIFACTS_MD)
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_ARTIFACTS_MD)
         if not os.path.exists(path):
-            path = os.path.join(devops_helper.BASE_FOLDER, "doc", "04_Development", "test_report.md")
+            path = os.path.join(reports_dir, "doc", "04_Development", "test_report.md")
         if not os.path.exists(path):
-            path = os.path.join(devops_helper.BASE_FOLDER, "test_report.md")
+            path = os.path.join(reports_dir, "test_report.md")
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_ARTIFACTS_MD)
         if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}")
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
@@ -2732,6 +2870,37 @@ class DevOpsBackend(QObject):
         curr_monday = date.fromisocalendar(curr_y, curr_w, 1)
         base_start_monday = curr_monday - timedelta(weeks=1)
         start_monday = base_start_monday - timedelta(weeks=lookback_weeks)
+
+        # Collect project sprint metadata to assist navigation
+        all_sprint_weeks = {}
+        total_all_sprint_items = 0
+        for wi in self._work_items:
+            if wi.get("deleted"):
+                continue
+            t_low = (wi.get("type") or "").lower()
+            if t_low in ("epic", "feature"):
+                continue
+            s_name = wi.get("sprint_week_name")
+            if not s_name:
+                _, _, s_name = utils.parse_sprint_week(wi.get("iteration_name") or wi.get("iteration_path") or "")
+            if s_name:
+                sy, sw, _ = utils.parse_sprint_week(s_name)
+                if sy and sw:
+                    all_sprint_weeks[(sy, sw)] = all_sprint_weeks.get((sy, sw), 0) + 1
+                    total_all_sprint_items += 1
+
+        latest_active_sprint_name = ""
+        latest_active_sprint_label = ""
+        suggested_lookback_offset = 0
+        if all_sprint_weeks:
+            max_s_key = max(all_sprint_weeks.keys())
+            max_y, max_w = max_s_key
+            latest_active_sprint_name = f"week-{str(max_y)[-2:]}{max_w:02d}"
+            latest_active_sprint_label = f"W{max_w:02d}"
+            latest_monday = date.fromisocalendar(max_y, max_w, 1)
+            target_start = latest_monday - timedelta(weeks=max(0, horizon_weeks - 2))
+            diff_w = int(round((base_start_monday - target_start).days / 7.0))
+            suggested_lookback_offset = max(0, diff_w)
 
         adv_iters = utils.generate_weekly_iterations_advance(
             start_date_or_week=start_monday,
@@ -3208,6 +3377,10 @@ class DevOpsBackend(QObject):
             "assignees_count": len(assignee_rows),
             "bug_hierarchy_mode": self._bug_hierarchy_mode,
             "lookback_weeks": lookback_weeks,
+            "total_all_sprint_items": total_all_sprint_items,
+            "latest_active_sprint_name": latest_active_sprint_name,
+            "latest_active_sprint_label": latest_active_sprint_label,
+            "suggested_lookback_offset": suggested_lookback_offset,
         }
 
     def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None):

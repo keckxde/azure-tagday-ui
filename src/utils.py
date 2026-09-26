@@ -148,6 +148,8 @@ def GetEnvVariable(name, default=None, prefer_env=False):
                 "AZURE_PROJECT_ID": cfg.get("project_id") or cfg.get("project_name"),
                 "AZURE_TEAM": cfg.get("team") or cfg.get("tfs_team_name"),
                 "WORK_ITEM_DEADLINE_FIELD": cfg.get("custom_deadline_field"),
+                "REPORTS_DIR": cfg.get("reports_dir") or cfg.get("base_folder"),
+                "BASE_FOLDER": cfg.get("reports_dir") or cfg.get("base_folder"),
             }
             if mapping.get(name):
                 return mapping[name]
@@ -166,6 +168,20 @@ def GetEnvVariable(name, default=None, prefer_env=False):
         return default
 
     return ""
+
+
+def get_reports_dir(default=None):
+    """
+    Returns the configured target directory for reading baseline reports and writing generated reports.
+    Checks database / user configuration ('REPORTS_DIR', 'reports_dir', 'BASE_FOLDER', 'base_folder'),
+    falling back to environment variables, and defaulting to default or os.getcwd().
+    """
+    configured = GetEnvVariable("REPORTS_DIR") or GetEnvVariable("BASE_FOLDER")
+    if configured and str(configured).strip():
+        return os.path.normpath(str(configured).strip())
+    if default is not None:
+        return os.path.normpath(default)
+    return os.getcwd()
         
 
 def parse_iso_datetime(date_str):

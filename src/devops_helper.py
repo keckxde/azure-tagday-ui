@@ -19,9 +19,13 @@ from azure import AzureInfoHandler, AzureDevOpsCache, AzureServerConnectionError
 
 logger = logging.getLogger(__name__)
 
+def get_reports_dir(default=None) -> str:
+    """Returns the currently configured reports target/baseline directory, defaulting to cwd."""
+    return utils.get_reports_dir(default or os.getcwd())
+
 # Determine BASE_FOLDER based on configuration or cwd
 cwd = os.getcwd()
-BASE_FOLDER = utils.GetEnvVariable("BASE_FOLDER", cwd)
+BASE_FOLDER = utils.get_reports_dir(cwd)
 
 logger.info("Use BASE_FOLDER: %s", BASE_FOLDER)
 
@@ -746,6 +750,8 @@ def export_prs(file_base_path):
     """
     Exports pull requests per repository and branch to Excel (XML) and Markdown.
     """
+    if file_base_path and not os.path.isabs(file_base_path):
+        file_base_path = os.path.join(get_reports_dir(), file_base_path)
     db_path, cache_db = _getDBCacheHandler()
     try:
         prs = cache_db.get_all_prs()
@@ -940,16 +946,19 @@ def list_untagged_repos():
 
 def generate_tagday_report(db_path: Optional[str] = None, output_path: Optional[str] = None,
                            project_id: Optional[str] = None, config_path: Optional[str] = None,
-                           template_path: Optional[str] = None) -> bool:
+                           template_path: Optional[str] = None, reports_dir: Optional[str] = None) -> bool:
     """
     Standardized entrypoint to generate the enhanced Tag Day release report.
-    Defaults to configured BASE_FOLDER, AZURE_PROJECT_ID, and TAGDAY_FILE_MD.
+    Defaults to configured reports directory, AZURE_PROJECT_ID, and TAGDAY_FILE_MD.
     """
     from generate_tagday_report import run_tagday_report
+    target_dir = reports_dir or get_reports_dir()
     if not db_path:
         db_path, _ = _getDBCacheHandler()
     if not output_path:
-        output_path = os.path.join(BASE_FOLDER, TAGDAY_FILE_MD)
+        output_path = os.path.join(target_dir, TAGDAY_FILE_MD)
+    elif not os.path.isabs(output_path):
+        output_path = os.path.join(target_dir, output_path)
     if not project_id:
         project_id = AZURE_PROJECT_ID
     return run_tagday_report(
@@ -961,18 +970,23 @@ def generate_tagday_report(db_path: Optional[str] = None, output_path: Optional[
     )
 
 
-def generate_artifacts_report(db_path: Optional[str] = None, md_path: Optional[str] = None, csv_path: Optional[str] = None) -> bool:
+def generate_artifacts_report(db_path: Optional[str] = None, md_path: Optional[str] = None, csv_path: Optional[str] = None, reports_dir: Optional[str] = None) -> bool:
     """
     Standardized entrypoint to generate Build Artifact & Disk Space Markdown and CSV reports.
-    Defaults to configured BASE_FOLDER, AZURE_PROJECT_ID, BUILD_ARTIFACTS_MD, and BUILD_ARTIFACTS_CSV.
+    Defaults to configured reports directory, AZURE_PROJECT_ID, BUILD_ARTIFACTS_MD, and BUILD_ARTIFACTS_CSV.
     """
     import generate_artifacts_report
+    target_dir = reports_dir or get_reports_dir()
     if not db_path:
         db_path, _ = _getDBCacheHandler()
     if not md_path:
-        md_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_MD)
+        md_path = os.path.join(target_dir, BUILD_ARTIFACTS_MD)
+    elif not os.path.isabs(md_path):
+        md_path = os.path.join(target_dir, md_path)
     if not csv_path:
-        csv_path = os.path.join(BASE_FOLDER, BUILD_ARTIFACTS_CSV)
+        csv_path = os.path.join(target_dir, BUILD_ARTIFACTS_CSV)
+    elif not os.path.isabs(csv_path):
+        csv_path = os.path.join(target_dir, csv_path)
     return generate_artifacts_report.run_reports(
         db_path=db_path,
         md_path=md_path,
@@ -980,16 +994,19 @@ def generate_artifacts_report(db_path: Optional[str] = None, md_path: Optional[s
     )
 
 
-def generate_revision_report(db_path: Optional[str] = None, revision_md_path: Optional[str] = None) -> bool:
+def generate_revision_report(db_path: Optional[str] = None, revision_md_path: Optional[str] = None, reports_dir: Optional[str] = None) -> bool:
     """
     Standardized entrypoint to generate REVISION.md and REVISION.docx release tracking documents.
-    Defaults to configured BASE_FOLDER, AZURE_PROJECT_ID, and REVISION_FILE_MD.
+    Defaults to configured reports directory, AZURE_PROJECT_ID, and REVISION_FILE_MD.
     """
     import generate_revision
+    target_dir = reports_dir or get_reports_dir()
     if not db_path:
         db_path, _ = _getDBCacheHandler()
     if not revision_md_path:
-        revision_md_path = os.path.join(BASE_FOLDER, REVISION_FILE_MD)
+        revision_md_path = os.path.join(target_dir, REVISION_FILE_MD)
+    elif not os.path.isabs(revision_md_path):
+        revision_md_path = os.path.join(target_dir, revision_md_path)
     return generate_revision.generate_revision_md(db_path, revision_md_path)
 
 
@@ -1001,6 +1018,7 @@ def main_cli():
     parser = argparse.ArgumentParser(description="Azure DevOps Sync & Document Generation CLI")
     parser.add_argument("--env-file", type=str, default=None, help="Path to .env file to load configuration from (optional, DB used by default)")
     parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
+    parser.add_argument("--reports-dir", type=str, default=None, help="Target directory for reading baseline reports and writing generated reports (defaults to current directory if not set).")
     parser.add_argument("--sync", action="store_true", help="Sync pipelines, repos, and tasks from TFS to local SQLite cache.")
     parser.add_argument("--force", action="store_true", help="Force sync, bypassing file recency checks (use with --sync).")
     parser.add_argument("--templates", action="store_true", help="Render Markdown pages from cached repository data.")
@@ -1012,6 +1030,11 @@ def main_cli():
     parser.add_argument("--untagged-repos", action="store_true", help="List all repositories where the latest pull request is either not closed or untagged.")
 
     args = parser.parse_args()
+
+    if args.reports_dir:
+        os.environ["REPORTS_DIR"] = args.reports_dir
+        global BASE_FOLDER
+        BASE_FOLDER = os.path.normpath(args.reports_dir)
 
     if args.env_file or args.load_env:
         utils.load_env_file(args.env_file)

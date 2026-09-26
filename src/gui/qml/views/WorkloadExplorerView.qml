@@ -390,55 +390,6 @@ Item {
 
             Item { width: 4 }
 
-            // Bug Hierarchy Mode Switcher
-            Row {
-                spacing: 4
-                Text {
-                    text: "🪲 Bugs:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Repeater {
-                    model: [
-                        { label: "As Stories", value: "like_user_story", tip: "Bugs are top-level containers that can contain tasks" },
-                        { label: "As Tasks", value: "like_task", tip: "Bugs are child tasks nested inside parent stories" }
-                    ]
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: backend && backend.bugHierarchyMode === modelData.value
-                        font.pixelSize: 10
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        ToolTip.visible: hovered
-                        ToolTip.text: modelData.tip
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 30
-                            implicitWidth: 86
-                            radius: 6
-                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#388bfd" : "#30363d"
-                        }
-                        onClicked: {
-                            if (backend) {
-                                backend.setBugHierarchyMode(modelData.value);
-                            }
-                        }
-                    }
-                }
-            }
-
-            Item { width: 4 }
-
             // Hide Closed Tasks Toggle in Top Header
             Button {
                 text: root.hideClosedTasks ? "⚡ Active Only" : "📋 All Tasks"
@@ -540,11 +491,11 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 12
                 anchors.rightMargin: 12
-                spacing: 12
+                spacing: 8
 
-                // ◀ Past button
+                // ◀ Past horizon button
                 Button {
-                    text: "◀  Past"
+                    text: "◀ Past (" + root.selectedHorizon + "w)"
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
                     ToolTip.visible: hovered
@@ -558,7 +509,7 @@ Item {
                     }
                     background: Rectangle {
                         implicitHeight: 30
-                        implicitWidth: 80
+                        implicitWidth: 90
                         radius: 6
                         color: parent.hovered ? "#21262d" : "transparent"
                         border.color: "#30363d"
@@ -566,9 +517,33 @@ Item {
                     onClicked: root.historyOffset += root.selectedHorizon
                 }
 
+                // ◀ -1 Wk button
+                Button {
+                    text: "◀ -1 Wk"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Shift view 1 sprint back into the past"
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#c9d1d9"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 65
+                        radius: 6
+                        color: parent.hovered ? "#21262d" : "transparent"
+                        border.color: "#30363d"
+                    }
+                    onClicked: root.historyOffset += 1
+                }
+
                 // ================= Center Timeline & Today Card =================
                 RowLayout {
-                    spacing: 10
+                    spacing: 8
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignVCenter
 
@@ -650,13 +625,43 @@ Item {
                         }
                         background: Rectangle {
                             implicitHeight: 30
-                            implicitWidth: 160
+                            implicitWidth: 150
                             radius: 15
                             color: parent.hovered ? (root.historyOffset > 0 ? "#3d0c0c" : "#13315c") : (root.historyOffset > 0 ? "#21262d" : "#0d2344")
                             border.color: root.historyOffset > 0 ? "#da3633" : "#1f6feb"
                             border.width: 1
                         }
                         onClicked: root.jumpToCurrentWeek()
+                    }
+
+                    // Jump to Active Sprints Button (if past active sprints exist)
+                    Button {
+                        visible: root.matrixData && root.matrixData.latest_active_sprint_name && (root.matrixData.suggested_lookback_offset || 0) > 0 && root.historyOffset !== root.matrixData.suggested_lookback_offset
+                        text: "⚡  Active Sprints (" + (root.matrixData ? (root.matrixData.latest_active_sprint_label || root.matrixData.latest_active_sprint_name || "") : "") + ")"
+                        font.pixelSize: 11
+                        font.weight: Font.Bold
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Jump directly to the latest project sprints that contain work items (" + (root.matrixData ? root.matrixData.latest_active_sprint_name : "") + ")"
+                        contentItem: Text {
+                            text: parent.text
+                            font: parent.font
+                            color: "#ffffff"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 30
+                            implicitWidth: 155
+                            radius: 15
+                            color: parent.hovered ? "#2ea043" : "#238636"
+                            border.color: "#3fb950"
+                            border.width: 1
+                        }
+                        onClicked: {
+                            if (root.matrixData && root.matrixData.suggested_lookback_offset !== undefined) {
+                                root.historyOffset = root.matrixData.suggested_lookback_offset;
+                            }
+                        }
                     }
 
                     // "Viewing past N weeks" indicator badge
@@ -708,14 +713,14 @@ Item {
                     Item { Layout.fillWidth: true }
                 }
 
-                // Future ▶ button
+                // +1 Wk ▶ button
                 Button {
-                    text: "Future  ▶"
+                    text: "+1 Wk ▶"
                     font.pixelSize: 11
                     font.weight: Font.DemiBold
                     enabled: root.historyOffset > 0
                     ToolTip.visible: hovered && root.historyOffset > 0
-                    ToolTip.text: "Shift view forward towards current/future sprints"
+                    ToolTip.text: "Shift view 1 sprint forward towards current week"
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
@@ -725,12 +730,91 @@ Item {
                     }
                     background: Rectangle {
                         implicitHeight: 30
-                        implicitWidth: 80
+                        implicitWidth: 65
+                        radius: 6
+                        color: parent.hovered && root.historyOffset > 0 ? "#21262d" : "transparent"
+                        border.color: root.historyOffset > 0 ? "#30363d" : "#21262d"
+                    }
+                    onClicked: root.historyOffset = Math.max(0, root.historyOffset - 1)
+                }
+
+                // Future horizon ▶ button
+                Button {
+                    text: "Future (" + root.selectedHorizon + "w) ▶"
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    enabled: root.historyOffset > 0
+                    ToolTip.visible: hovered && root.historyOffset > 0
+                    ToolTip.text: "Shift view " + root.selectedHorizon + " sprints forward towards current/future sprints"
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: root.historyOffset > 0 ? "#c9d1d9" : "#484f58"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 30
+                        implicitWidth: 90
                         radius: 6
                         color: parent.hovered && root.historyOffset > 0 ? "#21262d" : "transparent"
                         border.color: root.historyOffset > 0 ? "#30363d" : "#21262d"
                     }
                     onClicked: root.historyOffset = Math.max(0, root.historyOffset - root.selectedHorizon)
+                }
+            }
+        }
+
+        // ====================== Informational Banner when Current Calendar Window has 0 items but Project Sprints Exist ======================
+        Rectangle {
+            Layout.fillWidth: true
+            height: 38
+            radius: 6
+            color: "#0d2036"
+            border.color: "#1f6feb"
+            border.width: 1
+            visible: root.matrixData && (root.matrixData.total_items || 0) === 0 && (root.matrixData.total_all_sprint_items || 0) > 0 && !root.hasActiveHierarchyFilters
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+
+                Text {
+                    text: "ℹ️"
+                    font.pixelSize: 14
+                }
+                Text {
+                    text: "No work items in visible calendar window (" + sprintRangeText.text + "). " + (root.matrixData ? (root.matrixData.total_all_sprint_items || 0) : 0) + " work items found in project sprints (up to " + (root.matrixData ? root.matrixData.latest_active_sprint_name : "") + ")."
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#e6edf3"
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "◀  Jump to Active Sprints (" + (root.matrixData ? (root.matrixData.latest_active_sprint_label || root.matrixData.latest_active_sprint_name || "") : "") + ")"
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: "#ffffff"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 26
+                        implicitWidth: 190
+                        radius: 4
+                        color: parent.hovered ? "#2ea043" : "#238636"
+                        border.color: "#3fb950"
+                    }
+                    onClicked: {
+                        if (root.matrixData && root.matrixData.suggested_lookback_offset !== undefined) {
+                            root.historyOffset = root.matrixData.suggested_lookback_offset;
+                        }
+                    }
                 }
             }
         }
@@ -2239,6 +2323,78 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Empty State Overlay inside Matrix Table
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 12
+                    visible: matrixListView.count === 0
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "📭"
+                        font.pixelSize: 36
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: {
+                            if (root.hasActiveHierarchyFilters) {
+                                return "No work items match current filter criteria";
+                            }
+                            if (root.matrixData && (root.matrixData.total_all_sprint_items || 0) > 0) {
+                                return "No work items in visible sprint window (" + sprintRangeText.text + ")";
+                            }
+                            return "No work items found in sprint iterations";
+                        }
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        color: "#e6edf3"
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: !root.hasActiveHierarchyFilters && root.matrixData && (root.matrixData.total_all_sprint_items || 0) > 0
+                        text: (root.matrixData ? (root.matrixData.total_all_sprint_items || 0) : 0) + " work items exist in project sprints up to " + (root.matrixData ? root.matrixData.latest_active_sprint_name : "")
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 12
+                        color: "#8b949e"
+                    }
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 10
+                        Button {
+                            visible: !root.hasActiveHierarchyFilters && root.matrixData && (root.matrixData.total_all_sprint_items || 0) > 0
+                            text: "◀  Jump to Active Sprints (" + (root.matrixData ? (root.matrixData.latest_active_sprint_label || root.matrixData.latest_active_sprint_name || "") : "") + ")"
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: 230
+                                radius: 6
+                                color: parent.hovered ? "#2ea043" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (root.matrixData && root.matrixData.suggested_lookback_offset !== undefined) {
+                                    root.historyOffset = root.matrixData.suggested_lookback_offset;
+                                }
+                            }
+                        }
+                        Button {
+                            visible: root.hasActiveHierarchyFilters
+                            text: "Reset All Filters"
+                            font.pixelSize: 12
+                            onClicked: root.resetHierarchyFilters()
                         }
                     }
                 }
