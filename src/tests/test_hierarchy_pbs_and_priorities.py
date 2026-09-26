@@ -326,6 +326,76 @@ class TestHierarchyPBSAndPriorities(unittest.TestCase):
         self.assertEqual(l2_list[2], "Alpha Non PBS")
         self.assertEqual(l2_list[3], "Gamma Non PBS")
 
+    def test_work_item_categorization_rules(self):
+        """Test the 3 work item categorization rules:
+        1. Epics that do not follow [<ID>] <Title> pattern and all their children are put to 'ignored' category.
+        2. Features that do not follow [<ID>] <Title> pattern and all their children are put to 'ignored' category.
+        3. Unparented User Stories, Bugs and Tasks are put into 'to be investigated' category.
+        """
+        items = [
+            # 1. Epics without [<ID>] pattern and children -> ignored
+            {"id": 100, "type": "Epic", "title": "Epic Without Bracket Tag", "parent_id": None},
+            {"id": 101, "type": "Feature", "title": "[F-01] Valid Feature Under Bad Epic", "parent_id": 100},
+            {"id": 102, "type": "User Story", "title": "[OI_01] Valid Story Under Bad Epic", "parent_id": 101},
+            {"id": 103, "type": "Task", "title": "Task Under Bad Epic", "parent_id": 102},
+
+            # 2. Features without [<ID>] pattern and children -> ignored
+            {"id": 200, "type": "Epic", "title": "[PBS-01] Valid Epic", "parent_id": None},
+            {"id": 201, "type": "Feature", "title": "Feature Without Bracket Tag", "parent_id": 200},
+            {"id": 202, "type": "User Story", "title": "[OI_02] Story Under Bad Feature", "parent_id": 201},
+            {"id": 203, "type": "Bug", "title": "Bug Under Bad Feature", "parent_id": 201},
+            {"id": 204, "type": "Task", "title": "Task Under Bad Feature Story", "parent_id": 202},
+
+            # 3. Unparented User Stories, Bugs and Tasks -> to be investigated
+            {"id": 301, "type": "User Story", "title": "[OI_03] Unparented Story", "parent_id": None},
+            {"id": 302, "type": "Bug", "title": "Unparented Bug", "parent_id": None},
+            {"id": 303, "type": "Task", "title": "Unparented Task", "parent_id": None},
+            {"id": 304, "type": "Task", "title": "Task Under Unparented Story", "parent_id": 301},
+
+            # 4. Standard valid hierarchy -> standard
+            {"id": 400, "type": "Epic", "title": "[PBS-02] Powertrain", "parent_id": None},
+            {"id": 401, "type": "Feature", "title": "[2.1] Battery Pack", "parent_id": 400},
+            {"id": 402, "type": "User Story", "title": "[MP_01] Cell Monitoring", "parent_id": 401},
+            {"id": 403, "type": "Bug", "title": "[OI_04] Inverter Glitch", "parent_id": 401},
+            {"id": 404, "type": "Task", "title": "Assemble wiring", "parent_id": 402},
+        ]
+
+        items_map = {item["id"]: item for item in items}
+        for item in items:
+            h_info = resolve_work_item_hierarchy(item, items_map, bug_hierarchy_mode="like_user_story")
+            item.update(h_info)
+
+        # 1. Epics without [<ID>] and all descendants are ignored
+        self.assertEqual(items_map[100]["category"], "ignored")
+        self.assertTrue(items_map[100]["is_ignored"])
+        self.assertEqual(items_map[101]["category"], "ignored")
+        self.assertEqual(items_map[102]["category"], "ignored")
+        self.assertEqual(items_map[103]["category"], "ignored")
+
+        # 2. Features without [<ID>] and all descendants are ignored
+        self.assertEqual(items_map[200]["category"], "standard")  # Valid epic
+        self.assertEqual(items_map[201]["category"], "ignored")   # Feature missing [<ID>]
+        self.assertTrue(items_map[201]["is_ignored"])
+        self.assertEqual(items_map[202]["category"], "ignored")
+        self.assertEqual(items_map[203]["category"], "ignored")
+        self.assertEqual(items_map[204]["category"], "ignored")
+
+        # 3. Unparented Stories, Bugs and Tasks are to be investigated
+        self.assertEqual(items_map[301]["category"], "to be investigated")
+        self.assertTrue(items_map[301]["is_to_be_investigated"])
+        self.assertEqual(items_map[302]["category"], "to be investigated")
+        self.assertTrue(items_map[302]["is_to_be_investigated"])
+        self.assertEqual(items_map[303]["category"], "to be investigated")
+        self.assertTrue(items_map[303]["is_to_be_investigated"])
+        self.assertEqual(items_map[304]["category"], "to be investigated")
+
+        # 4. Standard items
+        self.assertEqual(items_map[400]["category"], "standard")
+        self.assertEqual(items_map[401]["category"], "standard")
+        self.assertEqual(items_map[402]["category"], "standard")
+        self.assertEqual(items_map[403]["category"], "standard")
+        self.assertEqual(items_map[404]["category"], "standard")
+
 
 if __name__ == "__main__":
     unittest.main()

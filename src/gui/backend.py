@@ -1890,10 +1890,15 @@ class DevOpsBackend(QObject):
         prs_completed_count = sum(1 for p in sorted_prs if p.get("status") == "completed")
         prs_abandoned_count = sum(1 for p in sorted_prs if p.get("status") == "abandoned")
 
+        ignored_wi_count = sum(1 for w in sorted_wis if not w.get("deleted") and w.get("is_ignored"))
+        to_be_investigated_count = sum(1 for w in sorted_wis if not w.get("deleted") and w.get("is_to_be_investigated"))
+        active_valid_wi_count = sum(1 for w in sorted_wis if not w.get("deleted") and not w.get("is_ignored") and w.get("state", "").lower() not in ("closed", "done", "resolved", "completed", "removed", "cut"))
+
         stats = {
             "repos_count": len(sorted_repos),
             "pending_repos_count": pending_repos_count,
             "untagged_prs_repos_count": untagged_prs_repos_count,
+            "pending_releases_count": untagged_prs_repos_count,
             "unmerged_branches_repos_count": unmerged_branches_repos_count,
             "latest_stable_tag": global_latest_stable["tag"] if global_latest_stable else "-",
             "latest_stable_repo": global_latest_stable["repo"] if global_latest_stable else "",
@@ -1903,7 +1908,10 @@ class DevOpsBackend(QObject):
             "latest_unstable_date": global_latest_unstable["date"] if global_latest_unstable else "",
             "work_items_count": len(sorted_wis),
             "active_work_items_count": active_wi_count,
+            "active_valid_work_items_count": active_valid_wi_count,
             "closed_work_items_count": closed_wi_count,
+            "ignored_work_items_count": ignored_wi_count,
+            "to_be_investigated_count": to_be_investigated_count,
             "deleted_work_items_count": deleted_count,
             "prs_count": len(sorted_prs),
             "prs_open_count": prs_open_count,
@@ -2037,10 +2045,12 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.debug(f"Could not query last week tags: {e}")
 
-        # Last Week Completed / Resolved Work Items
+        # Last Week Completed / Resolved Work Items (excluding ignored items)
         last_completed_wis_all = [
             w for w in sorted_wis
-            if w.get("state") in ("Closed", "Resolved", "Done", "Completed")
+            if not w.get("deleted")
+            and not w.get("is_ignored")
+            and w.get("state") in ("Closed", "Resolved", "Done", "Completed")
             and (
                 (w.get("changed_date") and last_start_str <= w.get("changed_date")[:10] < cur_start_str)
                 or w.get("sprint_week_name") == last_sprint_name
@@ -2071,10 +2081,11 @@ class DevOpsBackend(QObject):
             "completed_wis": last_completed_wis[:8],
         }
 
-        # Current Week Planned Work Items
+        # Current Week Planned Work Items (excluding ignored items)
         cur_planned_wis_all = [
             w for w in sorted_wis
             if not w.get("deleted")
+            and not w.get("is_ignored")
             and (
                 w.get("sprint_week_name") == cur_sprint_name
                 or w.get("urgency_status") == "due_this_week"
@@ -2100,7 +2111,7 @@ class DevOpsBackend(QObject):
             "planned_wis_count": len(cur_planned_wis),
             "due_this_week_count": due_this_week_count,
             "active_prs_count": len(cur_active_prs),
-            "pending_releases_count": pending_repos_count,
+            "pending_releases_count": untagged_prs_repos_count,
             "milestones": cur_week_milestones,
             "milestones_count": len(cur_week_milestones),
             "total_count": len(cur_planned_wis) + len(cur_active_prs),

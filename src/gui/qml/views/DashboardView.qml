@@ -147,14 +147,14 @@ Item {
                     Layout.fillWidth: true
                     icon: "⚠️"
                     title: "Pending Releases"
-                    value: ((backend && backend.stats && backend.stats.pending_repos_count !== undefined) ? backend.stats.pending_repos_count : 0).toString()
-                    status: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? "PENDING CHANGES" : "NOTHING PENDING"
-                    subtitle: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? (backend.stats.pending_repos_count + " repositories require release • Click to filter") : "Zero pending changes across all repos"
+                    value: ((backend && backend.stats && backend.stats.untagged_prs_repos_count !== undefined) ? backend.stats.untagged_prs_repos_count : 0).toString()
+                    status: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? "pending" : "clean"
+                    badgeText: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? (backend.stats.untagged_prs_repos_count + " PENDING") : "NO RELEASES PENDING"
+                    subtitle: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? (backend.stats.untagged_prs_repos_count + " repositories have untagged merged PRs • Click to filter") : "No untagged merged PRs across all repos"
                     clickable: true
                     onClicked: {
                         if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("⚠️ PENDING");
+                            window.navigateToRepos("🏷️ PENDING PRs");
                         } else if (typeof window !== "undefined") {
                             window.currentTabIndex = 1;
                         }
@@ -267,8 +267,14 @@ Item {
                         var act = backend.stats.active_work_items_count || 0;
                         var cl = backend.stats.closed_work_items_count || 0;
                         var tot = backend.stats.work_items_count || 0;
+                        var toInv = backend.stats.to_be_investigated_count || 0;
+                        var ign = backend.stats.ignored_work_items_count || 0;
                         if (act > 0) {
-                            return act + " active / in progress · " + cl + " closed (" + tot + " total) • Click to view";
+                            var extra = [];
+                            if (toInv > 0) extra.push(toInv + " to be investigated");
+                            if (ign > 0) extra.push(ign + " ignored");
+                            var extraStr = extra.length > 0 ? " (" + extra.join(" · ") + ")" : "";
+                            return act + " active" + extraStr + " · " + cl + " closed • Click to view";
                         }
                         return "All " + tot + " work items closed / resolved • Nothing pending";
                     }

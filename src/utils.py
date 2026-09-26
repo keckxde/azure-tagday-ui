@@ -1672,6 +1672,46 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
     is_grouped = bool(l1_pbs and l2_pbs)
     grouping_status = "grouped" if is_grouped else "ungrouped"
 
+    # Category classification rules:
+    # 1. Epics that do not follow [<ID>] <Title> pattern and all their children -> "ignored"
+    # 2. Features that do not follow [<ID>] <Title> pattern and all their children -> "ignored"
+    # 3. Unparented User Stories, Bugs and Tasks -> "to be investigated"
+    # Otherwise -> "standard"
+    category = "standard"
+    category_reason = ""
+
+    if curr_level == 1:
+        # Epic
+        curr_pbs, _, _ = parse_pbs_tag(curr_title)
+        if not curr_pbs:
+            category = "ignored"
+            category_reason = "Epic does not follow [<ID>] <Title> pattern"
+    elif curr_level == 2:
+        # Feature
+        curr_pbs, _, _ = parse_pbs_tag(curr_title)
+        if l1_item and not l1_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Epic does not follow [<ID>] <Title> pattern"
+        elif not curr_pbs:
+            category = "ignored"
+            category_reason = "Feature does not follow [<ID>] <Title> pattern"
+    elif curr_level in (3, 4):
+        # User Story, Requirement, Bug, Task
+        if l1_item and not l1_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Epic does not follow [<ID>] <Title> pattern"
+        elif l2_item and not l2_pbs:
+            category = "ignored"
+            category_reason = "Ancestor Feature does not follow [<ID>] <Title> pattern"
+        elif not wi.get("parent_id") or not all_wis_by_id.get(wi.get("parent_id")):
+            category = "to be investigated"
+            category_reason = f"Unparented {curr_type}"
+        else:
+            # Parent exists in map, but neither Level 1 Epic nor Level 2 Feature exist in ancestor chain
+            if not l1_item and not l2_item:
+                category = "to be investigated"
+                category_reason = f"Unparented hierarchy for {curr_type}"
+
     # Check Level 3 Prioritization:
     # Evaluate Level 3 title for [<Type>_<Number>] (OI, MP, SCEN, SPEC, PA, CS, DOC)
     prio_info = parse_level3_priority(l3_title if l3_title else curr_title)
@@ -1694,6 +1734,10 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
         "level3_title": l3_title,
         "is_grouped": is_grouped,
         "grouping_status": grouping_status,
+        "category": category,
+        "category_reason": category_reason,
+        "is_ignored": category == "ignored",
+        "is_to_be_investigated": category == "to be investigated",
         "is_prio1": prio_info["is_prio1"],
         "prio_category": prio_info["prio_category"],
         "prio_type": prio_info["prio_type"],
