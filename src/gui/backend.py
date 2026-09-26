@@ -1420,6 +1420,7 @@ class DevOpsBackend(QObject):
                 "unmerged_branches_count": unmerged_branches_count,
                 "active_prs_count": active_prs_count,
                 "pending_status_text": status_text,
+                "is_deleted": bool((rcat or "").strip().upper() == "DELETED" or r.get("is_deleted")),
             })
         sorted_repos = sorted(repo_list, key=lambda x: x["name"].lower())
 
