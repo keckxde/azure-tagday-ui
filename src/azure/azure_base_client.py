@@ -1033,6 +1033,9 @@ class AzureBaseClient:
                 update_status = ref_res.get("updateStatus")
                 success = ref_res.get("success", True)
                 if update_status and str(update_status).lower() not in ("succeeded", "success") or not success:
+                    if str(update_status).lower() == "staleoldobjectid" and ref_res.get("newObjectId") == object_id:
+                        logger.info("Tag ref %s already points to object %s", ref_name, object_id)
+                        return res
                     err_custom = ref_res.get("customMessage") or f"Status: {update_status}"
                     raise RuntimeError(f"Failed to create tag reference '{ref_name}': {err_custom}")
         elif isinstance(res, list) and res:
@@ -1040,6 +1043,9 @@ class AzureBaseClient:
             update_status = ref_res.get("updateStatus")
             success = ref_res.get("success", True)
             if update_status and str(update_status).lower() not in ("succeeded", "success") or not success:
+                if str(update_status).lower() == "staleoldobjectid" and ref_res.get("newObjectId") == object_id:
+                    logger.info("Tag ref %s already points to object %s", ref_name, object_id)
+                    return res
                 err_custom = ref_res.get("customMessage") or f"Status: {update_status}"
                 raise RuntimeError(f"Failed to create tag reference '{ref_name}': {err_custom}")
         return res

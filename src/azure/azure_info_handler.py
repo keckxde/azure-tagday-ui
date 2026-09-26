@@ -1775,6 +1775,7 @@ class AzureInfoHandler(AzureBaseClient):
         created_tag_obj = None
 
         # 1. Try creating annotated tag object first
+        # Azure DevOps POST /annotatedtags API creates the Git annotated tag object AND publishes refs/tags/<clean_tag> in one operation.
         try:
             annotated_tag_obj = self.create_annotated_tag(
                 project_id,
@@ -1786,24 +1787,24 @@ class AzureInfoHandler(AzureBaseClient):
             if annotated_tag_obj and isinstance(annotated_tag_obj, dict) and annotated_tag_obj.get("objectId"):
                 target_ref_object_id = annotated_tag_obj["objectId"]
                 created_tag_obj = annotated_tag_obj
-                logger.info("Created annotated tag object %s on repo %s (target commit %s)", target_ref_object_id[:8], repo_name, commit_id[:8])
+                logger.info("Successfully created and published annotated tag %s on repo %s (target commit %s)", clean_tag, repo_name, commit_id[:8])
         except Exception as e:
             logger.warning("Annotated tag object creation failed for %s on %s: %s. Falling back to direct commit ref creation...", clean_tag, repo_name, e)
 
-        # 2. Crucial: Publish the git tag reference (refs/tags/<clean_tag>)
-        try:
-            created_ref_obj = self.create_tag_ref(
-                project_id,
-                repo_id,
-                clean_tag,
-                target_ref_object_id
-            )
-            if not created_tag_obj:
+        # 2. Fallback: If annotated tag was not created, publish lightweight tag reference (refs/tags/<clean_tag>)
+        if not created_tag_obj:
+            try:
+                created_ref_obj = self.create_tag_ref(
+                    project_id,
+                    repo_id,
+                    clean_tag,
+                    target_ref_object_id
+                )
                 created_tag_obj = created_ref_obj
-            logger.info("Successfully created and published tag refs/tags/%s on repo %s (branch '%s', commit %s)", clean_tag, repo_name, clean_branch, commit_id[:8])
-        except Exception as ref_err:
-            logger.error("Failed to create tag reference refs/tags/%s on repo %s: %s", clean_tag, repo_name, ref_err)
-            raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
+                logger.info("Successfully created and published lightweight tag refs/tags/%s on repo %s (branch '%s', commit %s)", clean_tag, repo_name, clean_branch, commit_id[:8])
+            except Exception as ref_err:
+                logger.error("Failed to create tag reference refs/tags/%s on repo %s: %s", clean_tag, repo_name, ref_err)
+                raise RuntimeError(f"Failed to create tag '{clean_tag}' on TFS / Azure DevOps: {ref_err}") from ref_err
 
         # Update local cache if available
         if cache_db:

@@ -83,7 +83,31 @@ def test_create_repository_tag_handler():
     assert res["commit_id"] == "deadbeef12345678"
     handler.get_branch_commit_id.assert_called_with("my-project", "repo-guid-123", "dev")
     handler.create_annotated_tag.assert_called_once()
-    handler.create_tag_ref.assert_called_once_with("my-project", "repo-guid-123", "v01.02.2639", "tagobject12345678")
+    # create_tag_ref is NOT called when create_annotated_tag succeeds (Azure DevOps creates ref automatically)
+    handler.create_tag_ref.assert_not_called()
+    mock_db.save_single_tag.assert_called_once()
+
+
+def test_create_repository_tag_fallback_to_lightweight_ref():
+    from src.azure.azure_info_handler import AzureInfoHandler
+    
+    mock_client = MagicMock()
+    mock_db = MagicMock()
+    
+    handler = AzureInfoHandler(mock_client, mock_db)
+    handler.get_repositories = MagicMock(return_value=[{"id": "repo-guid-123", "name": "MyRepo"}])
+    handler.get_branch_commit_id = MagicMock(return_value="deadbeef12345678")
+    # Annotated tag fails (e.g. older TFS / missing API)
+    handler.create_annotated_tag = MagicMock(side_effect=RuntimeError("API not supported"))
+    handler.create_tag_ref = MagicMock(return_value={
+        "value": [{"name": "refs/tags/v01.02.2639", "updateStatus": "succeeded", "success": True}]
+    })
+    
+    res = handler.create_repository_tag("my-project", "MyRepo", "v01.02.2639", branch_name="dev", message="Weekly Tag", cache_db=mock_db)
+    assert res["success"] is True
+    assert res["tag_name"] == "v01.02.2639"
+    handler.create_annotated_tag.assert_called_once()
+    handler.create_tag_ref.assert_called_once_with("my-project", "repo-guid-123", "v01.02.2639", "deadbeef12345678")
     mock_db.save_single_tag.assert_called_once()
 
 
