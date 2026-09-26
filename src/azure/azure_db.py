@@ -104,9 +104,10 @@ class AzureDevOpsCache:
         """
         Context manager for database connections. Ensures transaction integrity and closes the connection.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA busy_timeout=30000")
             yield conn
             conn.commit()
         except Exception:
@@ -120,6 +121,10 @@ class AzureDevOpsCache:
         Creates schema tables and indexes.
         """
         with self._connection() as conn:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                pass
             # Table: projects
             conn.execute("""
             CREATE TABLE IF NOT EXISTS projects (

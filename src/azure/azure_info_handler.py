@@ -12,6 +12,7 @@ for p in (py_dir, parent_dir):
 
 
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils import UpdateDateString, parse_iso_datetime, timedelta, parse_semver_tuple, generate_weekly_iterations_advance, parse_sprint_week
 try:
     from .azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
@@ -95,13 +96,14 @@ class AzureInfoHandler(AzureBaseClient):
             logger.error("Error in GetTFSPipelines: %s", e)
             return []
 
-    def GetTFSWorkItems(self, task_id_list, cache_db=None):
+    def GetTFSWorkItems(self, task_id_list, cache_db=None, max_workers=10):
         """
         Retrieves work item details for a list of work item IDs.
 
         Args:
             task_id_list (list): List of work item IDs.
             cache_db (AzureDevOpsCache, optional): If provided, caches fetched work items or marks missing ones as deleted.
+            max_workers (int, optional): Max parallel workers for fallback single item requests. Defaults to 10.
 
         Returns:
             list: List of work item details dictionaries.
@@ -142,58 +144,69 @@ class AzureInfoHandler(AzureBaseClient):
                         cache_db.mark_work_item_deleted(tid)
             return work_item_list
         except Exception as batch_err:
-            logger.warning(" - GetTFSWorkItems: batch request failed (%s), falling back to individual requests", batch_err)
+            logger.warning(" - GetTFSWorkItems: batch request failed (%s), falling back to individual requests in parallel", batch_err)
 
-        # Fallback to single item requests
-        for task_id in task_id_list:
+        # Fallback to parallel single item requests
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _fetch_single_item(task_id):
             try:
                 wi = self.get_work_item(task_id)
                 if wi and isinstance(wi, dict) and "id" in wi:
-                    work_item_list.append(wi)
-                    if cache_db:
-                        fields = wi.get("fields", {})
-                        assigned = fields.get("System.AssignedTo", {})
-                        assigned_name = assigned.get("displayName", "") if isinstance(assigned, dict) else str(assigned or "")
-                        cache_db.save_work_item(
-                            wi["id"],
-                            fields.get("System.Title"),
-                            fields.get("System.WorkItemType"),
-                            fields.get("System.State"),
-                            assigned_name,
-                            fields.get("System.ChangedDate"),
-                            wi,
-                            deleted=0
-                        )
+                    return task_id, wi, None
                 else:
                     logger.warning(" - GetTFSWorkItems: #%s err no such task id", task_id)
-                    if cache_db:
-                        cache_db.mark_work_item_deleted(task_id)
+                    return task_id, None, None
             except urllib.error.HTTPError as e:
                 if e.code in (404, 410):
                     logger.warning(" - GetTFSWorkItems: #%s not found (HTTP %s)", task_id, e.code)
-                    if cache_db:
-                        cache_db.mark_work_item_deleted(task_id)
+                    return task_id, None, None
                 else:
                     logger.error(" - GetTFSWorkItems: #%s err %s", task_id, e)
+                    return task_id, None, e
             except Exception as e:
                 err_str = str(e).lower()
                 if "404" in err_str or "not found" in err_str or "does not exist" in err_str:
                     logger.warning(" - GetTFSWorkItems: #%s not found (%s)", task_id, e)
-                    if cache_db:
-                        cache_db.mark_work_item_deleted(task_id)
+                    return task_id, None, None
                 else:
                     logger.error(" - GetTFSWorkItems: #%s err %s", task_id, e)
+                    return task_id, None, e
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(task_id_list)))) as executor:
+            single_results = list(executor.map(_fetch_single_item, task_id_list))
+
+        for task_id, wi, err in single_results:
+            if wi:
+                work_item_list.append(wi)
+                if cache_db:
+                    fields = wi.get("fields", {})
+                    assigned = fields.get("System.AssignedTo", {})
+                    assigned_name = assigned.get("displayName", "") if isinstance(assigned, dict) else str(assigned or "")
+                    cache_db.save_work_item(
+                        wi["id"],
+                        fields.get("System.Title"),
+                        fields.get("System.WorkItemType"),
+                        fields.get("System.State"),
+                        assigned_name,
+                        fields.get("System.ChangedDate"),
+                        wi,
+                        deleted=0
+                    )
+            elif not err and cache_db:
+                cache_db.mark_work_item_deleted(task_id)
+
         return work_item_list
 
-    def sync_work_items(self, cache_db, project_id=None, chunk_size=200, progress_callback=None, force_full_sync=False):
+    def sync_work_items(self, cache_db, project_id=None, chunk_size=200, progress_callback=None, force_full_sync=False, max_workers=8):
         """
         Synchronizes all work items in the SQLite database cache with the TFS API.
-        Optimized with high-performance incremental timestamp-based sync:
+        Optimized with high-performance incremental timestamp-based sync and parallel batch requests:
         1. Queries all remote work item IDs using a fast flat WIQL query.
         2. Reconciles deletions immediately: cached items no longer on server are marked deleted=1.
         3. Checks latest System.ChangedDate timestamp in cache. If available and force_full_sync=False,
            executes a WIQL filter [System.ChangedDate] >= watermark to retrieve only new/modified items.
-        4. Downloads full details only for new and modified work items using batch requests.
+        4. Downloads full details only for new and modified work items using parallel batch requests.
         5. Recursively resolves missing parent/ancestor work items for complete hierarchy.
         6. Pre-fills major milestones.
 
@@ -203,6 +216,7 @@ class AzureInfoHandler(AzureBaseClient):
             chunk_size (int, optional): Max IDs per batch request (TFS limit is 200). Defaults to 200.
             progress_callback (callable, optional): Callback function(msg: str, current: int, total: int) for live progress updates.
             force_full_sync (bool, optional): If True, re-downloads all work items regardless of timestamp. Defaults to False.
+            max_workers (int, optional): Max parallel workers for batch downloading. Defaults to 8.
 
         Returns:
             dict: Summary of synced, deleted, unchanged, and error counts.
@@ -306,8 +320,9 @@ class AzureInfoHandler(AzureBaseClient):
             return summary
 
         total_items = len(clean_ids)
-        total_batches = (total_items + chunk_size - 1) // chunk_size
-        _notify(f"Downloading {total_items} work items in {total_batches} batch(es) of up to {chunk_size} items...", 0, total_items)
+        chunks = [clean_ids[i:i + chunk_size] for i in range(0, total_items, chunk_size)]
+        total_batches = len(chunks)
+        _notify(f"Downloading {total_items} work items in {total_batches} batch(es) of up to {chunk_size} items (parallel)...", 0, total_items)
 
         found_ids = set()
         all_parent_ids = set()
@@ -333,56 +348,80 @@ class AzureInfoHandler(AzureBaseClient):
                             pass
             return None
 
-        for i in range(0, len(clean_ids), chunk_size):
-            chunk = clean_ids[i:i + chunk_size]
-            batch_num = (i // chunk_size) + 1
-            batch_start = i + 1
-            batch_end = min(i + len(chunk), total_items)
-            pct = round((batch_end / total_items) * 100) if total_items > 0 else 0
-            _notify(
-                f"Syncing work items batch [{batch_num}/{total_batches}] (#{batch_start}-#{batch_end} of {total_items}, {pct}%)...",
-                batch_end, total_items
-            )
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_batch_chunk(batch_idx, chunk):
             try:
                 batch_items = self.get_work_items_batch(chunk, expand="all", chunk_size=chunk_size)
-                for wi in batch_items:
-                    if wi and isinstance(wi, dict) and "id" in wi:
-                        wi_id = wi["id"]
-                        found_ids.add(wi_id)
-                        fields = wi.get("fields", {})
-                        assigned = fields.get("System.AssignedTo", {})
-                        assigned_name = assigned.get("displayName", "") if isinstance(assigned, dict) else str(assigned or "")
-                        cache_db.save_work_item(
-                            wi_id,
-                            fields.get("System.Title"),
-                            fields.get("System.WorkItemType"),
-                            fields.get("System.State"),
-                            assigned_name,
-                            fields.get("System.ChangedDate"),
-                            wi,
-                            deleted=0
-                        )
-                        summary["synced"] += 1
-                        pid = _extract_parent_id(wi)
-                        if pid:
-                            all_parent_ids.add(pid)
+                return batch_idx, chunk, batch_items, None
+            except Exception as e:
+                return batch_idx, chunk, None, e
 
-                for tid in chunk:
-                    if tid not in found_ids:
-                        logger.warning(" - sync_work_items: #%s not returned by API batch. Marking as deleted.", tid)
-                        cache_db.mark_work_item_deleted(tid)
-                        summary["deleted"] += 1
+        processed_items_count = 0
 
-            except Exception as batch_err:
-                if is_connection_error(batch_err):
-                    logger.error("Lost connection to repository server during work items batch download: %s", batch_err)
-                    raise AzureServerConnectionError(f"Lost connection to repository server: {batch_err}", original_error=batch_err) from batch_err
-                _notify(f"Batch #{batch_num} failed ({batch_err}), falling back to individual requests...", batch_end, total_items)
-                for idx, task_id in enumerate(chunk):
-                    if (idx + 1) % 25 == 0 or idx == len(chunk) - 1:
-                        _notify(f"Batch #{batch_num} individual fallback: querying item {idx + 1}/{len(chunk)}...", batch_end, total_items)
-                    try:
-                        wi = self.get_work_item(task_id)
+        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, total_batches))) as executor:
+            futures = [executor.submit(_fetch_batch_chunk, b_idx + 1, ch) for b_idx, ch in enumerate(chunks)]
+            for fut in as_completed(futures):
+                batch_num, chunk, batch_items, batch_err = fut.result()
+                processed_items_count += len(chunk)
+                pct = round((processed_items_count / total_items) * 100) if total_items > 0 else 0
+                _notify(
+                    f"Syncing work items batch [{batch_num}/{total_batches}] ({processed_items_count}/{total_items}, {pct}%)...",
+                    processed_items_count, total_items
+                )
+
+                if batch_items is not None:
+                    batch_found_ids = set()
+                    for wi in batch_items:
+                        if wi and isinstance(wi, dict) and "id" in wi:
+                            wi_id = wi["id"]
+                            found_ids.add(wi_id)
+                            batch_found_ids.add(wi_id)
+                            fields = wi.get("fields", {})
+                            assigned = fields.get("System.AssignedTo", {})
+                            assigned_name = assigned.get("displayName", "") if isinstance(assigned, dict) else str(assigned or "")
+                            cache_db.save_work_item(
+                                wi_id,
+                                fields.get("System.Title"),
+                                fields.get("System.WorkItemType"),
+                                fields.get("System.State"),
+                                assigned_name,
+                                fields.get("System.ChangedDate"),
+                                wi,
+                                deleted=0
+                            )
+                            summary["synced"] += 1
+                            pid = _extract_parent_id(wi)
+                            if pid:
+                                all_parent_ids.add(pid)
+
+                    for tid in chunk:
+                        if tid not in batch_found_ids:
+                            logger.warning(" - sync_work_items: #%s not returned by API batch. Marking as deleted.", tid)
+                            cache_db.mark_work_item_deleted(tid)
+                            summary["deleted"] += 1
+
+                else:
+                    if is_connection_error(batch_err):
+                        logger.error("Lost connection to repository server during work items batch download: %s", batch_err)
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise AzureServerConnectionError(f"Lost connection to repository server: {batch_err}", original_error=batch_err) from batch_err
+
+                    _notify(f"Batch #{batch_num} failed ({batch_err}), falling back to parallel individual requests...", processed_items_count, total_items)
+
+                    def _fetch_single_fallback(task_id):
+                        try:
+                            wi = self.get_work_item(task_id)
+                            return task_id, wi, None
+                        except urllib.error.HTTPError as e:
+                            return task_id, None, e
+                        except Exception as e:
+                            return task_id, None, e
+
+                    with ThreadPoolExecutor(max_workers=min(10, len(chunk))) as single_exec:
+                        single_results = list(single_exec.map(_fetch_single_fallback, chunk))
+
+                    for task_id, wi, single_err in single_results:
                         if wi and isinstance(wi, dict) and "id" in wi:
                             found_ids.add(wi["id"])
                             fields = wi.get("fields", {})
@@ -403,32 +442,20 @@ class AzureInfoHandler(AzureBaseClient):
                             if pid:
                                 all_parent_ids.add(pid)
                         else:
-                            logger.warning(" - sync_work_items: #%s not found via API. Marking as deleted.", task_id)
-                            cache_db.mark_work_item_deleted(task_id)
-                            summary["deleted"] += 1
-                    except urllib.error.HTTPError as e:
-                        if e.code in (404, 410):
-                            logger.warning(" - sync_work_items: #%s returned HTTP %s. Marking as deleted.", task_id, e.code)
-                            cache_db.mark_work_item_deleted(task_id)
-                            summary["deleted"] += 1
-                        else:
-                            if is_connection_error(e):
-                                logger.error("Lost connection to repository server fetching #%s: %s", task_id, e)
-                                raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
-                            logger.error(" - sync_work_items: #%s HTTP error %s", task_id, e)
-                            summary["errors"] += 1
-                    except Exception as e:
-                        if is_connection_error(e):
-                            logger.error("Lost connection to repository server fetching #%s: %s", task_id, e)
-                            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
-                        err_str = str(e).lower()
-                        if "404" in err_str or "not found" in err_str or "does not exist" in err_str:
-                            logger.warning(" - sync_work_items: #%s not found (%s). Marking as deleted.", task_id, e)
-                            cache_db.mark_work_item_deleted(task_id)
-                            summary["deleted"] += 1
-                        else:
-                            logger.error(" - sync_work_items: #%s error %s", task_id, e)
-                            summary["errors"] += 1
+                            if single_err and is_connection_error(single_err):
+                                logger.error("Lost connection to repository server fetching #%s: %s", task_id, single_err)
+                                raise AzureServerConnectionError(f"Lost connection to repository server: {single_err}", original_error=single_err) from single_err
+
+                            err_str = str(single_err or "").lower()
+                            if (isinstance(single_err, urllib.error.HTTPError) and single_err.code in (404, 410)) or (
+                                "404" in err_str or "not found" in err_str or "does not exist" in err_str
+                            ) or not single_err:
+                                logger.warning(" - sync_work_items: #%s not found (%s). Marking as deleted.", task_id, single_err)
+                                cache_db.mark_work_item_deleted(task_id)
+                                summary["deleted"] += 1
+                            else:
+                                logger.error(" - sync_work_items: #%s error %s", task_id, single_err)
+                                summary["errors"] += 1
 
         # Recursively retrieve missing parent / ancestor work items so full hierarchy is stored in database
         active_db_ids = set(cache_db.get_all_work_item_ids(include_deleted=False)) if hasattr(cache_db, "get_all_work_item_ids") else set()
@@ -436,38 +463,42 @@ class AzureInfoHandler(AzureBaseClient):
         depth = 0
         while missing_parents and depth < 5:
             depth += 1
-            p_chunk = list(missing_parents)[:chunk_size]
+            missing_parents_list = list(missing_parents)
+            parent_chunks = [missing_parents_list[p:p + chunk_size] for p in range(0, len(missing_parents_list), chunk_size)]
             next_level_parents = set()
-            _notify(f"Resolving work item hierarchy (Level {depth}): fetching {len(p_chunk)} parent containers...", total_items, total_items)
+            _notify(f"Resolving work item hierarchy (Level {depth}): fetching {len(missing_parents_list)} parent containers in parallel...", total_items, total_items)
             try:
-                p_items = self.get_work_items_batch(p_chunk, expand="all", chunk_size=chunk_size)
-                for p_wi in p_items:
-                    if p_wi and isinstance(p_wi, dict) and "id" in p_wi:
-                        p_id = p_wi["id"]
-                        found_ids.add(p_id)
-                        active_db_ids.add(p_id)
-                        p_fields = p_wi.get("fields", {})
-                        p_assigned = p_fields.get("System.AssignedTo", {})
-                        p_assigned_name = p_assigned.get("displayName", "") if isinstance(p_assigned, dict) else str(p_assigned or "")
-                        cache_db.save_work_item(
-                            p_id,
-                            p_fields.get("System.Title"),
-                            p_fields.get("System.WorkItemType"),
-                            p_fields.get("System.State"),
-                            p_assigned_name,
-                            p_fields.get("System.ChangedDate"),
-                            p_wi,
-                            deleted=0
-                        )
-                        summary["synced"] += 1
-                        grandparent_id = _extract_parent_id(p_wi)
-                        if grandparent_id:
-                            next_level_parents.add(grandparent_id)
+                with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(parent_chunks)))) as p_exec:
+                    p_results = list(p_exec.map(lambda ch: self.get_work_items_batch(ch, expand="all", chunk_size=chunk_size), parent_chunks))
+
+                for p_items in p_results:
+                    for p_wi in (p_items or []):
+                        if p_wi and isinstance(p_wi, dict) and "id" in p_wi:
+                            p_id = p_wi["id"]
+                            found_ids.add(p_id)
+                            active_db_ids.add(p_id)
+                            p_fields = p_wi.get("fields", {})
+                            p_assigned = p_fields.get("System.AssignedTo", {})
+                            p_assigned_name = p_assigned.get("displayName", "") if isinstance(p_assigned, dict) else str(p_assigned or "")
+                            cache_db.save_work_item(
+                                p_id,
+                                p_fields.get("System.Title"),
+                                p_fields.get("System.WorkItemType"),
+                                p_fields.get("System.State"),
+                                p_assigned_name,
+                                p_fields.get("System.ChangedDate"),
+                                p_wi,
+                                deleted=0
+                            )
+                            summary["synced"] += 1
+                            grandparent_id = _extract_parent_id(p_wi)
+                            if grandparent_id:
+                                next_level_parents.add(grandparent_id)
             except Exception as p_err:
                 if is_connection_error(p_err):
                     logger.error("Lost connection to repository server while fetching parent work items: %s", p_err)
                     raise AzureServerConnectionError(f"Lost connection to repository server: {p_err}", original_error=p_err) from p_err
-                logger.warning(" - sync_work_items: error fetching missing parent items %s: %s", p_chunk, p_err)
+                logger.warning(" - sync_work_items: error fetching missing parent items: %s", p_err)
                 break
             missing_parents = (next_level_parents - found_ids) - active_db_ids
 
@@ -517,7 +548,7 @@ class AzureInfoHandler(AzureBaseClient):
 
     def GetTFSPullRequest(self, pr_list):
         """
-        Retrieves pull request details for a list of pull request IDs.
+        Retrieves pull request details for a list of pull request IDs in parallel.
 
         Args:
             pr_list (list): List of pull request IDs.
@@ -525,16 +556,36 @@ class AzureInfoHandler(AzureBaseClient):
         Returns:
             list: List of pull request detail dictionaries.
         """
+        if not pr_list:
+            return []
         prs = []
-        for pr_id in pr_list:
+        max_workers = min(10, len(pr_list))
+        if max_workers <= 1:
+            for pr_id in pr_list:
+                try:
+                    pr = self.get_pull_request(pr_id)
+                    if pr:
+                        prs.append(pr)
+                    else:
+                        logger.warning(" - GetTFSPullRequest: !%s err no such PR id", pr_id)
+                except Exception as e:
+                    logger.error(" - GetTFSPullRequest: !%s err %s", pr_id, e)
+            return prs
+
+        def _fetch_one(pr_id):
             try:
                 pr = self.get_pull_request(pr_id)
-                if pr:
-                    prs.append(pr)
-                else:
+                if not pr:
                     logger.warning(" - GetTFSPullRequest: !%s err no such PR id", pr_id)
+                return pr
             except Exception as e:
                 logger.error(" - GetTFSPullRequest: !%s err %s", pr_id, e)
+                return None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for pr in executor.map(_fetch_one, pr_list):
+                if pr:
+                    prs.append(pr)
         return prs
 
     def ParseSubmodules(self, repo, project_id):
@@ -790,7 +841,7 @@ class AzureInfoHandler(AzureBaseClient):
     def _refresh_active_prs(self, project_id, repo_id, repo_name, cache_db):
         """
         Re-syncs pull requests for a repository from TFS into the cache DB:
-        1. Refreshes all PRs currently stored as active in SQLite (detects completion/abandonment).
+        1. Refreshes all PRs currently stored as active in SQLite in parallel (detects completion/abandonment).
         2. Incrementally searches for any newly created PRs until hitting latest known PR ID.
 
         Args:
@@ -805,22 +856,30 @@ class AzureInfoHandler(AzureBaseClient):
         from utils import normalize_pr_status
         has_changes = False
         try:
-            # 1. Re-fetch every PR currently stored as active in the DB to capture closures & changes.
+            # 1. Re-fetch every PR currently stored as active in the DB in parallel to capture closures & changes.
             active_db_prs = cache_db.get_active_pull_requests(repo_id) if cache_db else []
-            for db_pr in active_db_prs:
-                pr_id_str = str(db_pr.get("id"))
-                try:
-                    updated_pr = self._safe_get_pr(pr_id_str, project_id=project_id, repo_id=repo_id)
-                    if updated_pr:
-                        if not updated_pr.get("repository"):
-                            updated_pr["repository"] = {"id": repo_id, "name": repo_name}
-                        _enrich_pr(updated_pr, normalize_pr_status)
-                        if cache_db:
-                            cache_db.save_single_pull_request(updated_pr)
-                        has_changes = True
-                        logger.info("  -- PR #%s in %s refreshed: %s", pr_id_str, repo_name, updated_pr["status"])
-                except Exception as ex:
-                    logger.warning("Could not refresh active PR #%s: %s", pr_id_str, ex)
+            if active_db_prs:
+                def _refresh_pr(db_pr):
+                    pr_id_str = str(db_pr.get("id"))
+                    try:
+                        updated_pr = self._safe_get_pr(pr_id_str, project_id=project_id, repo_id=repo_id)
+                        if updated_pr:
+                            if not updated_pr.get("repository"):
+                                updated_pr["repository"] = {"id": repo_id, "name": repo_name}
+                            _enrich_pr(updated_pr, normalize_pr_status)
+                            return updated_pr
+                    except Exception as ex:
+                        logger.warning("Could not refresh active PR #%s: %s", pr_id_str, ex)
+                    return None
+
+                workers = min(8, len(active_db_prs))
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    for updated_pr in executor.map(_refresh_pr, active_db_prs):
+                        if updated_pr:
+                            if cache_db:
+                                cache_db.save_single_pull_request(updated_pr)
+                            has_changes = True
+                            logger.info("  -- PR #%s in %s refreshed: %s", updated_pr.get("id"), repo_name, updated_pr.get("status"))
 
             # 2. Incremental scan for new PRs stopping at max_known_pr_id
             repo_dict = {"id": repo_id, "name": repo_name}
@@ -841,10 +900,12 @@ class AzureInfoHandler(AzureBaseClient):
         return has_changes
 
     def _process_branches(self, project_id, repo, branches):
-        """Processes branch references, updates latest commit details, and returns whether 'dev' exists."""
+        """Processes branch references in parallel, updates latest commit details, and returns whether 'dev' exists."""
         b_we_have_dev_branch = False
         repo_id = repo["id"]
-        for branch in branches:
+        default_branch = repo.get("defaultBranch", "").replace("refs/heads/", "") if repo.get("defaultBranch") else None
+
+        def _enrich_branch(branch):
             try:
                 latest_commit = self.get_commit(project_id, repo_id, branch['objectId'])
                 branch["LatestCommit"] = latest_commit
@@ -860,16 +921,12 @@ class AzureInfoHandler(AzureBaseClient):
             branch["CommitDateObj"] = parse_iso_datetime(commit_date_raw)
             branch["CommitDate"] = UpdateDateString(branch["CommitDateObj"])
             branch["Committer"] = committer_info.get("name", "")
-            
+
             comment_complete = branch["LatestCommit"].get("comment", "").replace("\n", " ")
             branch["CommentComplete"] = comment_complete
             branch["Comment"] = comment_complete[:46] + "..." if len(comment_complete) > 46 else comment_complete
 
-            if branch["FriendlyName"] == "dev":
-                b_we_have_dev_branch = True
-
-            if repo.get("defaultBranch"):
-                default_branch = repo["defaultBranch"].replace("refs/heads/", "")
+            if default_branch:
                 if branch["FriendlyName"] != default_branch:
                     try:
                         diff = self.get_diff(project_id, repo_id, default_branch, branch['FriendlyName'])
@@ -891,21 +948,33 @@ class AzureInfoHandler(AzureBaseClient):
                 branch["Ahead"] = 0
                 branch["Behind"] = 0
                 branch["Stats"] = {"aheadCount": 0, "behindCount": 0}
+            return branch
+
+        if len(branches) > 1:
+            workers = min(8, len(branches))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(_enrich_branch, branches))
+        elif len(branches) == 1:
+            _enrich_branch(branches[0])
+
+        for branch in branches:
+            if branch.get("FriendlyName") == "dev":
+                b_we_have_dev_branch = True
 
             last_commit_raw_date = repo.get("LastCommitRawDate")
-            commit_date_obj = branch["CommitDateObj"]
+            commit_date_obj = branch.get("CommitDateObj")
             if commit_date_obj and (not last_commit_raw_date or commit_date_obj > last_commit_raw_date):
                 repo["LastCommitRawDate"] = commit_date_obj
-                repo["LatestCommit"] = branch["CommitId"]
-                repo["CommitDate"] = branch["CommitDate"]
-                repo["Committer"] = branch["Committer"]
-                repo["Comment"] = branch["Comment"]
+                repo["LatestCommit"] = branch.get("CommitId")
+                repo["CommitDate"] = branch.get("CommitDate")
+                repo["Committer"] = branch.get("Committer")
+                repo["Comment"] = branch.get("Comment")
 
         branches.sort(key=lambda x: x.get("CommitDate", ""))
         return b_we_have_dev_branch
 
     def _process_tags(self, project_id, repo, filter_version_tags_format):
-        """Filters tags, extracts annotated and lightweight tag information, and returns stable/unstable lists."""
+        """Filters tags, extracts annotated and lightweight tag information in parallel, and returns stable/unstable lists."""
         tags_filtered = []
         last_stable_tag = ""
         last_unstable_tag = ""
@@ -919,6 +988,7 @@ class AzureInfoHandler(AzureBaseClient):
             logger.error("Error fetching tags for %s: %s", repo_name, e)
             return tags_filtered, last_stable_tag, last_unstable_tag
 
+        candidate_tags = []
         for tag in tags:
             tag["FriendlyName"] = tag.get("name", "").replace("refs/tags/", "")
             if filter_version_tags_format and not (tag["FriendlyName"].startswith("v") or tag["FriendlyName"].startswith("V")):
@@ -943,6 +1013,9 @@ class AzureInfoHandler(AzureBaseClient):
                 tag["unstable"] = False
                 tag["stable"] = True
 
+            candidate_tags.append(tag)
+
+        def _enrich_tag(tag):
             # 1. Try fetching annotated tag info
             tag_object_id = tag.get("objectId", "")
             peeled_id = tag.get("peeledObjectId", "")
@@ -1002,8 +1075,16 @@ class AzureInfoHandler(AzureBaseClient):
                                 tag["Comment"] = comment_raw
                     except Exception as ce:
                         logger.debug("Could not fetch commit details for lightweight tag %s in %s: %s", tag['FriendlyName'], repo_name, ce)
+            return tag
 
-            tags_filtered.append(tag)
+        if len(candidate_tags) > 1:
+            workers = min(10, len(candidate_tags))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                tags_filtered = list(executor.map(_enrich_tag, candidate_tags))
+        elif len(candidate_tags) == 1:
+            tags_filtered = [_enrich_tag(candidate_tags[0])]
+        else:
+            tags_filtered = []
 
         # Sort tags descending by CommitDate and SemVer
         tags_filtered.sort(
@@ -1124,17 +1205,25 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception:
             pass
 
-        for extra_id in extra_pr_ids:
-            try:
-                extra_pr = self._safe_get_pr(extra_id, project_id=project_id, repo_id=repo_id)
-                if extra_pr:
-                    if not extra_pr.get("repository"):
-                        extra_pr["repository"] = repo
-                    _enrich_pr(extra_pr, normalize_pr_status)
-                    all_prs.append(extra_pr)
-                    seen_ids.add(str(extra_id))
-            except Exception as e:
-                logger.debug("Error fetching extra PR %s: %s", extra_id, e)
+        if extra_pr_ids:
+            def _fetch_extra_pr(extra_id):
+                try:
+                    extra_pr = self._safe_get_pr(extra_id, project_id=project_id, repo_id=repo_id)
+                    if extra_pr:
+                        if not extra_pr.get("repository"):
+                            extra_pr["repository"] = repo
+                        _enrich_pr(extra_pr, normalize_pr_status)
+                        return (str(extra_id), extra_pr)
+                except Exception as e:
+                    logger.debug("Error fetching extra PR %s: %s", extra_id, e)
+                return (str(extra_id), None)
+
+            extra_workers = min(8, len(extra_pr_ids))
+            with ThreadPoolExecutor(max_workers=extra_workers) as executor:
+                for extra_id_str, extra_pr in executor.map(_fetch_extra_pr, extra_pr_ids):
+                    if extra_pr:
+                        all_prs.append(extra_pr)
+                        seen_ids.add(extra_id_str)
 
         # Fallback to local DB cache if API returned nothing or had an error
         if not all_prs and cache_db is not None:
@@ -1158,8 +1247,8 @@ class AzureInfoHandler(AzureBaseClient):
     def sync_pull_requests(self, cache_db, project_id=None, filter_repos="", progress_callback=None, cancel_token=None):
         """
         Directly synchronizes pull request states between TFS and SQLite database.
-        Phase 1: Refreshes all PRs currently recorded as active in SQLite (detects completion/abandonment).
-        Phase 2: Incrementally scans for new/updated PRs across all repositories.
+        Phase 1: Refreshes all PRs currently recorded as active in SQLite in parallel (detects completion/abandonment).
+        Phase 2: Incrementally scans for new/updated PRs across all repositories in parallel.
         """
         if not cache_db:
             return {"synced": 0, "updated": 0, "new": 0, "errors": 0}
@@ -1186,41 +1275,50 @@ class AzureInfoHandler(AzureBaseClient):
         summary = {"synced": 0, "updated": 0, "new": 0, "errors": 0, "tags_synced": 0}
         from utils import normalize_pr_status
 
-        # Phase 1: Re-check all PRs currently stored in SQLite as active
+        # Phase 1: Re-check all PRs currently stored in SQLite as active in parallel
         active_db_prs = cache_db.get_active_pull_requests()
         total_active = len(active_db_prs)
         _report(5, f"Reconciling {total_active} active pull requests...")
 
-        for idx, db_pr in enumerate(active_db_prs):
-            if _is_cancelled():
-                logger.info("Cancellation requested in sync_pull_requests Phase 1")
-                return summary
+        if total_active > 0:
+            def _check_live_pr(db_pr):
+                pr_id = str(db_pr.get("id"))
+                repo_id = db_pr.get("repo_id")
+                try:
+                    live_pr = self._safe_get_pr(pr_id, project_id=proj, repo_id=repo_id)
+                    return (db_pr, live_pr, None)
+                except Exception as e:
+                    return (db_pr, None, e)
 
-            pr_id = str(db_pr.get("id"))
-            repo_id = db_pr.get("repo_id")
-            try:
-                live_pr = self._safe_get_pr(pr_id, project_id=proj, repo_id=repo_id)
-                if live_pr:
-                    _enrich_pr(live_pr, normalize_pr_status)
-                    old_st = normalize_pr_status(db_pr.get("status"))
-                    if old_st != live_pr["status"]:
-                        logger.info("PR #%s status changed: %s -> %s", pr_id, old_st, live_pr["status"])
-                        summary["updated"] += 1
+            max_workers = min(8, total_active)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(_check_live_pr, p) for p in active_db_prs]
+                for idx, fut in enumerate(as_completed(futures)):
+                    if _is_cancelled():
+                        logger.info("Cancellation requested in sync_pull_requests Phase 1")
+                        return summary
+                    db_pr, live_pr, err = fut.result()
+                    pr_id = str(db_pr.get("id"))
+                    if err:
+                        if is_connection_error(err):
+                            logger.error("Lost connection to repository server while reconciling active PR #%s: %s", pr_id, err)
+                            raise AzureServerConnectionError(f"Lost connection to repository server: {err}", original_error=err) from err
+                        logger.warning("Could not sync status for active PR #%s: %s", pr_id, err)
+                        summary["errors"] += 1
+                    elif live_pr:
+                        _enrich_pr(live_pr, normalize_pr_status)
+                        old_st = normalize_pr_status(db_pr.get("status"))
+                        if old_st != live_pr["status"]:
+                            logger.info("PR #%s status changed: %s -> %s", pr_id, old_st, live_pr["status"])
+                            summary["updated"] += 1
 
-                    cache_db.save_single_pull_request(live_pr)
-                    summary["synced"] += 1
-            except Exception as e:
-                if is_connection_error(e):
-                    logger.error("Lost connection to repository server while reconciling active PR #%s: %s", pr_id, e)
-                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
-                logger.warning("Could not sync status for active PR #%s: %s", pr_id, e)
-                summary["errors"] += 1
+                        cache_db.save_single_pull_request(live_pr)
+                        summary["synced"] += 1
 
-            if total_active > 0:
-                pct = int(5 + (idx / total_active) * 25)
-                _report(pct, f"Reconciling active PRs ({idx + 1}/{total_active})...")
+                    pct = int(5 + ((idx + 1) / total_active) * 25)
+                    _report(pct, f"Reconciling active PRs ({idx + 1}/{total_active})...")
 
-        # Phase 2: Incremental Scan for New PRs & Tag References across enabled repositories
+        # Phase 2: Incremental Scan for New PRs & Tag References across enabled repositories in parallel
         if proj and not _is_cancelled():
             try:
                 repos = self.get_repositories(proj)
@@ -1233,30 +1331,45 @@ class AzureInfoHandler(AzureBaseClient):
                         logger.warning("Error reconciling deleted repositories in sync_pull_requests: %s", e)
                 enabled = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
                 total_repos = len(enabled)
-                for idx, repo in enumerate(enabled):
-                    if _is_cancelled():
-                        logger.info("Cancellation requested in sync_pull_requests Phase 2")
-                        return summary
 
+                def _scan_repo_sync(repo):
                     repo_name = repo.get("name", "")
                     repo_id = repo.get("id", "")
-                    pct = int(30 + (idx / total_repos) * 65) if total_repos > 0 else 50
-                    _report(pct, f"Scanning PRs and tag references for repo {repo_name} ({idx + 1}/{total_repos})...")
-
-                    # Update tag references for repository
+                    tags_synced = 0
                     try:
                         tags_filtered, _, _ = self._process_tags(proj, repo, filter_version_tags_format=False)
                         if cache_db and tags_filtered:
                             cache_db.save_tags(repo_id, tags_filtered)
-                            summary["tags_synced"] += len(tags_filtered)
+                            tags_synced = len(tags_filtered)
                     except Exception as e:
                         if is_connection_error(e):
                             raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
                         logger.debug("Could not update tag references for %s during PR sync: %s", repo_name, e)
 
                     new_count = self._fetch_new_prs_incremental(proj, repo, cache_db, cancel_token=cancel_token)
-                    summary["new"] += new_count
-                    summary["synced"] += new_count
+                    return (repo_name, new_count, tags_synced)
+
+                if total_repos > 0:
+                    max_repo_workers = min(6, total_repos)
+                    with ThreadPoolExecutor(max_workers=max_repo_workers) as executor:
+                        futures = {executor.submit(_scan_repo_sync, r): r for r in enabled}
+                        for idx, fut in enumerate(as_completed(futures)):
+                            if _is_cancelled():
+                                logger.info("Cancellation requested in sync_pull_requests Phase 2")
+                                return summary
+                            try:
+                                repo_name, new_count, tags_synced = fut.result()
+                                summary["new"] += new_count
+                                summary["synced"] += new_count
+                                summary["tags_synced"] += tags_synced
+                                pct = int(30 + ((idx + 1) / total_repos) * 65)
+                                _report(pct, f"Scanned repo {repo_name} ({idx + 1}/{total_repos})...")
+                            except Exception as e:
+                                if is_connection_error(e):
+                                    logger.error("Lost connection to repository server in sync_pull_requests: %s", e)
+                                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+                                logger.warning("Could not incrementally fetch new PRs: %s", e)
+                                summary["errors"] += 1
             except Exception as e:
                 if is_connection_error(e):
                     logger.error("Lost connection to repository server in sync_pull_requests: %s", e)
@@ -1275,7 +1388,7 @@ class AzureInfoHandler(AzureBaseClient):
         cache_db=None,
         progress_callback=None,
         cancel_token=None,
-        max_workers=6
+        max_workers=10
     ):
         """
         Retrieves all repositories, branches, tags, pushes, pull requests, and submodules for a project in parallel,
@@ -1288,7 +1401,7 @@ class AzureInfoHandler(AzureBaseClient):
             cache_db (AzureDevOpsCache, optional): The database cache manager. Defaults to None.
             progress_callback (callable, optional): Callback with (percent, message) or (message, current, total).
             cancel_token (callable/object, optional): Cancellation check.
-            max_workers (int, optional): Max parallel threads. Defaults to 6.
+            max_workers (int, optional): Max parallel threads. Defaults to 10.
 
         Returns:
             dict: A detailed map of repository names to their aggregated info (branches, tags, PRs, submodules, etc.).
@@ -1459,16 +1572,22 @@ class AzureInfoHandler(AzureBaseClient):
             if b_name and b_commit:
                 branch_tips[b_name] = b_commit
 
-        # Pre-fetch recent commit history for each branch
+        # Pre-fetch recent commit history for each branch in parallel
         branch_histories = {}
-        for b_name in branch_tips.keys():
-            try:
-                # Retrieve the last 100 commits for this branch to scan for tag commits
-                commits = self.get_commits(project_id, repo_id, branch_name=b_name, limit=100)
-                branch_histories[b_name] = {c.get("commitId") for c in commits if c.get("commitId")}
-            except Exception as e:
-                logger.error("Error fetching commit history for branch %s: %s", b_name, e)
-                branch_histories[b_name] = set()
+        branch_names = list(branch_tips.keys())
+        if branch_names:
+            def _fetch_branch_history(b_name):
+                try:
+                    commits = self.get_commits(project_id, repo_id, branch_name=b_name, limit=100)
+                    return (b_name, {c.get("commitId") for c in commits if c.get("commitId")})
+                except Exception as e:
+                    logger.error("Error fetching commit history for branch %s: %s", b_name, e)
+                    return (b_name, set())
+
+            workers = min(10, len(branch_names))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                for b_name, shas in executor.map(_fetch_branch_history, branch_names):
+                    branch_histories[b_name] = shas
 
         results = []
         for tag in tags_refs:

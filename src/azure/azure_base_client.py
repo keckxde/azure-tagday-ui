@@ -269,15 +269,16 @@ class AzureBaseClient:
             return res
         return []
 
-    def get_all_build_artifacts(self, project_id, cache_db=None, progress_callback=None):
+    def get_all_build_artifacts(self, project_id, cache_db=None, progress_callback=None, max_workers=8):
         """
-        Retrieves build definitions and artifacts for a specific project.
+        Retrieves build definitions and artifacts for a specific project in parallel.
         Saves builds and artifacts into SQLite cache if cache_db is provided.
 
         Args:
             project_id (str): The target project ID or name.
             cache_db (AzureDevOpsCache, optional): Database cache instance.
             progress_callback (callable, optional): Callback for live progress updates.
+            max_workers (int, optional): Max parallel workers. Defaults to 8.
 
         Returns:
             list: List of build dictionaries with associated artifacts.
@@ -286,35 +287,39 @@ class AzureBaseClient:
         if not isinstance(builds, list):
             builds = []
         total = len(builds)
-        count = 0
-        for i, build in enumerate(builds):
+        if total == 0:
+            return []
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_artifacts_for_build(idx, build):
+            build_id = build.get("id")
             try:
-                build_id = build.get("id")
-                build_number = build.get("buildNumber", build_id)
-                if progress_callback:
-                    progress_callback(f"Fetching artifacts for build {i+1}/{total} (Build #{build_number})...", i + 1, total)
-
                 artifacts = self.get_build_artifacts(project_id, build_id, cache_db=cache_db)
-
-                builds[i]["artifacts"] = artifacts or []
-
-                if artifacts:
-                    for artifact in artifacts:
-                        artifact_name = artifact.get("name", "")
-                        resource = artifact.get("resource") or {}
-                        props = resource.get("properties") or {} if isinstance(resource, dict) else {}
-                        artifact_size = props.get("artifactsize", 0) if isinstance(props, dict) else 0
-                        try:
-                            artifact_size_mb = int(artifact_size) / 1024 / 1024
-                        except (ValueError, TypeError):
-                            artifact_size_mb = 0.0
-
-                        count += artifact_size_mb
-
-                if cache_db:
-                    cache_db.save_build(project_id, builds[i])
+                return idx, build, artifacts or [], None
             except Exception as e:
-                logger.warning("Error processing build %s: %s", build.get('id'), e)
+                logger.warning("Error processing build %s: %s", build_id, e)
+                return idx, build, [], e
+
+        completed_count = 0
+        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, total))) as executor:
+            futures = [executor.submit(_fetch_artifacts_for_build, i, b) for i, b in enumerate(builds)]
+            for fut in as_completed(futures):
+                completed_count += 1
+                idx, build, artifacts, err = fut.result()
+                builds[idx]["artifacts"] = artifacts
+                build_number = build.get("buildNumber", build.get("id"))
+                if progress_callback:
+                    progress_callback(
+                        f"Fetching artifacts for build {completed_count}/{total} (Build #{build_number})...",
+                        completed_count,
+                        total
+                    )
+                if cache_db:
+                    try:
+                        cache_db.save_build(project_id, builds[idx])
+                    except Exception as ce:
+                        logger.warning("Error saving build %s to cache: %s", build.get('id'), ce)
 
         return builds
 
@@ -428,15 +433,17 @@ class AzureBaseClient:
                 return {"id": clean_id, "status": "cleared"}
             raise
 
-    def get_work_items_batch(self, task_ids, fields=None, expand=None, chunk_size=200):
+    def get_work_items_batch(self, task_ids, fields=None, expand=None, chunk_size=200, max_workers=8):
         """
         Retrieves work items in batches of up to chunk_size (max 200) by IDs using POST _apis/wit/workitemsbatch.
+        Executes multi-chunk requests in parallel across workers for high performance.
 
         Args:
             task_ids (list): List of work item IDs (int or str).
             fields (list, optional): Specific field names to retrieve. Defaults to None.
             expand (str, optional): Expand options ('none', 'relations', 'fields', 'links', 'all'). Defaults to None.
             chunk_size (int, optional): Max IDs per batch request (Azure DevOps / TFS limit is 200). Defaults to 200.
+            max_workers (int, optional): Max parallel workers for multi-chunk batches. Defaults to 8.
 
         Returns:
             list: List of work item dictionaries returned by the API.
@@ -454,9 +461,9 @@ class AzureBaseClient:
         if not clean_ids:
             return []
 
-        all_results = []
-        for i in range(0, len(clean_ids), chunk_size):
-            chunk = clean_ids[i:i + chunk_size]
+        chunks = [clean_ids[i:i + chunk_size] for i in range(0, len(clean_ids), chunk_size)]
+        if len(chunks) <= 1:
+            chunk = chunks[0]
             data = {"ids": chunk}
             if fields:
                 data["fields"] = fields
@@ -464,8 +471,31 @@ class AzureBaseClient:
                 data["$expand"] = expand
 
             res, _ = self._request("POST", "_apis/wit/workitemsbatch", params={"api-version": "6.0"}, data=data)
+            return res.get("value", []) if isinstance(res, dict) else []
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_single_batch(idx, chunk_ids):
+            data = {"ids": chunk_ids}
+            if fields:
+                data["fields"] = fields
+            if expand:
+                data["$expand"] = expand
+            res, _ = self._request("POST", "_apis/wit/workitemsbatch", params={"api-version": "6.0"}, data=data)
             items = res.get("value", []) if isinstance(res, dict) else []
-            all_results.extend(items)
+            return idx, items
+
+        ordered_results = [None] * len(chunks)
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
+            futures = [executor.submit(_fetch_single_batch, idx, ch) for idx, ch in enumerate(chunks)]
+            for fut in as_completed(futures):
+                idx, items = fut.result()
+                ordered_results[idx] = items
+
+        all_results = []
+        for batch_items in ordered_results:
+            if batch_items:
+                all_results.extend(batch_items)
 
         return all_results
 
