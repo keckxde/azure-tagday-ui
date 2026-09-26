@@ -1931,6 +1931,81 @@ class DevOpsBackend(QObject):
         last_s_d, last_e_d, last_start_str, last_end_str = utils.get_sprint_date_range(last_year, last_week)
         last_range_label = utils.format_sprint_range_label(last_year, last_week)
 
+        # Milestones determination for Last Week and Current Week
+        all_milestones = self._cache_db.get_milestones() if self._cache_db else []
+
+        def _get_milestones_for_range(start_str, end_str, y, w):
+            ms_list = []
+            for m in all_milestones:
+                m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+                m_end = (m.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
+                in_range = False
+                if start_str and end_str and m_start and m_end:
+                    if m_start <= end_str and m_end >= start_str:
+                        in_range = True
+                if not in_range and m_start:
+                    try:
+                        s_obj = datetime.strptime(m_start, "%Y-%m-%d").date()
+                        sy, sw, _ = s_obj.isocalendar()
+                        e_obj = datetime.strptime(m_end, "%Y-%m-%d").date()
+                        ey, ew, _ = e_obj.isocalendar()
+                        if (sy, sw) <= (y, w) <= (ey, ew):
+                            in_range = True
+                    except Exception:
+                        pass
+                if not in_range and m_start:
+                    sy, sw, _ = utils.parse_sprint_week(m_start)
+                    ey, ew, _ = utils.parse_sprint_week(m_end)
+                    if sy and ey and (sy, sw) <= (y, w) <= (ey, ew):
+                        in_range = True
+                    elif sy and (sy, sw) == (y, w):
+                        in_range = True
+                if in_range:
+                    ms_list.append(m)
+            return ms_list
+
+        last_week_milestones = _get_milestones_for_range(last_start_str, last_end_str, last_year, last_week)
+        cur_week_milestones = _get_milestones_for_range(cur_start_str, cur_end_str, cur_year, cur_week)
+
+        def _extract_bracket_tag(title):
+            if not title:
+                return ""
+            m = re.search(r"\[([a-zA-Z0-9]{2,6}_[^\]]+)\]", str(title))
+            if m:
+                return f"[{m.group(1)}]"
+            return ""
+
+        def _wi_priority_rank(w):
+            t_low = (w.get("type") or "").lower()
+            is_story = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story")
+            is_bug = t_low in ("bug", "defect", "problem") or w.get("is_bug")
+            is_task = t_low == "task" or w.get("is_task")
+
+            # 1. Type Priority (Stories & Bugs = 0, Tasks = 1, Others = 2)
+            if is_story or is_bug:
+                type_prio = 0
+            elif is_task:
+                type_prio = 1
+            else:
+                type_prio = 2
+
+            # 2. Bracket Notation Priority ([xx_xxx] e.g. OI, MP, SCN, SCEN, SPEC, PA, CS, DOC, PBS)
+            title_str = str(w.get("title") or "")
+            bracket_tag = _extract_bracket_tag(title_str)
+            has_bracket = bool(bracket_tag or w.get("is_prio1") or utils.parse_level3_priority(title_str).get("is_prio1"))
+            bracket_prio = 0 if has_bracket else 1
+
+            # 3. Urgency / Status Priority
+            urg = w.get("urgency_status")
+            if urg in ("overdue", "due_this_week"):
+                urg_prio = 0
+            elif w.get("state") in ("Active", "In Progress", "In Planning", "Doing", "Committed"):
+                urg_prio = 1
+            else:
+                urg_prio = 2
+
+            return (type_prio, bracket_prio, urg_prio, -(w.get("id") or 0))
+
         # Last Week Closed/Completed PRs
         last_closed_prs = [
             p for p in sorted_prs
@@ -1963,7 +2038,7 @@ class DevOpsBackend(QObject):
             logger.debug(f"Could not query last week tags: {e}")
 
         # Last Week Completed / Resolved Work Items
-        last_completed_wis = [
+        last_completed_wis_all = [
             w for w in sorted_wis
             if w.get("state") in ("Closed", "Resolved", "Done", "Completed")
             and (
@@ -1971,6 +2046,13 @@ class DevOpsBackend(QObject):
                 or w.get("sprint_week_name") == last_sprint_name
             )
         ]
+        last_completed_wis = sorted(last_completed_wis_all, key=_wi_priority_rank)
+        for w in last_completed_wis:
+            w["bracket_tag"] = _extract_bracket_tag(w.get("title"))
+            t_low = (w.get("type") or "").lower()
+            w["is_story"] = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story", False)
+            w["is_bug"] = t_low in ("bug", "defect", "problem") or w.get("is_bug", False)
+            w["is_task"] = t_low == "task" or w.get("is_task", False)
 
         last_week_activity = {
             "sprint_name": last_sprint_name,
@@ -1981,6 +2063,8 @@ class DevOpsBackend(QObject):
             "created_prs_count": len(last_created_prs),
             "tags_count": len(last_tags),
             "completed_wis_count": len(last_completed_wis),
+            "milestones": last_week_milestones,
+            "milestones_count": len(last_week_milestones),
             "total_count": len(last_closed_prs) + len(last_tags) + len(last_completed_wis),
             "closed_prs": last_closed_prs[:8],
             "tags": last_tags[:8],
@@ -1988,7 +2072,7 @@ class DevOpsBackend(QObject):
         }
 
         # Current Week Planned Work Items
-        cur_planned_wis = [
+        cur_planned_wis_all = [
             w for w in sorted_wis
             if not w.get("deleted")
             and (
@@ -1997,12 +2081,13 @@ class DevOpsBackend(QObject):
                 or (w.get("target_date") and cur_start_str <= w.get("target_date")[:10] <= cur_end_str)
             )
         ]
-        cur_planned_wis.sort(key=lambda x: (
-            0 if x.get("urgency_status") == "due_this_week" else (
-                1 if x.get("state") in ("Active", "In Progress", "In Planning") else 2
-            ),
-            x.get("id")
-        ), reverse=False)
+        cur_planned_wis = sorted(cur_planned_wis_all, key=_wi_priority_rank)
+        for w in cur_planned_wis:
+            w["bracket_tag"] = _extract_bracket_tag(w.get("title"))
+            t_low = (w.get("type") or "").lower()
+            w["is_story"] = t_low in ("user story", "requirement", "story", "product backlog item") or w.get("is_story", False)
+            w["is_bug"] = t_low in ("bug", "defect", "problem") or w.get("is_bug", False)
+            w["is_task"] = t_low == "task" or w.get("is_task", False)
 
         cur_active_prs = [p for p in sorted_prs if p.get("status") == "active"]
         due_this_week_count = sum(1 for w in cur_planned_wis if w.get("urgency_status") == "due_this_week")
@@ -2016,6 +2101,8 @@ class DevOpsBackend(QObject):
             "due_this_week_count": due_this_week_count,
             "active_prs_count": len(cur_active_prs),
             "pending_releases_count": pending_repos_count,
+            "milestones": cur_week_milestones,
+            "milestones_count": len(cur_week_milestones),
             "total_count": len(cur_planned_wis) + len(cur_active_prs),
             "planned_wis": cur_planned_wis[:8],
             "active_prs": cur_active_prs[:8],

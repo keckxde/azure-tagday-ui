@@ -285,17 +285,22 @@ Item {
             // Weekly Overviews: Last Week Activities & Current Week Planned
             // ==========================================
             GridLayout {
+                id: weeklyOverviewsGrid
                 Layout.fillWidth: true
                 columns: parent.width > 900 ? 2 : 1
                 rowSpacing: 18
                 columnSpacing: 18
+
+                property real maxCardHeight: Math.max(lastWeekCol.implicitHeight, curWeekCol.implicitHeight) + 36
 
                 // ----------------------------------------------------
                 // Card A: Last Week Activities Overview
                 // ----------------------------------------------------
                 Rectangle {
                     Layout.fillWidth: true
-                    implicitHeight: lastWeekCol.implicitHeight + 36
+                    Layout.fillHeight: true
+                    Layout.preferredHeight: weeklyOverviewsGrid.columns === 2 ? weeklyOverviewsGrid.maxCardHeight : (lastWeekCol.implicitHeight + 36)
+                    implicitHeight: weeklyOverviewsGrid.columns === 2 ? weeklyOverviewsGrid.maxCardHeight : (lastWeekCol.implicitHeight + 36)
                     color: "#161b22"
                     radius: 8
                     border.color: "#30363d"
@@ -305,7 +310,7 @@ Item {
                         id: lastWeekCol
                         anchors.fill: parent
                         anchors.margins: 18
-                        spacing: 14
+                        spacing: 12
 
                         // Header Row
                         RowLayout {
@@ -353,6 +358,70 @@ Item {
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
                                     color: "#8b949e"
+                                }
+                            }
+                        }
+
+                        // Milestones Section (if any)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: (backend && backend.lastWeekActivity && backend.lastWeekActivity.milestones && backend.lastWeekActivity.milestones.length > 0)
+                            spacing: 4
+
+                            RowLayout {
+                                spacing: 4
+                                Text {
+                                    text: "🚩"
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: "Milestones in Sprint:"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#d29922"
+                                }
+                            }
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Repeater {
+                                    model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.milestones) ? backend.lastWeekActivity.milestones : []
+
+                                    delegate: Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: lastMsRow.implicitWidth + 14
+                                        radius: 11
+                                        color: modelData.category_bg_color || "#272115"
+                                        border.color: modelData.category_color || "#d29922"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: lastMsRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text {
+                                                text: modelData.category_icon || "🚩"
+                                                font.pixelSize: 10
+                                            }
+                                            Text {
+                                                text: modelData.name || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: modelData.category_color || "#f0f6fc"
+                                            }
+                                            Text {
+                                                text: modelData.target_date ? "(" + modelData.target_date + ")" : ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                color: "#8b949e"
+                                                visible: !!modelData.target_date
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -456,22 +525,104 @@ Item {
                             }
                         }
 
-                        // Recent Activity Items List (Top highlights)
+                        // Recent Activity Items List (Top highlights: Stories, Bugs & PRs)
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 6
 
                             Text {
-                                text: "Activity Highlights:"
+                                text: "Activity Highlights (Stories & Bugs):"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 color: "#8b949e"
                             }
 
+                            // Completed Work Items previews (Stories & Bugs with [xx_xxx] priority first)
+                            Repeater {
+                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.completed_wis) ? backend.lastWeekActivity.completed_wis.slice(0, 3) : []
+
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 32
+                                    radius: 5
+                                    color: wiMa.containsMouse ? "#21262d" : "#0d1117"
+                                    border.color: (modelData.bracket_tag || modelData.is_prio1) ? "#238636" : "#30363d"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        spacing: 6
+
+                                        // Type badge icon
+                                        Text {
+                                            text: modelData.is_bug ? "🐞" : (modelData.is_story ? "📘" : "✓")
+                                            font.pixelSize: 11
+                                        }
+
+                                        // Bracket tag pill if any (e.g. [OI_01], [MP_02], [SCN_01])
+                                        Rectangle {
+                                            visible: !!modelData.bracket_tag
+                                            implicitHeight: 18
+                                            implicitWidth: bracketPillText.implicitWidth + 8
+                                            radius: 3
+                                            color: Qt.rgba(35/255, 134/255, 54/255, 0.25)
+                                            border.color: "#238636"
+
+                                            Text {
+                                                id: bracketPillText
+                                                anchors.centerIn: parent
+                                                text: modelData.bracket_tag || ""
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: "#3fb950"
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "#" + modelData.id
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: "#58a6ff"
+                                        }
+
+                                        Text {
+                                            text: modelData.title
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#f0f6fc"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: modelData.assigned_to || "Unassigned"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: wiMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (typeof window !== "undefined" && window.navigateToWorkItem) {
+                                                window.navigateToWorkItem(modelData.id);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // Closed PRs previews
                             Repeater {
-                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.closed_prs) ? backend.lastWeekActivity.closed_prs.slice(0, 3) : []
+                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.closed_prs) ? backend.lastWeekActivity.closed_prs.slice(0, 2) : []
 
                                 delegate: Rectangle {
                                     Layout.fillWidth: true
@@ -525,62 +676,6 @@ Item {
                                 }
                             }
 
-                            // Completed Work Items previews
-                            Repeater {
-                                model: (backend && backend.lastWeekActivity && backend.lastWeekActivity.completed_wis) ? backend.lastWeekActivity.completed_wis.slice(0, 2) : []
-
-                                delegate: Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 32
-                                    radius: 5
-                                    color: wiMa.containsMouse ? "#21262d" : "#0d1117"
-                                    border.color: "#30363d"
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        spacing: 8
-
-                                        Text {
-                                            text: "✓ #" + modelData.id
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            font.weight: Font.Bold
-                                            color: "#58a6ff"
-                                        }
-
-                                        Text {
-                                            text: modelData.title
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            color: "#f0f6fc"
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-
-                                        Text {
-                                            text: modelData.assigned_to || "Unassigned"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: wiMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (typeof window !== "undefined" && window.navigateToWorkItem) {
-                                                window.navigateToWorkItem(modelData.id);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
                             // Empty placeholder when no activities
                             Text {
                                 visible: (!backend || !backend.lastWeekActivity || !backend.lastWeekActivity.total_count)
@@ -590,6 +685,10 @@ Item {
                                 color: "#8b949e"
                                 Layout.topMargin: 4
                             }
+                        }
+
+                        Item {
+                            Layout.fillHeight: true
                         }
 
                         // Footer Action Button
@@ -626,7 +725,9 @@ Item {
                 // ----------------------------------------------------
                 Rectangle {
                     Layout.fillWidth: true
-                    implicitHeight: curWeekCol.implicitHeight + 36
+                    Layout.fillHeight: true
+                    Layout.preferredHeight: weeklyOverviewsGrid.columns === 2 ? weeklyOverviewsGrid.maxCardHeight : (curWeekCol.implicitHeight + 36)
+                    implicitHeight: weeklyOverviewsGrid.columns === 2 ? weeklyOverviewsGrid.maxCardHeight : (curWeekCol.implicitHeight + 36)
                     color: "#161b22"
                     radius: 8
                     border.color: "#30363d"
@@ -636,7 +737,7 @@ Item {
                         id: curWeekCol
                         anchors.fill: parent
                         anchors.margins: 18
-                        spacing: 14
+                        spacing: 12
 
                         // Header Row
                         RowLayout {
@@ -695,6 +796,70 @@ Item {
                                         font.pixelSize: 10
                                         font.weight: Font.Bold
                                         color: "#3fb950"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Milestones Section (if any)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.milestones && backend.currentWeekPlanned.milestones.length > 0)
+                            spacing: 4
+
+                            RowLayout {
+                                spacing: 4
+                                Text {
+                                    text: "🚩"
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: "Active Milestones:"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: "#58a6ff"
+                                }
+                            }
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Repeater {
+                                    model: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.milestones) ? backend.currentWeekPlanned.milestones : []
+
+                                    delegate: Rectangle {
+                                        implicitHeight: 22
+                                        implicitWidth: curMsRow.implicitWidth + 14
+                                        radius: 11
+                                        color: modelData.category_bg_color || "#13233a"
+                                        border.color: modelData.category_color || "#58a6ff"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: curMsRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text {
+                                                text: modelData.category_icon || "🎯"
+                                                font.pixelSize: 10
+                                            }
+                                            Text {
+                                                text: modelData.name || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: modelData.category_color || "#f0f6fc"
+                                            }
+                                            Text {
+                                                text: modelData.target_date ? "(" + modelData.target_date + ")" : ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                color: "#8b949e"
+                                                visible: !!modelData.target_date
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -799,13 +964,13 @@ Item {
                             }
                         }
 
-                        // Planned Activities List (Top items)
+                        // Planned Activities List (Top items: Stories & Bugs with [xx_xxx] priority first)
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 6
 
                             Text {
-                                text: "Targeted Activities:"
+                                text: "Targeted Activities (Stories & Bugs):"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -821,13 +986,39 @@ Item {
                                     implicitHeight: 32
                                     radius: 5
                                     color: curWiMa.containsMouse ? "#21262d" : "#0d1117"
-                                    border.color: (modelData.urgency_status === "due_this_week") ? "#f0883e" : "#30363d"
+                                    border.color: (modelData.urgency_status === "due_this_week") ? "#f0883e" : ((modelData.bracket_tag || modelData.is_prio1) ? "#238636" : "#30363d")
 
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 10
                                         anchors.rightMargin: 10
-                                        spacing: 8
+                                        spacing: 6
+
+                                        // Type badge icon
+                                        Text {
+                                            text: modelData.is_bug ? "🐞" : (modelData.is_story ? "📘" : "📋")
+                                            font.pixelSize: 11
+                                        }
+
+                                        // Bracket tag pill if any (e.g. [OI_01], [MP_02], [SCN_01])
+                                        Rectangle {
+                                            visible: !!modelData.bracket_tag
+                                            implicitHeight: 18
+                                            implicitWidth: curBracketPillText.implicitWidth + 8
+                                            radius: 3
+                                            color: Qt.rgba(35/255, 134/255, 54/255, 0.25)
+                                            border.color: "#238636"
+
+                                            Text {
+                                                id: curBracketPillText
+                                                anchors.centerIn: parent
+                                                text: modelData.bracket_tag || ""
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: "#3fb950"
+                                            }
+                                        }
 
                                         Text {
                                             text: "#" + modelData.id
@@ -953,6 +1144,10 @@ Item {
                                 color: "#8b949e"
                                 Layout.topMargin: 4
                             }
+                        }
+
+                        Item {
+                            Layout.fillHeight: true
                         }
 
                         // Footer Action Button
