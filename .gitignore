@@ -15,3 +15,4 @@ src/config/user_settings.yaml
 *_version_scm.py
 *.pylog
 azure_tagday_ui-*/*
+BUILD_ARTIFACTS*

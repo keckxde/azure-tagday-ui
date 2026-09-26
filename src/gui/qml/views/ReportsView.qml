@@ -1291,9 +1291,11 @@ Item {
                                                     Layout.fillWidth: true
                                                 }
 
-                                                StatusBadge {
+                                                Text {
                                                     text: modelData.category || "OTHERS"
-                                                    badgeColor: backend ? backend.get_category_color(modelData.category || "OTHERS") : "#30363d"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    color: "#8b949e"
                                                 }
                                             }
 
@@ -1833,28 +1835,6 @@ Item {
                                 }
 
                                 Button {
-                                    text: "Unmerged Branches (" + (root.selectedRepo ? root.selectedRepo.branches_count : 0) + ")"
-                                    checkable: true
-                                    checked: root.repoDetailSubTab === 1
-                                    font.pixelSize: 11
-                                    font.weight: checked ? Font.DemiBold : Font.Normal
-                                    contentItem: Text {
-                                        text: parent.text
-                                        font: parent.font
-                                        color: parent.checked ? "#ffffff" : "#8b949e"
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-                                    background: Rectangle {
-                                        implicitHeight: 28
-                                        implicitWidth: 165
-                                        radius: 4
-                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#0d1117")
-                                        border.color: parent.checked ? "#388bfd" : "#30363d"
-                                    }
-                                    onClicked: root.repoDetailSubTab = 1
-                                }
-
-                                Button {
                                     text: "Active PRs (" + (root.selectedRepo ? root.selectedRepo.active_prs_count : 0) + ")"
                                     checkable: true
                                     checked: root.repoDetailSubTab === 2
@@ -1896,6 +1876,28 @@ Item {
                                         border.color: parent.checked ? "#388bfd" : "#30363d"
                                     }
                                     onClicked: root.repoDetailSubTab = 3
+                                }
+
+                                Button {
+                                    text: "Unmerged Branches (" + (root.selectedRepo ? root.selectedRepo.branches_count : 0) + ")"
+                                    checkable: true
+                                    checked: root.repoDetailSubTab === 1
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 28
+                                        implicitWidth: 165
+                                        radius: 4
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#0d1117")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                    }
+                                    onClicked: root.repoDetailSubTab = 1
                                 }
 
                                 Item {
