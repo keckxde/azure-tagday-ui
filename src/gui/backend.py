@@ -1339,6 +1339,9 @@ class DevOpsBackend(QObject):
             active_prs_count = len(td_repo.get("active_prs", [])) if td_repo else 0
             pending_count = (prs_after_tag_count + unmerged_branches_count + active_prs_count) if is_cat_important else 0
             has_pending = pending_count > 0 and is_cat_important
+            has_untagged_prs = prs_after_tag_count > 0 and is_cat_important
+            has_unmerged_branches = unmerged_branches_count > 0 and is_cat_important
+            has_active_prs = active_prs_count > 0 and is_cat_important
 
             parts = []
             if is_cat_important:
@@ -1363,6 +1366,9 @@ class DevOpsBackend(QObject):
                 "branches_count": len(r.get("branches", [])),
                 "dev_prs_count": len(r.get("devPRs", [])),
                 "has_pending_changes": has_pending,
+                "has_untagged_prs": has_untagged_prs,
+                "has_unmerged_branches": has_unmerged_branches,
+                "has_active_prs": has_active_prs,
                 "pending_changes_count": pending_count,
                 "prs_after_tag_count": prs_after_tag_count,
                 "unmerged_branches_count": unmerged_branches_count,
@@ -1869,9 +1875,14 @@ class DevOpsBackend(QObject):
                 "unmerged_branches": clean_branches,
             })
 
+        repos_with_prs_count = sum(1 for r in repos_summary if r.get("prs_count", 0) > 0)
+        repos_with_branches_count = sum(1 for r in repos_summary if r.get("branches_count", 0) > 0)
+
         tagday_data = {
             "repos_analyzed": len(td_raw.get("all_repositories", {})),
             "repos_with_changes_count": len(repos_changed_map),
+            "repos_with_prs_count": repos_with_prs_count,
+            "repos_with_branches_count": repos_with_branches_count,
             "timeline_items_count": len(timeline),
             "timeline": timeline[:100],
             "repos_summary": repos_summary,
@@ -1881,6 +1892,8 @@ class DevOpsBackend(QObject):
         # 6. Stats Summary
         last_sync_dt = self._cache_db.get_project_last_synced(devops_helper.AZURE_PROJECT_ID)
         pending_repos_count = sum(1 for r in sorted_repos if r.get("has_pending_changes"))
+        untagged_prs_repos_count = sum(1 for r in sorted_repos if r.get("has_untagged_prs"))
+        unmerged_branches_repos_count = sum(1 for r in sorted_repos if r.get("has_unmerged_branches"))
         prs_open_count = sum(1 for p in sorted_prs if p.get("status") == "active")
         prs_completed_count = sum(1 for p in sorted_prs if p.get("status") == "completed")
         prs_abandoned_count = sum(1 for p in sorted_prs if p.get("status") == "abandoned")
@@ -1888,6 +1901,8 @@ class DevOpsBackend(QObject):
         stats = {
             "repos_count": len(sorted_repos),
             "pending_repos_count": pending_repos_count,
+            "untagged_prs_repos_count": untagged_prs_repos_count,
+            "unmerged_branches_repos_count": unmerged_branches_repos_count,
             "latest_stable_tag": global_latest_stable["tag"] if global_latest_stable else "-",
             "latest_stable_repo": global_latest_stable["repo"] if global_latest_stable else "",
             "latest_stable_date": global_latest_stable["date"] if global_latest_stable else "",

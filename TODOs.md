@@ -8,17 +8,30 @@
 
 ## DONE
 
+- Separate "Pending" (Untagged PRs) from "Unmerged Branches" in Repositories List & TagExplorer View:
+  - **Backend Separation ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**:
+    - Added dedicated boolean flags `has_untagged_prs` (`prs_after_tag_count > 0 and is_cat_important`), `has_unmerged_branches` (`unmerged_branches_count > 0 and is_cat_important`), and `has_active_prs` to every repository dictionary.
+    - Extended backend `stats` with explicit `untagged_prs_repos_count` and `unmerged_branches_repos_count`.
+    - Added `repos_with_prs_count` and `repos_with_branches_count` to TagDay dataset statistics.
+  - **Repositories View ([`src/gui/qml/views/ReposView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReposView.qml))**:
+    - Separated filter categories into `🏷️ PENDING PRs (<count>)`, `🌿 UNMERGED BRANCHES (<count>)`, and `ALL`.
+    - Split the row indicator and "PENDING CHANGES" column badges into distinct color-coded chips: orange/amber `🏷️ X untagged PRs`, purple `🌿 Y branches ahead`, and blue `🔀 Z active PRs`.
+  - **TagExplorer View ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**:
+    - Added sidebar filter pills for `All (<count>)`, `🏷️ PRs (<count>)`, and `🌿 Branches (<count>)` to instantly focus on repositories needing release tagging vs WIP branch updates.
+    - Replaced the merged `X updates` badge with distinct `🏷️ X PRs` and `🌿 Y branches` badges.
+    - Repositioned the Category badge to the first line alongside the repository name (`RowLayout`), freeing up width on the second row (latest & proposed tags) and eliminating layout overflow.
+    - Updated top overview metric cards to report `Pending Release Repos` and `Unmerged Branch Repos` separately.
+  - **Automated Verification ([`src/tests/test_pending_and_unmerged_branches.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_pending_and_unmerged_branches.py))**: Added unit test suite validating flag separation, counts, and TagDay breakdown metrics across all repositories (265/265 tests passed).
+
 - Unified Release & Semantic Tag Row in TagDay Explorer:
   - **Single Consolidated Header Card ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Replaced the separate stacked cards with a unified, modern Release & Tag status card.
   - **In-Line Tag Layout ([`src/gui/qml/views/ReportsView.qml`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/qml/views/ReportsView.qml))**: Positioned the **Latest Tag** (`vXX.YY.ZZZZ`) and **Proposed Tag** (`➔ Proposed Tag: vXX.YY.WWWW [Weekly <YYWW>]`) directly in the same horizontal row, alongside the `● Up to Date` badge and 1-click `🏷️ Tag Dev Branch` action button.
   - **Comprehensive Commit Details**: Positioned baseline/commit timestamps, committer info, untagged merged PR count, and tag comment into concise secondary rows within the same card.
 
-
 - Tag Dialog Handler Resolution Fix (`'DevOpsBackend' object has no attribute '_info_handler'`):
   - **Attribute Initialization & Fallback ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Initialized `self._info_handler = None` and `self._project_id` in `DevOpsBackend.__init__` and guarded attribute lookup via `getattr(self, "_info_handler", None) or devops_helper._getHandler()`.
   - **Project ID Resolution ([`src/gui/backend.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/gui/backend.py))**: Added safe project ID fallback (`getattr(self, "_project_id", None) or devops_helper.AZURE_PROJECT_ID or getattr(self, "selectedProject", "")`) when executing Git tagging requests.
   - **Automated Verification ([`src/tests/test_proposed_tag.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/tests/test_proposed_tag.py))**: Added `test_create_tag_async_default_instance_no_attribute_error` verifying default backend instances invoke `create_tag_async` without raising `AttributeError` (264/264 tests passed).
-
 
 - Eliminate Duplicate Pull Requests in PR List & TagDay Explorer:
   - **SQL Join Grouping & Tag Aggregation ([`src/azure/azure_db.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/azure/azure_db.py), [`src/generate_tagday_report.py`](file:///c:/Users/keckx/Projects/_github/azure-tagday-ui/src/generate_tagday_report.py))**: Updated `get_all_prs()`, `load_tagday_data()`, and `v_pull_requests_tagged` database view to use `GROUP BY pr.id` with `MAX(t_direct.name) AS direct_tag_name`. This prevents commits with multiple tag markers (e.g., lightweight tags, release candidates, build tags) from producing multiple duplicate row copies per PR.

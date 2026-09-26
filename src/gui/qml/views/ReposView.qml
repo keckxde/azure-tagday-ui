@@ -6,12 +6,36 @@ import "../components"
 Item {
     id: root
     property string searchQuery: ""
-    property string selectedCategory: "⚠️ PENDING"
+    property string selectedCategory: "🏷️ PENDING PRs"
     property int currentPage: 1
     property int pageSize: 15
     property int totalPages: 1
     property int totalMatchingCount: 0
     property int contentMargins: 20
+
+    readonly property int pendingPrsCount: {
+        if (!backend || !backend.repositories)
+            return 0;
+        var count = 0;
+        var list = backend.repositories;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].has_untagged_prs || (list[i].prs_after_tag_count && list[i].prs_after_tag_count > 0))
+                count++;
+        }
+        return count;
+    }
+
+    readonly property int unmergedBranchesCount: {
+        if (!backend || !backend.repositories)
+            return 0;
+        var count = 0;
+        var list = backend.repositories;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].has_unmerged_branches || (list[i].unmerged_branches_count && list[i].unmerged_branches_count > 0))
+                count++;
+        }
+        return count;
+    }
 
     readonly property int pendingCount: {
         if (!backend || !backend.repositories)
@@ -51,10 +75,15 @@ Item {
             }
 
             Text {
-                text: "(" + root.totalMatchingCount + " repos" + (root.pendingCount > 0 ? " • " + root.pendingCount + " pending" : "") + ")"
+                text: {
+                    var extra = [];
+                    if (root.pendingPrsCount > 0) extra.push(root.pendingPrsCount + " untagged PRs");
+                    if (root.unmergedBranchesCount > 0) extra.push(root.unmergedBranchesCount + " unmerged branches");
+                    return "(" + root.totalMatchingCount + " repos" + (extra.length > 0 ? " • " + extra.join(" • ") : "") + ")";
+                }
                 font.family: "Segoe UI, sans-serif"
                 font.pixelSize: 13
-                color: root.pendingCount > 0 ? "#f0883e" : "#8b949e"
+                color: (root.pendingPrsCount > 0 || root.unmergedBranchesCount > 0) ? "#f0883e" : "#8b949e"
             }
 
             Item {
@@ -139,7 +168,7 @@ Item {
 
                 Repeater {
                     model: {
-                        var base = ["⚠️ PENDING", "ALL"];
+                        var base = ["🏷️ PENDING PRs", "🌿 UNMERGED BRANCHES", "ALL"];
                         if (backend && backend.repoCategories) {
                             for (var i = 0; i < backend.repoCategories.length; i++) {
                                 base.push(backend.repoCategories[i].name);
@@ -150,7 +179,15 @@ Item {
                         return base;
                     }
                     Button {
-                        text: modelData === "⚠️ PENDING" ? ("⚠️ PENDING (" + root.pendingCount + ")") : modelData
+                        text: {
+                            if (modelData === "🏷️ PENDING PRs")
+                                return "🏷️ PENDING PRs (" + root.pendingPrsCount + ")";
+                            if (modelData === "🌿 UNMERGED BRANCHES")
+                                return "🌿 UNMERGED BRANCHES (" + root.unmergedBranchesCount + ")";
+                            if (modelData === "⚠️ PENDING")
+                                return "⚠️ ALL PENDING (" + root.pendingCount + ")";
+                            return modelData;
+                        }
                         checkable: true
                         checked: root.selectedCategory === modelData
                         font.pixelSize: 11
@@ -162,7 +199,13 @@ Item {
                         contentItem: Text {
                             text: parent.text
                             font: parent.font
-                            color: parent.checked ? "#ffffff" : (modelData === "⚠️ PENDING" ? "#f0883e" : "#8b949e")
+                            color: {
+                                if (parent.checked) return "#ffffff";
+                                if (modelData === "🏷️ PENDING PRs") return "#f0883e";
+                                if (modelData === "🌿 UNMERGED BRANCHES") return "#bc8cff";
+                                if (modelData === "⚠️ PENDING") return "#f0883e";
+                                return "#8b949e";
+                            }
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -171,15 +214,24 @@ Item {
                             radius: 14
                             color: {
                                 if (parent.checked) {
-                                    return modelData === "⚠️ PENDING" ? "#d29922" : (backend ? backend.get_category_color(modelData) : "#1f6feb");
+                                    if (modelData === "🏷️ PENDING PRs") return "#d29922";
+                                    if (modelData === "🌿 UNMERGED BRANCHES") return "#8957e5";
+                                    if (modelData === "⚠️ PENDING") return "#d29922";
+                                    return (backend ? backend.get_category_color(modelData) : "#1f6feb");
                                 }
                                 return parent.hovered ? "#21262d" : "#161b22";
                             }
                             border.color: {
                                 if (parent.checked) {
-                                    return modelData === "⚠️ PENDING" ? "#e3b341" : "#388bfd";
+                                    if (modelData === "🏷️ PENDING PRs") return "#e3b341";
+                                    if (modelData === "🌿 UNMERGED BRANCHES") return "#a371f7";
+                                    if (modelData === "⚠️ PENDING") return "#e3b341";
+                                    return "#388bfd";
                                 }
-                                return modelData === "⚠️ PENDING" ? "#6e4b10" : "#30363d";
+                                if (modelData === "🏷️ PENDING PRs") return "#6e4b10";
+                                if (modelData === "🌿 UNMERGED BRANCHES") return "#5a3e85";
+                                if (modelData === "⚠️ PENDING") return "#6e4b10";
+                                return "#30363d";
                             }
                         }
                         onClicked: root.selectedCategory = modelData
@@ -297,7 +349,7 @@ Item {
                     anchors.leftMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
                     radius: 1.5
-                    color: "#f0883e"
+                    color: (model.prs_after_tag_count > 0) ? "#f0883e" : "#bc8cff"
                     visible: !!model.has_pending_changes
                 }
 
@@ -433,44 +485,111 @@ Item {
                         }
                     }
 
-                    // 4. Pending Changes Information
+                    // 4. Pending Changes Information (Separated Untagged PRs and Unmerged Branches)
                     Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 200
                         height: parent.height
 
-                        // Badge when pending changes exist
-                        Rectangle {
+                        RowLayout {
                             visible: !!model.has_pending_changes
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            height: 26
-                            radius: 4
-                            color: "#281b0f"
-                            border.color: "#d29922"
-                            border.width: 1
+                            spacing: 6
 
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 6
+                            // Badge 1: Untagged PRs
+                            Rectangle {
+                                visible: !!(model.prs_after_tag_count > 0)
+                                height: 26
+                                radius: 4
+                                color: "#281b0f"
+                                border.color: "#d29922"
+                                border.width: 1
+                                implicitWidth: prRow.implicitWidth + 16
 
-                                Text {
-                                    text: "⚠️"
-                                    font.pixelSize: 11
+                                Row {
+                                    id: prRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: "🏷️"
+                                        font.pixelSize: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: model.prs_after_tag_count + " untagged PR" + (model.prs_after_tag_count > 1 ? "s" : "")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#f0883e"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
                                 }
+                            }
 
-                                Text {
-                                    text: model.pending_status_text || "Pending changes"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: "#f0883e"
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
+                            // Badge 2: Unmerged Branches
+                            Rectangle {
+                                visible: !!(model.unmerged_branches_count > 0)
+                                height: 26
+                                radius: 4
+                                color: "#1e172a"
+                                border.color: "#8957e5"
+                                border.width: 1
+                                implicitWidth: brRow.implicitWidth + 16
+
+                                Row {
+                                    id: brRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: "🌿"
+                                        font.pixelSize: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: model.unmerged_branches_count + " branch" + (model.unmerged_branches_count > 1 ? "es" : "") + " ahead"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#bc8cff"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
                                 }
+                            }
+
+                            // Badge 3: Active PRs (if any)
+                            Rectangle {
+                                visible: !!(model.active_prs_count > 0)
+                                height: 26
+                                radius: 4
+                                color: "#142233"
+                                border.color: "#388bfd"
+                                border.width: 1
+                                implicitWidth: actRow.implicitWidth + 16
+
+                                Row {
+                                    id: actRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text {
+                                        text: "🔀"
+                                        font.pixelSize: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: model.active_prs_count + " active PR" + (model.active_prs_count > 1 ? "s" : "")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#79c0ff"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
                             }
                         }
 
@@ -741,7 +860,11 @@ Item {
             var matchesCategory = false;
             if (cat === "ALL") {
                 matchesCategory = true;
-            } else if (cat === "⚠️ PENDING") {
+            } else if (cat === "🏷️ PENDING PRs" || cat === "PENDING_PRS") {
+                matchesCategory = !!item.has_untagged_prs || (item.prs_after_tag_count > 0);
+            } else if (cat === "🌿 UNMERGED BRANCHES" || cat === "UNMERGED_BRANCHES") {
+                matchesCategory = !!item.has_unmerged_branches || (item.unmerged_branches_count > 0);
+            } else if (cat === "⚠️ PENDING" || cat === "PENDING") {
                 matchesCategory = !!item.has_pending_changes;
             } else {
                 matchesCategory = (item.category === cat);

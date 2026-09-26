@@ -14,6 +14,7 @@ Item {
     property string shiftSourceFilter: "all" // "all", "user_gui", "tfs_sync"
     property string shiftReviewFilter: "all" // "all", "pending", "accepted"
     property bool shiftSprintOnlyFilter: false
+    property string tdRepoFilter: "all" // "all", "prs", "branches"
 
     // Tagging Modal & Release Proposal State
     property bool tagModalOpen: false
@@ -1062,10 +1063,18 @@ Item {
 
                     StatCard {
                         Layout.fillWidth: true
-                        title: "Repos with Changes"
-                        value: ((backend && backend.tagDayData && backend.tagDayData.repos_with_changes_count) ? backend.tagDayData.repos_with_changes_count : 0).toString()
-                        subtitle: "Pushes or PRs after tag"
-                        accentColor: "#d29922"
+                        title: "Pending Release Repos"
+                        value: ((backend && backend.tagDayData && backend.tagDayData.repos_with_prs_count !== undefined) ? backend.tagDayData.repos_with_prs_count : 0).toString()
+                        subtitle: "Untagged merged PRs"
+                        accentColor: "#f0883e"
+                    }
+
+                    StatCard {
+                        Layout.fillWidth: true
+                        title: "Unmerged Branch Repos"
+                        value: ((backend && backend.tagDayData && backend.tagDayData.repos_with_branches_count !== undefined) ? backend.tagDayData.repos_with_branches_count : 0).toString()
+                        subtitle: "Branches ahead of baseline"
+                        accentColor: "#bc8cff"
                     }
 
                     StatCard {
@@ -1115,13 +1124,105 @@ Item {
                                 }
                             }
 
+                            // Filter Pills: All, Pending PRs, Unmerged Branches
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Button {
+                                    text: "All (" + ((backend && backend.tagDayData && backend.tagDayData.repos_summary) ? backend.tagDayData.repos_summary.length : 0) + ")"
+                                    checkable: true
+                                    checked: root.tdRepoFilter === "all"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    Layout.fillWidth: true
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 24
+                                        radius: 4
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#0d1117")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                    }
+                                    onClicked: root.tdRepoFilter = "all"
+                                }
+
+                                Button {
+                                    readonly property int count: {
+                                        if (!backend || !backend.tagDayData || !backend.tagDayData.repos_summary) return 0;
+                                        return backend.tagDayData.repos_summary.filter(function(r) { return (r.prs_count || 0) > 0; }).length;
+                                    }
+                                    text: "🏷️ PRs (" + count + ")"
+                                    checkable: true
+                                    checked: root.tdRepoFilter === "prs"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    Layout.fillWidth: true
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#f0883e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 24
+                                        radius: 4
+                                        color: parent.checked ? "#d29922" : (parent.hovered ? "#21262d" : "#0d1117")
+                                        border.color: parent.checked ? "#e3b341" : "#6e4b10"
+                                    }
+                                    onClicked: root.tdRepoFilter = "prs"
+                                }
+
+                                Button {
+                                    readonly property int count: {
+                                        if (!backend || !backend.tagDayData || !backend.tagDayData.repos_summary) return 0;
+                                        return backend.tagDayData.repos_summary.filter(function(r) { return (r.branches_count || 0) > 0; }).length;
+                                    }
+                                    text: "🌿 Branches (" + count + ")"
+                                    checkable: true
+                                    checked: root.tdRepoFilter === "branches"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    Layout.fillWidth: true
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#bc8cff"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 24
+                                        radius: 4
+                                        color: parent.checked ? "#8957e5" : (parent.hovered ? "#21262d" : "#0d1117")
+                                        border.color: parent.checked ? "#a371f7" : "#5a3e85"
+                                    }
+                                    onClicked: root.tdRepoFilter = "branches"
+                                }
+                            }
+
                             ListView {
                                 id: tdReposList
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
                                 spacing: 6
-                                model: (backend && backend.tagDayData && backend.tagDayData.repos_summary) ? backend.tagDayData.repos_summary : []
+                                model: {
+                                    if (!backend || !backend.tagDayData || !backend.tagDayData.repos_summary) return [];
+                                    var list = backend.tagDayData.repos_summary;
+                                    if (root.tdRepoFilter === "prs") {
+                                        return list.filter(function(r) { return (r.prs_count || 0) > 0; });
+                                    } else if (root.tdRepoFilter === "branches") {
+                                        return list.filter(function(r) { return (r.branches_count || 0) > 0; });
+                                    }
+                                    return list;
+                                }
 
                                 ScrollBar.vertical: ScrollBar {
                                     active: true
@@ -1160,13 +1261,24 @@ Item {
                                             Layout.fillWidth: true
                                             spacing: 3
 
-                                            Text {
-                                                text: modelData.name
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 12
-                                                font.weight: repoCard.isSelected ? Font.Bold : Font.DemiBold
-                                                color: repoCard.isSelected ? "#58a6ff" : "#f0f6fc"
+                                            RowLayout {
                                                 Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Text {
+                                                    text: modelData.name
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 12
+                                                    font.weight: repoCard.isSelected ? Font.Bold : Font.DemiBold
+                                                    color: repoCard.isSelected ? "#58a6ff" : "#f0f6fc"
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                StatusBadge {
+                                                    text: modelData.category || "OTHERS"
+                                                    badgeColor: backend ? backend.get_category_color(modelData.category || "OTHERS") : "#30363d"
+                                                }
                                             }
 
                                             Row {
@@ -1191,25 +1303,22 @@ Item {
                                                     color: "#58a6ff"
                                                     visible: !!modelData.proposed_tag
                                                 }
-                                                Text {
-                                                    text: "•"
-                                                    font.pixelSize: 10
-                                                    color: "#484f58"
-                                                }
-                                                Text {
-                                                    text: modelData.category || "OTHERS"
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 10
-                                                    color: "#8b949e"
-                                                }
                                             }
                                         }
 
                                         RowLayout {
                                             spacing: 4
+
                                             StatusBadge {
-                                                text: (modelData.prs_count + modelData.branches_count) + " updates"
-                                                badgeColor: repoCard.isSelected ? "#388bfd" : "#d29922"
+                                                visible: (modelData.prs_count || 0) > 0
+                                                text: modelData.prs_count + " PR" + (modelData.prs_count > 1 ? "s" : "")
+                                                badgeColor: "#d29922"
+                                            }
+
+                                            StatusBadge {
+                                                visible: (modelData.branches_count || 0) > 0
+                                                text: modelData.branches_count + " branch" + (modelData.branches_count > 1 ? "es" : "")
+                                                badgeColor: "#8957e5"
                                             }
 
                                             Button {
@@ -1466,21 +1575,27 @@ Item {
 
                             // Unified Release & Semantic Tag Card
                             Rectangle {
+                                id: unifiedTagCard
                                 Layout.fillWidth: true
-                                height: (root.selectedRepo && root.selectedRepo.latest_tag_details && root.selectedRepo.latest_tag_details.comment) ? 76 : 64
+                                implicitHeight: unifiedTagCardRow.implicitHeight + 24
+                                height: implicitHeight
                                 color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#0d1f33" : "#0d1117"
                                 radius: 6
                                 border.color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#1f6feb" : "#30363d"
                                 border.width: 1
 
                                 RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 10
+                                    id: unifiedTagCardRow
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 12
                                     spacing: 12
 
                                     Rectangle {
-                                        width: 36
-                                        height: 36
+                                        Layout.preferredWidth: 36
+                                        Layout.preferredHeight: 36
+                                        Layout.alignment: Qt.AlignTop
                                         radius: 6
                                         color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#162a45" : "#161b22"
                                         border.color: (root.selectedRepo && root.selectedRepo.proposed_tag) ? "#58a6ff" : ((root.selectedRepo && root.selectedRepo.latest_tag !== "-") ? "#238636" : "#30363d")
@@ -1493,8 +1608,9 @@ Item {
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: 3
+                                        spacing: 6
 
+                                        // Row 1: Tag Indicators & Actions
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: 8
@@ -1599,6 +1715,7 @@ Item {
                                             }
                                         }
 
+                                        // Row 2: Baseline & Commit Information
                                         Text {
                                             text: {
                                                 var details = "";
@@ -1617,19 +1734,45 @@ Item {
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
                                             color: "#8b949e"
-                                            elide: Text.ElideRight
+                                            wrapMode: Text.WordWrap
                                             Layout.fillWidth: true
                                         }
 
-                                        Text {
+                                        // Row 3: Tag Description / Comment
+                                        Rectangle {
                                             visible: !!(root.selectedRepo && root.selectedRepo.latest_tag_details && root.selectedRepo.latest_tag_details.comment)
-                                            text: (root.selectedRepo && root.selectedRepo.latest_tag_details) ? ("\"" + root.selectedRepo.latest_tag_details.comment + "\"") : ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            font.italic: true
-                                            color: "#6e7681"
-                                            elide: Text.ElideRight
                                             Layout.fillWidth: true
+                                            implicitHeight: commentTxt.implicitHeight + 12
+                                            radius: 4
+                                            color: "#161b22"
+                                            border.color: "#30363d"
+                                            border.width: 1
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                anchors.topMargin: 4
+                                                anchors.bottomMargin: 4
+                                                spacing: 6
+
+                                                Text {
+                                                    text: "💬"
+                                                    font.pixelSize: 11
+                                                    Layout.alignment: Qt.AlignTop
+                                                }
+
+                                                Text {
+                                                    id: commentTxt
+                                                    text: (root.selectedRepo && root.selectedRepo.latest_tag_details) ? root.selectedRepo.latest_tag_details.comment : ""
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    font.italic: true
+                                                    color: "#c9d1d9"
+                                                    wrapMode: Text.WordWrap
+                                                    Layout.fillWidth: true
+                                                }
+                                            }
                                         }
                                     }
                                 }
