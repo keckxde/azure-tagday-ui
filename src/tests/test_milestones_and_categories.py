@@ -774,6 +774,47 @@ class TestMilestonesAndCategories(unittest.TestCase):
         future_m = next(m for m in milestones if m["name"] == "Future Milestone")
         self.assertFalse(future_m["is_historic"])
 
+    def test_coming_milestones_starting_current_week(self):
+        from datetime import date, timedelta
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        today_obj = date.today()
+        cy, cw, _ = today_obj.isocalendar()
+        curr_monday = date.fromisocalendar(cy, cw, 1)
+        prev_monday = curr_monday - timedelta(weeks=2)
+        next_monday = curr_monday + timedelta(weeks=1)
+
+        # 1. Past milestone (2 weeks ago)
+        self.cache.save_milestone(
+            name="Old Past Milestone",
+            target_date=prev_monday.strftime("%Y-%m-%d"),
+            category_id="ddqs"
+        )
+        # 2. Current week milestone
+        self.cache.save_milestone(
+            name="Current Week Gate",
+            target_date=curr_monday.strftime("%Y-%m-%d"),
+            category_id="release"
+        )
+        # 3. Next week milestone
+        self.cache.save_milestone(
+            name="Next Week Gate",
+            target_date=next_monday.strftime("%Y-%m-%d"),
+            category_id="qiav"
+        )
+
+        coming = backend.get_coming_milestones()
+        coming_names = [m["name"] for m in coming]
+
+        self.assertNotIn("Old Past Milestone", coming_names)
+        self.assertIn("Current Week Gate", coming_names)
+        self.assertIn("Next Week Gate", coming_names)
+
+        cw_item = next(m for m in coming if m["name"] == "Current Week Gate")
+        self.assertTrue(cw_item["is_current_week"])
+        self.assertEqual(cw_item["relative_label"], "This week")
+
 
 if __name__ == "__main__":
     unittest.main()

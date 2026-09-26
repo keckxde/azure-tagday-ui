@@ -8,11 +8,12 @@ Item {
     property string iconText: ""
     property bool active: false
     property bool isCollapsed: false
+    property string badgeText: ""
     signal clicked()
 
     Layout.fillWidth: true
-    Layout.preferredHeight: 42
-    implicitHeight: 42
+    Layout.preferredHeight: 34
+    implicitHeight: 34
     implicitWidth: root.isCollapsed ? 48 : 200
 
     Rectangle {
@@ -28,7 +29,7 @@ Item {
         // Active indicator on left
         Rectangle {
             width: 3
-            height: 20
+            height: 18
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             radius: 1.5
@@ -37,27 +38,48 @@ Item {
         }
 
         // Expanded view: Icon + Label Row
-        Row {
+        RowLayout {
             visible: !root.isCollapsed
-            anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 8
+            spacing: 10
 
             Text {
                 text: root.iconText
-                font.pixelSize: 16
-                anchors.verticalCenter: parent.verticalCenter
+                font.pixelSize: 14
+                Layout.alignment: Qt.AlignVCenter
                 color: root.active ? "#58a6ff" : (mouseArea.containsMouse ? "#f0f6fc" : "#8b949e")
             }
 
             Text {
                 text: root.label
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
                 font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 13
+                font.pixelSize: 12
                 font.weight: root.active ? Font.DemiBold : Font.Normal
-                color: root.active ? "#f0f6fc" : (mouseArea.containsMouse ? "#f0f6fc" : "#8b949e")
+                color: root.active ? "#f0f6fc" : (mouseArea.containsMouse ? "#f0f6fc" : "#c9d1d9")
+                elide: Text.ElideRight
+            }
+
+            Rectangle {
+                visible: root.badgeText !== ""
+                implicitWidth: badgeLabel.implicitWidth + 8
+                implicitHeight: 16
+                radius: 8
+                color: root.active ? "#388bfd" : "#30363d"
+                Layout.alignment: Qt.AlignVCenter
+
+                Text {
+                    id: badgeLabel
+                    anchors.centerIn: parent
+                    text: root.badgeText
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 9
+                    font.weight: Font.Bold
+                    color: "#ffffff"
+                }
             }
         }
 
@@ -66,13 +88,13 @@ Item {
             visible: root.isCollapsed
             anchors.centerIn: parent
             text: root.iconText
-            font.pixelSize: 18
+            font.pixelSize: 16
             color: root.active ? "#58a6ff" : (mouseArea.containsMouse ? "#f0f6fc" : "#8b949e")
         }
     }
 
     ToolTip.visible: root.isCollapsed && mouseArea.containsMouse
-    ToolTip.text: root.label
+    ToolTip.text: root.label + (root.badgeText !== "" ? " (" + root.badgeText + ")" : "")
     ToolTip.delay: 150
 
     MouseArea {

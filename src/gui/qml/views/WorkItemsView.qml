@@ -99,7 +99,7 @@ Item {
     function refreshStatesList() {
         if (!backend) return
         var states = backend.workItemStates || []
-        statesList = ["ALL"].concat(states).concat(["DELETED"])
+        statesList = ["ALL"].concat(states).concat(["to be investigated", "ignored", "DELETED"])
     }
 
     function refreshAssigneesList() {
@@ -222,13 +222,16 @@ Item {
 
     function stateColor(s, deleted) {
         if (deleted) return "#f85149"
-        switch ((s || "").toLowerCase()) {
+        var sLower = (s || "").toLowerCase()
+        switch (sLower) {
             case "closed": case "done":       return "#3fb950"
             case "resolved":                  return "#2ea043"
             case "active": case "in progress": return "#d29922"
             case "in planning":               return "#a371f7"
             case "proposed":                  return "#bf8700"
             case "new": case "open": case "to do": return "#388bfd"
+            case "to be investigated": case "to_be_investigated": return "#f0883e"
+            case "ignored":                   return "#8b949e"
             case "removed": case "cut":       return "#f85149"
             default:                          return "#8b949e"
         }
@@ -565,7 +568,13 @@ Item {
                 Repeater {
                     model: root.statesList
                     Button {
-                        text: modelData === "ALL" ? "All States" : (modelData === "DELETED" ? "Deleted" : modelData)
+                        text: {
+                            if (modelData === "ALL") return "All States"
+                            if (modelData === "DELETED") return "Deleted"
+                            if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "🔍 To Be Investigated"
+                            if (modelData === "ignored" || modelData === "IGNORED") return "🚫 Ignored"
+                            return modelData
+                        }
                         checkable: true
                         checked: root.filterState === modelData
                         font.pixelSize: 11
@@ -584,6 +593,8 @@ Item {
                             property color stateC: {
                                 if (modelData === "ALL") return "#1f6feb"
                                 if (modelData === "DELETED") return "#da3633"
+                                if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "#f0883e"
+                                if (modelData === "ignored" || modelData === "IGNORED") return "#6e7681"
                                 return root.stateColor(modelData, false)
                             }
                             color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
@@ -1511,7 +1522,13 @@ Item {
                     text: {
                         var parts = [];
                         if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
-                        if (root.filterState !== "ALL") parts.push("State: " + root.filterState);
+                        if (root.filterState !== "ALL") {
+                            var stDesc = root.filterState;
+                            if (stDesc === "to be investigated") stDesc = "To Be Investigated";
+                            else if (stDesc === "ignored") stDesc = "Ignored";
+                            else if (stDesc === "DELETED") stDesc = "Deleted";
+                            parts.push("State: " + stDesc);
+                        }
                         if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
                         if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
                         if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
@@ -2580,12 +2597,17 @@ Item {
             ))
 
             var matchesState = true
+            var stLower = (st || "").toLowerCase()
             if (st === "ALL") {
                 matchesState = !item.deleted
-            } else if (st === "DELETED") {
+            } else if (st === "DELETED" || stLower === "deleted") {
                 matchesState = item.deleted
+            } else if (st === "to be investigated" || st === "TO_BE_INVESTIGATED" || stLower === "to be investigated" || stLower === "to_be_investigated") {
+                matchesState = !item.deleted && (item.is_to_be_investigated || (item.category || "").toLowerCase() === "to be investigated")
+            } else if (st === "ignored" || st === "IGNORED" || stLower === "ignored") {
+                matchesState = !item.deleted && (item.is_ignored || (item.category || "").toLowerCase() === "ignored")
             } else {
-                matchesState = !item.deleted && ((item.state || "").toLowerCase() === st.toLowerCase())
+                matchesState = !item.deleted && ((item.state || "").toLowerCase() === stLower)
             }
 
             var matchesType = (ft === "ALL") || (item.type === ft)

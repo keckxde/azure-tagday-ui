@@ -13,6 +13,15 @@ class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
+
+
+class UserSettingsImportResult(dict):
+    """Dictionary holding import summary that also supports 2-element tuple unpacking (success, message)."""
+    def __iter__(self):
+        yield self.get("success", False)
+        yield self.get("message", "")
+
+
 def _calculate_sprint_delta_weeks(old_iter, new_iter):
     """
     Calculates the difference in weeks between two sprint/iteration path strings.
@@ -626,7 +635,15 @@ class AzureDevOpsCache:
         try:
             with self._connection() as conn:
                 row = conn.execute("SELECT value FROM project_config WHERE key = ?", (key,)).fetchone()
-                return row["value"] if row and row["value"] is not None else default
+                if row and row["value"] is not None:
+                    val = row["value"]
+                    if isinstance(default, (list, dict)) and isinstance(val, str):
+                        try:
+                            return json.loads(val)
+                        except Exception:
+                            return default
+                    return val
+                return default
         except Exception:
             return default
 
@@ -635,7 +652,10 @@ class AzureDevOpsCache:
         Sets or updates a project configuration value.
         """
         now_str = datetime.now().isoformat()
-        val_str = str(value) if value is not None else ""
+        if isinstance(value, (list, dict)):
+            val_str = json.dumps(value)
+        else:
+            val_str = str(value) if value is not None else ""
         with self._connection() as conn:
             conn.execute("""
             INSERT INTO project_config (key, value, updated_at)
@@ -665,7 +685,10 @@ class AzureDevOpsCache:
         now_str = datetime.now().isoformat()
         with self._connection() as conn:
             for k, v in config_dict.items():
-                val_str = str(v) if v is not None else ""
+                if isinstance(v, (list, dict)):
+                    val_str = json.dumps(v)
+                else:
+                    val_str = str(v) if v is not None else ""
                 conn.execute("""
                 INSERT INTO project_config (key, value, updated_at)
                 VALUES (?, ?, ?)
@@ -687,7 +710,7 @@ class AzureDevOpsCache:
         except Exception:
             return []
 
-    def save_milestone_category(self, cat_id, name, color, bg_color, icon, sort_order=0):
+    def save_milestone_category(self, cat_id="", name="", color="#79c0ff", bg_color="#16243b", icon="🚩", sort_order=0):
         """Creates or updates a milestone category."""
         import re
         clean_name = (name or "").strip()
@@ -1309,6 +1332,398 @@ class AzureDevOpsCache:
                     VALUES (?, ?)
                     """, (rname_clean, cname_clean))
         return True
+
+    def export_user_settings(self, include_sections=None):
+        """
+        Exports specific user settings into a structured dictionary.
+
+        Sections supported:
+          - 'repo_categories': categories, prefix rules, overrides, default category
+          - 'git_branch_filters': branch_filter_patterns, repo_category_filter_patterns
+          - 'milestones': milestone_categories, milestones
+          - 'work_item_categories': work_item_tag_categories, custom_deadline_field, reports_dir
+          - 'team_assignment_and_sprint_url': tfs_team_name, sprint_url_template, default_tfs_team
+
+        Args:
+            include_sections (list of str, optional): Sections to export. If None or empty, all sections are exported.
+
+        Returns:
+            dict: Structured export dictionary.
+        """
+        section_alias_map = {
+            "team_and_sprint_url": "team_assignment_and_sprint_url",
+            "team_assignment_and_sprint_url": "team_assignment_and_sprint_url",
+            "git_branch_filters": "git_branch_filters",
+            "branch_filters": "git_branch_filters",
+            "repo_categories": "repo_categories",
+            "milestones": "milestones",
+            "work_item_categories": "work_item_categories",
+        }
+
+        all_sections = [
+            "repo_categories",
+            "git_branch_filters",
+            "milestones",
+            "work_item_categories",
+            "team_assignment_and_sprint_url",
+        ]
+
+        if include_sections:
+            target_sections = []
+            for s in include_sections:
+                mapped = section_alias_map.get(s, s)
+                if mapped in all_sections and mapped not in target_sections:
+                    target_sections.append(mapped)
+        else:
+            target_sections = list(all_sections)
+
+        data = {
+            "version": 1,
+            "exported_at": datetime.now().isoformat(),
+            "settings": {}
+        }
+
+        # 1. repo_categories
+        if "repo_categories" in target_sections:
+            repo_cfg = self.get_full_repo_category_config()
+            cats_list = self.get_repo_categories()
+            rules_list = self.get_repo_prefix_rules()
+            overrides_dict = self.get_repo_category_overrides()
+            repo_overrides_list = [{"repo_name": k, "category": v} for k, v in overrides_dict.items()] if isinstance(overrides_dict, dict) else overrides_dict
+            data["settings"]["repo_categories"] = {
+                "default_category": repo_cfg.get("default_category", "OTHERS"),
+                "categories": cats_list,
+                "prefix_rules": rules_list,
+                "overrides": overrides_dict,
+                "repo_overrides": repo_overrides_list,
+            }
+
+        # 2. git_branch_filters
+        if "git_branch_filters" in target_sections:
+            bfp_raw = self.get_config("branch_filter_patterns")
+            rcp_raw = self.get_config("repo_category_filter_patterns")
+            bfp = []
+            rcp = []
+            if bfp_raw:
+                try:
+                    bfp = json.loads(bfp_raw) if isinstance(bfp_raw, str) else bfp_raw
+                except Exception:
+                    pass
+            if rcp_raw:
+                try:
+                    rcp = json.loads(rcp_raw) if isinstance(rcp_raw, str) else rcp_raw
+                except Exception:
+                    pass
+            data["settings"]["git_branch_filters"] = {
+                "branch_filter_patterns": bfp if isinstance(bfp, list) else [],
+                "repo_category_filter_patterns": rcp if isinstance(rcp, list) else []
+            }
+
+        # 3. milestones
+        if "milestones" in target_sections:
+            m_cats = self.get_milestone_categories()
+            m_list = self.get_milestones()
+            cleaned_milestones = []
+            for m in m_list:
+                cleaned_milestones.append({
+                    "name": m.get("name", ""),
+                    "target_date": m.get("target_date", ""),
+                    "end_date": m.get("end_date", ""),
+                    "team": m.get("team", ""),
+                    "category_id": m.get("category_id", "general"),
+                    "description": m.get("description", "")
+                })
+            data["settings"]["milestones"] = {
+                "categories": m_cats,
+                "milestones": cleaned_milestones
+            }
+
+        # 4. work_item_categories
+        if "work_item_categories" in target_sections:
+            tag_cats_raw = self.get_config("work_item_tag_categories")
+            tag_cats = []
+            if tag_cats_raw:
+                try:
+                    tag_cats = json.loads(tag_cats_raw) if isinstance(tag_cats_raw, str) else tag_cats_raw
+                except Exception:
+                    tag_cats = tag_cats_raw
+            data["settings"]["work_item_categories"] = {
+                "tag_categories": tag_cats,
+                "work_item_tag_categories": tag_cats,
+                "custom_deadline_field": self.get_config("custom_deadline_field") or self.get_config("WORK_ITEM_DEADLINE_FIELD", ""),
+                "reports_dir": self.get_config("REPORTS_DIR") or self.get_config("reports_dir", "")
+            }
+
+        # 5. team_assignment_and_sprint_url (and alias team_and_sprint_url)
+        if "team_assignment_and_sprint_url" in target_sections:
+            team_cfg = {
+                "tfs_team_name": self.get_config("tfs_team_name") or self.get_config("AZURE_TEAM", ""),
+                "sprint_url_template": self.get_config("sprint_url_template") or self.get_config("SPRINT_URL_TEMPLATE", ""),
+                "default_tfs_team": self.get_config("default_tfs_team", "")
+            }
+            data["settings"]["team_assignment_and_sprint_url"] = team_cfg
+            data["settings"]["team_and_sprint_url"] = team_cfg
+
+        return data
+
+    def import_user_settings(self, data, clear_existing=False, include_sections=None):
+        """
+        Imports user settings from a dictionary structure into SQLite.
+
+        Args:
+            data (dict): Dictionary containing the settings.
+            clear_existing (bool): If True, purges existing entries in target tables before importing.
+            include_sections (list of str, optional): If specified, only import listed sections.
+
+        Returns:
+            dict: Summary of imported settings.
+        """
+        if not data or not isinstance(data, dict):
+            return {"success": False, "error": "Invalid data format (expected dict)"}
+
+        settings = data.get("settings", data)
+        summary = {
+            "success": True,
+            "imported_sections": [],
+            "repo_categories": 0,
+            "prefix_rules": 0,
+            "category_overrides": 0,
+            "branch_filters": 0,
+            "repo_category_filters": 0,
+            "milestone_categories": 0,
+            "milestones": 0,
+            "tag_categories": 0,
+            "config_keys_updated": 0,
+        }
+
+        section_alias_map = {
+            "team_and_sprint_url": "team_assignment_and_sprint_url",
+            "team_assignment_and_sprint_url": "team_assignment_and_sprint_url",
+            "git_branch_filters": "git_branch_filters",
+            "branch_filters": "git_branch_filters",
+            "repo_categories": "repo_categories",
+            "milestones": "milestones",
+            "work_item_categories": "work_item_categories",
+        }
+
+        all_sections = [
+            "repo_categories",
+            "git_branch_filters",
+            "milestones",
+            "work_item_categories",
+            "team_assignment_and_sprint_url",
+        ]
+
+        if include_sections:
+            target_sections = []
+            for s in include_sections:
+                mapped = section_alias_map.get(s, s)
+                if mapped in all_sections and mapped not in target_sections:
+                    target_sections.append(mapped)
+        else:
+            target_sections = list(all_sections)
+
+        # 1. repo_categories
+        if "repo_categories" in target_sections and "repo_categories" in settings:
+            rc_data = settings["repo_categories"]
+            if isinstance(rc_data, dict):
+                if "categories" in rc_data or "prefix_rules" in rc_data or "overrides" in rc_data or "repo_overrides" in rc_data:
+                    if clear_existing:
+                        with self._connection() as conn:
+                            conn.execute("DELETE FROM repo_categories")
+                            conn.execute("DELETE FROM repo_prefix_rules")
+                            conn.execute("DELETE FROM repo_category_overrides")
+
+                    # Categories
+                    cats = rc_data.get("categories", [])
+                    if isinstance(cats, list):
+                        for c in cats:
+                            if isinstance(c, dict) and c.get("name"):
+                                self.save_repo_category(
+                                    c["name"],
+                                    c.get("color", "#6e7681"),
+                                    bg_color=c.get("bg_color", ""),
+                                    sort_order=c.get("sort_order", 0),
+                                    is_default=bool(c.get("is_default", False))
+                                )
+                                summary["repo_categories"] += 1
+
+                    # Prefix Rules
+                    rules = rc_data.get("prefix_rules", [])
+                    if isinstance(rules, list):
+                        for r in rules:
+                            if isinstance(r, dict) and r.get("prefix") and r.get("category"):
+                                self.save_repo_prefix_rule(r["prefix"], r["category"])
+                                summary["prefix_rules"] += 1
+                    elif isinstance(rules, dict):
+                        for p, c in rules.items():
+                            self.save_repo_prefix_rule(p, c)
+                            summary["prefix_rules"] += 1
+
+                    # Overrides
+                    overrides = rc_data.get("overrides", rc_data.get("repo_overrides", rc_data.get("repositories", {})))
+                    if isinstance(overrides, dict):
+                        for rname, cat in overrides.items():
+                            self.save_repo_category_override(rname, cat)
+                            summary["category_overrides"] += 1
+                    elif isinstance(overrides, list):
+                        for ov in overrides:
+                            if isinstance(ov, dict) and ov.get("repo_name") and ov.get("category"):
+                                self.save_repo_category_override(ov["repo_name"], ov["category"])
+                                summary["category_overrides"] += 1
+                else:
+                    # Legacy repo_category_config dict
+                    self.save_full_repo_category_config(rc_data, merge=not clear_existing)
+                    summary["repo_categories"] += len(rc_data.get("category_colors", {}))
+                    summary["prefix_rules"] += len(rc_data.get("prefix_rules", {}))
+                    summary["category_overrides"] += len(rc_data.get("repositories", {}))
+
+                summary["imported_sections"].append("repo_categories")
+
+        # 2. git_branch_filters
+        if "git_branch_filters" in target_sections and "git_branch_filters" in settings:
+            gbf_data = settings["git_branch_filters"]
+            if isinstance(gbf_data, dict):
+                bfp = gbf_data.get("branch_filter_patterns", [])
+                rcp = gbf_data.get("repo_category_filter_patterns", [])
+                if isinstance(bfp, list):
+                    if not clear_existing:
+                        existing_bfp = []
+                        try:
+                            cur = self.get_config("branch_filter_patterns")
+                            if cur:
+                                existing_bfp = json.loads(cur) if isinstance(cur, str) else cur
+                        except Exception:
+                            pass
+                        merged_bfp = list(dict.fromkeys(existing_bfp + bfp))
+                        self.set_config("branch_filter_patterns", json.dumps(merged_bfp))
+                        summary["branch_filters"] = len(merged_bfp)
+                    else:
+                        self.set_config("branch_filter_patterns", json.dumps(bfp))
+                        summary["branch_filters"] = len(bfp)
+                if isinstance(rcp, list):
+                    if not clear_existing:
+                        existing_rcp = []
+                        try:
+                            cur = self.get_config("repo_category_filter_patterns")
+                            if cur:
+                                existing_rcp = json.loads(cur) if isinstance(cur, str) else cur
+                        except Exception:
+                            pass
+                        merged_rcp = list(dict.fromkeys(existing_rcp + rcp))
+                        self.set_config("repo_category_filter_patterns", json.dumps(merged_rcp))
+                        summary["repo_category_filters"] = len(merged_rcp)
+                    else:
+                        self.set_config("repo_category_filter_patterns", json.dumps(rcp))
+                        summary["repo_category_filters"] = len(rcp)
+                summary["imported_sections"].append("git_branch_filters")
+
+        # 3. milestones
+        if "milestones" in target_sections and "milestones" in settings:
+            m_data = settings["milestones"]
+            if isinstance(m_data, dict):
+                # Categories
+                cats = m_data.get("categories", [])
+                if isinstance(cats, list):
+                    for c in cats:
+                        if isinstance(c, dict) and c.get("name"):
+                            self.save_milestone_category(
+                                c.get("id", ""),
+                                c["name"],
+                                c.get("color", "#79c0ff"),
+                                c.get("bg_color", "#16243b"),
+                                c.get("icon", "🚩"),
+                                sort_order=c.get("sort_order", 0)
+                            )
+                            summary["milestone_categories"] += 1
+                # Milestones
+                ms_list = m_data.get("milestones", [])
+                if isinstance(ms_list, list):
+                    m_res = self.bulk_import_milestones(ms_list, clear_existing=clear_existing)
+                    summary["milestones"] = m_res.get("total", 0)
+                summary["imported_sections"].append("milestones")
+            elif isinstance(m_data, list):
+                m_res = self.bulk_import_milestones(m_data, clear_existing=clear_existing)
+                summary["milestones"] = m_res.get("total", 0)
+                summary["imported_sections"].append("milestones")
+
+        # 4. work_item_categories
+        if "work_item_categories" in target_sections and "work_item_categories" in settings:
+            wic_data = settings["work_item_categories"]
+            if isinstance(wic_data, dict):
+                tag_cats = wic_data.get("tag_categories", wic_data.get("work_item_tag_categories", []))
+                if isinstance(tag_cats, (list, dict)):
+                    if not clear_existing:
+                        existing_tc = []
+                        try:
+                            cur = self.get_config("work_item_tag_categories")
+                            if cur:
+                                existing_tc = json.loads(cur) if isinstance(cur, str) else cur
+                        except Exception:
+                            pass
+                        if isinstance(tag_cats, dict) and isinstance(existing_tc, dict):
+                            merged = dict(existing_tc)
+                            merged.update(tag_cats)
+                            self.set_config("work_item_tag_categories", json.dumps(merged) if not isinstance(merged, str) else merged)
+                            summary["tag_categories"] = len(merged)
+                        elif isinstance(tag_cats, list):
+                            existing_list = existing_tc if isinstance(existing_tc, list) else []
+                            pat_map = {r["pattern"]: r["category"] for r in existing_list if isinstance(r, dict) and "pattern" in r}
+                            for r in tag_cats:
+                                if isinstance(r, dict) and "pattern" in r:
+                                    pat_map[r["pattern"]] = r.get("category", "")
+                            merged_tc = [{"pattern": k, "category": v} for k, v in pat_map.items()] if pat_map else tag_cats
+                            self.set_config("work_item_tag_categories", json.dumps(merged_tc))
+                            summary["tag_categories"] = len(merged_tc)
+                        else:
+                            self.set_config("work_item_tag_categories", json.dumps(tag_cats) if not isinstance(tag_cats, str) else tag_cats)
+                            summary["tag_categories"] = len(tag_cats)
+                    else:
+                        self.set_config("work_item_tag_categories", json.dumps(tag_cats) if not isinstance(tag_cats, str) else tag_cats)
+                        summary["tag_categories"] = len(tag_cats)
+
+                cdf = wic_data.get("custom_deadline_field")
+                if cdf is not None:
+                    self.set_config("custom_deadline_field", str(cdf).strip())
+                    self.set_config("WORK_ITEM_DEADLINE_FIELD", str(cdf).strip())
+                    summary["config_keys_updated"] += 1
+
+                rdir = wic_data.get("reports_dir")
+                if rdir is not None:
+                    self.set_config("REPORTS_DIR", str(rdir).strip())
+                    self.set_config("reports_dir", str(rdir).strip())
+                    summary["config_keys_updated"] += 1
+
+                summary["imported_sections"].append("work_item_categories")
+
+        # 5. team_assignment_and_sprint_url
+        team_section_data = settings.get("team_assignment_and_sprint_url", settings.get("team_and_sprint_url"))
+        if "team_assignment_and_sprint_url" in target_sections and team_section_data:
+            tas_data = team_section_data
+            if isinstance(tas_data, dict):
+                team = tas_data.get("tfs_team_name")
+                if team is not None:
+                    self.set_config("tfs_team_name", str(team).strip())
+                    self.set_config("AZURE_TEAM", str(team).strip())
+                    summary["config_keys_updated"] += 1
+
+                surl = tas_data.get("sprint_url_template")
+                if surl is not None:
+                    self.set_config("sprint_url_template", str(surl).strip())
+                    self.set_config("SPRINT_URL_TEMPLATE", str(surl).strip())
+                    summary["config_keys_updated"] += 1
+
+                def_team = tas_data.get("default_tfs_team")
+                if def_team is not None:
+                    self.set_config("default_tfs_team", str(def_team).strip())
+                    summary["config_keys_updated"] += 1
+
+                summary["imported_sections"].append("team_assignment_and_sprint_url")
+
+        sec_list = summary.get("imported_sections", [])
+        sec_str = ", ".join(sec_list) if sec_list else "none"
+        summary["message"] = f"Successfully imported settings ({sec_str})."
+        return UserSettingsImportResult(summary)
 
     def get_last_push_id(self, repo_id):
         """

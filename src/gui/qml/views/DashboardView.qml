@@ -115,7 +115,7 @@ Item {
             }
 
             // ==========================================
-            // Main Stat Cards Grid (6 Interactive Cards)
+            // Main Stat Cards Grid (Interactive Cards)
             // ==========================================
             GridLayout {
                 Layout.fillWidth: true
@@ -123,118 +123,38 @@ Item {
                 rowSpacing: 18
                 columnSpacing: 18
 
-                // Card 1: Repositories
+                // Card 1: Repositories & Pull Requests (Integrated)
                 StatCard {
                     Layout.fillWidth: true
                     icon: "📁"
-                    title: "Repositories"
-                    value: ((backend && backend.stats && backend.stats.repos_count) ? backend.stats.repos_count : 0).toString()
-                    status: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? (backend.stats.pending_repos_count + " PENDING") : "NOTHING PENDING"
-                    subtitle: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? (backend.stats.pending_repos_count + " have pending changes • Click to explore") : "All repositories up to date • Click to explore"
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("ALL");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
-                        }
-                    }
-                }
-
-                // Card 2: Pending Releases (Highlight Attention)
-                StatCard {
-                    Layout.fillWidth: true
-                    icon: "⚠️"
-                    title: "Pending Releases"
-                    value: ((backend && backend.stats && backend.stats.untagged_prs_repos_count !== undefined) ? backend.stats.untagged_prs_repos_count : 0).toString()
-                    status: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? (backend.stats.untagged_prs_repos_count + " PENDING") : "NO RELEASES PENDING"
-                    subtitle: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? (backend.stats.untagged_prs_repos_count + " repositories have untagged merged PRs • Click to filter") : "No untagged merged PRs across all repos"
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("🏷️ PENDING PRs");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
-                        }
-                    }
-                }
-
-                // Card 3: Latest Stable Tag
-                StatCard {
-                    Layout.fillWidth: true
-                    icon: "🛡️"
-                    title: "Latest Stable Tag"
-                    value: ((backend && backend.stats && backend.stats.latest_stable_tag) ? backend.stats.latest_stable_tag : "-")
-                    valuePixelSize: 24
-                    status: "clean"
-                    badgeText: "NOTHING PENDING"
-                    subtitle: {
-                        if (backend && backend.stats && backend.stats.latest_stable_repo) {
-                            return backend.stats.latest_stable_repo + (backend.stats.latest_stable_date ? (" • " + backend.stats.latest_stable_date) : "") + " • Verified Stable";
-                        }
-                        return "No stable tags cached • Click to view";
-                    }
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("ALL");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
-                        }
-                    }
-                }
-
-                // Card 4: Latest Unstable Tag
-                StatCard {
-                    Layout.fillWidth: true
-                    icon: "⚡"
-                    title: "Latest Unstable Tag"
-                    value: ((backend && backend.stats && backend.stats.latest_unstable_tag) ? backend.stats.latest_unstable_tag : "-")
-                    valuePixelSize: 24
-                    status: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.pending_repos_count > 0) ? "PENDING CHANGES" : "NOTHING PENDING"
-                    subtitle: {
-                        if (backend && backend.stats && backend.stats.latest_unstable_repo) {
-                            return backend.stats.latest_unstable_repo + (backend.stats.latest_unstable_date ? (" • " + backend.stats.latest_unstable_date) : "") + " • Click to view";
-                        }
-                        return "No unstable tags cached • Click to view";
-                    }
-                    clickable: true
-                    onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("ALL");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
-                        }
-                    }
-                }
-
-                // Card 5: Pull Requests (Open / Closed / Abandoned Breakdown)
-                StatCard {
-                    Layout.fillWidth: true
-                    icon: "🔀"
-                    title: "Pull Requests"
-                    showPrBreakdown: true
+                    title: "Repositories & Pull Requests"
+                    showRepoPrCombined: true
+                    value: ((backend && backend.stats && backend.stats.repos_count) ? backend.stats.repos_count : 0) + " Repos"
                     openCount: (backend && backend.stats && backend.stats.prs_open_count !== undefined) ? backend.stats.prs_open_count : 0
                     closedCount: (backend && backend.stats && backend.stats.prs_completed_count !== undefined) ? backend.stats.prs_completed_count : 0
                     abandonedCount: (backend && backend.stats && backend.stats.prs_abandoned_count !== undefined) ? backend.stats.prs_abandoned_count : 0
-                    status: (backend && backend.stats && backend.stats.prs_open_count > 0) ? "pending" : "clean"
-                    badgeText: (backend && backend.stats && backend.stats.prs_open_count > 0) ? (backend.stats.prs_open_count + " PENDING") : "NOTHING PENDING"
-                    subtitle: {
-                        if (!backend || !backend.stats) return "Click to view pull requests";
-                        if (backend.stats.prs_open_count > 0) {
-                            return backend.stats.prs_open_count + " open PR" + (backend.stats.prs_open_count > 1 ? "s" : "") + " awaiting merge • Click to view";
+                    status: (backend && backend.stats && (backend.stats.pending_repos_count > 0 || backend.stats.prs_open_count > 0)) ? "pending" : "clean"
+                    badgeText: {
+                        if (backend && backend.stats && backend.stats.pending_repos_count > 0) {
+                            return backend.stats.pending_repos_count + " REPOS PENDING";
+                        } else if (backend && backend.stats && backend.stats.prs_open_count > 0) {
+                            return backend.stats.prs_open_count + " PRs OPEN";
                         }
-                        return "All " + backend.stats.prs_count + " pull requests completed • Click to view";
+                        return "ALL UP TO DATE";
+                    }
+                    subtitle: {
+                        if (!backend || !backend.stats) return "Loading repositories and pull requests...";
+                        var rCount = backend.stats.repos_count || 0;
+                        var oPrs = backend.stats.prs_open_count || 0;
+                        var totPrs = backend.stats.prs_count || 0;
+                        return rCount + " repositories · " + oPrs + " open PRs awaiting merge (" + totPrs + " total) • Click to explore";
                     }
                     clickable: true
                     onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToPullRequests) {
-                            window.navigateToPullRequests();
+                        if (typeof window !== "undefined" && window.navigateToRepos) {
+                            window.navigateToRepos("ALL");
                         } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 2;
+                            window.currentTabIndex = 1;
                         }
                     }
                     onOpenPillClicked: {
@@ -254,12 +174,113 @@ Item {
                     }
                 }
 
-                // Card 6: Active Work Items
+                // Card 2: Coming Milestones (Starting with current week)
                 StatCard {
+                    Layout.fillWidth: true
+                    icon: "🚩"
+                    title: "Coming Milestones"
+                    showMilestonesPreview: true
+                    value: (backend && backend.comingMilestones ? backend.comingMilestones.length : 0) + " Upcoming"
+                    milestonesList: backend ? backend.comingMilestones : []
+                    status: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? "clean" : "neutral"
+                    badgeText: (backend && backend.comingMilestones && backend.comingMilestones.length > 0) ? (backend.comingMilestones.length + " COMING") : "NO MILESTONES"
+                    subtitle: {
+                        if (backend && backend.comingMilestones && backend.comingMilestones.length > 0) {
+                            var nextM = backend.comingMilestones[0];
+                            var lbl = nextM.relative_label || nextM.target_date || "";
+                            return "Next: " + nextM.name + " (" + lbl + ")" + (nextM.category_name ? (" • " + nextM.category_name) : "") + " • Click to manage";
+                        }
+                        return "No milestones scheduled starting current week • Click to configure";
+                    }
+                    clickable: true
+                    onClicked: {
+                        if (typeof window !== "undefined" && window.openMilestonesManager) {
+                            window.openMilestonesManager();
+                        }
+                    }
+                }
+
+                // Card 3: Latest Stable Tag (with Pending Release info)
+                StatCard {
+                    Layout.fillWidth: true
+                    icon: "🛡️"
+                    title: "Latest Stable Tag"
+                    value: ((backend && backend.stats && backend.stats.latest_stable_tag) ? backend.stats.latest_stable_tag : "-")
+                    valuePixelSize: 24
+                    status: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? "pending" : "clean"
+                    badgeText: (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) ? (backend.stats.untagged_prs_repos_count + " RELEASES PENDING") : "VERIFIED STABLE"
+                    subtitle: {
+                        if (!backend || !backend.stats) return "Click to view tags";
+                        var repo = backend.stats.latest_stable_repo || "";
+                        var dt = backend.stats.latest_stable_date ? (" • " + backend.stats.latest_stable_date) : "";
+                        var untagged = backend.stats.untagged_prs_repos_count || 0;
+                        if (repo) {
+                            return repo + dt + (untagged > 0 ? (" • " + untagged + " repos pending release") : " • Verified Stable");
+                        }
+                        return "No stable tags cached" + (untagged > 0 ? (" • " + untagged + " repos pending release") : " • Click to view");
+                    }
+                    clickable: true
+                    onClicked: {
+                        if (typeof window !== "undefined" && window.navigateToRepos) {
+                            window.navigateToRepos("ALL");
+                        } else if (typeof window !== "undefined") {
+                            window.currentTabIndex = 1;
+                        }
+                    }
+                }
+
+                // Card 4: Latest Unstable Tag (with Pending Release info)
+                StatCard {
+                    Layout.fillWidth: true
+                    icon: "⚡"
+                    title: "Latest Unstable Tag"
+                    value: ((backend && backend.stats && backend.stats.latest_unstable_tag) ? backend.stats.latest_unstable_tag : "-")
+                    valuePixelSize: 24
+                    status: (backend && backend.stats && (backend.stats.untagged_prs_repos_count > 0 || backend.stats.pending_repos_count > 0)) ? "pending" : "clean"
+                    badgeText: {
+                        if (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) {
+                            return backend.stats.untagged_prs_repos_count + " PENDING RELEASES";
+                        } else if (backend && backend.stats && backend.stats.pending_repos_count > 0) {
+                            return backend.stats.pending_repos_count + " PENDING CHANGES";
+                        }
+                        return "NO RELEASES PENDING";
+                    }
+                    subtitle: {
+                        if (!backend || !backend.stats) return "Click to view tags";
+                        var repo = backend.stats.latest_unstable_repo || "";
+                        var dt = backend.stats.latest_unstable_date ? (" • " + backend.stats.latest_unstable_date) : "";
+                        var untagged = backend.stats.untagged_prs_repos_count || 0;
+                        if (repo) {
+                            return repo + dt + (untagged > 0 ? (" • " + untagged + " untagged repos pending release") : " • Click to view");
+                        }
+                        return "No unstable tags cached" + (untagged > 0 ? (" • " + untagged + " untagged repos pending release") : " • Click to view");
+                    }
+                    clickable: true
+                    onClicked: {
+                        if (typeof window !== "undefined" && window.navigateToRepos) {
+                            if (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) {
+                                window.navigateToRepos("🏷️ PENDING PRs");
+                            } else {
+                                window.navigateToRepos("ALL");
+                            }
+                        } else if (typeof window !== "undefined") {
+                            window.currentTabIndex = 1;
+                        }
+                    }
+                }
+
+                // Card 5: Active Work Items (Spans full width across both columns)
+                StatCard {
+                    Layout.columnSpan: 2
                     Layout.fillWidth: true
                     icon: "📋"
                     title: "Active Work Items"
-                    value: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0).toString()
+                    showWorkItemsBreakdown: true
+                    value: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0) + " Active"
+                    activeWiCount: ((backend && backend.stats && backend.stats.active_work_items_count !== undefined) ? backend.stats.active_work_items_count : 0)
+                    closedWiCount: ((backend && backend.stats && backend.stats.closed_work_items_count !== undefined) ? backend.stats.closed_work_items_count : 0)
+                    investigatedCount: ((backend && backend.stats && backend.stats.to_be_investigated_count !== undefined) ? backend.stats.to_be_investigated_count : 0)
+                    ignoredCount: ((backend && backend.stats && backend.stats.ignored_work_items_count !== undefined) ? backend.stats.ignored_work_items_count : 0)
                     status: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? "pending" : "clean"
                     badgeText: (backend && backend.stats && backend.stats.active_work_items_count > 0) ? (backend.stats.active_work_items_count + " ACTIVE") : "ALL RESOLVED"
                     subtitle: {
@@ -274,7 +295,7 @@ Item {
                             if (toInv > 0) extra.push(toInv + " to be investigated");
                             if (ign > 0) extra.push(ign + " ignored");
                             var extraStr = extra.length > 0 ? " (" + extra.join(" · ") + ")" : "";
-                            return act + " active" + extraStr + " · " + cl + " closed • Click to view";
+                            return act + " active" + extraStr + " · " + cl + " closed out of " + tot + " total • Click to view";
                         }
                         return "All " + tot + " work items closed / resolved • Nothing pending";
                     }
@@ -282,6 +303,22 @@ Item {
                     onClicked: {
                         if (typeof window !== "undefined") {
                             window.currentTabIndex = 3;
+                        }
+                    }
+                    onInvestigatedPillClicked: {
+                        if (typeof window !== "undefined") {
+                            window.currentTabIndex = 3;
+                            if (workItemsView && typeof workItemsView.selectStateFilter === "function") {
+                                workItemsView.selectStateFilter("to be investigated");
+                            }
+                        }
+                    }
+                    onIgnoredPillClicked: {
+                        if (typeof window !== "undefined") {
+                            window.currentTabIndex = 3;
+                            if (workItemsView && typeof workItemsView.selectStateFilter === "function") {
+                                workItemsView.selectStateFilter("ignored");
+                            }
                         }
                     }
                 }

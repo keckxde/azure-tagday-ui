@@ -900,6 +900,84 @@ def import_repo_categories_from_file(file_path):
         return None
 
 
+def export_user_settings_to_file(settings_data, file_path):
+    """
+    Exports full or partial user settings dictionary to a YAML or JSON file.
+
+    Args:
+        settings_data (dict): User settings dictionary.
+        file_path (str): Target output file path (.yaml, .yml, .json).
+
+    Returns:
+        bool: True if export succeeded, False otherwise.
+    """
+    if not settings_data or not isinstance(settings_data, dict) or not file_path:
+        return False
+
+    ext = os.path.splitext(file_path)[1].lower()
+    parent_dir = os.path.dirname(os.path.abspath(file_path))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    if ext in [".yaml", ".yml"]:
+        try:
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(settings_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings to YAML {file_path}: {e}")
+            return False
+    elif ext == ".json":
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings to JSON {file_path}: {e}")
+            return False
+    else:
+        # Default to YAML export
+        try:
+            import yaml
+            with open(file_path, "w", encoding="utf-8") as f:
+                yaml.dump(settings_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            log.error(f"Failed to export user settings {file_path}: {e}")
+            return False
+
+
+def import_user_settings_from_file(file_path):
+    """
+    Imports user settings from a YAML or JSON file.
+
+    Args:
+        file_path (str): Path to input file (.yaml, .yml, .json).
+
+    Returns:
+        dict: Parsed user settings dictionary, or empty dict if loading fails.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return {}
+
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if ext == ".json":
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        else:
+            import yaml
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception as e:
+        log.error(f"Failed to import user settings from {file_path}: {e}")
+        return {}
+
+
+
 def categorize_repository(repo_name, config=None, cache_db=None, config_path=None):
     """Categorizes repository using the database configuration or default configuration.
 

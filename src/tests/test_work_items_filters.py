@@ -286,6 +286,65 @@ class TestWorkItemsFilters(unittest.TestCase):
         self.assertIn("DDQS-01", milestones)
         self.assertIn("DDQS-02", milestones)
 
+    def test_work_items_to_be_investigated_and_ignored_states(self):
+        backend = DevOpsBackend()
+        backend._work_items = [
+            {
+                "id": 5001,
+                "title": "Standard Task",
+                "type": "Task",
+                "state": "Active",
+                "deleted": False,
+                "is_to_be_investigated": False,
+                "is_ignored": False,
+                "category": "active",
+            },
+            {
+                "id": 5002,
+                "title": "Orphaned Task",
+                "type": "Task",
+                "state": "Active",
+                "deleted": False,
+                "is_to_be_investigated": True,
+                "is_ignored": False,
+                "category": "to be investigated",
+            },
+            {
+                "id": 5003,
+                "title": "Ignored Test Scenario",
+                "type": "Test Case",
+                "state": "Closed",
+                "deleted": False,
+                "is_to_be_investigated": False,
+                "is_ignored": True,
+                "category": "ignored",
+            },
+            {
+                "id": 5004,
+                "title": "Deleted Item",
+                "type": "Task",
+                "state": "Deleted",
+                "deleted": True,
+                "is_to_be_investigated": False,
+                "is_ignored": False,
+                "category": "deleted",
+            }
+        ]
+
+        # Verify classification in stats and items
+        to_be_investigated = [w for w in backend.workItems if w.get("is_to_be_investigated") or w.get("category") == "to be investigated"]
+        ignored = [w for w in backend.workItems if w.get("is_ignored") or w.get("category") == "ignored"]
+        deleted = [w for w in backend.workItems if w.get("deleted")]
+
+        self.assertEqual(len(to_be_investigated), 1)
+        self.assertEqual(to_be_investigated[0]["id"], 5002)
+
+        self.assertEqual(len(ignored), 1)
+        self.assertEqual(ignored[0]["id"], 5003)
+
+        self.assertEqual(len(deleted), 1)
+        self.assertEqual(deleted[0]["id"], 5004)
+
 
 if __name__ == "__main__":
     unittest.main()

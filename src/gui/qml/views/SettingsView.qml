@@ -2859,6 +2859,365 @@ Item {
             }
 
             // ==========================================
+            // Export & Import Specific User Settings Card
+            // ==========================================
+            Rectangle {
+                id: exportImportCard
+                Layout.fillWidth: true
+                implicitHeight: expImpCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                property bool expRepoCats: true
+                property bool expBranchFilters: true
+                property bool expMilestones: true
+                property bool expWorkItemCats: true
+                property bool expTeamSprintUrl: true
+                property bool clearOnImport: false
+
+                function getSelectedSections() {
+                    var secs = [];
+                    if (expRepoCats) secs.push("repo_categories");
+                    if (expBranchFilters) secs.push("git_branch_filters");
+                    if (expMilestones) secs.push("milestones");
+                    if (expWorkItemCats) secs.push("work_item_categories");
+                    if (expTeamSprintUrl) secs.push("team_assignment_and_sprint_url");
+                    return secs;
+                }
+
+                function selectAllSections() {
+                    expRepoCats = true;
+                    expBranchFilters = true;
+                    expMilestones = true;
+                    expWorkItemCats = true;
+                    expTeamSprintUrl = true;
+                }
+
+                function deselectAllSections() {
+                    expRepoCats = false;
+                    expBranchFilters = false;
+                    expMilestones = false;
+                    expWorkItemCats = false;
+                    expTeamSprintUrl = false;
+                }
+
+                ColumnLayout {
+                    id: expImpCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 16
+
+                    // Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "📦"; font.pixelSize: 22 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Export & Import Specific User Settings"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Export or import project-specific configuration profiles including Repository Categories, Git Branch Filters, Milestones, Work Item Categories, and Team/Sprint URL settings to/from YAML or JSON files."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Quick selection actions
+                        RowLayout {
+                            spacing: 6
+                            Button {
+                                text: "✓ Select All"
+                                font.pixelSize: 11
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: "#58a6ff"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 26; implicitWidth: 85; radius: 4
+                                    color: parent.hovered ? "#21262d" : "transparent"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: exportImportCard.selectAllSections()
+                            }
+
+                            Button {
+                                text: "✕ Clear All"
+                                font.pixelSize: 11
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: "#8b949e"
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 26; implicitWidth: 80; radius: 4
+                                    color: parent.hovered ? "#21262d" : "transparent"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: exportImportCard.deselectAllSections()
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Settings Scope Selection Pills
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Included Configuration Categories:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            // 1. Repo Categories
+                            Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: rcPillRow.implicitWidth + 24
+                                radius: 6
+                                color: exportImportCard.expRepoCats ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : "#0d1117"
+                                border.color: exportImportCard.expRepoCats ? "#1f6feb" : "#30363d"
+                                border.width: exportImportCard.expRepoCats ? 2 : 1
+
+                                RowLayout {
+                                    id: rcPillRow
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: exportImportCard.expRepoCats ? "☑" : "☐"; font.pixelSize: 13; color: exportImportCard.expRepoCats ? "#58a6ff" : "#8b949e" }
+                                    Text { text: "📁 Repository Categories & Rules"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 11; font.weight: exportImportCard.expRepoCats ? Font.Bold : Font.Normal; color: exportImportCard.expRepoCats ? "#f0f6fc" : "#8b949e" }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.expRepoCats = !exportImportCard.expRepoCats
+                                }
+                            }
+
+                            // 2. Git Branch Filters
+                            Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: bfPillRow.implicitWidth + 24
+                                radius: 6
+                                color: exportImportCard.expBranchFilters ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : "#0d1117"
+                                border.color: exportImportCard.expBranchFilters ? "#1f6feb" : "#30363d"
+                                border.width: exportImportCard.expBranchFilters ? 2 : 1
+
+                                RowLayout {
+                                    id: bfPillRow
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: exportImportCard.expBranchFilters ? "☑" : "☐"; font.pixelSize: 13; color: exportImportCard.expBranchFilters ? "#58a6ff" : "#8b949e" }
+                                    Text { text: "🌿 Git Branch & Change Filters"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 11; font.weight: exportImportCard.expBranchFilters ? Font.Bold : Font.Normal; color: exportImportCard.expBranchFilters ? "#f0f6fc" : "#8b949e" }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.expBranchFilters = !exportImportCard.expBranchFilters
+                                }
+                            }
+
+                            // 3. Milestones
+                            Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: msPillRow.implicitWidth + 24
+                                radius: 6
+                                color: exportImportCard.expMilestones ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : "#0d1117"
+                                border.color: exportImportCard.expMilestones ? "#1f6feb" : "#30363d"
+                                border.width: exportImportCard.expMilestones ? 2 : 1
+
+                                RowLayout {
+                                    id: msPillRow
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: exportImportCard.expMilestones ? "☑" : "☐"; font.pixelSize: 13; color: exportImportCard.expMilestones ? "#58a6ff" : "#8b949e" }
+                                    Text { text: "🚩 Milestones & Categories"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 11; font.weight: exportImportCard.expMilestones ? Font.Bold : Font.Normal; color: exportImportCard.expMilestones ? "#f0f6fc" : "#8b949e" }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.expMilestones = !exportImportCard.expMilestones
+                                }
+                            }
+
+                            // 4. Work Item Categories
+                            Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: wiPillRow.implicitWidth + 24
+                                radius: 6
+                                color: exportImportCard.expWorkItemCats ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : "#0d1117"
+                                border.color: exportImportCard.expWorkItemCats ? "#1f6feb" : "#30363d"
+                                border.width: exportImportCard.expWorkItemCats ? 2 : 1
+
+                                RowLayout {
+                                    id: wiPillRow
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: exportImportCard.expWorkItemCats ? "☑" : "☐"; font.pixelSize: 13; color: exportImportCard.expWorkItemCats ? "#58a6ff" : "#8b949e" }
+                                    Text { text: "🏷️ Work Item Tag Categories & Deadlines"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 11; font.weight: exportImportCard.expWorkItemCats ? Font.Bold : Font.Normal; color: exportImportCard.expWorkItemCats ? "#f0f6fc" : "#8b949e" }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.expWorkItemCats = !exportImportCard.expWorkItemCats
+                                }
+                            }
+
+                            // 5. Team Assignment and Sprint URL
+                            Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: tmPillRow.implicitWidth + 24
+                                radius: 6
+                                color: exportImportCard.expTeamSprintUrl ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : "#0d1117"
+                                border.color: exportImportCard.expTeamSprintUrl ? "#1f6feb" : "#30363d"
+                                border.width: exportImportCard.expTeamSprintUrl ? 2 : 1
+
+                                RowLayout {
+                                    id: tmPillRow
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: exportImportCard.expTeamSprintUrl ? "☑" : "☐"; font.pixelSize: 13; color: exportImportCard.expTeamSprintUrl ? "#58a6ff" : "#8b949e" }
+                                    Text { text: "👥 Team Assignment & Sprint URL"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 11; font.weight: exportImportCard.expTeamSprintUrl ? Font.Bold : Font.Normal; color: exportImportCard.expTeamSprintUrl ? "#f0f6fc" : "#8b949e" }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.expTeamSprintUrl = !exportImportCard.expTeamSprintUrl
+                                }
+                            }
+                        }
+                    }
+
+                    // Import Options & Action Buttons Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        Layout.topMargin: 4
+
+                        // Clear on import checkbox
+                        RowLayout {
+                            spacing: 8
+                            Rectangle {
+                                implicitWidth: 16
+                                implicitHeight: 16
+                                radius: 3
+                                color: exportImportCard.clearOnImport ? "#1f6feb" : "#0d1117"
+                                border.color: exportImportCard.clearOnImport ? "#58a6ff" : "#30363d"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "✓"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                    visible: exportImportCard.clearOnImport
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.clearOnImport = !exportImportCard.clearOnImport
+                                }
+                            }
+
+                            Text {
+                                text: "Clear existing entries on import (replace instead of merge)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: exportImportCard.clearOnImport ? "#f0f6fc" : "#8b949e"
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: exportImportCard.clearOnImport = !exportImportCard.clearOnImport
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Export Button
+                        Button {
+                            text: "📤 Export Settings..."
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            enabled: backend && exportImportCard.getSelectedSections().length > 0
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: parent.parent.enabled ? "#ffffff" : "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 165; radius: 6
+                                color: parent.enabled ? (parent.hovered ? "#388bfd" : "#1f6feb") : "#21262d"
+                                border.color: parent.enabled ? "#58a6ff" : "#30363d"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    var res = backend.export_all_user_settings("", JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = "User settings exported successfully to: " + res.file_path;
+                                        root.bannerType = "success";
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Export error: " + res.error;
+                                        root.bannerType = "error";
+                                    }
+                                }
+                            }
+                        }
+
+                        // Import Button
+                        Button {
+                            text: "📥 Import Settings..."
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            enabled: backend !== null
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 165; radius: 6
+                                color: parent.hovered ? "#2ea043" : "#238636"
+                                border.color: "#3fb950"
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    var res = backend.import_all_user_settings("", exportImportCard.clearOnImport, JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = res.message || "User settings imported successfully!";
+                                        root.bannerType = "success";
+                                        root.loadDatabasesList();
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Import error: " + res.error;
+                                        root.bannerType = "error";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Recent Projects History Card (if any)
             // ==========================================
             Rectangle {
@@ -3125,6 +3484,336 @@ Item {
                                             root.bannerMsg = "Font size updated to " + modelData.title;
                                             root.bannerType = "success";
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Export & Import Specific User Settings Card
+            // ==========================================
+            Rectangle {
+                id: exportImportCard
+                Layout.fillWidth: true
+                implicitHeight: exportImportCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                function getSelectedSections() {
+                    var secs = [];
+                    if (chkRepoCats.checked) secs.push("repo_categories");
+                    if (chkBranchFilters.checked) secs.push("git_branch_filters");
+                    if (chkMilestones.checked) secs.push("milestones");
+                    if (chkWorkItemCats.checked) secs.push("work_item_categories");
+                    if (chkTeamSprint.checked) secs.push("team_and_sprint_url");
+                    return secs;
+                }
+
+                function selectAllSections(enable) {
+                    chkRepoCats.checked = enable;
+                    chkBranchFilters.checked = enable;
+                    chkMilestones.checked = enable;
+                    chkWorkItemCats.checked = enable;
+                    chkTeamSprint.checked = enable;
+                }
+
+                ColumnLayout {
+                    id: exportImportCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 14
+
+                    // Card Title & Icon
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "📦"; font.pixelSize: 20 }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Text {
+                                text: "Export & Import Specific User Settings"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Backup, share, or restore specific user configuration sections in YAML or JSON format."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            implicitHeight: 22
+                            implicitWidth: formatPillText.implicitWidth + 14
+                            radius: 11
+                            color: "#1f6feb22"
+                            border.color: "#58a6ff"
+                            border.width: 1
+
+                            Text {
+                                id: formatPillText
+                                anchors.centerIn: parent
+                                text: "YAML / JSON Supported"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: "#58a6ff"
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Section Selection Controls
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Select Sections to Include:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#c9d1d9"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "Select All"
+                            font.pixelSize: 11
+                            background: Rectangle {
+                                color: parent.hovered ? "#21262d" : "transparent"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#79c0ff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: exportImportCard.selectAllSections(true)
+                        }
+
+                        Button {
+                            text: "Deselect All"
+                            font.pixelSize: 11
+                            background: Rectangle {
+                                color: parent.hovered ? "#21262d" : "transparent"
+                                radius: 4
+                                border.color: "#30363d"
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: exportImportCard.selectAllSections(false)
+                        }
+                    }
+
+                    // Checkbox Pills Grid
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        rowSpacing: 10
+                        columnSpacing: 16
+
+                        CheckBox {
+                            id: chkRepoCats
+                            text: "Repository Categories (rules, colors, overrides, default category)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkBranchFilters
+                            text: "Git Branch & Category Filters (branch_filter_patterns, notifications)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkMilestones
+                            text: "Milestones (categories, target dates, end dates, team assignment, descriptions)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkWorkItemCats
+                            text: "Work Item Categories & Deadlines (tag pattern mapping, custom deadline field, reports directory)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        CheckBox {
+                            id: chkTeamSprint
+                            text: "Team Assignment & Sprint URL (tfs_team_name, sprint_url_template, default_tfs_team)"
+                            checked: true
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Options & Action Buttons Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        CheckBox {
+                            id: chkClearExisting
+                            text: "Clear existing records on import (Full replace instead of merge)"
+                            checked: false
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: parent.checked ? "#f85149" : "#8b949e"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Export Button
+                        Button {
+                            text: "📤 Export Settings..."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: 155
+                                radius: 6
+                                color: parent.hovered ? "#1f6feb" : "#238636"
+                                border.color: parent.hovered ? "#58a6ff" : "#2ea043"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    if (secs.length === 0) {
+                                        root.bannerMsg = "Please select at least one settings section to export.";
+                                        root.bannerType = "error";
+                                        return;
+                                    }
+                                    var res = backend.exportAllUserSettings("", JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = res.message || ("Settings exported to: " + res.file_path);
+                                        root.bannerType = "success";
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Export failed: " + res.error;
+                                        root.bannerType = "error";
+                                    }
+                                }
+                            }
+                        }
+
+                        // Import Button
+                        Button {
+                            text: "📥 Import Settings..."
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#ffffff"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34
+                                implicitWidth: 155
+                                radius: 6
+                                color: parent.hovered ? "#388bfd" : "#1f6feb"
+                                border.color: "#58a6ff"
+                                border.width: 1
+                            }
+                            onClicked: {
+                                if (backend) {
+                                    var secs = exportImportCard.getSelectedSections();
+                                    if (secs.length === 0) {
+                                        root.bannerMsg = "Please select at least one settings section to import.";
+                                        root.bannerType = "error";
+                                        return;
+                                    }
+                                    var res = backend.importAllUserSettings("", chkClearExisting.checked, JSON.stringify(secs));
+                                    if (res && res.success) {
+                                        root.bannerMsg = res.message || "User settings imported successfully.";
+                                        root.bannerType = "success";
+                                    } else if (res && res.error) {
+                                        root.bannerMsg = "Import failed: " + res.error;
+                                        root.bannerType = "error";
                                     }
                                 }
                             }

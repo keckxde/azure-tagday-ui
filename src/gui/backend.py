@@ -414,14 +414,14 @@ class DevOpsBackend(QObject):
                 self._stats["project_name"] = p_name
             if db_cfg.get("AZURE_PERSONAL_ACCESS_TOKEN"):
                 devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = db_cfg["AZURE_PERSONAL_ACCESS_TOKEN"]
-            if db_cfg.get("WORK_ITEM_DEADLINE_FIELD"):
-                self._custom_deadline_field = db_cfg["WORK_ITEM_DEADLINE_FIELD"]
+            if db_cfg.get("WORK_ITEM_DEADLINE_FIELD") or db_cfg.get("custom_deadline_field"):
+                self._custom_deadline_field = db_cfg.get("WORK_ITEM_DEADLINE_FIELD") or db_cfg.get("custom_deadline_field")
             if db_cfg.get("bug_behavior"):
                 self._bug_hierarchy_mode = db_cfg["bug_behavior"]
-            if db_cfg.get("AZURE_TEAM"):
-                self._tfs_team_name = db_cfg["AZURE_TEAM"]
-            if db_cfg.get("SPRINT_URL_TEMPLATE"):
-                self._sprint_url_template = db_cfg["SPRINT_URL_TEMPLATE"]
+            if db_cfg.get("AZURE_TEAM") or db_cfg.get("tfs_team_name"):
+                self._tfs_team_name = db_cfg.get("AZURE_TEAM") or db_cfg.get("tfs_team_name")
+            if db_cfg.get("SPRINT_URL_TEMPLATE") or db_cfg.get("sprint_url_template"):
+                self._sprint_url_template = db_cfg.get("SPRINT_URL_TEMPLATE") or db_cfg.get("sprint_url_template")
             if "AUTO_SYNC_ENABLED" in db_cfg:
                 self._auto_sync_enabled = str(db_cfg["AUTO_SYNC_ENABLED"]).lower() in ("true", "1", "yes")
             if "AUTO_SYNC_INTERVAL_MINUTES" in db_cfg:
@@ -443,8 +443,8 @@ class DevOpsBackend(QObject):
                 devops_helper.BUILD_ARTIFACTS_MD = db_cfg["BUILD_ARTIFACTS_MD"]
             if "BUILD_ARTIFACTS_CSV" in db_cfg:
                 devops_helper.BUILD_ARTIFACTS_CSV = db_cfg["BUILD_ARTIFACTS_CSV"]
-            if db_cfg.get("REPORTS_DIR") or db_cfg.get("BASE_FOLDER"):
-                self._reports_dir = db_cfg.get("REPORTS_DIR") or db_cfg.get("BASE_FOLDER")
+            if db_cfg.get("REPORTS_DIR") or db_cfg.get("reports_dir") or db_cfg.get("BASE_FOLDER") or db_cfg.get("base_folder"):
+                self._reports_dir = db_cfg.get("REPORTS_DIR") or db_cfg.get("reports_dir") or db_cfg.get("BASE_FOLDER") or db_cfg.get("base_folder")
                 devops_helper.BASE_FOLDER = self._reports_dir
             if "RECENT_DELAY" in db_cfg:
                 try:
@@ -1227,6 +1227,11 @@ class DevOpsBackend(QObject):
     @Property(list, notify=milestonesChanged)
     def milestones(self):
         return self.get_milestones()
+
+    @Property(list, notify=milestonesChanged)
+    def comingMilestones(self):
+        """Returns configured milestones starting from the current week sorted ascending by target date."""
+        return self.get_coming_milestones()
 
     @Property(list, notify=milestoneCategoriesChanged)
     def milestoneCategories(self):
@@ -2189,6 +2194,7 @@ class DevOpsBackend(QObject):
         self.storageDataChanged.emit()
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
+        self.milestonesChanged.emit()
 
     @Slot()
     def startup_load_async(self):
@@ -4720,6 +4726,65 @@ class DevOpsBackend(QObject):
         return []
 
     @Slot(result=list)
+    def get_coming_milestones(self):
+        """Returns configured milestones starting from the current week sorted ascending by target date."""
+        all_milestones = self.get_milestones()
+        cur_year, cur_week, _ = datetime.now().isocalendar()
+        _, _, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
+
+        coming = []
+        today = datetime.now().date()
+        for m in all_milestones:
+            m_start = (m.get("target_date") or m.get("start_date") or "").split("T")[0].split(" ")[0].strip()
+            m_end = (m.get("end_date") or m_start).split("T")[0].split(" ")[0].strip()
+            is_coming = False
+            if cur_start_str and m_end:
+                if m_end >= cur_start_str:
+                    is_coming = True
+            elif m_start:
+                try:
+                    s_obj = datetime.strptime(m_start, "%Y-%m-%d").date()
+                    sy, sw, _ = s_obj.isocalendar()
+                    if (sy, sw) >= (cur_year, cur_week):
+                        is_coming = True
+                except Exception:
+                    pass
+
+            if is_coming:
+                m_copy = dict(m)
+                is_cw = False
+                if cur_start_str and cur_end_str and m_start and m_end:
+                    if m_start <= cur_end_str and m_end >= cur_start_str:
+                        is_cw = True
+                m_copy["is_current_week"] = is_cw
+
+                if m_start:
+                    try:
+                        t_d = datetime.strptime(m_start, "%Y-%m-%d").date()
+                        diff_days = (t_d - today).days
+                        m_copy["days_until"] = diff_days
+                        if is_cw:
+                            m_copy["relative_label"] = "This week"
+                        elif 0 < diff_days <= 7:
+                            m_copy["relative_label"] = "Next week"
+                        elif diff_days > 7:
+                            m_copy["relative_label"] = f"In {diff_days}d"
+                        elif diff_days == 0:
+                            m_copy["relative_label"] = "Today"
+                        else:
+                            m_copy["relative_label"] = m_start
+                    except Exception:
+                        m_copy["days_until"] = 0
+                        m_copy["relative_label"] = m_start
+                else:
+                    m_copy["days_until"] = 0
+                    m_copy["relative_label"] = ""
+                coming.append(m_copy)
+
+        coming.sort(key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        return coming
+
+    @Slot(result=list)
     def getAvailableTeams(self):
         """Returns a sorted list of unique team names across work items, config, and milestones."""
         teams = set()
@@ -5725,6 +5790,176 @@ class DevOpsBackend(QObject):
     def importRepoCategories(self, file_path="", merge=False):
         """CamelCase alias for import_repo_categories."""
         return self.import_repo_categories(file_path, merge)
+
+    @property
+    def db(self):
+        """Cache database instance property."""
+        return self._cache_db
+
+    @db.setter
+    def db(self, val):
+        self._cache_db = val
+        if val and hasattr(val, "db_path"):
+            self._db_path = val.db_path
+
+    @Slot(result=str)
+    def browse_user_settings_export_path(self):
+        """Opens native file dialog to select save destination for user settings export (.yaml, .json)."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            proj_slug = (self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or "settings").replace(" ", "_").lower()
+            default_path = os.path.join(initial_dir, f"user_settings_{proj_slug}_{timestamp}.yaml")
+            file_path, _ = QFileDialog.getSaveFileName(
+                None, "Export User Settings & Configurations", default_path,
+                "YAML Configuration (*.yaml *.yml);;JSON Configuration (*.json);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening user settings export dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseUserSettingsExportPath(self):
+        """CamelCase alias for browse_user_settings_export_path."""
+        return self.browse_user_settings_export_path()
+
+    @Slot(result=str)
+    def browse_user_settings_import_file(self):
+        """Opens native file dialog to select a YAML or JSON user settings file to import."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            initial_dir = self.get_effective_reports_dir()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Select User Settings File to Import", initial_dir,
+                "User Settings Files (*.yaml *.yml *.json);;YAML Files (*.yaml *.yml);;JSON Files (*.json);;All Files (*.*)"
+            )
+            return file_path or ""
+        except Exception as e:
+            logger.error(f"Error opening user settings import dialog: {e}")
+            return ""
+
+    @Slot(result=str)
+    def browseUserSettingsImportFile(self):
+        """CamelCase alias for browse_user_settings_import_file."""
+        return self.browse_user_settings_import_file()
+
+    @Slot(str, "QVariantList", result=dict)
+    @Slot(str, str, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def export_all_user_settings(self, file_path="", sections_json=None, selected_sections=None):
+        """Exports user settings to YAML or JSON file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_user_settings_export_path()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+
+        sections = selected_sections if selected_sections is not None else sections_json
+        if isinstance(sections, str) and sections:
+            try:
+                sections = json.loads(sections)
+            except Exception:
+                pass
+
+        try:
+            data = self._cache_db.export_user_settings(include_sections=sections)
+            data["project_name"] = self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or ""
+            ok = utils.export_user_settings_to_file(data, file_path)
+            if ok:
+                msg = f"User settings exported successfully to: {file_path}"
+                logger.info(msg)
+                self.logMessage.emit(f"✅ {msg}")
+                return {"success": True, "file_path": file_path, "message": msg}
+            else:
+                err = f"Failed to write settings file: {file_path}"
+                self.logMessage.emit(f"❌ {err}")
+                return {"success": False, "error": err}
+        except Exception as e:
+            err = f"Error exporting user settings: {e}"
+            logger.error(err, exc_info=True)
+            self.logMessage.emit(f"❌ {err}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, "QVariantList", result=dict)
+    @Slot(str, str, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def exportAllUserSettings(self, file_path="", sections_json=None, selected_sections=None):
+        """CamelCase alias for export_all_user_settings."""
+        return self.export_all_user_settings(file_path=file_path, sections_json=sections_json, selected_sections=selected_sections)
+
+    @Slot(str, bool, "QVariantList", result=dict)
+    @Slot(str, bool, str, result=dict)
+    @Slot(str, bool, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def import_all_user_settings(self, file_path="", clear_existing=False, sections_json=None, selected_sections=None):
+        """Imports user settings from YAML or JSON file."""
+        if not self._cache_db:
+            return {"success": False, "error": "No database connected"}
+        if not file_path:
+            file_path = self.browse_user_settings_import_file()
+        if not file_path:
+            return {"success": False, "cancelled": True}
+
+        sections = selected_sections if selected_sections is not None else sections_json
+        if isinstance(sections, str) and sections:
+            try:
+                sections = json.loads(sections)
+            except Exception:
+                pass
+
+        try:
+            raw_data = utils.import_user_settings_from_file(file_path)
+            if not raw_data:
+                err = f"Failed to read or parse settings from: {file_path}"
+                self.logMessage.emit(f"❌ {err}")
+                return {"success": False, "error": err}
+
+            summary = self._cache_db.import_user_settings(raw_data, clear_existing=clear_existing, include_sections=sections)
+            
+            # Reload backend state from DB
+            self._load_project_config_from_db(self._cache_db)
+            self._recalculate_repo_categories()
+            self._enrich_work_items_with_milestones()
+            
+            # Emit signals so all views update immediately
+            self.settingsChanged.emit()
+            self.milestonesChanged.emit()
+            self.milestoneCategoriesChanged.emit()
+            self.repoCategoriesChanged.emit()
+            self.repositoriesChanged.emit()
+            self.changeFiltersChanged.emit()
+            self.tagCategoriesChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.workItemsChanged.emit()
+            self.reportsDirChanged.emit()
+            self.statsChanged.emit()
+
+            sec_str = ", ".join(summary.get("imported_sections", [])) or "all selected"
+            msg = f"Imported user settings from {os.path.basename(file_path)} ({sec_str})."
+            logger.info(msg)
+            self.logMessage.emit(f"✅ {msg}")
+            summary["message"] = msg
+            return summary
+        except Exception as e:
+            err = f"Error importing user settings: {e}"
+            logger.error(err, exc_info=True)
+            self.logMessage.emit(f"❌ {err}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(str, bool, "QVariantList", result=dict)
+    @Slot(str, bool, str, result=dict)
+    @Slot(str, bool, result=dict)
+    @Slot(str, result=dict)
+    @Slot(result=dict)
+    def importAllUserSettings(self, file_path="", clear_existing=False, sections_json=None, selected_sections=None):
+        """CamelCase alias for import_all_user_settings."""
+        return self.import_all_user_settings(file_path=file_path, clear_existing=clear_existing, sections_json=sections_json, selected_sections=selected_sections)
 
     @Slot(str, str, result=bool)
     def save_change_filters(self, repo_category_patterns_json, branch_patterns_json):
