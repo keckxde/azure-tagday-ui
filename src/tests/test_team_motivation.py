@@ -324,6 +324,204 @@ class TestTeamMotivation(unittest.TestCase):
         ts = data["team_summary"]
         self.assertGreaterEqual(ts["commits_count"], 3)
 
+    def test_state_transition_recording_and_cleaner_decliner_badges(self):
+        """
+        Verify that state transition events (forward cleaning and backward pushbacks)
+        are properly detected and recorded, and award 'The Cleaner' and 'The Decliner' badges.
+        """
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+
+        # 1. Cleaner: Charlie cleans up 4 tasks to Resolved / Closed
+        for i in range(1, 5):
+            self.cache.record_state_event(
+                work_item_id=400 + i,
+                old_state="Active",
+                new_state="Closed",
+                changed_by="Charlie Brown",
+                recorded_at=yesterday.isoformat(),
+                is_pushback=0
+            )
+
+        # 2. Decliner: Diana pushes back 2 tasks from Resolved/Done back to Active/ToDo
+        for i in range(1, 3):
+            self.cache.record_state_event(
+                work_item_id=500 + i,
+                old_state="Resolved",
+                new_state="Active",
+                changed_by="Diana Prince",
+                recorded_at=yesterday.isoformat(),
+                is_pushback=1
+            )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Charlie Brown check
+        self.assertIn("Charlie Brown", members)
+        charlie = members["Charlie Brown"]
+        self.assertGreaterEqual(charlie["tasks_cleaned"], 4)
+        self.assertTrue(charlie["is_cleaner"])
+        has_cleaner_badge = any(b["id"] == "the_cleaner" for b in charlie["badges"])
+        self.assertTrue(has_cleaner_badge, "Charlie should earn the 'The Cleaner' badge")
+
+        # Diana Prince check
+        self.assertIn("Diana Prince", members)
+        diana = members["Diana Prince"]
+        self.assertGreaterEqual(diana["pushbacks_count"], 2)
+        self.assertTrue(diana["is_decliner"])
+        has_decliner_badge = any(b["id"] == "the_decliner" for b in diana["badges"])
+        self.assertTrue(has_decliner_badge, "Diana should earn the 'The Decliner' badge")
+        self.assertEqual(diana["time_stats"]["persona"], "🛡️ The Gatekeeper")
+
+        # Check leaderboards
+        self.assertIn("cleaners", data["leaderboards"])
+        self.assertIn("decliners", data["leaderboards"])
+        self.assertIn("state_movers", data["leaderboards"])
+        self.assertEqual(data["leaderboards"]["cleaners"]["leader"]["name"], "Charlie Brown")
+        self.assertEqual(data["leaderboards"]["decliners"]["leader"]["name"], "Diana Prince")
+
+    def test_stale_task_radar_and_ignorer_detection(self):
+        """
+        Verify that open work items with >=14 days of inactivity are captured in the Stale Radar,
+        and contributors with multiple stale tasks and zero transitions receive the 'Backlog Stasher' persona.
+        """
+        now = datetime.now()
+        twenty_days_ago = now - timedelta(days=20)
+
+        # Create 3 stale tasks assigned to "Edward Stasher"
+        for i in range(1, 4):
+            self.cache.save_work_item(
+                600 + i, f"Unattended task {i}", "Task", "Active", "Edward Stasher",
+                twenty_days_ago.strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": f"Unattended task {i}",
+                        "System.State": "Active",
+                        "System.WorkItemType": "Task",
+                        "System.AssignedTo": {"displayName": "Edward Stasher"},
+                        "System.ChangedDate": twenty_days_ago.isoformat(),
+                    }
+                }
+            )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        stale_radar = data.get("stale_radar", [])
+
+        # Verify Stale Radar contains Edward's items
+        stale_ids = [item["id"] for item in stale_radar]
+        self.assertIn(601, stale_ids)
+        self.assertIn(602, stale_ids)
+        self.assertIn(603, stale_ids)
+
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Edward Stasher", members)
+        edward = members["Edward Stasher"]
+        self.assertGreaterEqual(edward["stale_tasks_count"], 3)
+        self.assertTrue(edward["is_ignorer"])
+        self.assertEqual(edward["time_stats"]["persona"], "💤 Backlog Stasher")
+
+    def test_current_week_activity_aggregation(self):
+        """
+        Verify that commits, PRs, work items, and branch updates performed during the current week
+        are properly aggregated and score positive points under timeframe='current_week'.
+        """
+        now = datetime.now()
+
+        # Save a fresh commit today in the current sprint
+        self.cache.save_commits("repo1", [{
+            "commitId": "today_sha_1",
+            "author": {"name": "Alice Smith", "email": "alice@company.com", "date": now.isoformat()},
+            "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": now.isoformat()},
+            "comment": "Current sprint progress",
+            "changeCounts": {"Add": 5, "Edit": 10, "Delete": 1}
+        }])
+
+        # Save an active task updated today
+        self.cache.save_work_item(
+            701, "Current sprint active task", "Task", "Closed", "Alice Smith",
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Current sprint active task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "Alice Smith"},
+                    "Microsoft.VSTS.Common.ClosedDate": now.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Alice Smith"},
+                    "System.ChangedDate": now.isoformat(),
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="current_week")
+        self.assertIn("team_summary", data)
+        self.assertIn("members", data)
+
+        ts = data["team_summary"]
+        self.assertGreaterEqual(ts["commits_count"], 1)
+        self.assertGreaterEqual(ts["tasks_completed"], 1)
+        self.assertGreaterEqual(ts["active_contributors"], 1)
+
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Alice Smith", members)
+        self.assertGreaterEqual(members["Alice Smith"]["commits_count"], 1)
+        self.assertGreaterEqual(members["Alice Smith"]["tasks_completed"], 1)
+        self.assertGreater(members["Alice Smith"]["score"], 0)
+
+    def test_pr_closer_and_reviewer_tracking(self):
+        """Tests that PR closers, approvers, and reviewers are all accurately credited."""
+        now = datetime.now()
+        # Create completed PR merged by Bob, created by Alice, approved by Charlie
+        pr_data = [
+            {
+                "pullRequestId": 801,
+                "title": "PR: Engine Optimizations",
+                "status": "completed",
+                "createdBy": {"displayName": "Alice Smith"},
+                "closedBy": {"displayName": "Bob Jones"},
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "reviewers": [
+                    {"displayName": "Charlie Brown", "vote": 10},
+                    {"displayName": "Diana Prince", "vote": 5},
+                ]
+            },
+            {
+                "pullRequestId": 802,
+                "title": "PR: Auto-completed bugfix",
+                "status": "3",  # enum for completed
+                "createdBy": {"displayName": "Bob Jones"},
+                "closedBy": "",  # empty closedBy fallback to approver
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "reviewers": [
+                    {"displayName": "Diana Prince", "vote": 10},
+                ]
+            }
+        ]
+        self.cache.save_pull_requests("repo1", pr_data)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+        
+        # Bob Jones closed PR 801
+        self.assertGreaterEqual(members["Bob Jones"]["prs_closed"], 1)
+        # Diana Prince approved PR 801 and 802
+        self.assertGreaterEqual(members["Diana Prince"]["prs_approved"], 2)
+        self.assertGreaterEqual(members["Diana Prince"]["prs_reviewed"], 2)
+        # Charlie Brown approved PR 801
+        self.assertGreaterEqual(members["Charlie Brown"]["prs_approved"], 1)
+        self.assertGreaterEqual(members["Charlie Brown"]["prs_reviewed"], 1)
+
+        # Leaderboards check
+        lb = data["leaderboards"]
+        self.assertIn("prs_closed", lb)
+        self.assertIn("prs_approved", lb)
+        self.assertIn("prs_reviewed", lb)
+        self.assertGreater(lb["prs_closed"]["total_contributors"], 0)
+        self.assertGreater(lb["prs_approved"]["total_contributors"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

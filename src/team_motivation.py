@@ -188,6 +188,69 @@ BADGE_DEFINITIONS = {
         "bg_color": "#0d2344",
         "description": "Shipped and closed PRs or tasks on Friday afternoon before sprint close.",
         "tier": "bronze"
+    },
+    "the_cleaner": {
+        "id": "the_cleaner",
+        "name": "The Cleaner 🧹",
+        "icon": "🧹",
+        "color": "#388bfd",
+        "bg_color": "#0c2d6b",
+        "description": "Backlog Grooming Master — actively kept 3+ work item states accurate and groomed.",
+        "tier": "gold"
+    },
+    "the_decliner": {
+        "id": "the_decliner",
+        "name": "The Gatekeeper / Decliner 🛡️",
+        "icon": "🛡️",
+        "color": "#e3b341",
+        "bg_color": "#3d2800",
+        "description": "Quality Gatekeeper — rejected/pushed back items to Active or To Do for rigorous fixes.",
+        "tier": "silver"
+    },
+    "state_mover": {
+        "id": "state_mover",
+        "name": "State Driver 🚀",
+        "icon": "🚀",
+        "color": "#56d364",
+        "bg_color": "#142d1b",
+        "description": "High flow velocity — progressed multiple work items across lifecycle states.",
+        "tier": "silver"
+    },
+    "stale_sheriff": {
+        "id": "stale_sheriff",
+        "name": "Stale Task Sheriff 🤠",
+        "icon": "🤠",
+        "color": "#f0883e",
+        "bg_color": "#3e1e0d",
+        "description": "Zero stale backlog: all assigned work items are actively moving without idle tickets.",
+        "tier": "gold"
+    },
+    "evidence_master": {
+        "id": "evidence_master",
+        "name": "Proof Master 🧾",
+        "icon": "🧾",
+        "color": "#39c5cf",
+        "bg_color": "#0d2d30",
+        "description": "High Traceability — backed up 5+ tasks with concrete commit, PR, and artifact links.",
+        "tier": "gold"
+    },
+    "relic_keeper": {
+        "id": "relic_keeper",
+        "name": "Backlog Archaeologist ⏳",
+        "icon": "⏳",
+        "color": "#e3b341",
+        "bg_color": "#3d2800",
+        "description": "Custodian of Ancient Lore — managing an active ticket open for over 90 days.",
+        "tier": "bronze"
+    },
+    "speedy_task_closer": {
+        "id": "speedy_task_closer",
+        "name": "Lightning Finisher ⚡",
+        "icon": "⚡",
+        "color": "#f0883e",
+        "bg_color": "#381a08",
+        "description": "High Velocity — completed tasks in record turnaround time under 24 hours.",
+        "tier": "silver"
     }
 }
 
@@ -260,7 +323,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         target_sprint = cur_sprint_name
         range_label = f"Current Sprint ({cur_sprint_name} • {cur_start_str} to {cur_end_str})"
         filter_start_str = cur_start_str
-        filter_end_str = (cur_end_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        filter_end_str = (cur_end_dt + timedelta(days=3)).strftime("%Y-%m-%d")
     elif timeframe == "last_4_weeks":
         four_wks_ago = now - timedelta(days=28)
         filter_start_str = four_wks_ago.strftime("%Y-%m-%d")
@@ -277,7 +340,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         if sy and sw:
             s_dt, e_dt, s_str, e_str = get_sprint_date_range(sy, sw)
             filter_start_str = s_str
-            filter_end_str = (e_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            filter_end_str = (e_dt + timedelta(days=3)).strftime("%Y-%m-%d")
             range_label = f"Sprint {clean_s} ({s_str} to {e_str})"
         else:
             filter_start_str = "1970-01-01"
@@ -292,19 +355,36 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
     # Fetch raw datasets if not provided
     all_wis = work_items if work_items is not None else cache_db.get_all_work_items()
+    all_wis = work_items if work_items is not None else cache_db.get_all_work_items()
     all_prs = []
     if pull_requests is not None:
         all_prs = pull_requests
     else:
         try:
             with cache_db._connection() as conn:
-                rows = conn.execute("SELECT raw_json FROM pull_requests").fetchall()
+                rows = conn.execute("SELECT id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json FROM pull_requests").fetchall()
                 for r in rows:
+                    pr_obj = {}
                     if r["raw_json"]:
                         try:
-                            all_prs.append(json.loads(r["raw_json"]))
+                            pr_obj = json.loads(r["raw_json"]) if isinstance(r["raw_json"], str) else r["raw_json"]
                         except Exception:
                             pass
+                    if not isinstance(pr_obj, dict):
+                        pr_obj = {}
+                    if "createdBy" not in pr_obj and r["created_by"]:
+                        pr_obj["createdBy"] = r["created_by"]
+                    if "closedBy" not in pr_obj and r["closed_by"]:
+                        pr_obj["closedBy"] = r["closed_by"]
+                    if "closedDate" not in pr_obj and r["closed_date"]:
+                        pr_obj["closedDate"] = r["closed_date"]
+                    if "status" not in pr_obj and r["status"]:
+                        pr_obj["status"] = r["status"]
+                    if "status_str" not in pr_obj and r["status_str"]:
+                        pr_obj["status_str"] = r["status_str"]
+                    if "title" not in pr_obj and r["title"]:
+                        pr_obj["title"] = r["title"]
+                    all_prs.append(pr_obj)
         except Exception as e:
             logger.debug(f"Error reading PRs from cache: {e}")
 
@@ -394,6 +474,14 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     except Exception as e:
         logger.debug(f"Error reading commits: {e}")
 
+    # Fetch state transition events
+    all_state_events = []
+    try:
+        if hasattr(cache_db, "get_state_events"):
+            all_state_events = cache_db.get_state_events(limit=5000)
+    except Exception as e:
+        logger.debug(f"Error reading state events: {e}")
+
     # Fetch iteration shifts to measure delay/sprint predictability
     shifts_by_user = {}
     try:
@@ -414,9 +502,28 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         "night_count": 0,
         "weekend_count": 0,
         "friday_pm_count": 0,
+        "commits_count": 0,
+        "prs_count": 0,
+        "tasks_count": 0,
+        "builds_count": 0,
         "hourly_distribution": [0] * 24,
         "daily_distribution": [0] * 7,  # Mon(0)..Sun(6)
+        "hourly_commits": [0] * 24,
+        "hourly_prs": [0] * 24,
+        "hourly_tasks": [0] * 24,
+        "hourly_builds": [0] * 24,
+        "daily_commits": [0] * 7,
+        "daily_prs": [0] * 7,
+        "daily_tasks": [0] * 7,
+        "daily_builds": [0] * 7,
+        "daytime_breakdown": {"commits": 0, "prs": 0, "tasks": 0, "builds": 0},
+        "night_breakdown": {"commits": 0, "prs": 0, "tasks": 0, "builds": 0},
+        "early_bird_breakdown": {"commits": 0, "prs": 0, "tasks": 0, "builds": 0},
+        "weekend_breakdown": {"commits": 0, "prs": 0, "tasks": 0, "builds": 0},
     }
+
+    # Stale tasks radar accumulator
+    stale_radar = []
 
     # Initialize Per-Member Aggregation dictionary
     members = {}
@@ -436,6 +543,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "prs_closed": 0,
                 "prs_fast_merged": 0,
                 "prs_reviewed": 0,
+                "prs_approved": 0,
                 "tasks_created": 0,
                 "tasks_completed": 0,
                 "bugs_resolved": 0,
@@ -451,6 +559,20 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "total_shifts": 0,
                 "total_delay_weeks": 0,
                 "avg_pr_hours": 0.0,
+                "state_changes_count": 0,
+                "pushbacks_count": 0,
+                "tasks_cleaned": 0,
+                "stale_tasks_count": 0,
+                "open_tasks_assigned": 0,
+                "oldest_open_task_days": 0,
+                "oldest_open_task": None,
+                "tasks_fast_closed": 0,
+                "avg_task_turnaround_hours": 0.0,
+                "fastest_task_hours": 0.0,
+                "task_evidences_count": 0,
+                "is_cleaner": False,
+                "is_decliner": False,
+                "is_ignorer": False,
                 "night_activities": 0,
                 "early_bird_activities": 0,
                 "weekend_activities": 0,
@@ -477,6 +599,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     "persona": "☀️ Daytime Core",
                 },
                 "_pr_durations": [],
+                "_task_durations": [],
                 "recent_achievements": [],
                 "badges": [],
                 "badges_count": 0,
@@ -487,8 +610,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             }
         return members[cname]
 
-    def _track_activity_time(member_dict, ts_str):
-        """Categorizes when work happened (daytime vs night-owl vs weekend vs early-bird)."""
+    def _track_activity_time(member_dict, ts_str, act_type="other"):
+        """Categorizes when work happened (daytime vs night-owl vs weekend vs early-bird) and tracks typed activity."""
         if not member_dict or not ts_str:
             return
         dt = parse_iso_datetime(ts_str) if isinstance(ts_str, str) else ts_str
@@ -507,27 +630,60 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         team_time_agg["hourly_distribution"][hour] += 1
         team_time_agg["daily_distribution"][weekday] += 1
 
+        # Track typed activity breakdown
+        category = "other"
+        if act_type == "commit":
+            category = "commits"
+            team_time_agg["commits_count"] += 1
+            team_time_agg["hourly_commits"][hour] += 1
+            team_time_agg["daily_commits"][weekday] += 1
+        elif act_type in ("pr_merge", "pr_create", "pr_review"):
+            category = "prs"
+            team_time_agg["prs_count"] += 1
+            team_time_agg["hourly_prs"][hour] += 1
+            team_time_agg["daily_prs"][weekday] += 1
+        elif act_type in ("task_close", "task_create", "state_change"):
+            category = "tasks"
+            team_time_agg["tasks_count"] += 1
+            team_time_agg["hourly_tasks"][hour] += 1
+            team_time_agg["daily_tasks"][weekday] += 1
+        elif act_type in ("build", "tag"):
+            category = "builds"
+            team_time_agg["builds_count"] += 1
+            team_time_agg["hourly_builds"][hour] += 1
+            team_time_agg["daily_builds"][weekday] += 1
+
         if weekday in (5, 6):
             ts["weekend_count"] += 1
             member_dict["weekend_activities"] += 1
             team_time_agg["weekend_count"] += 1
+            if category in team_time_agg["weekend_breakdown"]:
+                team_time_agg["weekend_breakdown"][category] += 1
             if hour >= 21 or hour < 5:
                 ts["night_count"] += 1
                 member_dict["night_activities"] += 1
                 team_time_agg["night_count"] += 1
+                if category in team_time_agg["night_breakdown"]:
+                    team_time_agg["night_breakdown"][category] += 1
         else:
             if hour >= 21 or hour < 5:
                 ts["night_count"] += 1
                 member_dict["night_activities"] += 1
                 team_time_agg["night_count"] += 1
+                if category in team_time_agg["night_breakdown"]:
+                    team_time_agg["night_breakdown"][category] += 1
             elif 5 <= hour < 9:
                 ts["early_bird_count"] += 1
                 member_dict["early_bird_activities"] += 1
                 team_time_agg["early_bird_count"] += 1
+                if category in team_time_agg["early_bird_breakdown"]:
+                    team_time_agg["early_bird_breakdown"][category] += 1
             elif 9 <= hour < 18:
                 ts["daytime_count"] += 1
                 member_dict["daytime_activities"] += 1
                 team_time_agg["daytime_count"] += 1
+                if category in team_time_agg["daytime_breakdown"]:
+                    team_time_agg["daytime_breakdown"][category] += 1
             else:
                 ts["evening_count"] += 1
                 member_dict["evening_activities"] += 1
@@ -537,6 +693,25 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 ts["friday_pm_count"] += 1
                 member_dict["friday_afternoon_activities"] += 1
                 team_time_agg["friday_pm_count"] += 1
+
+    # Build cross-reference evidence map for work items (mentions in commits & PRs)
+    wi_evidence_map = {}
+    for c in all_commits:
+        c_msg = c.get("comment", "") or ""
+        for m_id in re.finditer(r"#(\d{3,})", c_msg):
+            try:
+                wid_ref = int(m_id.group(1))
+                wi_evidence_map[wid_ref] = wi_evidence_map.get(wid_ref, 0) + 1
+            except Exception:
+                pass
+    for pr in all_prs:
+        pr_text = f"{pr.get('title', '')} {pr.get('status_str', '')} {pr.get('description', '')}"
+        for m_id in re.finditer(r"#(\d{3,})", pr_text):
+            try:
+                wid_ref = int(m_id.group(1))
+                wi_evidence_map[wid_ref] = wi_evidence_map.get(wid_ref, 0) + 1
+            except Exception:
+                pass
 
     # 1. Process Work Items
     for wi in all_wis:
@@ -574,13 +749,30 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             wi.get("resolved_date") or
             ""
         )
-        changed_date_str = changed_date_raw[:10]
-        created_date_str = created_date_raw[:10]
-        closed_date_str = closed_date_raw[:10]
+        changed_date_str = str(changed_date_raw)[:10] if changed_date_raw else ""
+        created_date_str = str(created_date_raw)[:10] if created_date_raw else ""
+        closed_date_str = str(closed_date_raw)[:10] if closed_date_raw else ""
 
         state = str(wi.get("state") or fields.get("System.State") or "").capitalize()
         wi_type = str(wi.get("type") or fields.get("System.WorkItemType") or "").lower()
         is_closed_state = state in ("Closed", "Resolved", "Done", "Completed")
+
+        # Track Task Evidences & Traceability Links (Relations, Commits, PRs, Hyperlinks)
+        wid = wi.get("id")
+        relations = raw.get("relations") or []
+        rel_count = len(relations) if isinstance(relations, list) else 0
+        ext_evidence = wi_evidence_map.get(wid, 0)
+        desc_str = f"{fields.get('System.Description', '')} {fields.get('System.History', '')}"
+        hash_refs = min(len(re.findall(r"\b[0-9a-f]{7,40}\b", desc_str)), 3)
+        url_refs = min(len(re.findall(r"https?://", desc_str)), 3)
+        wi_evidences = rel_count + ext_evidence + hash_refs + url_refs
+
+        if wi_evidences > 0:
+            evidence_owner = assigned_name or closed_by or created_by
+            if _is_valid_member(evidence_owner):
+                m_ev = _get_or_create_member(evidence_owner)
+                if m_ev:
+                    m_ev["task_evidences_count"] += wi_evidences
 
         # Track historical activity across weeks for streak calculation based on actual event dates
         if is_closed_state:
@@ -607,6 +799,55 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     if m:
                         m["weekly_activity_history"][cr_sprint] = m["weekly_activity_history"].get(cr_sprint, 0) + 1
 
+        # Track Open, Stale, and Oldest Work Items for Assignee
+        if not is_closed_state and not wi.get("deleted") and not wi.get("is_deleted"):
+            created_dt = parse_iso_datetime(created_date_raw) if created_date_raw else None
+            age_days = max(0, (now - created_dt).days) if created_dt else 0
+
+            if _is_valid_member(assigned_name):
+                m_as = _get_or_create_member(assigned_name)
+                if m_as:
+                    m_as["open_tasks_assigned"] += 1
+                    if age_days > m_as["oldest_open_task_days"]:
+                        m_as["oldest_open_task_days"] = age_days
+                        m_as["oldest_open_task"] = {
+                            "id": wi.get("id"),
+                            "title": wi.get("title") or fields.get("System.Title") or f"#{wi.get('id')}",
+                            "type": wi_type.capitalize() or "Task",
+                            "state": state or "Active",
+                            "days_old": age_days,
+                            "created_date": created_date_str or "Unknown",
+                        }
+                    days_idle = 0
+                    if changed_date_raw:
+                        dt_ch = parse_iso_datetime(changed_date_raw)
+                        if dt_ch:
+                            days_idle = max(0, (now - dt_ch).days)
+                    else:
+                        days_idle = 30
+                    if days_idle >= 14:
+                        m_as["stale_tasks_count"] += 1
+                        stale_radar.append({
+                            "id": wi.get("id"),
+                            "title": wi.get("title") or fields.get("System.Title") or f"#{wi.get('id')}",
+                            "type": wi_type.capitalize() or "Task",
+                            "state": state or "Active",
+                            "assigned_to": assigned_name,
+                            "days_idle": days_idle,
+                            "last_changed": changed_date_str or "Unknown",
+                        })
+
+        # Track Task Activation in timeframe
+        activated_by = _clean_user_name(fields.get("Microsoft.VSTS.Common.ActivatedBy"))
+        activated_date_raw = fields.get("Microsoft.VSTS.Common.ActivatedDate") or ""
+        activated_date_str = str(activated_date_raw)[:10] if activated_date_raw else ""
+        if activated_date_str and (filter_start_str <= activated_date_str < filter_end_str or timeframe == "all_time"):
+            if _is_valid_member(activated_by):
+                m_act = _get_or_create_member(activated_by)
+                if m_act:
+                    m_act["state_changes_count"] += 1
+                    _track_activity_time(m_act, activated_date_raw, "state_change")
+
         # Evaluate Completed Work Items within timeframe
         if is_closed_state:
             # If ClosedDate is recorded, strictly check ClosedDate; otherwise fall back to ChangedDate
@@ -626,11 +867,27 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(effective_closer)
                     if m:
                         m["tasks_completed"] += 1
-                        _track_activity_time(m, effective_close_raw)
+                        m["tasks_cleaned"] += 1
+                        m["state_changes_count"] += 1
+                        _track_activity_time(m, effective_close_raw, "task_close")
                         if "bug" in wi_type or "defect" in wi_type or "problem" in wi_type:
                             m["bugs_resolved"] += 1
                         elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
                             m["stories_completed"] += 1
+
+                        # Task turnaround speed
+                        start_raw = activated_date_raw or created_date_raw
+                        if start_raw and effective_close_raw:
+                            try:
+                                dt_s = parse_iso_datetime(start_raw)
+                                dt_e = parse_iso_datetime(effective_close_raw)
+                                if dt_s and dt_e and dt_e >= dt_s:
+                                    t_hours = (dt_e - dt_s).total_seconds() / 3600.0
+                                    m["_task_durations"].append(t_hours)
+                                    if t_hours <= 24.0:
+                                        m["tasks_fast_closed"] += 1
+                            except Exception:
+                                pass
 
         # Evaluate Created Work Items within timeframe
         if created_date_str and filter_start_str and filter_end_str:
@@ -640,18 +897,97 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(effective_creator)
                     if m:
                         m["tasks_created"] += 1
-                        _track_activity_time(m, created_date_raw)
+                        _track_activity_time(m, created_date_raw, "task_create")
 
-    # 2. Process Pull Requests & Feature Branches
+    # 2. Process Recorded State Transition Events (Pushbacks, Reopenings & State Transitions)
+    for ev in all_state_events:
+        ev_date_raw = ev.get("recorded_at") or ""
+        ev_date_str = ev_date_raw[:10]
+        changer = _clean_user_name(ev.get("changed_by"))
+        is_pushback = bool(ev.get("is_pushback", 0))
+
+        if ev_date_str and (filter_start_str <= ev_date_str < filter_end_str or timeframe == "all_time"):
+            if _is_valid_member(changer):
+                m = _get_or_create_member(changer)
+                if m:
+                    m["state_changes_count"] += 1
+                    if is_pushback:
+                        m["pushbacks_count"] += 1
+                    else:
+                        m["tasks_cleaned"] += 1
+                    _track_activity_time(m, ev_date_raw, "state_change")
+
+    # 3. Process Pull Requests, Merges, Reviews & Approvals
     for pr in all_prs:
-        cb = _clean_user_name(pr.get("createdBy"))
-        clb = _clean_user_name(pr.get("closedBy"))
-        c_date_raw = pr.get("creationDate") or pr.get("creationDateStr") or ""
-        cl_date_raw = pr.get("closedDate") or pr.get("closedDateStr") or ""
-        c_date_str = c_date_raw[:10]
-        cl_date_str = cl_date_raw[:10]
-        status = str(pr.get("status") or pr.get("statusStr") or "").lower()
-        source_ref = str(pr.get("sourceRefName") or pr.get("source_branch") or "")
+        raw = pr
+        if isinstance(pr, dict) and "raw_json" in pr and isinstance(pr["raw_json"], str):
+            try:
+                raw = json.loads(pr["raw_json"])
+            except Exception:
+                raw = pr
+        if not isinstance(raw, dict):
+            raw = {}
+
+        cb = _clean_user_name(
+            raw.get("createdBy") or
+            raw.get("created_by") or
+            pr.get("created_by") or
+            pr.get("createdBy")
+        )
+
+        clb = _clean_user_name(
+            raw.get("closedBy") or
+            raw.get("closed_by") or
+            raw.get("autoCompleteSetBy") or
+            (raw.get("lastMergeCommit", {}).get("author", {}).get("name") if isinstance(raw.get("lastMergeCommit"), dict) else None) or
+            (raw.get("lastMergeCommit", {}).get("committer", {}).get("name") if isinstance(raw.get("lastMergeCommit"), dict) else None) or
+            pr.get("closed_by") or
+            pr.get("closedBy")
+        )
+
+        c_date_raw = (
+            raw.get("creationDate") or
+            raw.get("creationDateStr") or
+            raw.get("creation_date") or
+            raw.get("created_date") or
+            pr.get("creationDate") or
+            pr.get("creation_date") or
+            pr.get("created_date") or
+            ""
+        )
+        cl_date_raw = (
+            raw.get("closedDate") or
+            raw.get("closedDateStr") or
+            raw.get("closed_date") or
+            pr.get("closedDate") or
+            pr.get("closed_date") or
+            ""
+        )
+
+        if not cl_date_raw:
+            st_text = str(raw.get("statusStr") or raw.get("status_str") or pr.get("status_str") or "")
+            m_cl = re.search(r"\b(DON|COMPLETED|ABANDONED|CLOSED)\s+(\d{4}-\d{2}-\d{2})", st_text, re.I)
+            if m_cl:
+                cl_date_raw = m_cl.group(2)
+
+        c_date_str = str(c_date_raw)[:10] if c_date_raw else ""
+        cl_date_str = str(cl_date_raw)[:10] if cl_date_raw else ""
+
+        status = str(
+            raw.get("status") or
+            raw.get("statusStr") or
+            raw.get("norm_status") or
+            pr.get("status") or
+            pr.get("status_str") or
+            ""
+        ).lower()
+
+        is_completed = (
+            status in ("completed", "closed", "3", "don", "done") or
+            "don " in status or
+            "completed" in status or
+            bool(cl_date_str and status not in ("abandoned", "active", "open", "1", "2"))
+        )
 
         # Track weekly activity for streaks
         if cl_date_str:
@@ -669,31 +1005,86 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["weekly_activity_history"][pr_sprint] = m["weekly_activity_history"].get(pr_sprint, 0) + 1
 
         # Check PR creation timeframe (Feature branch started)
-        if c_date_str and filter_start_str <= c_date_str < filter_end_str:
+        if c_date_str and (filter_start_str <= c_date_str < filter_end_str or timeframe == "all_time"):
             if _is_valid_member(cb):
                 m = _get_or_create_member(cb)
                 if m:
                     m["prs_created"] += 1
                     m["branches_started"] += 1
                     m["commits_count"] += 1  # PR branch initiation commit
-                    _track_activity_time(m, c_date_raw)
+                    _track_activity_time(m, c_date_raw, "pr_create")
+
+        # Extract Reviewers & Approvers list
+        reviewers_list = raw.get("reviewers") or pr.get("reviewers") or []
+        if isinstance(reviewers_list, str):
+            try:
+                reviewers_list = json.loads(reviewers_list)
+            except Exception:
+                reviewers_list = []
+
+        approver_names = []
+        for rev in reviewers_list:
+            rev_name = _clean_user_name(rev)
+            vote = 0
+            if isinstance(rev, dict):
+                vote = rev.get("vote", 0) or 0
+                if rev.get("hasDeclined"):
+                    vote = -10
+            elif isinstance(rev, str):
+                vote = 10
+
+            if vote > 0 and _is_valid_member(rev_name):
+                approver_names.append(rev_name)
+
+            if _is_valid_member(rev_name) and rev_name != cb:
+                rev_date_raw = cl_date_raw or c_date_raw
+                rev_date_str = str(rev_date_raw)[:10] if rev_date_raw else ""
+
+                if rev_date_str:
+                    dt_rev = parse_iso_datetime(rev_date_str)
+                    if dt_rev:
+                        y_r, w_r, _ = dt_rev.isocalendar()
+                        rev_sprint = f"week-{str(y_r)[-2:]}{w_r:02d}"
+                        m_rev = _get_or_create_member(rev_name)
+                        if m_rev:
+                            m_rev["weekly_activity_history"][rev_sprint] = m_rev["weekly_activity_history"].get(rev_sprint, 0) + 1
+
+                in_tf = False
+                if rev_date_str:
+                    in_tf = (filter_start_str <= rev_date_str < filter_end_str or timeframe == "all_time")
+                else:
+                    in_tf = (timeframe == "all_time")
+
+                if in_tf:
+                    m_rev = _get_or_create_member(rev_name)
+                    if m_rev:
+                        m_rev["prs_reviewed"] += 1
+                        if vote > 0:
+                            m_rev["prs_approved"] += 1
+                        _track_activity_time(m_rev, rev_date_raw, "pr_review")
 
         # Check PR closed timeframe (Feature branch closed/merged)
-        if status in ("completed", "closed", "3") and cl_date_str and filter_start_str <= cl_date_str < filter_end_str:
-            closer = clb or cb
+        if is_completed and cl_date_str and (filter_start_str <= cl_date_str < filter_end_str or timeframe == "all_time"):
+            closer = clb
+            if not _is_valid_member(closer):
+                if approver_names:
+                    closer = approver_names[0]
+                elif _is_valid_member(cb):
+                    closer = cb
+
             if _is_valid_member(closer):
                 m = _get_or_create_member(closer)
                 if m:
                     m["prs_closed"] += 1
                     m["branches_closed"] += 1
                     m["commits_count"] += 1  # Merge commit
-                    _track_activity_time(m, cl_date_raw)
+                    _track_activity_time(m, cl_date_raw, "pr_merge")
 
             # Check PR turnaround speed
-            if pr.get("creationDate") and pr.get("closedDate"):
+            if c_date_raw and cl_date_raw:
                 try:
-                    dt_c = parse_iso_datetime(pr["creationDate"])
-                    dt_cl = parse_iso_datetime(pr["closedDate"])
+                    dt_c = parse_iso_datetime(c_date_raw)
+                    dt_cl = parse_iso_datetime(cl_date_raw)
                     if dt_c and dt_cl and dt_cl >= dt_c:
                         diff_hours = (dt_cl - dt_c).total_seconds() / 3600.0
                         if diff_hours <= 24.0:
@@ -708,27 +1099,20 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 except Exception:
                     pass
 
-        # Code Reviewers
-        if filter_start_str <= (cl_date_str or c_date_str) < filter_end_str:
-            for rev in pr.get("reviewers", []):
-                rev_name = _clean_user_name(rev)
-                vote = rev.get("vote", 0) if isinstance(rev, dict) else 0
-                if _is_valid_member(rev_name) and rev_name != cb and vote > 0:
-                    m = _get_or_create_member(rev_name)
-                    if m:
-                        m["prs_reviewed"] += 1
-                        _track_activity_time(m, cl_date_raw or c_date_raw)
-
-    # 3. Process Code Commits
+    # 3. Process Code Commits & Feature Branch Tips
+    processed_commit_ids = set()
     if all_commits:
         for c in all_commits:
+            c_id = c.get("commit_id") or c.get("commitId") or ""
+            if c_id:
+                processed_commit_ids.add(c_id)
             c_date_raw = c.get("committer_date") or c.get("author_date") or ""
             c_date_str = c_date_raw[:10]
             committer = _clean_user_name(c.get("committer_name") or c.get("author_name"))
 
             # Track weekly activity for streaks
             if c_date_str and _is_valid_member(committer):
-                dt = parse_iso_datetime(c_date_str)
+                dt = parse_iso_datetime(c_date_raw or c_date_str)
                 if dt:
                     y, w, _ = dt.isocalendar()
                     cm_sprint = f"week-{str(y)[-2:]}{w:02d}"
@@ -742,19 +1126,31 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(committer)
                     if m:
                         m["commits_count"] += 1
-                        _track_activity_time(m, c_date_raw)
-    else:
-        # Fallback to branch tips if full commits table is not populated
-        for br in all_branches:
-            b_date_raw = br.get("commit_date", "")
-            b_date = b_date_raw[:10]
-            committer = _clean_user_name(br.get("committer"))
-            if b_date and (filter_start_str <= b_date < filter_end_str or timeframe == "all_time"):
-                if _is_valid_member(committer):
-                    m = _get_or_create_member(committer)
-                    if m:
-                        m["commits_count"] += 1
-                        _track_activity_time(m, b_date_raw)
+                        _track_activity_time(m, c_date_raw, "commit")
+
+    # Process branch tips from all_branches that may not be in commits table yet
+    for br in all_branches:
+        b_cid = br.get("commit_id") or ""
+        if b_cid and b_cid in processed_commit_ids:
+            continue
+        b_date_raw = br.get("commit_date", "")
+        b_date = b_date_raw[:10]
+        committer = _clean_user_name(br.get("committer"))
+        if b_date and _is_valid_member(committer):
+            dt = parse_iso_datetime(b_date_raw or b_date)
+            if dt:
+                y, w, _ = dt.isocalendar()
+                br_sprint = f"week-{str(y)[-2:]}{w:02d}"
+                m = _get_or_create_member(committer)
+                if m:
+                    m["weekly_activity_history"][br_sprint] = m["weekly_activity_history"].get(br_sprint, 0) + 1
+
+        if b_date and (filter_start_str <= b_date < filter_end_str or timeframe == "all_time"):
+            if _is_valid_member(committer):
+                m = _get_or_create_member(committer)
+                if m:
+                    m["commits_count"] += 1
+                    _track_activity_time(m, b_date_raw, "commit")
 
     # 4. Process Tags
     for tag in all_tags:
@@ -768,7 +1164,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m["tags_pushed"] += 1
                     if not all_commits:
                         m["commits_count"] += 1
-                    _track_activity_time(m, t_date_raw)
+                    _track_activity_time(m, t_date_raw, "tag")
 
     # 5. Process CI Builds & Pipeline Executions
     for b in all_builds:
@@ -782,7 +1178,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m = _get_or_create_member(requester)
                 if m:
                     m["builds_total"] += 1
-                    _track_activity_time(m, build_date_raw)
+                    _track_activity_time(m, build_date_raw, "build")
                     if is_succ:
                         m["builds_succeeded"] += 1
                     elif is_fail:
@@ -816,6 +1212,11 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         # Calculate Average PR Turnaround
         if m["_pr_durations"]:
             m["avg_pr_hours"] = round(sum(m["_pr_durations"]) / len(m["_pr_durations"]), 1)
+
+        # Calculate Task Turnaround Metrics
+        if m["_task_durations"]:
+            m["avg_task_turnaround_hours"] = round(sum(m["_task_durations"]) / len(m["_task_durations"]), 1)
+            m["fastest_task_hours"] = round(min(m["_task_durations"]), 1)
 
         # Calculate Build Success Rate
         if m["builds_total"] > 0:
@@ -900,30 +1301,87 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             badges.append(BADGE_DEFINITIONS["zen_balancer"])
         if m["friday_afternoon_activities"] >= 2:
             badges.append(BADGE_DEFINITIONS["friday_hero"])
+        if m["tasks_cleaned"] >= 3 or m["state_changes_count"] >= 4:
+            badges.append(BADGE_DEFINITIONS["the_cleaner"])
+            m["is_cleaner"] = True
+        if m["pushbacks_count"] >= 1:
+            badges.append(BADGE_DEFINITIONS["the_decliner"])
+            m["is_decliner"] = True
+        if m["state_changes_count"] >= 5:
+            badges.append(BADGE_DEFINITIONS["state_mover"])
+        if m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 2:
+            badges.append(BADGE_DEFINITIONS["stale_sheriff"])
+        if m["task_evidences_count"] >= 5:
+            badges.append(BADGE_DEFINITIONS["evidence_master"])
+        if m["oldest_open_task_days"] >= 90:
+            badges.append(BADGE_DEFINITIONS["relic_keeper"])
+        if m["tasks_fast_closed"] >= 2 or (m["tasks_completed"] >= 2 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
+            badges.append(BADGE_DEFINITIONS["speedy_task_closer"])
+
+        # Determine Ignorer / Stasher persona
+        if m["stale_tasks_count"] >= 2 and m["state_changes_count"] == 0:
+            m["is_ignorer"] = True
+            m["time_stats"]["persona"] = "💤 Backlog Stasher"
+        elif m["pushbacks_count"] >= 2:
+            m["time_stats"]["persona"] = "🛡️ The Gatekeeper"
+        elif m["tasks_cleaned"] >= 4:
+            m["time_stats"]["persona"] = "🧹 The Cleaner"
 
         m["badges"] = badges
         m["badges_count"] = len(badges)
 
         # Composite Motivation Score Formula:
         # PRs closed * 15 + PRs created * 10 + Commits * 3 + Branches closed * 5 + Tasks completed * 8
-        # + Bugs resolved * 10 + PRs reviewed * 6 + Tags * 12 + Successful builds * 4
-        # + Badges * 5 + Streak * 4 - Delays * 3 - Failed builds * 2
-        score = (
+        # + Bugs resolved * 10 + PRs approved * 8 + PRs reviewed * 6 + Tags * 12 + Successful builds * 4
+        # + Tasks cleaned * 3 + Pushbacks * 4 + Fast closes * 4 + Task evidences * 2 + Badges * 5 + Streak * 4
+        # - Delays * 3 - Failed builds * 2 - Stale tasks * 2
+        pos_score = (
             m["prs_closed"] * 15
             + m["prs_created"] * 10
             + m["commits_count"] * 3
             + m["branches_closed"] * 5
             + m["tasks_completed"] * 8
             + m["bugs_resolved"] * 10
+            + m["prs_approved"] * 8
             + m["prs_reviewed"] * 6
             + m["tags_pushed"] * 12
             + m["builds_succeeded"] * 4
+            + m["tasks_cleaned"] * 3
+            + m["pushbacks_count"] * 4
+            + m["tasks_fast_closed"] * 4
+            + min(m["task_evidences_count"], 25) * 2
             + len(badges) * 5
             + m["current_streak_weeks"] * 4
-            - (m["total_delay_weeks"] * 3)
-            - (m["builds_failed"] * 2)
         )
-        m["score"] = max(0, score)
+        neg_score = (
+            (m["total_delay_weeks"] * 3)
+            + (m["builds_failed"] * 2)
+            + (min(m["stale_tasks_count"], 4) * 2)
+        )
+        has_current_activity = (
+            m["prs_closed"] > 0
+            or m["prs_created"] > 0
+            or m["commits_count"] > 0
+            or m["branches_started"] > 0
+            or m["branches_closed"] > 0
+            or m["tasks_completed"] > 0
+            or m["bugs_resolved"] > 0
+            or m["prs_reviewed"] > 0
+            or m["prs_approved"] > 0
+            or m["tags_pushed"] > 0
+            or m["builds_total"] > 0
+            or m["state_changes_count"] > 0
+            or m["pushbacks_count"] > 0
+            or m["tasks_cleaned"] > 0
+            or m["tasks_fast_closed"] > 0
+            or m["task_evidences_count"] > 0
+            or m["current_streak_weeks"] > 0
+        )
+        raw_final = pos_score - neg_score
+        if has_current_activity:
+            m["score"] = max(1, raw_final)
+        else:
+            m["score"] = max(0, raw_final)
 
     # Award Sprint MVP badge to the top scorer
     sorted_by_score = sorted(member_list, key=lambda x: x["score"], reverse=True)
@@ -969,13 +1427,20 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     leaderboard_tasks_completed = _make_leaderboard("tasks_completed", "Task Crusher (Tasks Done)", "🔨", "tasks")
     leaderboard_bugs_resolved = _make_leaderboard("bugs_resolved", "Bug Hunter (Defects Fixed)", "🛡️", "bugs")
     leaderboard_prs_reviewed = _make_leaderboard("prs_reviewed", "Review Rockstar (Code Reviews)", "🔍", "reviews")
+    leaderboard_prs_approved = _make_leaderboard("prs_approved", "PR Accepter (PRs Approved)", "✅", "approved")
     leaderboard_tags = _make_leaderboard("tags_pushed", "Release Titan (Tags Pushed)", "🏷️", "tags")
     leaderboard_builds = _make_leaderboard("builds_succeeded", "Build Master (Successful Builds)", "🏗️", "builds")
     leaderboard_streaks = _make_leaderboard("current_streak_weeks", "Streak Champion (Weekly Streak)", "🔥", "wks")
-    leaderboard_night_owls = _make_leaderboard("night_activities", "Night Owls (9PM – 5AM)", "🦉", "actions")
-    leaderboard_early_birds = _make_leaderboard("early_bird_activities", "Early Birds (5AM – 9AM)", "🌅", "actions")
-    leaderboard_weekend_warriors = _make_leaderboard("weekend_activities", "The Week-enders (Sat/Sun)", "⚡", "actions")
-    leaderboard_daytime = _make_leaderboard("daytime_activities", "Daytime Champions (9AM – 6PM)", "☀️", "actions")
+    leaderboard_cleaners = _make_leaderboard("tasks_cleaned", "The Cleaner (State Grooming)", "🧹", "groomed")
+    leaderboard_decliners = _make_leaderboard("pushbacks_count", "The Gatekeeper (Reopened / Pushed Back)", "🛡️", "pushbacks")
+    leaderboard_state_movers = _make_leaderboard("state_changes_count", "State Drivers (Transitions)", "🚀", "changes")
+    leaderboard_oldest_task = _make_leaderboard("oldest_open_task_days", "Ancient Relic Keeper (Oldest Open Task)", "⏳", "days")
+    leaderboard_fast_closer = _make_leaderboard("tasks_fast_closed", "Lightning Finisher (Tasks Closed <24h)", "⚡", "fast tasks")
+    leaderboard_evidences = _make_leaderboard("task_evidences_count", "Traceability Champion (Evidences & Links)", "🧾", "evidences")
+    leaderboard_night_owls = _make_leaderboard("night_activities", "Night Owls (9PM – 5AM)", "🦉", "night acts")
+    leaderboard_early_birds = _make_leaderboard("early_bird_activities", "Early Birds (5AM – 9AM)", "🌅", "early acts")
+    leaderboard_weekend_warriors = _make_leaderboard("weekend_activities", "The Week-enders (Sat/Sun)", "⚡", "wknd acts")
+    leaderboard_daytime = _make_leaderboard("daytime_activities", "Daytime Champions (9AM – 6PM)", "☀️", "core acts")
     leaderboard_overall = _make_leaderboard("score", "Sprint MVP (Overall Hall of Fame)", "👑", "pts")
 
     # Team Overview Summary
@@ -987,30 +1452,111 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     team_total_tasks_completed = sum(m["tasks_completed"] for m in member_list)
     team_total_bugs_resolved = sum(m["bugs_resolved"] for m in member_list)
     team_total_reviews = sum(m["prs_reviewed"] for m in member_list)
+    team_total_approvals = sum(m["prs_approved"] for m in member_list)
     team_total_tags = sum(m["tags_pushed"] for m in member_list)
     team_total_builds = sum(m["builds_total"] for m in member_list)
     team_total_builds_succeeded = sum(m["builds_succeeded"] for m in member_list)
     team_total_builds_failed = sum(m["builds_failed"] for m in member_list)
+    team_total_state_changes = sum(m["state_changes_count"] for m in member_list)
+    team_total_pushbacks = sum(m["pushbacks_count"] for m in member_list)
+    team_total_stale_tasks = sum(m["stale_tasks_count"] for m in member_list)
+    team_total_fast_closed = sum(m["tasks_fast_closed"] for m in member_list)
+    team_total_evidences = sum(m["task_evidences_count"] for m in member_list)
+    team_oldest_task_days = max((m["oldest_open_task_days"] for m in member_list), default=0)
     team_build_success_rate = round((team_total_builds_succeeded / team_total_builds * 100.0), 1) if team_total_builds > 0 else 100.0
     active_contributors_count = sum(1 for m in member_list if m["score"] > 0)
 
     # Compute Team Time Analytics
+    def _format_breakdown_label(commits, prs, tasks, builds):
+        parts = []
+        if commits > 0:
+            parts.append(f"{commits} commit{'s' if commits > 1 else ''}")
+        if prs > 0:
+            parts.append(f"{prs} PR{'s' if prs > 1 else ''}")
+        if tasks > 0:
+            parts.append(f"{tasks} task{'s' if tasks > 1 else ''}")
+        if builds > 0:
+            parts.append(f"{builds} build{'s' if builds > 1 else ''}")
+        return " • ".join(parts) if parts else "0 actions"
+
     team_tot_samples = team_time_agg["total_samples"]
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    day_shorts = ["M", "T", "W", "T", "F", "S", "S"]
     peak_h_team = max(range(24), key=lambda h: team_time_agg["hourly_distribution"][h]) if team_tot_samples > 0 else 14
     peak_d_idx = max(range(7), key=lambda d: team_time_agg["daily_distribution"][d]) if team_tot_samples > 0 else 2
     peak_d_team = day_names[peak_d_idx]
+
+    hourly_details = []
+    for h in range(24):
+        tot = team_time_agg["hourly_distribution"][h]
+        c = team_time_agg["hourly_commits"][h]
+        p = team_time_agg["hourly_prs"][h]
+        t = team_time_agg["hourly_tasks"][h]
+        b = team_time_agg["hourly_builds"][h]
+        hourly_details.append({
+            "hour": h,
+            "label": f"{h:02d}:00",
+            "count": tot,
+            "commits": c,
+            "prs": p,
+            "tasks": t,
+            "builds": b,
+            "breakdown": _format_breakdown_label(c, p, t, b)
+        })
+
+    daily_details = []
+    for d in range(7):
+        tot = team_time_agg["daily_distribution"][d]
+        c = team_time_agg["daily_commits"][d]
+        p = team_time_agg["daily_prs"][d]
+        t = team_time_agg["daily_tasks"][d]
+        b = team_time_agg["daily_builds"][d]
+        daily_details.append({
+            "day": day_names[d][:3],
+            "full_day": day_names[d],
+            "short": day_shorts[d],
+            "count": tot,
+            "commits": c,
+            "prs": p,
+            "tasks": t,
+            "builds": b,
+            "breakdown": _format_breakdown_label(c, p, t, b)
+        })
 
     team_time_analytics = {
         "total_samples": team_tot_samples,
         "daytime_count": team_time_agg["daytime_count"],
         "daytime_pct": round((team_time_agg["daytime_count"] / team_tot_samples * 100.0), 1) if team_tot_samples > 0 else 0.0,
+        "daytime_breakdown": _format_breakdown_label(
+            team_time_agg["daytime_breakdown"]["commits"],
+            team_time_agg["daytime_breakdown"]["prs"],
+            team_time_agg["daytime_breakdown"]["tasks"],
+            team_time_agg["daytime_breakdown"]["builds"]
+        ),
         "night_count": team_time_agg["night_count"],
         "night_pct": round((team_time_agg["night_count"] / team_tot_samples * 100.0), 1) if team_tot_samples > 0 else 0.0,
+        "night_breakdown": _format_breakdown_label(
+            team_time_agg["night_breakdown"]["commits"],
+            team_time_agg["night_breakdown"]["prs"],
+            team_time_agg["night_breakdown"]["tasks"],
+            team_time_agg["night_breakdown"]["builds"]
+        ),
         "weekend_count": team_time_agg["weekend_count"],
         "weekend_pct": round((team_time_agg["weekend_count"] / team_tot_samples * 100.0), 1) if team_tot_samples > 0 else 0.0,
+        "weekend_breakdown": _format_breakdown_label(
+            team_time_agg["weekend_breakdown"]["commits"],
+            team_time_agg["weekend_breakdown"]["prs"],
+            team_time_agg["weekend_breakdown"]["tasks"],
+            team_time_agg["weekend_breakdown"]["builds"]
+        ),
         "early_bird_count": team_time_agg["early_bird_count"],
         "early_bird_pct": round((team_time_agg["early_bird_count"] / team_tot_samples * 100.0), 1) if team_tot_samples > 0 else 0.0,
+        "early_bird_breakdown": _format_breakdown_label(
+            team_time_agg["early_bird_breakdown"]["commits"],
+            team_time_agg["early_bird_breakdown"]["prs"],
+            team_time_agg["early_bird_breakdown"]["tasks"],
+            team_time_agg["early_bird_breakdown"]["builds"]
+        ),
         "evening_count": team_time_agg["evening_count"],
         "evening_pct": round((team_time_agg["evening_count"] / team_tot_samples * 100.0), 1) if team_tot_samples > 0 else 0.0,
         "friday_pm_count": team_time_agg["friday_pm_count"],
@@ -1018,15 +1564,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         "peak_hour_label": f"{peak_h_team:02d}:00",
         "peak_day": peak_d_team,
         "hourly_distribution": team_time_agg["hourly_distribution"],
-        "daily_distribution": [
-            {"day": "Mon", "short": "M", "count": team_time_agg["daily_distribution"][0]},
-            {"day": "Tue", "short": "T", "count": team_time_agg["daily_distribution"][1]},
-            {"day": "Wed", "short": "W", "count": team_time_agg["daily_distribution"][2]},
-            {"day": "Thu", "short": "T", "count": team_time_agg["daily_distribution"][3]},
-            {"day": "Fri", "short": "F", "count": team_time_agg["daily_distribution"][4]},
-            {"day": "Sat", "short": "S", "count": team_time_agg["daily_distribution"][5]},
-            {"day": "Sun", "short": "S", "count": team_time_agg["daily_distribution"][6]},
-        ]
+        "hourly_details": hourly_details,
+        "daily_distribution": daily_details,
     }
 
     # Dynamic Motivational Quotes / Pulse
@@ -1043,6 +1582,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     # Clean member list for JSON serialization (remove internal helpers)
     for m in member_list:
         m.pop("_pr_durations", None)
+        m.pop("_task_durations", None)
         # Format recent highlights
         highlights = []
         if m["prs_closed"] > 0:
@@ -1053,6 +1593,16 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             highlights.append(f"{m['branches_started']} branch{'es' if m['branches_started'] > 1 else ''}")
         if m["tasks_completed"] > 0:
             highlights.append(f"Completed {m['tasks_completed']} item{'s' if m['tasks_completed'] > 1 else ''}")
+        if m["tasks_cleaned"] > 0:
+            highlights.append(f"Groomed {m['tasks_cleaned']} states 🧹")
+        if m["pushbacks_count"] > 0:
+            highlights.append(f"Pushed back {m['pushbacks_count']} items 🛡️")
+        if m["tasks_fast_closed"] > 0:
+            highlights.append(f"{m['tasks_fast_closed']} fast closes (<24h) ⚡")
+        if m["task_evidences_count"] >= 3:
+            highlights.append(f"{m['task_evidences_count']} evidences linked 🧾")
+        if m["oldest_open_task_days"] >= 60:
+            highlights.append(f"Open item {m['oldest_open_task_days']}d old ⏳")
         if m["bugs_resolved"] > 0:
             highlights.append(f"Fixed {m['bugs_resolved']} bug{'s' if m['bugs_resolved'] > 1 else ''}")
         if m["builds_succeeded"] > 0:
@@ -1061,6 +1611,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             highlights.append(f"{m['tags_pushed']} tags")
         if m["prs_reviewed"] > 0:
             highlights.append(f"Reviewed {m['prs_reviewed']} PR{'s' if m['prs_reviewed'] > 1 else ''}")
+        if m["stale_tasks_count"] > 0:
+            highlights.append(f"⚠️ {m['stale_tasks_count']} stale items")
         if m["night_activities"] >= 3:
             highlights.append(f"🦉 Night Owl ({m['night_activities']} late acts)")
         if m["weekend_activities"] >= 2:
@@ -1095,20 +1647,41 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "branches_closed": team_total_branches_closed,
             "tasks_completed": team_total_tasks_completed,
             "bugs_resolved": team_total_bugs_resolved,
+            "prs_reviewed": team_total_reviews,
+            "prs_approved": team_total_approvals,
             "reviews_completed": team_total_reviews,
+            "approvals_completed": team_total_approvals,
             "tags_pushed": team_total_tags,
             "builds_total": team_total_builds,
             "builds_succeeded": team_total_builds_succeeded,
             "builds_failed": team_total_builds_failed,
             "build_success_rate": team_build_success_rate,
+            "total_state_changes": team_total_state_changes,
+            "total_pushbacks": team_total_pushbacks,
+            "total_stale_tasks": team_total_stale_tasks,
+            "tasks_fast_closed": team_total_fast_closed,
+            "task_evidences_count": team_total_evidences,
+            "oldest_open_task_days": team_oldest_task_days,
             "active_contributors": active_contributors_count,
             "total_points": sum(m["score"] for m in member_list),
             "time_analytics": team_time_analytics,
+            "cleaner_leader": leaderboard_cleaners.get("leader"),
+            "decliner_leader": leaderboard_decliners.get("leader"),
+            "fast_closer_leader": leaderboard_fast_closer.get("leader"),
+            "oldest_task_leader": leaderboard_oldest_task.get("leader"),
+            "evidences_leader": leaderboard_evidences.get("leader"),
         },
+        "stale_radar": sorted(stale_radar, key=lambda x: x["days_idle"], reverse=True)[:25],
         "podium": podium,
         "members": sorted_all,
         "leaderboards": {
             "overall": leaderboard_overall,
+            "cleaners": leaderboard_cleaners,
+            "decliners": leaderboard_decliners,
+            "fast_closer": leaderboard_fast_closer,
+            "oldest_task": leaderboard_oldest_task,
+            "evidences": leaderboard_evidences,
+            "state_movers": leaderboard_state_movers,
             "prs_closed": leaderboard_prs_closed,
             "prs_created": leaderboard_prs_created,
             "commits": leaderboard_commits,
@@ -1117,6 +1690,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "tasks_completed": leaderboard_tasks_completed,
             "bugs_resolved": leaderboard_bugs_resolved,
             "prs_reviewed": leaderboard_prs_reviewed,
+            "prs_approved": leaderboard_prs_approved,
             "tags": leaderboard_tags,
             "builds": leaderboard_builds,
             "streaks": leaderboard_streaks,

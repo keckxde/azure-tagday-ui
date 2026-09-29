@@ -1,7 +1,7 @@
 # -*- coding: UTF-8 -*-
 import logging, re, os, sys, fnmatch
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 log = logging.getLogger('azure')
 
@@ -190,7 +190,7 @@ def parse_iso_datetime(date_str):
     Strips timezones and milliseconds for naive UTC comparison.
 
     Args:
-        date_str (str/datetime): The input date string or datetime object.
+        date_str (str/datetime/date): The input date string or datetime object.
 
     Returns:
         datetime: Naive datetime object or None if parsing fails.
@@ -199,18 +199,23 @@ def parse_iso_datetime(date_str):
         return None
     if isinstance(date_str, datetime):
         return date_str
+    if isinstance(date_str, date):
+        return datetime.combine(date_str, datetime.min.time())
     try:
         # Normalize the string: remove Z, replace T with space, remove ms if any
-        s = date_str.replace("Z", "").replace("T", " ")
+        s = str(date_str).replace("Z", "").replace("T", " ").strip()
         if "." in s:
             s = s.split(".")[0]
         # Ignore timezone offset for naive comparison in UTC
         if "+" in s:
             s = s.split("+")[0]
-        return datetime.strptime(s.strip(), "%Y-%m-%d %H:%M:%S")
+        s = s.strip()
+        if len(s) == 10 and "-" in s:
+            return datetime.strptime(s, "%Y-%m-%d")
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
     except Exception:
         try:
-            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return datetime.fromisoformat(str(date_str).replace("Z", ""))
         except Exception:
             return None
 

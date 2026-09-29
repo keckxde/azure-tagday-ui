@@ -20,6 +20,7 @@ Item {
     readonly property var leaderboards: motivationData && motivationData.leaderboards ? motivationData.leaderboards : {}
     readonly property var membersList: motivationData && motivationData.members ? motivationData.members : []
     readonly property var allBadgesList: motivationData && motivationData.all_badges ? motivationData.all_badges : []
+    readonly property var staleRadarList: motivationData && motivationData.stale_radar ? motivationData.stale_radar : []
 
     function setTimeframe(tf, sprintName) {
         root.selectedTimeframe = tf;
@@ -339,7 +340,7 @@ Item {
             // ==========================================
             GridLayout {
                 Layout.fillWidth: true
-                columns: width > 1200 ? 4 : (width > 800 ? 2 : 1)
+                columns: width > 1200 ? 5 : (width > 800 ? 3 : 1)
                 columnSpacing: 12
                 rowSpacing: 12
 
@@ -348,6 +349,7 @@ Item {
                         { label: "Total Points", value: (teamSummary ? (teamSummary.total_points || 0) : 0) + " pts", icon: "🌟", color: "#ffd700", bg: "#2a2200", tip: "Composite motivation and achievement score" },
                         { label: "Code Commits", value: (teamSummary ? (teamSummary.commits_count || 0) : 0) + " commits", icon: "💻", color: "#7ee787", bg: "#122a18", tip: "Total code commits pushed to repositories" },
                         { label: "PRs Merged / Open", value: (teamSummary ? (teamSummary.prs_closed || 0) : 0) + " / " + (teamSummary ? (teamSummary.prs_created || 0) : 0), icon: "🏁", color: "#3fb950", bg: "#162b20", tip: "Pull requests closed / merged vs opened" },
+                        { label: "PR Reviews & Approvals", value: (teamSummary ? (teamSummary.prs_reviewed || 0) : 0) + " rev • " + (teamSummary ? (teamSummary.prs_approved || 0) : 0) + " app", icon: "🔍", color: "#39c5cf", bg: "#0d2d30", tip: "Peer PR reviews conducted and approvals/acceptances" },
                         { label: "Feature Branches", value: (teamSummary ? (teamSummary.branches_closed || 0) : 0) + " / " + (teamSummary ? (teamSummary.branches_started || 0) : 0), icon: "🌳", color: "#79c0ff", bg: "#16243b", tip: "Feature branches merged vs started" },
                         { label: "Tasks Done", value: (teamSummary ? (teamSummary.tasks_completed || 0) : 0) + " (" + (teamSummary ? (teamSummary.bugs_resolved || 0) : 0) + " bugs)", icon: "🔨", color: "#a371f7", bg: "#271052", tip: "Completed work items & resolved bugs" },
                         { label: "Release Tags", value: (teamSummary ? (teamSummary.tags_pushed || 0) : 0) + " tagged", icon: "🏷️", color: "#d2a8ff", bg: "#2c1b4d", tip: "Production and sprint milestone release tags" },
@@ -501,9 +503,9 @@ Item {
                                             Layout.fillWidth: true
                                         }
                                         Text {
-                                            text: (modelData.member.prs_closed || 0) + " PRs merged • " + (modelData.member.commits_count || 0) + " commits • " + (modelData.member.tasks_completed || 0) + " tasks"
+                                            text: (modelData.member.prs_closed || 0) + " PRs merged • " + (modelData.member.prs_reviewed || 0) + " reviews (" + (modelData.member.prs_approved || 0) + " approved) • " + (modelData.member.commits_count || 0) + " commits"
                                             font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
+                                            font.pixelSize: 10
                                             color: "#8b949e"
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
@@ -600,6 +602,8 @@ Item {
                 border.color: "#30363d"
                 border.width: 1
 
+                property string timelineFilter: "all"
+
                 ColumnLayout {
                     id: rhythmCol
                     anchors.fill: parent
@@ -636,7 +640,7 @@ Item {
                                 color: "#f0f6fc"
                             }
                             Text {
-                                text: "Temporal breakdown of commits, PRs, work items, and builds across the 24-hour day and 7-day week."
+                                text: "Precise temporal breakdown of commits, PRs, work items, and builds across the 24-hour day and 7-day week."
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#8b949e"
@@ -679,7 +683,8 @@ Item {
                                     badge: "☀️ Core Work",
                                     hours: "09:00 – 18:00 (Mon-Fri)",
                                     pct: timeAnalytics ? (timeAnalytics.daytime_pct + "%") : "0%",
-                                    count: timeAnalytics ? (timeAnalytics.daytime_count + " acts") : "0 acts",
+                                    count: timeAnalytics ? (timeAnalytics.daytime_count + " events") : "0 events",
+                                    breakdown: timeAnalytics && timeAnalytics.daytime_breakdown ? timeAnalytics.daytime_breakdown : "No daytime events",
                                     color: "#3fb950",
                                     bg: "#102a18"
                                 },
@@ -688,7 +693,8 @@ Item {
                                     badge: "🦉 Late Night",
                                     hours: "21:00 – 05:00",
                                     pct: timeAnalytics ? (timeAnalytics.night_pct + "%") : "0%",
-                                    count: timeAnalytics ? (timeAnalytics.night_count + " acts") : "0 acts",
+                                    count: timeAnalytics ? (timeAnalytics.night_count + " events") : "0 events",
+                                    breakdown: timeAnalytics && timeAnalytics.night_breakdown ? timeAnalytics.night_breakdown : "No late night events",
                                     color: "#a371f7",
                                     bg: "#271052"
                                 },
@@ -697,7 +703,8 @@ Item {
                                     badge: "🌅 Sunrise Surge",
                                     hours: "05:00 – 09:00 (Mon-Fri)",
                                     pct: timeAnalytics ? (timeAnalytics.early_bird_pct + "%") : "0%",
-                                    count: timeAnalytics ? (timeAnalytics.early_bird_count + " acts") : "0 acts",
+                                    count: timeAnalytics ? (timeAnalytics.early_bird_count + " events") : "0 events",
+                                    breakdown: timeAnalytics && timeAnalytics.early_bird_breakdown ? timeAnalytics.early_bird_breakdown : "No early bird events",
                                     color: "#f0883e",
                                     bg: "#381a08"
                                 },
@@ -706,7 +713,8 @@ Item {
                                     badge: "⚡ Weekend Warriors",
                                     hours: "Saturday & Sunday",
                                     pct: timeAnalytics ? (timeAnalytics.weekend_pct + "%") : "0%",
-                                    count: timeAnalytics ? (timeAnalytics.weekend_count + " acts") : "0 acts",
+                                    count: timeAnalytics ? (timeAnalytics.weekend_count + " events") : "0 events",
+                                    breakdown: timeAnalytics && timeAnalytics.weekend_breakdown ? timeAnalytics.weekend_breakdown : "No weekend events",
                                     color: "#d29922",
                                     bg: "#382900"
                                 }
@@ -714,7 +722,7 @@ Item {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                implicitHeight: 68
+                                implicitHeight: 76
                                 radius: 8
                                 color: "#0d1117"
                                 border.color: modelData.color
@@ -755,7 +763,7 @@ Item {
                                             Text {
                                                 text: modelData.pct
                                                 font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 14
+                                                font.pixelSize: 13
                                                 font.weight: Font.Bold
                                                 color: modelData.color
                                             }
@@ -776,10 +784,69 @@ Item {
                                                 color: "#c9d1d9"
                                             }
                                         }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.breakdown
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            color: "#79c0ff"
+                                            elide: Text.ElideRight
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
+
+                    // Activity Type Filter Pills
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Timeline Filter:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+
+                        Repeater {
+                            model: [
+                                { id: "all", label: "✨ All Activities" },
+                                { id: "commits", label: "💻 Commits" },
+                                { id: "prs", label: "🔀 Pull Requests" },
+                                { id: "tasks", label: "🔨 Tasks & State" },
+                                { id: "builds", label: "🏗️ CI Builds" }
+                            ]
+
+                            Rectangle {
+                                implicitHeight: 24
+                                implicitWidth: pillTxt.implicitWidth + 18
+                                radius: 12
+                                color: rhythmCol.parent.timelineFilter === modelData.id ? "#388bfd33" : "#21262d"
+                                border.color: rhythmCol.parent.timelineFilter === modelData.id ? "#58a6ff" : "#30363d"
+                                border.width: 1
+
+                                Text {
+                                    id: pillTxt
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    font.weight: rhythmCol.parent.timelineFilter === modelData.id ? Font.Bold : Font.Normal
+                                    color: rhythmCol.parent.timelineFilter === modelData.id ? "#58a6ff" : "#8b949e"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: rhythmCol.parent.timelineFilter = modelData.id
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
                     }
 
                     // 24-Hour & 7-Day Visual Matrix Charts
@@ -791,7 +858,7 @@ Item {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredWidth: 60
-                            implicitHeight: 145
+                            implicitHeight: 155
                             radius: 8
                             color: "#0d1117"
                             border.color: "#21262d"
@@ -805,7 +872,7 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Text {
-                                        text: "⏰ 24-Hour Hourly Timeline (00h – 23h)"
+                                        text: "⏰ 24-Hour Activity Timeline"
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 12
                                         font.weight: Font.Bold
@@ -827,23 +894,50 @@ Item {
                                     spacing: 3
 
                                     Repeater {
-                                        model: (timeAnalytics && timeAnalytics.hourly_distribution) ? timeAnalytics.hourly_distribution : 24
+                                        model: (timeAnalytics && timeAnalytics.hourly_details) ? timeAnalytics.hourly_details : 24
 
                                         Rectangle {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             color: "transparent"
 
-                                            property int val: (timeAnalytics && timeAnalytics.hourly_distribution) ? timeAnalytics.hourly_distribution[index] : 0
+                                            property var detail: (timeAnalytics && timeAnalytics.hourly_details && timeAnalytics.hourly_details[index]) ? timeAnalytics.hourly_details[index] : null
+                                            property string curFilter: rhythmCol.parent.timelineFilter
+                                            property int val: {
+                                                if (!detail) {
+                                                    return (timeAnalytics && timeAnalytics.hourly_distribution) ? timeAnalytics.hourly_distribution[index] : 0;
+                                                }
+                                                if (curFilter === "commits") return detail.commits || 0;
+                                                if (curFilter === "prs") return detail.prs || 0;
+                                                if (curFilter === "tasks") return detail.tasks || 0;
+                                                if (curFilter === "builds") return detail.builds || 0;
+                                                return detail.count || 0;
+                                            }
                                             property int maxVal: {
-                                                if (!timeAnalytics || !timeAnalytics.hourly_distribution) return 1;
+                                                if (!timeAnalytics) return 1;
                                                 var m = 1;
-                                                for (var i = 0; i < timeAnalytics.hourly_distribution.length; i++) {
-                                                    if (timeAnalytics.hourly_distribution[i] > m) m = timeAnalytics.hourly_distribution[i];
+                                                if (timeAnalytics.hourly_details) {
+                                                    for (var i = 0; i < timeAnalytics.hourly_details.length; i++) {
+                                                        var d = timeAnalytics.hourly_details[i];
+                                                        var v = d.count;
+                                                        if (curFilter === "commits") v = d.commits;
+                                                        else if (curFilter === "prs") v = d.prs;
+                                                        else if (curFilter === "tasks") v = d.tasks;
+                                                        else if (curFilter === "builds") v = d.builds;
+                                                        if (v > m) m = v;
+                                                    }
+                                                } else if (timeAnalytics.hourly_distribution) {
+                                                    for (var j = 0; j < timeAnalytics.hourly_distribution.length; j++) {
+                                                        if (timeAnalytics.hourly_distribution[j] > m) m = timeAnalytics.hourly_distribution[j];
+                                                    }
                                                 }
                                                 return m;
                                             }
                                             property color barColor: {
+                                                if (curFilter === "commits") return "#58a6ff";
+                                                if (curFilter === "prs") return "#bc8cff";
+                                                if (curFilter === "tasks") return "#3fb950";
+                                                if (curFilter === "builds") return "#f0883e";
                                                 if (index < 5 || index >= 21) return "#a371f7"; // Night
                                                 if (index >= 5 && index < 9) return "#f0883e";  // Early
                                                 if (index >= 9 && index < 18) return "#3fb950"; // Day
@@ -858,11 +952,18 @@ Item {
                                                 height: Math.max(4, Math.round((parent.val / parent.maxVal) * (parent.height - 4)))
                                                 radius: 2
                                                 color: parent.barColor
-                                                opacity: hMa.containsMouse ? 1.0 : 0.75
+                                                opacity: hMa.containsMouse ? 1.0 : (parent.val > 0 ? 0.85 : 0.25)
                                             }
 
                                             ToolTip.visible: hMa.containsMouse
-                                            ToolTip.text: (index < 10 ? "0" : "") + index + ":00 — " + parent.val + " actions (" + (index < 5 || index >= 21 ? "Night" : (index < 9 ? "Early" : (index < 18 ? "Daytime" : "Evening"))) + ")"
+                                            ToolTip.text: {
+                                                var timeStr = (index < 10 ? "0" : "") + index + ":00";
+                                                var rhythmStr = (index < 5 || index >= 21 ? "Night" : (index < 9 ? "Early" : (index < 18 ? "Daytime" : "Evening")));
+                                                if (detail && detail.breakdown) {
+                                                    return timeStr + " (" + rhythmStr + ") — " + (detail.count || 0) + " total\n" + detail.breakdown;
+                                                }
+                                                return timeStr + " (" + rhythmStr + ") — " + parent.val + " events";
+                                            }
                                             ToolTip.delay: 100
 
                                             MouseArea {
@@ -894,7 +995,7 @@ Item {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredWidth: 40
-                            implicitHeight: 145
+                            implicitHeight: 155
                             radius: 8
                             color: "#0d1117"
                             border.color: "#21262d"
@@ -930,13 +1031,13 @@ Item {
 
                                     Repeater {
                                         model: timeAnalytics && timeAnalytics.daily_distribution ? timeAnalytics.daily_distribution : [
-                                            {day: "Mon", short: "M", count: 0},
-                                            {day: "Tue", short: "T", count: 0},
-                                            {day: "Wed", short: "W", count: 0},
-                                            {day: "Thu", short: "T", count: 0},
-                                            {day: "Fri", short: "F", count: 0},
-                                            {day: "Sat", short: "S", count: 0},
-                                            {day: "Sun", short: "S", count: 0}
+                                            {day: "Mon", full_day: "Monday", short: "M", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Tue", full_day: "Tuesday", short: "T", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Wed", full_day: "Wednesday", short: "W", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Thu", full_day: "Thursday", short: "T", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Fri", full_day: "Friday", short: "F", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Sat", full_day: "Saturday", short: "S", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"},
+                                            {day: "Sun", full_day: "Sunday", short: "S", count: 0, commits: 0, prs: 0, tasks: 0, builds: 0, breakdown: "No activity"}
                                         ]
 
                                         ColumnLayout {
@@ -944,12 +1045,25 @@ Item {
                                             Layout.fillHeight: true
                                             spacing: 4
 
-                                            property int dayVal: modelData.count || 0
+                                            property string curFilter: rhythmCol.parent.timelineFilter
+                                            property int dayVal: {
+                                                if (curFilter === "commits") return modelData.commits || 0;
+                                                if (curFilter === "prs") return modelData.prs || 0;
+                                                if (curFilter === "tasks") return modelData.tasks || 0;
+                                                if (curFilter === "builds") return modelData.builds || 0;
+                                                return modelData.count || 0;
+                                            }
                                             property int maxDayVal: {
                                                 if (!timeAnalytics || !timeAnalytics.daily_distribution) return 1;
                                                 var m = 1;
                                                 for (var i = 0; i < timeAnalytics.daily_distribution.length; i++) {
-                                                    if (timeAnalytics.daily_distribution[i].count > m) m = timeAnalytics.daily_distribution[i].count;
+                                                    var d = timeAnalytics.daily_distribution[i];
+                                                    var v = d.count;
+                                                    if (curFilter === "commits") v = d.commits;
+                                                    else if (curFilter === "prs") v = d.prs;
+                                                    else if (curFilter === "tasks") v = d.tasks;
+                                                    else if (curFilter === "builds") v = d.builds;
+                                                    if (v > m) m = v;
                                                 }
                                                 return m;
                                             }
@@ -966,12 +1080,26 @@ Item {
                                                     anchors.right: parent.right
                                                     height: Math.max(4, Math.round((parent.parent.dayVal / parent.parent.maxDayVal) * (parent.height - 4)))
                                                     radius: 3
-                                                    color: parent.parent.isWknd ? "#d29922" : (timeAnalytics && modelData.day === timeAnalytics.peak_day ? "#58a6ff" : "#238636")
-                                                    opacity: dMa.containsMouse ? 1.0 : 0.8
+                                                    color: {
+                                                        if (curFilter === "commits") return "#58a6ff";
+                                                        if (curFilter === "prs") return "#bc8cff";
+                                                        if (curFilter === "tasks") return "#3fb950";
+                                                        if (curFilter === "builds") return "#f0883e";
+                                                        if (parent.parent.isWknd) return "#d29922";
+                                                        return (timeAnalytics && modelData.day === timeAnalytics.peak_day) ? "#58a6ff" : "#238636";
+                                                    }
+                                                    opacity: dMa.containsMouse ? 1.0 : (parent.parent.dayVal > 0 ? 0.85 : 0.3)
                                                 }
 
                                                 ToolTip.visible: dMa.containsMouse
-                                                ToolTip.text: modelData.day + ": " + parent.parent.dayVal + " actions" + (parent.parent.isWknd ? " (Weekend)" : "")
+                                                ToolTip.text: {
+                                                    var dayName = modelData.full_day || modelData.day;
+                                                    var totalStr = (modelData.count || 0) + " total events";
+                                                    if (modelData.breakdown) {
+                                                        return dayName + (parent.parent.isWknd ? " (Weekend)" : "") + " — " + totalStr + "\n" + modelData.breakdown;
+                                                    }
+                                                    return dayName + ": " + parent.parent.dayVal + " events";
+                                                }
                                                 ToolTip.delay: 100
 
                                                 MouseArea {
@@ -997,6 +1125,8 @@ Item {
                     }
                 }
             }
+                }
+            }
 
             // ==========================================
             // Category Competitions & Mini Leaderboards Grid
@@ -1018,7 +1148,12 @@ Item {
 
                 Repeater {
                     model: [
+                        { key: "cleaners", cat: leaderboards ? leaderboards.cleaners : null },
+                        { key: "decliners", cat: leaderboards ? leaderboards.decliners : null },
+                        { key: "state_movers", cat: leaderboards ? leaderboards.state_movers : null },
                         { key: "prs_closed", cat: leaderboards ? leaderboards.prs_closed : null },
+                        { key: "prs_approved", cat: leaderboards ? leaderboards.prs_approved : null },
+                        { key: "prs_reviewed", cat: leaderboards ? leaderboards.prs_reviewed : null },
                         { key: "commits", cat: leaderboards ? leaderboards.commits : null },
                         { key: "night_owls", cat: leaderboards ? leaderboards.night_owls : null },
                         { key: "weekend_warriors", cat: leaderboards ? leaderboards.weekend_warriors : null },
@@ -1123,6 +1258,332 @@ Item {
                             }
 
                             Item { Layout.fillHeight: true }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Backlog State Hygiene & Stale Task Radar ("The Ignorer Watch")
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: hygieneCol.implicitHeight + 36
+                radius: 10
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: hygieneCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 16
+
+                    // Title Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Rectangle {
+                            width: 34
+                            height: 34
+                            radius: 6
+                            color: "#1a2332"
+                            border.color: "#58a6ff"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "🧹"
+                                font.pixelSize: 18
+                            }
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Backlog State Hygiene & Stale Item Radar"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 16
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Tracking state transition velocity: 'The Cleaner' (accurate grooming), 'The Decliner' (quality gatekeeping), and 'The Ignorer' (idle un-transitioned tasks)."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+                    }
+
+                    // Hygiene Persona Metrics (Cleaner vs Decliner vs Stale Items)
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width > 1000 ? 3 : (width > 650 ? 2 : 1)
+                        columnSpacing: 12
+                        rowSpacing: 12
+
+                        // The Cleaner Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 74
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#238636"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Rectangle {
+                                    width: 38
+                                    height: 38
+                                    radius: 19
+                                    color: "#162b20"
+                                    border.color: "#238636"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "🧹"
+                                        font.pixelSize: 18
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "The Cleaner (State Grooming)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#3fb950"
+                                    }
+                                    Text {
+                                        text: teamSummary && teamSummary.cleaner_leader ? (teamSummary.cleaner_leader.name + " (" + teamSummary.cleaner_leader.value + " groomed)") : "No grooming recorded"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#f0f6fc"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: "Grooms and closes completed items promptly"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+                            }
+                        }
+
+                        // The Decliner / Gatekeeper Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 74
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#8957e5"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Rectangle {
+                                    width: 38
+                                    height: 38
+                                    radius: 19
+                                    color: "#271052"
+                                    border.color: "#8957e5"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "🛡️"
+                                        font.pixelSize: 18
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "The Gatekeeper (Pushbacks)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#a371f7"
+                                    }
+                                    Text {
+                                        text: teamSummary && teamSummary.decliner_leader ? (teamSummary.decliner_leader.name + " (" + teamSummary.decliner_leader.value + " pushbacks)") : (teamSummary ? (teamSummary.total_pushbacks || 0) + " pushbacks total" : "0 pushbacks")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#f0f6fc"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: "Reopens tasks if not meeting acceptance criteria"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+                            }
+                        }
+
+                        // The Stale Radar Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 74
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: (staleRadarList && staleRadarList.length > 0) ? "#d29922" : "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Rectangle {
+                                    width: 38
+                                    height: 38
+                                    radius: 19
+                                    color: (staleRadarList && staleRadarList.length > 0) ? "#382900" : "#21262d"
+                                    border.color: (staleRadarList && staleRadarList.length > 0) ? "#d29922" : "#30363d"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "⚠️"
+                                        font.pixelSize: 18
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "Stale Task Radar (Ignorer Watch)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: (staleRadarList && staleRadarList.length > 0) ? "#e3b341" : "#8b949e"
+                                    }
+                                    Text {
+                                        text: (staleRadarList ? staleRadarList.length : 0) + " items idle ≥14 days"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#f0f6fc"
+                                    }
+                                    Text {
+                                        text: "Open tasks assigned without state changes"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Stale Tasks Radar Table List (if any idle tasks exist)
+                    ColumnLayout {
+                        visible: staleRadarList && staleRadarList.length > 0
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: "⚠️ Attention Required: Top Idle Open Tasks (≥14 Days Without State Update)"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            color: "#e3b341"
+                        }
+
+                        Repeater {
+                            model: (staleRadarList || []).slice(0, 8)
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 38
+                                radius: 6
+                                color: "#0d1117"
+                                border.color: "#21262d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 8
+
+                                    // Type Badge
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: wiTypeTxt.implicitWidth + 8
+                                        radius: 3
+                                        color: modelData.type === "Bug" ? "#3f1a18" : (modelData.type === "Story" ? "#16243b" : "#21262d")
+                                        border.color: modelData.type === "Bug" ? "#ff7b72" : (modelData.type === "Story" ? "#58a6ff" : "#30363d")
+                                        border.width: 1
+
+                                        Text {
+                                            id: wiTypeTxt
+                                            anchors.centerIn: parent
+                                            text: modelData.type || "Task"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: modelData.type === "Bug" ? "#ff7b72" : (modelData.type === "Story" ? "#79c0ff" : "#c9d1d9")
+                                        }
+                                    }
+
+                                    // ID & Title
+                                    Text {
+                                        text: "#" + modelData.id + " " + modelData.title
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#f0f6fc"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+
+                                    // Assigned To
+                                    Text {
+                                        text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#8b949e"
+                                    }
+
+                                    // Idle Duration Pill
+                                    Rectangle {
+                                        implicitHeight: 20
+                                        implicitWidth: idleTxt.implicitWidth + 10
+                                        radius: 10
+                                        color: modelData.days_idle >= 30 ? "#3f1a18" : "#382900"
+                                        border.color: modelData.days_idle >= 30 ? "#ff7b72" : "#d29922"
+                                        border.width: 1
+
+                                        Text {
+                                            id: idleTxt
+                                            anchors.centerIn: parent
+                                            text: modelData.days_idle + " days idle 💤"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: modelData.days_idle >= 30 ? "#ff7b72" : "#e3b341"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1760,16 +2221,21 @@ Item {
                 Repeater {
                     model: root.selectedMember ? [
                         { label: "Commits Pushed", val: root.selectedMember.commits_count || 0, icon: "💻" },
-                        { label: "PRs Merged", val: root.selectedMember.prs_closed || 0, icon: "🏁" },
+                        { label: "PRs Merged (The Closer)", val: root.selectedMember.prs_closed || 0, icon: "🏁" },
+                        { label: "PRs Approved / Accepted", val: root.selectedMember.prs_approved || 0, icon: "✅" },
+                        { label: "Code Reviews Conducted", val: root.selectedMember.prs_reviewed || 0, icon: "🔍" },
                         { label: "Branches Started", val: root.selectedMember.branches_started || 0, icon: "🌳" },
                         { label: "Branches Merged", val: root.selectedMember.branches_closed || 0, icon: "🌿" },
                         { label: "Tasks Completed", val: root.selectedMember.tasks_completed || 0, icon: "🔨" },
                         { label: "Bugs Fixed", val: root.selectedMember.bugs_resolved || 0, icon: "🛡️" },
+                        { label: "State Transitions", val: root.selectedMember.state_changes_count || 0, icon: "🚀" },
+                        { label: "Tasks Cleaned / Groomed", val: root.selectedMember.tasks_cleaned || 0, icon: "🧹" },
+                        { label: "Tasks Pushed Back", val: root.selectedMember.pushbacks_count || 0, icon: "🛡️" },
+                        { label: "Stale Items (>14d)", val: root.selectedMember.stale_tasks_count || 0, icon: "⚠️" },
+                        { label: "CI Builds Passed", val: (root.selectedMember.builds_succeeded || 0) + "/" + (root.selectedMember.builds_total || 0), icon: "🏗️" },
                         { label: "Night Acts (9PM-5AM)", val: root.selectedMember.night_activities || 0, icon: "🦉" },
                         { label: "Weekend Acts", val: root.selectedMember.weekend_activities || 0, icon: "⚡" },
                         { label: "Early Bird (5-9AM)", val: root.selectedMember.early_bird_activities || 0, icon: "🌅" },
-                        { label: "CI Builds Passed", val: (root.selectedMember.builds_succeeded || 0) + "/" + (root.selectedMember.builds_total || 0), icon: "🏗️" },
-                        { label: "Code Reviews", val: root.selectedMember.prs_reviewed || 0, icon: "🔍" },
                         { label: "Fast Merges (<24h)", val: root.selectedMember.prs_fast_merged || 0, icon: "⚡" },
                     ] : []
 

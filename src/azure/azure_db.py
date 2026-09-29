@@ -335,6 +335,21 @@ class AzureDevOpsCache:
                 reviewed_by TEXT
             )""")
 
+            # Table: work_item_state_events
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS work_item_state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_item_id INTEGER NOT NULL,
+                title TEXT,
+                type TEXT,
+                assigned_to TEXT,
+                changed_by TEXT,
+                old_state TEXT,
+                new_state TEXT,
+                is_pushback INTEGER DEFAULT 0,
+                recorded_at TEXT NOT NULL
+            )""")
+
             # Schema migrations for iteration_shifts
             try:
                 conn.execute("ALTER TABLE iteration_shifts ADD COLUMN review_status TEXT DEFAULT 'pending'")
@@ -515,6 +530,9 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_build ON artifacts(build_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_wi ON iteration_shifts(work_item_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_date ON iteration_shifts(recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_wi ON work_item_state_events(work_item_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_date ON work_item_state_events(recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_changer ON work_item_state_events(changed_by)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_proj ON cached_iterations(project)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_name ON cached_iterations(iteration_name)")
 
@@ -2223,9 +2241,31 @@ class AzureDevOpsCache:
         new_iter = new_fields.get("System.IterationPath") or ""
 
         with self._connection() as conn:
-            if new_iter:
-                old_row = conn.execute("SELECT raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
-                if old_row and old_row["raw_json"]:
+            old_row = conn.execute("SELECT state, raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if old_row:
+                old_state = str(old_row["state"] or "").strip()
+                new_state = str(state or "").strip()
+                if old_state and new_state and old_state.lower() != new_state.lower():
+                    changed_by_raw = (
+                        new_fields.get("System.ChangedBy", {})
+                        if isinstance(new_fields.get("System.ChangedBy"), dict)
+                        else {"displayName": str(new_fields.get("System.ChangedBy") or "")}
+                    )
+                    changed_by_name = changed_by_raw.get("displayName") or str(changed_by_raw or "")
+                    old_norm = old_state.lower()
+                    new_norm = new_state.lower()
+                    is_pushback = 1 if (
+                        old_norm in ("resolved", "closed", "done", "completed", "review", "testing", "qa") and
+                        new_norm in ("active", "new", "to do", "todo", "in progress", "doing", "reopened")
+                    ) else 0
+
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute("""
+                    INSERT INTO work_item_state_events (work_item_id, title, type, assigned_to, changed_by, old_state, new_state, is_pushback, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (wi_int, title or "", type_str or "", assigned_to or "", changed_by_name or "", old_state, new_state, is_pushback, now_str))
+
+                if new_iter and old_row["raw_json"]:
                     try:
                         old_raw = json.loads(old_row["raw_json"])
                         old_fields = old_raw.get("fields", {}) if isinstance(old_raw, dict) else {}
@@ -2431,6 +2471,47 @@ class AzureDevOpsCache:
                 "top_postponed": top_list,
                 "most_delayed_item": most_delayed
             }
+
+    def record_state_event(self, work_item_id, old_state, new_state, changed_by="", assigned_to="", title="", type_str="", is_pushback=None, recorded_at=None):
+        """
+        Records an explicit work item state transition event in SQLite.
+        """
+        if not old_state or not new_state or old_state.lower() == new_state.lower():
+            return
+        old_norm = old_state.lower()
+        new_norm = new_state.lower()
+        if is_pushback is None:
+            is_pushback = 1 if (
+                old_norm in ("resolved", "closed", "done", "completed", "review", "testing", "qa") and
+                new_norm in ("active", "new", "to do", "todo", "in progress", "doing", "reopened")
+            ) else 0
+        else:
+            is_pushback = 1 if is_pushback else 0
+
+        now_str = recorded_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO work_item_state_events (work_item_id, title, type, assigned_to, changed_by, old_state, new_state, is_pushback, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (work_item_id, title or "", type_str or "", assigned_to or "", changed_by or "", old_state, new_state, is_pushback, now_str))
+
+    def get_state_events(self, limit=2000, work_item_id=None, pushback_only=False):
+        """
+        Retrieves recorded work item state transition events.
+        """
+        query = "SELECT * FROM work_item_state_events WHERE 1=1"
+        params = []
+        if work_item_id:
+            query += " AND work_item_id = ?"
+            params.append(work_item_id)
+        if pushback_only:
+            query += " AND is_pushback = 1"
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
 
     def mark_work_item_deleted(self, wi_id):
         """
