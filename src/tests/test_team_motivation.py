@@ -216,6 +216,65 @@ class TestTeamMotivation(unittest.TestCase):
             self.assertIn("hourly_distribution", m["time_stats"])
             self.assertEqual(len(m["time_stats"]["hourly_distribution"]), 24)
 
+    def test_work_item_closed_date_gating_and_attribution(self):
+        """
+        Verify that:
+        1. An old task closed a year ago, but touched/changed last week, is NOT credited as completed last week.
+        2. An old task assigned to an inactive employee, but closed last week by an active employee,
+           credits the active employee (ClosedBy) and NOT the inactive employee.
+        """
+        now = datetime.now()
+        one_year_ago = now - timedelta(days=365)
+        last_week = now - timedelta(days=4)
+
+        # 1. Old task closed 1 year ago, but System.ChangedDate updated last week (e.g. tag/bulk edit)
+        self.cache.save_work_item(
+            301, "Old legacy task", "Task", "Closed", "Inactive Colleague",
+            last_week.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Old legacy task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "Inactive Colleague"},
+                    "Microsoft.VSTS.Common.ClosedDate": one_year_ago.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Inactive Colleague"},
+                    "System.ChangedDate": last_week.isoformat(),
+                }
+            }
+        )
+
+        # 2. Old task assigned to Inactive Colleague, but closed last week by Alice Smith
+        self.cache.save_work_item(
+            302, "Cleaned up old bug", "Bug", "Closed", "Inactive Colleague",
+            last_week.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Cleaned up old bug",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Bug",
+                    "System.AssignedTo": {"displayName": "Inactive Colleague"},
+                    "Microsoft.VSTS.Common.ClosedDate": last_week.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Alice Smith"},
+                    "System.ChangedDate": last_week.isoformat(),
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="last_week")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Inactive Colleague should NOT have tasks_completed in last_week
+        if "Inactive Colleague" in members:
+            self.assertEqual(members["Inactive Colleague"]["tasks_completed"], 0,
+                             "Inactive colleague must not be credited for old tasks touched last week")
+
+        # Alice Smith should receive credit for closing task 302
+        self.assertIn("Alice Smith", members)
+        # Alice already had tasks from setUp plus this 1 bug
+        self.assertGreaterEqual(members["Alice Smith"]["tasks_completed"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

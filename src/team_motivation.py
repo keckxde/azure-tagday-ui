@@ -531,60 +531,95 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
 
         assigned_name = _clean_user_name(wi.get("assigned_to") or fields.get("System.AssignedTo"))
-        created_by = _clean_user_name(wi.get("CreatedBy") or fields.get("System.CreatedBy"))
+        created_by = _clean_user_name(wi.get("CreatedBy") or fields.get("System.CreatedBy") or wi.get("created_by"))
+        changed_by = _clean_user_name(wi.get("ChangedBy") or fields.get("System.ChangedBy") or wi.get("changed_by"))
+        closed_by = _clean_user_name(
+            fields.get("Microsoft.VSTS.Common.ClosedBy") or
+            fields.get("Microsoft.VSTS.Common.ResolvedBy") or
+            wi.get("ClosedBy") or
+            wi.get("closed_by") or
+            wi.get("ResolvedBy") or
+            wi.get("resolved_by")
+        )
+
         changed_date_raw = wi.get("changed_date") or fields.get("System.ChangedDate") or ""
-        created_date_raw = wi.get("CreatedDate") or fields.get("System.CreatedDate") or ""
+        created_date_raw = wi.get("CreatedDate") or fields.get("System.CreatedDate") or wi.get("created_date") or ""
+        closed_date_raw = (
+            fields.get("Microsoft.VSTS.Common.ClosedDate") or
+            fields.get("Microsoft.VSTS.Common.ResolvedDate") or
+            wi.get("ClosedDate") or
+            wi.get("closed_date") or
+            wi.get("ResolvedDate") or
+            wi.get("resolved_date") or
+            ""
+        )
         changed_date_str = changed_date_raw[:10]
         created_date_str = created_date_raw[:10]
+        closed_date_str = closed_date_raw[:10]
+
         state = str(wi.get("state") or fields.get("System.State") or "").capitalize()
         wi_type = str(wi.get("type") or fields.get("System.WorkItemType") or "").lower()
-        iter_path = str(wi.get("iteration_path") or fields.get("System.IterationPath") or "")
+        is_closed_state = state in ("Closed", "Resolved", "Done", "Completed")
 
-        # Extract sprint week from item
-        _, _, item_sprint = parse_sprint_week(iter_path)
-        if not item_sprint and changed_date_str:
-            dt = parse_iso_datetime(changed_date_str)
-            if dt:
-                y, w, _ = dt.isocalendar()
-                item_sprint = f"week-{str(y)[-2:]}{w:02d}"
+        # Track historical activity across weeks for streak calculation based on actual event dates
+        if is_closed_state:
+            effective_close_raw = closed_date_raw or changed_date_raw
+            effective_close_str = closed_date_str or changed_date_str
+            effective_closer = closed_by or assigned_name or changed_by
+            if effective_close_str and _is_valid_member(effective_closer):
+                dt = parse_iso_datetime(effective_close_str)
+                if dt:
+                    y, w, _ = dt.isocalendar()
+                    c_sprint = f"week-{str(y)[-2:]}{w:02d}"
+                    m = _get_or_create_member(effective_closer)
+                    if m:
+                        m["weekly_activity_history"][c_sprint] = m["weekly_activity_history"].get(c_sprint, 0) + 1
 
-        # Track historical activity per user across weeks for streak calculation
-        if _is_valid_member(assigned_name) and item_sprint:
-            m = _get_or_create_member(assigned_name)
-            if m:
-                m["weekly_activity_history"][item_sprint] = m["weekly_activity_history"].get(item_sprint, 0) + 1
+        if created_date_str:
+            effective_creator = created_by or assigned_name
+            if _is_valid_member(effective_creator):
+                dt = parse_iso_datetime(created_date_str)
+                if dt:
+                    y, w, _ = dt.isocalendar()
+                    cr_sprint = f"week-{str(y)[-2:]}{w:02d}"
+                    m = _get_or_create_member(effective_creator)
+                    if m:
+                        m["weekly_activity_history"][cr_sprint] = m["weekly_activity_history"].get(cr_sprint, 0) + 1
 
-        # Check if item matches the selected timeframe
-        in_timeframe = False
-        if target_sprint and item_sprint == target_sprint:
-            in_timeframe = True
-        elif filter_start_str and filter_end_str:
-            if (changed_date_str and filter_start_str <= changed_date_str < filter_end_str) or \
-               (created_date_str and filter_start_str <= created_date_str < filter_end_str):
-                in_timeframe = True
+        # Evaluate Completed Work Items within timeframe
+        if is_closed_state:
+            # If ClosedDate is recorded, strictly check ClosedDate; otherwise fall back to ChangedDate
+            effective_close_raw = closed_date_raw or changed_date_raw
+            effective_close_str = closed_date_str or changed_date_str
 
-        if not in_timeframe:
-            continue
+            is_completed_in_timeframe = False
+            if filter_start_str and filter_end_str and effective_close_str:
+                if filter_start_str <= effective_close_str < filter_end_str:
+                    is_completed_in_timeframe = True
+            elif timeframe == "all_time":
+                is_completed_in_timeframe = True
 
-        # Completed items
-        if state in ("Closed", "Resolved", "Done", "Completed"):
-            if _is_valid_member(assigned_name):
-                m = _get_or_create_member(assigned_name)
-                if m:
-                    m["tasks_completed"] += 1
-                    _track_activity_time(m, changed_date_raw)
-                    if "bug" in wi_type or "defect" in wi_type or "problem" in wi_type:
-                        m["bugs_resolved"] += 1
-                    elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
-                        m["stories_completed"] += 1
+            if is_completed_in_timeframe:
+                effective_closer = closed_by or assigned_name or changed_by
+                if _is_valid_member(effective_closer):
+                    m = _get_or_create_member(effective_closer)
+                    if m:
+                        m["tasks_completed"] += 1
+                        _track_activity_time(m, effective_close_raw)
+                        if "bug" in wi_type or "defect" in wi_type or "problem" in wi_type:
+                            m["bugs_resolved"] += 1
+                        elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
+                            m["stories_completed"] += 1
 
-        # Created tasks
-        if created_date_str and filter_start_str <= created_date_str < filter_end_str:
-            if _is_valid_member(created_by):
-                m = _get_or_create_member(created_by)
-                if m:
-                    m["tasks_created"] += 1
-                    _track_activity_time(m, created_date_raw)
+        # Evaluate Created Work Items within timeframe
+        if created_date_str and filter_start_str and filter_end_str:
+            if filter_start_str <= created_date_str < filter_end_str or timeframe == "all_time":
+                effective_creator = created_by or assigned_name
+                if _is_valid_member(effective_creator):
+                    m = _get_or_create_member(effective_creator)
+                    if m:
+                        m["tasks_created"] += 1
+                        _track_activity_time(m, created_date_raw)
 
     # 2. Process Pull Requests & Feature Branches
     for pr in all_prs:
