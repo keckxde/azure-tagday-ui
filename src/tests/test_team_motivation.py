@@ -182,10 +182,39 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertIn("Leaderboard & Badges", md)
         self.assertIn("Alice Smith", md)
 
-    def test_timeframe_custom_sprint(self):
-        data = compute_team_motivation_data(self.cache, timeframe="sprint", custom_sprint=self.last_sprint)
-        self.assertEqual(data["target_sprint"], self.last_sprint)
-        self.assertIn("team_summary", data)
+    def test_time_based_analytics_and_badges(self):
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        ts = data["team_summary"]
+        self.assertIn("time_analytics", ts)
+        ta = ts["time_analytics"]
+        self.assertIn("daytime_pct", ta)
+        self.assertIn("night_pct", ta)
+        self.assertIn("weekend_pct", ta)
+        self.assertIn("hourly_distribution", ta)
+        self.assertEqual(len(ta["hourly_distribution"]), 24)
+        self.assertEqual(len(ta["daily_distribution"]), 7)
+
+        # Leaderboards check
+        self.assertIn("night_owls", data["leaderboards"])
+        self.assertIn("early_birds", data["leaderboards"])
+        self.assertIn("weekend_warriors", data["leaderboards"])
+        self.assertIn("daytime", data["leaderboards"])
+
+        # Check badges list
+        badge_ids = [b["id"] for b in data["all_badges"]]
+        self.assertIn("night_owl", badge_ids)
+        self.assertIn("early_bird", badge_ids)
+        self.assertIn("weekend_warrior", badge_ids)
+        self.assertIn("zen_balancer", badge_ids)
+        self.assertIn("friday_hero", badge_ids)
+
+        # Check member time stats and persona
+        members = {m["name"]: m for m in data["members"]}
+        for name, m in members.items():
+            self.assertIn("time_stats", m)
+            self.assertIn("persona", m["time_stats"])
+            self.assertIn("hourly_distribution", m["time_stats"])
+            self.assertEqual(len(m["time_stats"]["hourly_distribution"]), 24)
 
 
 if __name__ == "__main__":

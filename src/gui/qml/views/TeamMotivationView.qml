@@ -15,6 +15,7 @@ Item {
 
     readonly property var motivationData: (backend && backend.teamMotivationData) ? backend.teamMotivationData : {}
     readonly property var teamSummary: motivationData && motivationData.team_summary ? motivationData.team_summary : {}
+    readonly property var timeAnalytics: teamSummary && teamSummary.time_analytics ? teamSummary.time_analytics : null
     readonly property var podiumList: motivationData && motivationData.podium ? motivationData.podium : []
     readonly property var leaderboards: motivationData && motivationData.leaderboards ? motivationData.leaderboards : {}
     readonly property var membersList: motivationData && motivationData.members ? motivationData.members : []
@@ -338,7 +339,7 @@ Item {
             // ==========================================
             GridLayout {
                 Layout.fillWidth: true
-                columns: width > 1150 ? 6 : (width > 800 ? 3 : 2)
+                columns: width > 1200 ? 4 : (width > 800 ? 2 : 1)
                 columnSpacing: 12
                 rowSpacing: 12
 
@@ -349,7 +350,9 @@ Item {
                         { label: "PRs Merged / Open", value: (teamSummary ? (teamSummary.prs_closed || 0) : 0) + " / " + (teamSummary ? (teamSummary.prs_created || 0) : 0), icon: "🏁", color: "#3fb950", bg: "#162b20", tip: "Pull requests closed / merged vs opened" },
                         { label: "Feature Branches", value: (teamSummary ? (teamSummary.branches_closed || 0) : 0) + " / " + (teamSummary ? (teamSummary.branches_started || 0) : 0), icon: "🌳", color: "#79c0ff", bg: "#16243b", tip: "Feature branches merged vs started" },
                         { label: "Tasks Done", value: (teamSummary ? (teamSummary.tasks_completed || 0) : 0) + " (" + (teamSummary ? (teamSummary.bugs_resolved || 0) : 0) + " bugs)", icon: "🔨", color: "#a371f7", bg: "#271052", tip: "Completed work items & resolved bugs" },
+                        { label: "Release Tags", value: (teamSummary ? (teamSummary.tags_pushed || 0) : 0) + " tagged", icon: "🏷️", color: "#d2a8ff", bg: "#2c1b4d", tip: "Production and sprint milestone release tags" },
                         { label: "CI Builds", value: (teamSummary ? (teamSummary.builds_succeeded || 0) : 0) + "/" + (teamSummary ? (teamSummary.builds_total || 0) : 0) + " (" + (teamSummary ? (teamSummary.build_success_rate || 100) : 100) + "%)", icon: "🏗️", color: "#56d364", bg: "#142d1b", tip: "Successful CI builds vs total builds executed" },
+                        { label: "Work Rhythm", value: (timeAnalytics ? timeAnalytics.daytime_pct : 0) + "% Day • " + (timeAnalytics ? timeAnalytics.night_pct : 0) + "% Night", icon: "⏰", color: "#f0883e", bg: "#3e1e0d", tip: "Daytime (9-18h), Night-Owl (21-5h), and Weekend activity breakdown" },
                     ]
 
                     Rectangle {
@@ -587,6 +590,415 @@ Item {
             }
 
             // ==========================================
+            // Team Activity Rhythms & 24-Hour / 7-Day Time Distribution
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: rhythmCol.implicitHeight + 36
+                radius: 10
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: rhythmCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 16
+
+                    // Title Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Rectangle {
+                            width: 34
+                            height: 34
+                            radius: 6
+                            color: "#271052"
+                            border.color: "#a371f7"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⏰"
+                                font.pixelSize: 18
+                            }
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Team Work Rhythms & Activity Matrix"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 16
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Temporal breakdown of commits, PRs, work items, and builds across the 24-hour day and 7-day week."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+
+                        // Peak Day & Hour Pill
+                        Rectangle {
+                            visible: timeAnalytics !== null && timeAnalytics.total_samples > 0
+                            implicitHeight: 28
+                            implicitWidth: peakTxt.implicitWidth + 20
+                            radius: 14
+                            color: "#16243b"
+                            border.color: "#58a6ff"
+                            border.width: 1
+
+                            Text {
+                                id: peakTxt
+                                anchors.centerIn: parent
+                                text: "🔥 Peak: " + (timeAnalytics ? (timeAnalytics.peak_day + " @" + timeAnalytics.peak_hour_label) : "")
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: "#79c0ff"
+                            }
+                        }
+                    }
+
+                    // 4 Rhythm Persona Cards
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width > 1000 ? 4 : (width > 600 ? 2 : 1)
+                        columnSpacing: 10
+                        rowSpacing: 10
+
+                        Repeater {
+                            model: [
+                                {
+                                    title: "Daytime Core",
+                                    badge: "☀️ Core Work",
+                                    hours: "09:00 – 18:00 (Mon-Fri)",
+                                    pct: timeAnalytics ? (timeAnalytics.daytime_pct + "%") : "0%",
+                                    count: timeAnalytics ? (timeAnalytics.daytime_count + " acts") : "0 acts",
+                                    color: "#3fb950",
+                                    bg: "#102a18"
+                                },
+                                {
+                                    title: "Night Owls",
+                                    badge: "🦉 Late Night",
+                                    hours: "21:00 – 05:00",
+                                    pct: timeAnalytics ? (timeAnalytics.night_pct + "%") : "0%",
+                                    count: timeAnalytics ? (timeAnalytics.night_count + " acts") : "0 acts",
+                                    color: "#a371f7",
+                                    bg: "#271052"
+                                },
+                                {
+                                    title: "Early Birds",
+                                    badge: "🌅 Sunrise Surge",
+                                    hours: "05:00 – 09:00 (Mon-Fri)",
+                                    pct: timeAnalytics ? (timeAnalytics.early_bird_pct + "%") : "0%",
+                                    count: timeAnalytics ? (timeAnalytics.early_bird_count + " acts") : "0 acts",
+                                    color: "#f0883e",
+                                    bg: "#381a08"
+                                },
+                                {
+                                    title: "The Week-enders",
+                                    badge: "⚡ Weekend Warriors",
+                                    hours: "Saturday & Sunday",
+                                    pct: timeAnalytics ? (timeAnalytics.weekend_pct + "%") : "0%",
+                                    count: timeAnalytics ? (timeAnalytics.weekend_count + " acts") : "0 acts",
+                                    color: "#d29922",
+                                    bg: "#382900"
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 68
+                                radius: 8
+                                color: "#0d1117"
+                                border.color: modelData.color
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 10
+
+                                    Rectangle {
+                                        width: 32
+                                        height: 32
+                                        radius: 6
+                                        color: modelData.bg
+                                        border.color: modelData.color
+                                        border.width: 1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.badge.split(" ")[0]
+                                            font.pixelSize: 16
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        spacing: 2
+                                        Layout.fillWidth: true
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Text {
+                                                text: modelData.title
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Bold
+                                                color: "#f0f6fc"
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            Text {
+                                                text: modelData.pct
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 14
+                                                font.weight: Font.Bold
+                                                color: modelData.color
+                                            }
+                                        }
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Text {
+                                                text: modelData.hours
+                                                font.family: "Consolas, monospace"
+                                                font.pixelSize: 9
+                                                color: "#8b949e"
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            Text {
+                                                text: modelData.count
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                color: "#c9d1d9"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 24-Hour & 7-Day Visual Matrix Charts
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+
+                        // Left: 24-Hour Activity Profile
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 60
+                            implicitHeight: 145
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#21262d"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "⏰ 24-Hour Hourly Timeline (00h – 23h)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: "🟣 Night • 🟠 Early • 🟢 Day • 🟡 Eve"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        color: "#8b949e"
+                                    }
+                                }
+
+                                // 24-Hour Bars Row
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    spacing: 3
+
+                                    Repeater {
+                                        model: (timeAnalytics && timeAnalytics.hourly_distribution) ? timeAnalytics.hourly_distribution : 24
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            color: "transparent"
+
+                                            property int val: (timeAnalytics && timeAnalytics.hourly_distribution) ? timeAnalytics.hourly_distribution[index] : 0
+                                            property int maxVal: {
+                                                if (!timeAnalytics || !timeAnalytics.hourly_distribution) return 1;
+                                                var m = 1;
+                                                for (var i = 0; i < timeAnalytics.hourly_distribution.length; i++) {
+                                                    if (timeAnalytics.hourly_distribution[i] > m) m = timeAnalytics.hourly_distribution[i];
+                                                }
+                                                return m;
+                                            }
+                                            property color barColor: {
+                                                if (index < 5 || index >= 21) return "#a371f7"; // Night
+                                                if (index >= 5 && index < 9) return "#f0883e";  // Early
+                                                if (index >= 9 && index < 18) return "#3fb950"; // Day
+                                                return "#d29922";                               // Evening
+                                            }
+
+                                            // Bar Rectangle
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                height: Math.max(4, Math.round((parent.val / parent.maxVal) * (parent.height - 4)))
+                                                radius: 2
+                                                color: parent.barColor
+                                                opacity: hMa.containsMouse ? 1.0 : 0.75
+                                            }
+
+                                            ToolTip.visible: hMa.containsMouse
+                                            ToolTip.text: (index < 10 ? "0" : "") + index + ":00 — " + parent.val + " actions (" + (index < 5 || index >= 21 ? "Night" : (index < 9 ? "Early" : (index < 18 ? "Daytime" : "Evening"))) + ")"
+                                            ToolTip.delay: 100
+
+                                            MouseArea {
+                                                id: hMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Axis labels
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "00h"; font.pixelSize: 8; color: "#6e7681" }
+                                    Item { Layout.fillWidth: true }
+                                    Text { text: "06h"; font.pixelSize: 8; color: "#6e7681" }
+                                    Item { Layout.fillWidth: true }
+                                    Text { text: "12h"; font.pixelSize: 8; color: "#6e7681" }
+                                    Item { Layout.fillWidth: true }
+                                    Text { text: "18h"; font.pixelSize: 8; color: "#6e7681" }
+                                    Item { Layout.fillWidth: true }
+                                    Text { text: "23h"; font.pixelSize: 8; color: "#6e7681" }
+                                }
+                            }
+                        }
+
+                        // Right: 7-Day Sprint Distribution
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 40
+                            implicitHeight: 145
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#21262d"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: "📅 Weekly Rhythm (Mon – Sun)"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: timeAnalytics ? (timeAnalytics.peak_day + " focus") : ""
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#58a6ff"
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    spacing: 6
+
+                                    Repeater {
+                                        model: timeAnalytics && timeAnalytics.daily_distribution ? timeAnalytics.daily_distribution : [
+                                            {day: "Mon", short: "M", count: 0},
+                                            {day: "Tue", short: "T", count: 0},
+                                            {day: "Wed", short: "W", count: 0},
+                                            {day: "Thu", short: "T", count: 0},
+                                            {day: "Fri", short: "F", count: 0},
+                                            {day: "Sat", short: "S", count: 0},
+                                            {day: "Sun", short: "S", count: 0}
+                                        ]
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            spacing: 4
+
+                                            property int dayVal: modelData.count || 0
+                                            property int maxDayVal: {
+                                                if (!timeAnalytics || !timeAnalytics.daily_distribution) return 1;
+                                                var m = 1;
+                                                for (var i = 0; i < timeAnalytics.daily_distribution.length; i++) {
+                                                    if (timeAnalytics.daily_distribution[i].count > m) m = timeAnalytics.daily_distribution[i].count;
+                                                }
+                                                return m;
+                                            }
+                                            property bool isWknd: index >= 5
+
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                color: "transparent"
+
+                                                Rectangle {
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    height: Math.max(4, Math.round((parent.parent.dayVal / parent.parent.maxDayVal) * (parent.height - 4)))
+                                                    radius: 3
+                                                    color: parent.parent.isWknd ? "#d29922" : (timeAnalytics && modelData.day === timeAnalytics.peak_day ? "#58a6ff" : "#238636")
+                                                    opacity: dMa.containsMouse ? 1.0 : 0.8
+                                                }
+
+                                                ToolTip.visible: dMa.containsMouse
+                                                ToolTip.text: modelData.day + ": " + parent.parent.dayVal + " actions" + (parent.parent.isWknd ? " (Weekend)" : "")
+                                                ToolTip.delay: 100
+
+                                                MouseArea {
+                                                    id: dMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                }
+                                            }
+
+                                            Text {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: modelData.short || modelData.day
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                font.weight: parent.isWknd ? Font.Bold : Font.Normal
+                                                color: parent.isWknd ? "#d29922" : "#8b949e"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Category Competitions & Mini Leaderboards Grid
             // ==========================================
             Text {
@@ -608,6 +1020,10 @@ Item {
                     model: [
                         { key: "prs_closed", cat: leaderboards ? leaderboards.prs_closed : null },
                         { key: "commits", cat: leaderboards ? leaderboards.commits : null },
+                        { key: "night_owls", cat: leaderboards ? leaderboards.night_owls : null },
+                        { key: "weekend_warriors", cat: leaderboards ? leaderboards.weekend_warriors : null },
+                        { key: "early_birds", cat: leaderboards ? leaderboards.early_birds : null },
+                        { key: "daytime", cat: leaderboards ? leaderboards.daytime : null },
                         { key: "branches_closed", cat: leaderboards ? leaderboards.branches_closed : null },
                         { key: "branches_started", cat: leaderboards ? leaderboards.branches_started : null },
                         { key: "tasks_completed", cat: leaderboards ? leaderboards.tasks_completed : null },
@@ -790,13 +1206,14 @@ Item {
                     Text { text: "RANK"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 40 }
                     Text { text: "CONTRIBUTOR"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.fillWidth: true }
                     Text { text: "SCORE"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 55; horizontalAlignment: Text.AlignRight }
-                    Text { text: "STREAK"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 65; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "COMMITS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "BRANCHES"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 65; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "PRS (M/C)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 65; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "TASKS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "BUILDS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 55; horizontalAlignment: Text.AlignHCenter }
-                    Text { text: "BADGES EARNED"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 150 }
+                    Text { text: "RHYTHM"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 100; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "STREAK"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "COMMITS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 55; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "BRANCHES"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "PRS (M/C)"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "TASKS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 45; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "BUILDS"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignHCenter }
+                    Text { text: "BADGES EARNED"; font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 140 }
                 }
             }
 
@@ -884,9 +1301,27 @@ Item {
                                 horizontalAlignment: Text.AlignRight
                             }
 
+                            // Work Rhythm Persona
+                            Rectangle {
+                                Layout.preferredWidth: 100
+                                implicitHeight: 22
+                                radius: 4
+                                color: "#161b22"
+                                border.color: "#30363d"
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: (modelData.time_stats && modelData.time_stats.persona) ? modelData.time_stats.persona : "☀️ Daytime"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    color: "#f0f6fc"
+                                }
+                            }
+
                             // Streak
                             RowLayout {
-                                Layout.preferredWidth: 65
+                                Layout.preferredWidth: 60
                                 Layout.alignment: Qt.AlignHCenter
                                 spacing: 3
                                 Text {
@@ -905,7 +1340,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: modelData.commits_count > 0 ? "#7ee787" : "#6e7681"
-                                Layout.preferredWidth: 60
+                                Layout.preferredWidth: 55
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
@@ -915,7 +1350,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#79c0ff"
-                                Layout.preferredWidth: 65
+                                Layout.preferredWidth: 60
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
@@ -925,7 +1360,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#c9d1d9"
-                                Layout.preferredWidth: 65
+                                Layout.preferredWidth: 60
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
@@ -935,7 +1370,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#a371f7"
-                                Layout.preferredWidth: 50
+                                Layout.preferredWidth: 45
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
@@ -945,17 +1380,17 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: modelData.builds_succeeded > 0 ? "#56d364" : "#6e7681"
-                                Layout.preferredWidth: 55
+                                Layout.preferredWidth: 50
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
                             // Badges
                             RowLayout {
-                                Layout.preferredWidth: 150
+                                Layout.preferredWidth: 140
                                 spacing: 4
 
                                 Repeater {
-                                    model: (modelData.badges || []).slice(0, 6)
+                                    model: (modelData.badges || []).slice(0, 5)
 
                                     Rectangle {
                                         width: 22
@@ -1246,6 +1681,67 @@ Item {
                 }
             }
 
+            // Work Rhythm & Persona Card
+            Rectangle {
+                visible: root.selectedMember && root.selectedMember.time_stats !== undefined
+                Layout.fillWidth: true
+                implicitHeight: 68
+                radius: 6
+                color: "#0d1117"
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "⏰ Work Rhythm Persona:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            implicitHeight: 20
+                            implicitWidth: pTxt.implicitWidth + 12
+                            radius: 4
+                            color: "#16243b"
+                            border.color: "#58a6ff"
+                            Text {
+                                id: pTxt
+                                anchors.centerIn: parent
+                                text: root.selectedMember && root.selectedMember.time_stats ? root.selectedMember.time_stats.persona : "☀️ Daytime Core"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                color: "#79c0ff"
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "☀️ " + (root.selectedMember && root.selectedMember.time_stats ? root.selectedMember.time_stats.daytime_pct : 0) + "% Day • 🦉 " + (root.selectedMember && root.selectedMember.time_stats ? root.selectedMember.time_stats.night_pct : 0) + "% Night • ⚡ " + (root.selectedMember && root.selectedMember.time_stats ? root.selectedMember.time_stats.weekend_pct : 0) + "% Wknd"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            color: "#c9d1d9"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: "Peak: " + (root.selectedMember && root.selectedMember.time_stats ? (root.selectedMember.time_stats.peak_day + " @" + root.selectedMember.time_stats.peak_hour_label) : "")
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            color: "#ffd700"
+                        }
+                    }
+                }
+            }
+
             // Metric Breakdown Grid
             Text {
                 text: "Contribution Metrics Breakdown"
@@ -1269,10 +1765,12 @@ Item {
                         { label: "Branches Merged", val: root.selectedMember.branches_closed || 0, icon: "🌿" },
                         { label: "Tasks Completed", val: root.selectedMember.tasks_completed || 0, icon: "🔨" },
                         { label: "Bugs Fixed", val: root.selectedMember.bugs_resolved || 0, icon: "🛡️" },
+                        { label: "Night Acts (9PM-5AM)", val: root.selectedMember.night_activities || 0, icon: "🦉" },
+                        { label: "Weekend Acts", val: root.selectedMember.weekend_activities || 0, icon: "⚡" },
+                        { label: "Early Bird (5-9AM)", val: root.selectedMember.early_bird_activities || 0, icon: "🌅" },
                         { label: "CI Builds Passed", val: (root.selectedMember.builds_succeeded || 0) + "/" + (root.selectedMember.builds_total || 0), icon: "🏗️" },
                         { label: "Code Reviews", val: root.selectedMember.prs_reviewed || 0, icon: "🔍" },
                         { label: "Fast Merges (<24h)", val: root.selectedMember.prs_fast_merged || 0, icon: "⚡" },
-                        { label: "Release Tags", val: root.selectedMember.tags_pushed || 0, icon: "🏷️" },
                     ] : []
 
                     Rectangle {
