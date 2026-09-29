@@ -172,6 +172,46 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    // Team Motivation & Hall of Fame Button
+                    Rectangle {
+                        implicitHeight: 34
+                        implicitWidth: motivTopBtnRow.implicitWidth + 24
+                        radius: 6
+                        color: motivTopMa.containsMouse ? "#272115" : "#1b1710"
+                        border.color: "#d29922"
+                        border.width: 1
+
+                        RowLayout {
+                            id: motivTopBtnRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            Text { text: "🏆"; font.pixelSize: 13 }
+                            Text {
+                                text: "Team Hall of Fame"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#ffd700"
+                            }
+                        }
+
+                        ToolTip.visible: motivTopMa.containsMouse
+                        ToolTip.text: "View Sprint Motivation, Streaks, and Team Leaderboards"
+                        ToolTip.delay: 150
+
+                        MouseArea {
+                            id: motivTopMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (typeof window !== "undefined" && window.openTeamMotivationPage) {
+                                    window.openTeamMotivationPage("last_week");
+                                }
+                            }
+                        }
+                    }
+
                     // Refresh Button
                     Button {
                         text: "↻ Refresh"
@@ -520,7 +560,7 @@ Item {
                                                 font.pixelSize: 10
                                                 font.weight: Font.Bold
                                                 color: modelData.isCurrent ? "#d29922" : (modelData.index === 1 ? "#58a6ff" : "#f0f6fc")
-                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                Layout.alignment: Qt.AlignHCenter
                                             }
 
                                             Text {
@@ -528,7 +568,7 @@ Item {
                                                 font.family: "Consolas, monospace"
                                                 font.pixelSize: 9
                                                 color: modelData.isCurrent ? "#e3b341" : "#8b949e"
-                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                Layout.alignment: Qt.AlignHCenter
                                             }
                                         }
                                     }
@@ -746,6 +786,46 @@ Item {
                                 }
                             }
 
+                            // Hall of Fame & Badges Button
+                            Rectangle {
+                                implicitHeight: 24
+                                implicitWidth: motivLwBtnRow.implicitWidth + 16
+                                radius: 12
+                                color: motivLwMa.containsMouse ? "#272115" : "#1c1810"
+                                border.color: "#d29922"
+                                border.width: 1
+
+                                RowLayout {
+                                    id: motivLwBtnRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+                                    Text { text: "🏆"; font.pixelSize: 10 }
+                                    Text {
+                                        text: "Hall of Fame & Badges →"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: "#ffd700"
+                                    }
+                                }
+
+                                ToolTip.visible: motivLwMa.containsMouse
+                                ToolTip.text: "Open Team Motivation, Streaks, and Sprint Leaderboards"
+                                ToolTip.delay: 150
+
+                                MouseArea {
+                                    id: motivLwMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && window.openTeamMotivationPage) {
+                                            window.openTeamMotivationPage("last_week");
+                                        }
+                                    }
+                                }
+                            }
+
                             // Sprint Badge
                             Rectangle {
                                 implicitHeight: 22
@@ -853,7 +933,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: "#238636"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -861,7 +941,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }
@@ -884,7 +964,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: "#58a6ff"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -892,7 +972,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }
@@ -915,7 +995,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: "#bc8cff"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -923,7 +1003,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }
@@ -1292,7 +1372,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: "#58a6ff"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -1300,7 +1380,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }
@@ -1323,7 +1403,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.due_this_week_count > 0) ? "#f0883e" : "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -1331,7 +1411,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.due_this_week_count > 0) ? "#f0883e" : "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }
@@ -1354,7 +1434,7 @@ Item {
                                         font.pixelSize: 15
                                         font.weight: Font.Bold
                                         color: "#bc8cff"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
 
                                     Text {
@@ -1362,7 +1442,7 @@ Item {
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 9
                                         color: "#8b949e"
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                     }
                                 }
                             }

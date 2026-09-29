@@ -242,6 +242,8 @@ class DevOpsBackend(QObject):
     connectionLost = Signal(str)            # error description on repository server disconnect
     tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
     reportsDirChanged = Signal()
+    teamMotivationChanged = Signal()
+    teamMotivationTimeframeChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -342,6 +344,9 @@ class DevOpsBackend(QObject):
         self._storage_data = {}
         self._last_week_activity = {}
         self._current_week_planned = {}
+        self._team_motivation_data = {}
+        self._team_motivation_timeframe = "last_week"
+        self._team_motivation_custom_sprint = ""
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
         self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
         if self._reports_dir:
@@ -807,6 +812,18 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=statsChanged)
     def currentWeekPlanned(self):
         return self._current_week_planned
+
+    @Property(dict, notify=teamMotivationChanged)
+    def teamMotivationData(self):
+        return self._team_motivation_data
+
+    @Property(str, notify=teamMotivationTimeframeChanged)
+    def teamMotivationTimeframe(self):
+        return self._team_motivation_timeframe
+
+    @Property(str, notify=teamMotivationTimeframeChanged)
+    def teamMotivationCustomSprint(self):
+        return self._team_motivation_custom_sprint
 
     @Property(list, notify=repositoriesChanged)
     def repositories(self):
@@ -2156,6 +2173,20 @@ class DevOpsBackend(QObject):
             "active_prs": cur_active_prs[:8],
         }
 
+        # Team Motivation & Gamification Data
+        team_motivation_data = {}
+        try:
+            import team_motivation
+            team_motivation_data = team_motivation.compute_team_motivation_data(
+                self._cache_db,
+                timeframe=self._team_motivation_timeframe,
+                custom_sprint=self._team_motivation_custom_sprint,
+                work_items=sorted_wis,
+                pull_requests=sorted_prs
+            )
+        except Exception as e:
+            logger.debug(f"Could not compute initial team motivation data: {e}")
+
         return {
             "repositories": sorted_repos,
             "work_items": sorted_wis,
@@ -2168,6 +2199,7 @@ class DevOpsBackend(QObject):
             "shift_summary_map": shift_summary_map,
             "last_week_activity": last_week_activity,
             "current_week_planned": current_week_planned,
+            "team_motivation_data": team_motivation_data,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -2184,6 +2216,7 @@ class DevOpsBackend(QObject):
         self._shift_summary_map = data.get("shift_summary_map", {})
         self._last_week_activity = data.get("last_week_activity", {})
         self._current_week_planned = data.get("current_week_planned", {})
+        self._team_motivation_data = data.get("team_motivation_data", {})
         if "stats" in data:
             self._stats = data["stats"]
 
@@ -2196,6 +2229,7 @@ class DevOpsBackend(QObject):
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
         self.milestonesChanged.emit()
+        self.teamMotivationChanged.emit()
 
     @Slot()
     def startup_load_async(self):
@@ -3732,6 +3766,57 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(str)
+    @Slot(str, str)
+    def set_team_motivation_timeframe(self, timeframe, custom_sprint=""):
+        """Sets the active timeframe / sprint for team motivation and recomputes stats."""
+        self._team_motivation_timeframe = timeframe or "last_week"
+        self._team_motivation_custom_sprint = custom_sprint or ""
+        self.teamMotivationTimeframeChanged.emit()
+        self.recompute_team_motivation()
+
+    @Slot()
+    def recompute_team_motivation(self):
+        """Recomputes team motivation, streaks, and leaderboards."""
+        if not self._cache_db:
+            return
+        try:
+            import team_motivation
+            self._team_motivation_data = team_motivation.compute_team_motivation_data(
+                self._cache_db,
+                timeframe=self._team_motivation_timeframe,
+                custom_sprint=self._team_motivation_custom_sprint,
+                work_items=self._work_items,
+                pull_requests=self._pull_requests
+            )
+            self.teamMotivationChanged.emit()
+        except Exception as e:
+            logger.error(f"Error computing team motivation data: {e}", exc_info=True)
+
+    @Slot(result=str)
+    def get_team_motivation_markdown_summary(self):
+        """Returns markdown sprint motivation summary for copying to Slack/Teams."""
+        try:
+            import team_motivation
+            if not self._team_motivation_data:
+                self.recompute_team_motivation()
+            return team_motivation.generate_motivation_markdown_summary(self._team_motivation_data)
+        except Exception as e:
+            logger.error(f"Error generating team motivation markdown summary: {e}", exc_info=True)
+            return f"Error: {e}"
+
+    @Slot(str, result=dict)
+    def get_team_member_profile(self, member_name):
+        """Returns detailed contribution and badge profile for a specific team member."""
+        if not self._team_motivation_data:
+            self.recompute_team_motivation()
+        members = self._team_motivation_data.get("members", [])
+        target = (member_name or "").strip().lower()
+        for m in members:
+            if m.get("name", "").lower() == target:
+                return m
+        return {}
 
     @Slot(int, str, result=dict)
     def update_work_item_deadline(self, work_item_id, new_date_str):

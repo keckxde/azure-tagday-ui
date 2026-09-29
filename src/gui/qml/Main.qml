@@ -29,6 +29,7 @@ ApplicationWindow {
     readonly property var workloadExplorerView: workloadExplorerViewLoader ? workloadExplorerViewLoader.item : null
     readonly property var reportsView: reportsViewLoader ? reportsViewLoader.item : null
     readonly property var settingsView: settingsViewLoader ? settingsViewLoader.item : null
+    readonly property var teamMotivationView: teamMotivationViewLoader ? teamMotivationViewLoader.item : null
 
     function navigateToTagDayRepo(repoName) {
         window.currentTabIndex = 5;
@@ -167,6 +168,23 @@ ApplicationWindow {
                 }
             };
             workItemsViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openTeamMotivationPage(timeframe, sprintName) {
+        window.currentTabIndex = 7;
+        if (teamMotivationView && typeof teamMotivationView.setTimeframe === "function") {
+            if (timeframe) {
+                teamMotivationView.setTimeframe(timeframe, sprintName || "");
+            }
+        } else if (teamMotivationViewLoader && timeframe) {
+            var conn = function() {
+                if (teamMotivationViewLoader.item && typeof teamMotivationViewLoader.item.setTimeframe === "function") {
+                    teamMotivationViewLoader.loaded.disconnect(conn);
+                    teamMotivationViewLoader.item.setTimeframe(timeframe, sprintName || "");
+                }
+            };
+            teamMotivationViewLoader.loaded.connect(conn);
         }
     }
 
@@ -536,6 +554,14 @@ ApplicationWindow {
                                     window.currentTabIndex = 5;
                                     if (reportsView) reportsView.activeReportTab = 4;
                                 }
+                            }
+
+                            NavItem {
+                                iconText: "🏆"
+                                label: "Team Motivation"
+                                active: window.currentTabIndex === 7
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openTeamMotivationPage()
                             }
 
                             // ==========================================
@@ -1497,6 +1523,15 @@ ApplicationWindow {
                         property bool _hasLoaded: false
                         asynchronous: true
                         source: "views/SettingsView.qml"
+                        onLoaded: _hasLoaded = true
+                    }
+
+                    Loader {
+                        id: teamMotivationViewLoader
+                        active: window.currentTabIndex === 7 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/TeamMotivationView.qml"
                         onLoaded: _hasLoaded = true
                     }
                 }
