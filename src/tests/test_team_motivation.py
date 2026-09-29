@@ -115,6 +115,32 @@ class TestTeamMotivation(unittest.TestCase):
                 VALUES (2, 'p1', 'repo1', 10, 'CI Build', '1.0.2', 'completed', 'succeeded', ?, ?, 'Alice Smith')
             """, ((now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"), (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")))
 
+        # Populate sample Commits
+        commits_sample = [
+            {
+                "commitId": "sha101",
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
+                "comment": "Feature: Implement high-performance buffer",
+                "changeCounts": {"Add": 15, "Edit": 20, "Delete": 2}
+            },
+            {
+                "commitId": "sha102",
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
+                "comment": "Fix: Handle null pointer on empty input",
+                "changeCounts": {"Add": 2, "Edit": 5, "Delete": 0}
+            },
+            {
+                "commitId": "sha103",
+                "author": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
+                "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
+                "comment": "Refactor: Modularize DB connection pool",
+                "changeCounts": {"Add": 40, "Edit": 10, "Delete": 30}
+            }
+        ]
+        self.cache.save_commits("repo1", commits_sample)
+
     def tearDown(self):
         if os.path.exists(self.tmp_db.name):
             try:
@@ -274,7 +300,32 @@ class TestTeamMotivation(unittest.TestCase):
         # Alice already had tasks from setUp plus this 1 bug
         self.assertGreaterEqual(members["Alice Smith"]["tasks_completed"], 1)
 
+    def test_commits_caching_and_sync(self):
+        """
+        Verify that commits saved to SQLite cache are retrieved correctly,
+        and accurately aggregated into member commit metrics and motivation leaderboards.
+        """
+        all_commits = self.cache.get_all_commits()
+        self.assertGreaterEqual(len(all_commits), 3)
+        self.assertEqual(self.cache.get_commit_count(), len(all_commits))
+
+        repo_commits = self.cache.get_commits_for_repo("repo1")
+        self.assertGreaterEqual(len(repo_commits), 3)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        self.assertIn("Alice Smith", members)
+        self.assertGreaterEqual(members["Alice Smith"]["commits_count"], 2)
+
+        self.assertIn("Bob Jones", members)
+        self.assertGreaterEqual(members["Bob Jones"]["commits_count"], 1)
+
+        ts = data["team_summary"]
+        self.assertGreaterEqual(ts["commits_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

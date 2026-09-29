@@ -1479,11 +1479,21 @@ class AzureInfoHandler(AzureBaseClient):
             # Load PRs directly in bulk
             dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo, cache_db=cache_db)
 
+            # Load recent commits
+            commits = []
+            try:
+                commits = self.get_commits(project_id, repo_id, limit=200)
+            except Exception as e:
+                if is_connection_error(e):
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+                logger.debug("Could not fetch commits for %s: %s", repo_name, e)
+
             submodules = []
             repo_data = {
                 "info": repo,
                 "branches": branches,
                 "tags": tags_filtered,
+                "commits": commits,
                 "submodules": submodules,
                 "devPRs": dev_prs,
                 "stablePRs": stable_prs,
@@ -1498,6 +1508,7 @@ class AzureInfoHandler(AzureBaseClient):
                 "remote_push_id": remote_push_id,
                 "branches": branches,
                 "tags": tags_filtered,
+                "commits": commits,
                 "submodules": submodules,
                 "prs": dev_prs + stable_prs
             }
@@ -1531,6 +1542,8 @@ class AzureInfoHandler(AzureBaseClient):
                                 cache_db.save_repository(db_payload["project_id"], db_payload["repo"], db_payload["remote_push_id"])
                                 cache_db.save_branches(db_payload["repo_id"], db_payload["branches"])
                                 cache_db.save_tags(db_payload["repo_id"], db_payload["tags"])
+                                if db_payload.get("commits"):
+                                    cache_db.save_commits(db_payload["repo_id"], db_payload["commits"])
                                 cache_db.save_submodules(db_payload["repo_id"], db_payload["submodules"])
                                 cache_db.save_pull_requests(db_payload["repo_id"], db_payload["prs"])
                             except Exception as e:
@@ -1891,7 +1904,14 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as e:
             logger.warning("Could not refresh PRs for %s: %s", repo_name, e)
 
-        # 4. Save everything to SQLite cache
+        # 4. Fetch recent commits
+        commits = []
+        try:
+            commits = self.get_commits(project_id, repo_id, limit=200)
+        except Exception as e:
+            logger.warning("Could not refresh commits for %s: %s", repo_name, e)
+
+        # 5. Save everything to SQLite cache
         if cache_db:
             try:
                 cache_db.save_repository(project_id, target_repo)
@@ -1899,10 +1919,12 @@ class AzureInfoHandler(AzureBaseClient):
                     cache_db.save_branches(repo_id, branches)
                 if tags_filtered:
                     cache_db.save_tags(repo_id, tags_filtered)
+                if commits:
+                    cache_db.save_commits(repo_id, commits)
                 if prs:
                     cache_db.save_pull_requests(repo_id, prs)
-                logger.info("Successfully synced repository %s (%d tags, %d branches, %d PRs) to cache",
-                            repo_name, len(tags_filtered), len(branches), len(prs))
+                logger.info("Successfully synced repository %s (%d tags, %d branches, %d commits, %d PRs) to cache",
+                            repo_name, len(tags_filtered), len(branches), len(commits), len(prs))
             except Exception as db_err:
                 logger.warning("Failed writing synced repo %s to database: %s", repo_name, db_err)
 
@@ -1910,7 +1932,101 @@ class AzureInfoHandler(AzureBaseClient):
             "info": target_repo,
             "branches": branches,
             "tags": tags_filtered,
+            "commits": commits,
             "prs": prs
         }
+
+    def sync_commits(
+        self,
+        cache_db,
+        project_id=None,
+        filter_repos="",
+        top=200,
+        progress_callback=None,
+        cancel_token=None,
+        max_workers=6
+    ):
+        """
+        Synchronizes recent Git commits across all enabled repositories into the SQLite cache.
+
+        Args:
+            cache_db: The database cache instance.
+            project_id (str, optional): Project ID.
+            filter_repos (str/list, optional): Repositories filter.
+            top (int, optional): Max commits per repository. Defaults to 200.
+            progress_callback (callable, optional): Callback with (percentage, message).
+            cancel_token (callable/object, optional): Cancellation check.
+            max_workers (int, optional): Thread pool size. Defaults to 6.
+
+        Returns:
+            dict: Summary with synced count, repos scanned, and errors.
+        """
+        if not cache_db:
+            return {"synced": 0, "repos_scanned": 0, "errors": 0}
+
+        proj = project_id or getattr(self, "project_id", "")
+        summary = {"synced": 0, "repos_scanned": 0, "errors": 0}
+
+        def _is_cancelled():
+            if not cancel_token:
+                return False
+            if callable(cancel_token):
+                return cancel_token()
+            return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+        def _report(pct, msg):
+            if progress_callback:
+                try:
+                    progress_callback(pct, msg)
+                except Exception:
+                    pass
+
+        try:
+            repos = self.get_repositories(proj)
+            enabled = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
+            total = len(enabled)
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _fetch_repo_commits(repo):
+                repo_id = repo["id"]
+                repo_name = repo.get("name", "")
+                try:
+                    commits = self.get_commits(proj, repo_id, limit=top)
+                    if commits:
+                        cache_db.save_commits(repo_id, commits)
+                        return (repo_name, len(commits), None)
+                    return (repo_name, 0, None)
+                except Exception as e:
+                    return (repo_name, 0, e)
+
+            if total > 0:
+                with ThreadPoolExecutor(max_workers=min(max_workers, total)) as executor:
+                    futures = {executor.submit(_fetch_repo_commits, r): r for r in enabled}
+                    for idx, fut in enumerate(as_completed(futures)):
+                        if _is_cancelled():
+                            logger.info("Cancellation requested in sync_commits")
+                            break
+                        repo_name, count, err = fut.result()
+                        summary["repos_scanned"] += 1
+                        if err:
+                            if is_connection_error(err):
+                                raise AzureServerConnectionError(f"Lost connection to repository server: {err}", original_error=err) from err
+                            logger.warning("Could not sync commits for %s: %s", repo_name, err)
+                            summary["errors"] += 1
+                        else:
+                            summary["synced"] += count
+                        pct = int(((idx + 1) / total) * 100)
+                        _report(pct, f"Synced commits for {repo_name} ({idx + 1}/{total})...")
+        except Exception as e:
+            if is_connection_error(e):
+                raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+            logger.error("Error syncing repository commits: %s", e)
+            summary["errors"] += 1
+
+        logger.info("Git commits sync completed: %d commits across %d repositories (%d errors)",
+                    summary["synced"], summary["repos_scanned"], summary["errors"])
+        return summary
+
 
 

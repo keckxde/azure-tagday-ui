@@ -373,6 +373,27 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     except Exception as e:
         logger.debug(f"Error reading builds: {e}")
 
+    # Fetch commits
+    all_commits = []
+    try:
+        if hasattr(cache_db, "get_all_commits"):
+            all_commits = cache_db.get_all_commits(limit=25000)
+        else:
+            with cache_db._connection() as conn:
+                c_rows = conn.execute("""
+                    SELECT c.repo_id, c.commit_id, c.author_name, c.author_date,
+                           c.committer_name, c.committer_date, c.comment,
+                           COALESCE(r.name, c.repo_id) as repo_name
+                    FROM commits c
+                    LEFT JOIN repositories r ON c.repo_id = r.id
+                    ORDER BY COALESCE(c.committer_date, c.author_date) DESC
+                    LIMIT 25000
+                """).fetchall()
+                for cr in c_rows:
+                    all_commits.append(dict(cr))
+    except Exception as e:
+        logger.debug(f"Error reading commits: {e}")
+
     # Fetch iteration shifts to measure delay/sprint predictability
     shifts_by_user = {}
     try:
@@ -698,30 +719,56 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["prs_reviewed"] += 1
                         _track_activity_time(m, cl_date_raw or c_date_raw)
 
-    # 3. Process Tags
+    # 3. Process Code Commits
+    if all_commits:
+        for c in all_commits:
+            c_date_raw = c.get("committer_date") or c.get("author_date") or ""
+            c_date_str = c_date_raw[:10]
+            committer = _clean_user_name(c.get("committer_name") or c.get("author_name"))
+
+            # Track weekly activity for streaks
+            if c_date_str and _is_valid_member(committer):
+                dt = parse_iso_datetime(c_date_str)
+                if dt:
+                    y, w, _ = dt.isocalendar()
+                    cm_sprint = f"week-{str(y)[-2:]}{w:02d}"
+                    m = _get_or_create_member(committer)
+                    if m:
+                        m["weekly_activity_history"][cm_sprint] = m["weekly_activity_history"].get(cm_sprint, 0) + 1
+
+            # Timeframe evaluation
+            if c_date_str and (filter_start_str <= c_date_str < filter_end_str or timeframe == "all_time"):
+                if _is_valid_member(committer):
+                    m = _get_or_create_member(committer)
+                    if m:
+                        m["commits_count"] += 1
+                        _track_activity_time(m, c_date_raw)
+    else:
+        # Fallback to branch tips if full commits table is not populated
+        for br in all_branches:
+            b_date_raw = br.get("commit_date", "")
+            b_date = b_date_raw[:10]
+            committer = _clean_user_name(br.get("committer"))
+            if b_date and (filter_start_str <= b_date < filter_end_str or timeframe == "all_time"):
+                if _is_valid_member(committer):
+                    m = _get_or_create_member(committer)
+                    if m:
+                        m["commits_count"] += 1
+                        _track_activity_time(m, b_date_raw)
+
+    # 4. Process Tags
     for tag in all_tags:
         t_date_raw = tag.get("commit_date", "")
         t_date = t_date_raw[:10]
         committer = _clean_user_name(tag.get("committer"))
-        if t_date and filter_start_str <= t_date < filter_end_str:
+        if t_date and (filter_start_str <= t_date < filter_end_str or timeframe == "all_time"):
             if _is_valid_member(committer):
                 m = _get_or_create_member(committer)
                 if m:
                     m["tags_pushed"] += 1
-                    m["commits_count"] += 1
+                    if not all_commits:
+                        m["commits_count"] += 1
                     _track_activity_time(m, t_date_raw)
-
-    # 4. Process Direct Branch Commits
-    for br in all_branches:
-        b_date_raw = br.get("commit_date", "")
-        b_date = b_date_raw[:10]
-        committer = _clean_user_name(br.get("committer"))
-        if b_date and filter_start_str <= b_date < filter_end_str:
-            if _is_valid_member(committer):
-                m = _get_or_create_member(committer)
-                if m:
-                    m["commits_count"] += 1
-                    _track_activity_time(m, b_date_raw)
 
     # 5. Process CI Builds & Pipeline Executions
     for b in all_builds:

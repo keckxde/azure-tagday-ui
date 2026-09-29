@@ -197,6 +197,23 @@ class AzureDevOpsCache:
                 PRIMARY KEY(parent_repo_id, path)
             )""")
 
+            # Table: commits
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS commits (
+                repo_id TEXT NOT NULL,
+                commit_id TEXT NOT NULL,
+                author_name TEXT,
+                author_email TEXT,
+                author_date TEXT,
+                committer_name TEXT,
+                committer_email TEXT,
+                committer_date TEXT,
+                comment TEXT,
+                change_counts TEXT,
+                raw_json TEXT,
+                PRIMARY KEY(repo_id, commit_id)
+            )""")
+
             # Table: pull_requests
             conn.execute("""
             CREATE TABLE IF NOT EXISTS pull_requests (
@@ -461,6 +478,9 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_commit ON tags(commit_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submodules_repo ON submodules(parent_repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_committer_date ON commits(committer_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_author_date ON commits(author_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_repo ON pull_requests(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_status ON pull_requests(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_id ON work_items(id)")
@@ -1856,6 +1876,79 @@ class AzureDevOpsCache:
                 INSERT OR REPLACE INTO submodules (parent_repo_id, path, url, commit_id, raw_json)
                 VALUES (?, ?, ?, ?, ?)
                 """, (repo_id, sub["path"], sub["url"], commit_id, raw_json))
+
+    def save_commits(self, repo_id, commits):
+        """
+        Saves commits for a repository into the SQLite cache.
+        Merges commits using INSERT OR REPLACE without deleting older historical commits.
+        """
+        if not commits:
+            return
+        with self._connection() as conn:
+            for c in commits:
+                commit_id = c.get("commitId") or c.get("id") or ""
+                if not commit_id:
+                    continue
+                author = c.get("author") if isinstance(c.get("author"), dict) else {}
+                committer = c.get("committer") if isinstance(c.get("committer"), dict) else {}
+
+                author_name = author.get("name") or c.get("author_name") or ""
+                author_email = author.get("email") or c.get("author_email") or ""
+                author_date = author.get("date") or c.get("author_date") or ""
+
+                committer_name = committer.get("name") or c.get("committer_name") or author_name
+                committer_email = committer.get("email") or c.get("committer_email") or author_email
+                committer_date = committer.get("date") or c.get("committer_date") or author_date
+
+                comment = c.get("comment") or c.get("message") or ""
+                change_counts = json.dumps(c.get("changeCounts", {}), ensure_ascii=False) if isinstance(c.get("changeCounts"), dict) else (c.get("change_counts") or "")
+                raw_json = json.dumps(c, cls=DateTimeEncoder, ensure_ascii=False) if not isinstance(c, str) else c
+
+                conn.execute("""
+                INSERT OR REPLACE INTO commits (repo_id, commit_id, author_name, author_email, author_date, committer_name, committer_email, committer_date, comment, change_counts, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (repo_id, commit_id, author_name, author_email, author_date, committer_name, committer_email, committer_date, comment, change_counts, raw_json))
+
+    def get_all_commits(self, limit=10000):
+        """
+        Retrieves all cached commits joined with repository metadata.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("""
+            SELECT c.repo_id, c.commit_id, c.author_name, c.author_email, c.author_date,
+                   c.committer_name, c.committer_email, c.committer_date, c.comment,
+                   c.change_counts, c.raw_json,
+                   COALESCE(r.name, c.repo_id) as repo_name
+            FROM commits c
+            LEFT JOIN repositories r ON c.repo_id = r.id
+            ORDER BY COALESCE(c.committer_date, c.author_date) DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_commits_for_repo(self, repo_id, limit=500):
+        """
+        Retrieves cached commits for a specific repository.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("""
+            SELECT repo_id, commit_id, author_name, author_email, author_date,
+                   committer_name, committer_email, committer_date, comment,
+                   change_counts, raw_json
+            FROM commits
+            WHERE repo_id = ?
+            ORDER BY COALESCE(committer_date, author_date) DESC
+            LIMIT ?
+            """, (repo_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_commit_count(self):
+        """
+        Returns the total number of commits cached across all repositories.
+        """
+        with self._connection() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM commits").fetchone()
+            return row["cnt"] if row else 0
 
     def save_pull_requests(self, repo_id, prs):
         """

@@ -948,15 +948,17 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pushes/{push_id}", params={"includeCommits": 0, "includeRefUpdates": True, "api-version": "6.0"})
         return res
 
-    def get_commits(self, project_id, repo_id, branch_name=None, limit=100):
+    def get_commits(self, project_id, repo_id, branch_name=None, limit=100, from_date=None, to_date=None):
         """
-        Retrieves commits for a repository with optional branch filtering.
+        Retrieves commits for a repository with optional branch and date filtering.
 
         Args:
             project_id (str): The project ID or name.
             repo_id (str): The repository ID.
             branch_name (str, optional): The branch name to retrieve commits from.
             limit (int): Maximum number of commits to retrieve.
+            from_date (str, optional): ISO formatted start date.
+            to_date (str, optional): ISO formatted end date.
 
         Returns:
             list: List of commit dictionaries.
@@ -965,6 +967,10 @@ class AzureBaseClient:
         if branch_name:
             params["searchCriteria.itemVersion.version"] = branch_name
             params["searchCriteria.itemVersion.versionType"] = "branch"
+        if from_date:
+            params["searchCriteria.fromDate"] = from_date
+        if to_date:
+            params["searchCriteria.toDate"] = to_date
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/commits", params=params)
         return res.get("value", [])
 
