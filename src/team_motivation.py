@@ -251,6 +251,15 @@ BADGE_DEFINITIONS = {
         "bg_color": "#381a08",
         "description": "High Velocity — completed tasks in record turnaround time under 24 hours.",
         "tier": "silver"
+    },
+    "syntax_master": {
+        "id": "syntax_master",
+        "name": "Syntax Champion 🏷️",
+        "icon": "🏷️",
+        "color": "#7ee787",
+        "bg_color": "#122a18",
+        "description": "Standard Bearer — resolved 3+ bugs or features formatted with [<Type>_<nr>] syntax.",
+        "tier": "gold"
     }
 }
 
@@ -570,6 +579,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "avg_task_turnaround_hours": 0.0,
                 "fastest_task_hours": 0.0,
                 "task_evidences_count": 0,
+                "structured_syntax_completed": 0,
                 "is_cleaner": False,
                 "is_decliner": False,
                 "is_ignorer": False,
@@ -874,6 +884,11 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                             m["bugs_resolved"] += 1
                         elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
                             m["stories_completed"] += 1
+
+                        # Track [<Type>_<nr>] structured syntax convention in title
+                        wi_title = str(wi.get("title") or fields.get("System.Title") or "")
+                        if re.search(r"\[[A-Za-z0-9_<>-]+_\d+\]", wi_title, re.IGNORECASE):
+                            m["structured_syntax_completed"] += 1
 
                         # Task turnaround speed
                         start_raw = activated_date_raw or created_date_raw
@@ -1317,6 +1332,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             badges.append(BADGE_DEFINITIONS["relic_keeper"])
         if m["tasks_fast_closed"] >= 2 or (m["tasks_completed"] >= 2 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
             badges.append(BADGE_DEFINITIONS["speedy_task_closer"])
+        if m["structured_syntax_completed"] >= 3:
+            badges.append(BADGE_DEFINITIONS["syntax_master"])
 
         # Determine Ignorer / Stasher persona
         if m["stale_tasks_count"] >= 2 and m["state_changes_count"] == 0:
@@ -1333,7 +1350,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         # Composite Motivation Score Formula:
         # PRs closed * 15 + PRs created * 10 + Commits * 3 + Branches closed * 5 + Tasks completed * 8
         # + Bugs resolved * 10 + PRs approved * 8 + PRs reviewed * 6 + Tags * 12 + Successful builds * 4
-        # + Tasks cleaned * 3 + Pushbacks * 4 + Fast closes * 4 + Task evidences * 2 + Badges * 5 + Streak * 4
+        # + Tasks cleaned * 3 + Pushbacks * 4 + Fast closes * 4 + Task evidences * 2 + Syntax bonus * 7 + Badges * 5 + Streak * 4
         # - Delays * 3 - Failed builds * 2 - Stale tasks * 2
         pos_score = (
             m["prs_closed"] * 15
@@ -1350,6 +1367,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             + m["pushbacks_count"] * 4
             + m["tasks_fast_closed"] * 4
             + min(m["task_evidences_count"], 25) * 2
+            + (m["structured_syntax_completed"] * 7)
             + len(badges) * 5
             + m["current_streak_weeks"] * 4
         )
@@ -1375,6 +1393,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             or m["tasks_cleaned"] > 0
             or m["tasks_fast_closed"] > 0
             or m["task_evidences_count"] > 0
+            or m["structured_syntax_completed"] > 0
             or m["current_streak_weeks"] > 0
         )
         raw_final = pos_score - neg_score
@@ -1437,6 +1456,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     leaderboard_oldest_task = _make_leaderboard("oldest_open_task_days", "Ancient Relic Keeper (Oldest Open Task)", "⏳", "days")
     leaderboard_fast_closer = _make_leaderboard("tasks_fast_closed", "Lightning Finisher (Tasks Closed <24h)", "⚡", "fast tasks")
     leaderboard_evidences = _make_leaderboard("task_evidences_count", "Traceability Champion (Evidences & Links)", "🧾", "evidences")
+    leaderboard_syntax = _make_leaderboard("structured_syntax_completed", "Syntax Master ([Type_#] Standard)", "🏷️", "structured")
     leaderboard_night_owls = _make_leaderboard("night_activities", "Night Owls (9PM – 5AM)", "🦉", "night acts")
     leaderboard_early_birds = _make_leaderboard("early_bird_activities", "Early Birds (5AM – 9AM)", "🌅", "early acts")
     leaderboard_weekend_warriors = _make_leaderboard("weekend_activities", "The Week-enders (Sat/Sun)", "⚡", "wknd acts")
@@ -1599,6 +1619,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             highlights.append(f"Pushed back {m['pushbacks_count']} items 🛡️")
         if m["tasks_fast_closed"] > 0:
             highlights.append(f"{m['tasks_fast_closed']} fast closes (<24h) ⚡")
+        if m["structured_syntax_completed"] > 0:
+            highlights.append(f"{m['structured_syntax_completed']} syntax standard items 🏷️")
         if m["task_evidences_count"] >= 3:
             highlights.append(f"{m['task_evidences_count']} evidences linked 🧾")
         if m["oldest_open_task_days"] >= 60:
@@ -1661,6 +1683,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "total_stale_tasks": team_total_stale_tasks,
             "tasks_fast_closed": team_total_fast_closed,
             "task_evidences_count": team_total_evidences,
+            "structured_syntax_completed": sum(m["structured_syntax_completed"] for m in member_list),
             "oldest_open_task_days": team_oldest_task_days,
             "active_contributors": active_contributors_count,
             "total_points": sum(m["score"] for m in member_list),
@@ -1670,12 +1693,14 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "fast_closer_leader": leaderboard_fast_closer.get("leader"),
             "oldest_task_leader": leaderboard_oldest_task.get("leader"),
             "evidences_leader": leaderboard_evidences.get("leader"),
+            "syntax_leader": leaderboard_syntax.get("leader"),
         },
         "stale_radar": sorted(stale_radar, key=lambda x: x["days_idle"], reverse=True)[:25],
         "podium": podium,
         "members": sorted_all,
         "leaderboards": {
             "overall": leaderboard_overall,
+            "syntax_master": leaderboard_syntax,
             "cleaners": leaderboard_cleaners,
             "decliners": leaderboard_decliners,
             "fast_closer": leaderboard_fast_closer,

@@ -522,6 +522,142 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertGreater(lb["prs_closed"]["total_contributors"], 0)
         self.assertGreater(lb["prs_approved"]["total_contributors"], 0)
 
+    def test_oldest_task_fastest_closer_evidences_and_syntax_bonus(self):
+        now = datetime.now()
+        work_items = [
+            # 1. Oldest open task (assigned to Old Timer, created 120 days ago)
+            (
+                9001,
+                "[Task_9001] Legacy Migration Architecture",
+                "Task",
+                "Active",
+                "Old Timer",
+                (now - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Task_9001] Legacy Migration Architecture",
+                        "System.State": "Active",
+                        "System.WorkItemType": "Task",
+                        "System.AssignedTo": {"displayName": "Old Timer"},
+                        "System.CreatedDate": (now - timedelta(days=120)).isoformat(),
+                        "System.ChangedDate": (now - timedelta(days=5)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/abc12345"},
+                        {"rel": "Hyperlink", "url": "https://wiki.internal/docs"},
+                    ]
+                }
+            ),
+            # 2. Fast closer with syntax convention [Bug_9002] (created 2h before closed, closed by Speedy Sam)
+            (
+                9002,
+                "[Bug_9002] Fix memory leak in auth module",
+                "Bug",
+                "Closed",
+                "Speedy Sam",
+                (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Bug_9002] Fix memory leak in auth module",
+                        "System.State": "Closed",
+                        "System.WorkItemType": "Bug",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(hours=3)).isoformat(),
+                        "Microsoft.VSTS.Common.ActivatedDate": (now - timedelta(hours=2)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=1)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/777"},
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/def67890"},
+                        {"rel": "Hyperlink", "url": "https://issue.tracker/9002"},
+                    ]
+                }
+            ),
+            # 3. Second fast close for Speedy Sam with structured syntax [Feature_9003]
+            (
+                9003,
+                "[Feature_9003] Add dark mode theme switch",
+                "Feature",
+                "Done",
+                "Speedy Sam",
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Feature_9003] Add dark mode theme switch",
+                        "System.State": "Done",
+                        "System.WorkItemType": "Feature",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(hours=5)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/feedface"},
+                    ]
+                }
+            ),
+            # 4. Third structured syntax close for Speedy Sam [UserStory_9004]
+            (
+                9004,
+                "[UserStory_9004] Real-time activity pulse",
+                "User Story",
+                "Resolved",
+                "Speedy Sam",
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[UserStory_9004] Real-time activity pulse",
+                        "System.State": "Resolved",
+                        "System.WorkItemType": "User Story",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(days=1)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/12345678"},
+                    ]
+                }
+            )
+        ]
+        for wid, title, wtype, state, assigned, cdate, raw_obj in work_items:
+            self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Check Old Timer metrics (oldest open task >= 120 days, relic_keeper badge)
+        old_timer = members.get("Old Timer")
+        self.assertIsNotNone(old_timer)
+        self.assertGreaterEqual(old_timer["oldest_open_task_days"], 119)
+        self.assertIsNotNone(old_timer["oldest_open_task"])
+        self.assertEqual(old_timer["oldest_open_task"]["id"], 9001)
+        self.assertTrue(any(b["id"] == "relic_keeper" for b in old_timer["badges"]))
+
+        # Check Speedy Sam metrics (fastest closer, syntax master, evidences)
+        speedy = members.get("Speedy Sam")
+        self.assertIsNotNone(speedy)
+        self.assertGreaterEqual(speedy["tasks_fast_closed"], 2)
+        self.assertGreaterEqual(speedy["structured_syntax_completed"], 3)
+        self.assertGreaterEqual(speedy["task_evidences_count"], 5)
+        self.assertGreater(speedy["avg_task_turnaround_hours"], 0)
+        self.assertLessEqual(speedy["fastest_task_hours"], 2.0)
+
+        # Check badges awarded
+        self.assertTrue(any(b["id"] == "speedy_task_closer" for b in speedy["badges"]))
+        self.assertTrue(any(b["id"] == "syntax_master" for b in speedy["badges"]))
+        self.assertTrue(any(b["id"] == "evidence_master" for b in speedy["badges"]))
+
+        # Check leaderboards exist and are populated
+        lb = data["leaderboards"]
+        self.assertIn("oldest_task", lb)
+        self.assertIn("fast_closer", lb)
+        self.assertIn("evidences", lb)
+        self.assertIn("syntax_master", lb)
+        self.assertEqual(lb["oldest_task"]["leader"]["name"], "Old Timer")
+        self.assertEqual(lb["fast_closer"]["leader"]["name"], "Speedy Sam")
+
 
 if __name__ == "__main__":
     unittest.main()

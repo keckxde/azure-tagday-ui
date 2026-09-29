@@ -1125,8 +1125,6 @@ Item {
                     }
                 }
             }
-                }
-            }
 
             // ==========================================
             // Category Competitions & Mini Leaderboards Grid
@@ -1148,8 +1146,12 @@ Item {
 
                 Repeater {
                     model: [
+                        { key: "syntax_master", cat: leaderboards ? leaderboards.syntax_master : null },
                         { key: "cleaners", cat: leaderboards ? leaderboards.cleaners : null },
                         { key: "decliners", cat: leaderboards ? leaderboards.decliners : null },
+                        { key: "fast_closer", cat: leaderboards ? leaderboards.fast_closer : null },
+                        { key: "oldest_task", cat: leaderboards ? leaderboards.oldest_task : null },
+                        { key: "evidences", cat: leaderboards ? leaderboards.evidences : null },
                         { key: "state_movers", cat: leaderboards ? leaderboards.state_movers : null },
                         { key: "prs_closed", cat: leaderboards ? leaderboards.prs_closed : null },
                         { key: "prs_approved", cat: leaderboards ? leaderboards.prs_approved : null },
@@ -1164,7 +1166,6 @@ Item {
                         { key: "tasks_completed", cat: leaderboards ? leaderboards.tasks_completed : null },
                         { key: "bugs_resolved", cat: leaderboards ? leaderboards.bugs_resolved : null },
                         { key: "builds", cat: leaderboards ? leaderboards.builds : null },
-                        { key: "prs_reviewed", cat: leaderboards ? leaderboards.prs_reviewed : null },
                         { key: "tags", cat: leaderboards ? leaderboards.tags : null },
                         { key: "streaks", cat: leaderboards ? leaderboards.streaks : null },
                         { key: "prs_created", cat: leaderboards ? leaderboards.prs_created : null },
@@ -2228,6 +2229,11 @@ Item {
                         { label: "Branches Merged", val: root.selectedMember.branches_closed || 0, icon: "🌿" },
                         { label: "Tasks Completed", val: root.selectedMember.tasks_completed || 0, icon: "🔨" },
                         { label: "Bugs Fixed", val: root.selectedMember.bugs_resolved || 0, icon: "🛡️" },
+                        { label: "Syntax Standard Tasks", val: root.selectedMember.structured_syntax_completed || 0, icon: "🏷️" },
+                        { label: "Tasks Fast Closed (<24h)", val: root.selectedMember.tasks_fast_closed || 0, icon: "⚡" },
+                        { label: "Avg Task Turnaround", val: root.selectedMember.avg_task_turnaround_hours ? (root.selectedMember.avg_task_turnaround_hours + " hrs") : "—", icon: "⏱️" },
+                        { label: "Oldest Open Task", val: root.selectedMember.oldest_open_task_days ? (root.selectedMember.oldest_open_task_days + " days") : "0 days", icon: "⏳" },
+                        { label: "Task Evidences & Links", val: root.selectedMember.task_evidences_count || 0, icon: "🧾" },
                         { label: "State Transitions", val: root.selectedMember.state_changes_count || 0, icon: "🚀" },
                         { label: "Tasks Cleaned / Groomed", val: root.selectedMember.tasks_cleaned || 0, icon: "🧹" },
                         { label: "Tasks Pushed Back", val: root.selectedMember.pushbacks_count || 0, icon: "🛡️" },
