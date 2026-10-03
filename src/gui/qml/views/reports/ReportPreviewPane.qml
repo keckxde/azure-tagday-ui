@@ -19,10 +19,18 @@ Item {
         if (!backend) return;
         var rType = previewPaneRoot.reportType;
         var param = previewPaneRoot.reportParam;
+        if (rType === "sprint" && !param && previewPaneRoot.root && previewPaneRoot.root.selectedSprintReport) {
+            param = previewPaneRoot.root.selectedSprintReport;
+        }
         var res = backend.get_report_content(rType, param);
         previewPaneRoot.reportData = res;
     }
 
+    onVisibleChanged: {
+        if (visible) {
+            loadContent();
+        }
+    }
     onReportTypeChanged: loadContent()
     onReportParamChanged: loadContent()
 
@@ -31,13 +39,35 @@ Item {
     Connections {
         target: backend
         function onStorageDataChanged() {
-            if (previewPaneRoot.reportType === "storage") previewPaneRoot.loadContent();
+            if (previewPaneRoot.reportType === "storage" || previewPaneRoot.visible) previewPaneRoot.loadContent();
         }
         function onSprintReportGenerated(data, mdText) {
-            if (previewPaneRoot.reportType === "sprint") previewPaneRoot.loadContent();
+            if (previewPaneRoot.reportType === "sprint" || previewPaneRoot.visible) previewPaneRoot.loadContent();
         }
         function onTagDayDataChanged() {
-            if (previewPaneRoot.reportType === "tagday") previewPaneRoot.loadContent();
+            if (previewPaneRoot.reportType === "tagday" || previewPaneRoot.visible) previewPaneRoot.loadContent();
+        }
+        function onWorkItemsChanged() {
+            if (previewPaneRoot.visible) previewPaneRoot.loadContent();
+        }
+        function onStatsChanged() {
+            if (previewPaneRoot.visible) previewPaneRoot.loadContent();
+        }
+    }
+
+    Connections {
+        target: previewPaneRoot.root
+        ignoreUnknownSignals: true
+        function onSelectedSprintReportChanged() {
+            if (previewPaneRoot.reportType === "sprint") {
+                previewPaneRoot.reportParam = (previewPaneRoot.root && previewPaneRoot.root.selectedSprintReport) ? previewPaneRoot.root.selectedSprintReport : "";
+                previewPaneRoot.loadContent();
+            }
+        }
+        function onActiveReportTabChanged() {
+            if (previewPaneRoot.visible) {
+                previewPaneRoot.loadContent();
+            }
         }
     }
 

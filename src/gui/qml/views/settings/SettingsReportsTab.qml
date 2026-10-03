@@ -42,7 +42,7 @@ ColumnLayout {
                         color: "#f0f6fc"
                     }
                     Text {
-                        text: "Configure the target folder for reading baseline reports to extend (such as REVISION.md) and saving generated release reports (TAGDAY.md, REVISION.md/docx, SPRINT_REPORT, BUILD_ARTIFACTS)."
+                        text: "Configure the target folder for reading baseline reports to extend (such as REVISION.md) and saving generated release reports (TAGDAY.md, REVISION.md, SPRINT_REPORT, BUILD_ARTIFACTS)."
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 11
                         color: "#8b949e"
@@ -197,7 +197,7 @@ ColumnLayout {
 
                 Text { text: "ℹ️"; font.pixelSize: 12 }
                 Text {
-                    text: "Effective path: " + (backend ? backend.effectiveReportsDir : "N/A") + "  •  Applies to TAGDAY.md, REVISION.md, REVISION.docx, SPRINT_REPORT_*.md, RESCHEDULING_REPORT.*, and BUILD_ARTIFACTS.*"
+                    text: "Effective path: " + (backend ? backend.effectiveReportsDir : "N/A") + "  •  Applies to TAGDAY.md, REVISION.md, SPRINT_REPORT_*.md, RESCHEDULING_REPORT.*, and BUILD_ARTIFACTS.*"
                     font.family: "Consolas, Segoe UI, sans-serif"
                     font.pixelSize: 11
                     color: "#8b949e"

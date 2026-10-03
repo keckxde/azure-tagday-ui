@@ -80,29 +80,6 @@ import "../../components"
                                 backend.open_revision_file();
                         }
                     }
-
-                    Button {
-                        text: "📘 DOCX"
-                        font.pixelSize: 12
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: "#58a6ff"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 32
-                            implicitWidth: 80
-                            radius: 6
-                            color: parent.hovered ? "#30363d" : "#21262d"
-                            border.color: "#30363d"
-                        }
-                        onClicked: {
-                            if (backend)
-                                backend.open_revision_docx();
-                        }
-                    }
                 }
 
                 // Table Container

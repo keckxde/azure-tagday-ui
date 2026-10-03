@@ -95,12 +95,10 @@ class TestReportsTargetFolder(unittest.TestCase):
 
             # Generate revision report specifying target path in target_dir
             target_report_file = os.path.join(target_dir, "REVISION.md")
-            target_docx_file = os.path.join(target_dir, "REVISION.docx")
 
             success = generate_revision.generate_revision_md(db_path, revision_md_path=target_report_file)
             self.assertTrue(success)
             self.assertTrue(os.path.exists(target_report_file))
-            self.assertTrue(os.path.exists(target_docx_file))
 
             with open(target_report_file, "r", encoding="utf-8") as f:
                 generated = f.read()

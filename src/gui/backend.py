@@ -3181,7 +3181,7 @@ class DevOpsBackend(QObject):
             return
 
         def _work(worker):
-            worker.log_message.emit("Generating Release Notes (REVISION.md & REVISION.docx)...")
+            worker.log_message.emit("Generating Release Notes (REVISION.md)...")
             reports_dir = self.get_effective_reports_dir()
             revision_md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
             success = devops_helper.generate_revision_report(
@@ -7580,12 +7580,19 @@ class DevOpsBackend(QObject):
         eff_dir = self.get_effective_reports_dir()
 
         if r_type in ("tagday", "tag_day"):
-            fpath = os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD)
-            res = self.get_file_content(fpath)
-            if res.get("success"):
-                res["title"] = "Tag Day Release Report"
-                res["format"] = "markdown"
-                return res
+            candidates = [
+                os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD),
+                os.path.join(eff_dir, "TAGDAY.md"),
+                os.path.join(os.getcwd(), devops_helper.TAGDAY_FILE_MD),
+                os.path.join(os.getcwd(), "TAGDAY.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Tag Day Release Report"
+                        res["format"] = "markdown"
+                        return res
             # Fallback to in-memory tag day data if file not yet written to disk
             if self._tagday_data and self._tagday_data.get("repos_summary"):
                 import generate_tagday_report
@@ -7593,9 +7600,9 @@ class DevOpsBackend(QObject):
                     md_text = generate_tagday_report.build_tagday_markdown(self._tagday_data, project_id=self.selectedProject)
                     return {
                         "success": True,
-                        "title": "Tag Day Release Report (Draft / Live)",
+                        "title": "Tag Day Release Report (Live Draft)",
                         "format": "markdown",
-                        "file_path": fpath,
+                        "file_path": os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD),
                         "file_name": devops_helper.TAGDAY_FILE_MD,
                         "content": md_text,
                         "line_count": len(md_text.splitlines()),
@@ -7605,22 +7612,40 @@ class DevOpsBackend(QObject):
                     }
                 except Exception as e:
                     logger.debug(f"Could not build draft tagday markdown: {e}")
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD))
             res["title"] = "Tag Day Release Report"
             res["format"] = "markdown"
             return res
 
         elif r_type in ("revision", "release_notes"):
-            fpath = os.path.join(eff_dir, devops_helper.REVISION_FILE_MD)
-            res = self.get_file_content(fpath)
+            candidates = [
+                os.path.join(eff_dir, devops_helper.REVISION_FILE_MD),
+                os.path.join(eff_dir, "REVISION.md"),
+                os.path.join(eff_dir, "doc", "04_Development", "REVISION.md"),
+                os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.md"),
+                os.path.join(os.getcwd(), "REVISION.md"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "doc", "04_Development", "REVISION.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Release Notes & Revision History"
+                        res["format"] = "markdown"
+                        return res
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.REVISION_FILE_MD))
             res["title"] = "Release Notes & Revision History"
             res["format"] = "markdown"
             return res
 
         elif r_type in ("storage", "artifacts"):
             candidates = [
-                os.path.join(eff_dir, "STORAGE.md"),
+                os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
                 os.path.join(eff_dir, "BUILD_ARTIFACTS.md"),
-                os.path.join(os.getcwd(), "BUILD_ARTIFACTS.md")
+                os.path.join(eff_dir, "STORAGE.md"),
+                os.path.join(os.getcwd(), devops_helper.BUILD_ARTIFACTS_MD),
+                os.path.join(os.getcwd(), "BUILD_ARTIFACTS.md"),
+                os.path.join(os.getcwd(), "STORAGE.md"),
             ]
             for c in candidates:
                 if os.path.isfile(c):
@@ -7630,43 +7655,87 @@ class DevOpsBackend(QObject):
                         res["format"] = "markdown"
                         return res
             s_data = self._storage_data or {}
-            md_lines = ["# Storage & Build Artifacts Report", "", f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
-            md_lines.append(f"- **Total Storage Used:** {s_data.get('total_size_mb', 0):.2f} MB")
-            md_lines.append(f"- **Total Artifact Packages:** {len(s_data.get('packages', []))}")
-            md_lines.append("")
-            md_lines.append("## Packages Overview")
-            for pkg in s_data.get("packages", []):
-                md_lines.append(f"### {pkg.get('name', 'Package')}")
-                md_lines.append(f"- **Size:** {pkg.get('size_mb', 0):.2f} MB | **Files:** {pkg.get('files_count', 0)}")
-                md_lines.append(f"- **Path:** `{pkg.get('path', '')}`")
-                md_lines.append("")
+            packages = s_data.get("packages", [])
+            total_size = s_data.get("total_size_mb", 0)
+            md_lines = [
+                "# Storage & Build Artifacts Report",
+                "",
+                f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                f"- **Total Storage Used:** {total_size:.2f} MB",
+                f"- **Total Artifact Packages:** {len(packages)}",
+                "",
+                "## Packages Overview",
+                "",
+                "| Package Name | Size (MB) | Files Count | Path |",
+                "|---|---|---|---|"
+            ]
+            if packages:
+                for pkg in packages:
+                    p_name = pkg.get("name", "Package")
+                    p_size = pkg.get("size_mb", 0)
+                    p_files = pkg.get("files_count", 0)
+                    p_path = pkg.get("path", "-")
+                    md_lines.append(f"| {p_name} | {p_size:.2f} | {p_files} | `{p_path}` |")
+            else:
+                md_lines.append("*No artifact package data cached yet. Click 'Generate Storage Report' to analyze.*")
             content = "\n".join(md_lines)
             return {
                 "success": True,
-                "title": "Storage & Build Artifacts Report",
+                "title": "Storage & Build Artifacts Report (Live)",
                 "format": "markdown",
-                "file_path": os.path.join(eff_dir, "STORAGE.md"),
-                "file_name": "STORAGE.md",
+                "file_path": os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                "file_name": devops_helper.BUILD_ARTIFACTS_MD,
                 "content": content,
                 "line_count": len(md_lines),
                 "word_count": len(re.findall(r"\b\w+\b", content)),
                 "size_bytes": len(content.encode("utf-8")),
-                "modified_at": "Generated on demand"
+                "modified_at": "Live snapshot"
             }
 
         elif r_type in ("sprint", "sprint_report"):
-            sprint_name = self._get_default_sprint_name(param)
-            fpath = os.path.join(eff_dir, f"SPRINT_{sprint_name}.md")
-            if os.path.isfile(fpath):
-                res = self.get_file_content(fpath)
-                if res.get("success"):
-                    res["title"] = f"Sprint Report - {sprint_name}"
-                    res["format"] = "markdown"
-                    return res
+            clean_sprint = self._get_default_sprint_name(param)
+            candidates = [
+                os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                os.path.join(eff_dir, f"SPRINT_{clean_sprint}.md"),
+                os.path.join(os.getcwd(), f"SPRINT_REPORT_{clean_sprint}.md"),
+                os.path.join(os.getcwd(), f"SPRINT_{clean_sprint}.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = f"Sprint Report - {clean_sprint}"
+                        res["format"] = "markdown"
+                        return res
 
-            matching_wis = [w for w in self._work_items if (w.get("sprint_week_name") == sprint_name or sprint_name in (w.get("iteration_path") or ""))]
+            # Live full rendered sprint markdown fallback
+            try:
+                import generate_sprint_report
+                work_items = self._work_items if self._work_items else None
+                data = generate_sprint_report.generate_sprint_report_data(
+                    self._cache_db, sprint_name=clean_sprint, work_items=work_items
+                )
+                md_text = generate_sprint_report.render_sprint_markdown(data)
+                if md_text:
+                    return {
+                        "success": True,
+                        "title": f"Sprint Report - {clean_sprint} (Live)",
+                        "format": "markdown",
+                        "file_path": os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                        "file_name": f"SPRINT_REPORT_{clean_sprint}.md",
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": "Live generated"
+                    }
+            except Exception as e:
+                logger.debug(f"Could not render full sprint markdown: {e}")
+
+            matching_wis = [w for w in (self._work_items or []) if (w.get("sprint_week_name") == clean_sprint or clean_sprint in (w.get("iteration_path") or ""))]
             md_lines = [
-                f"# Sprint Report: {sprint_name}",
+                f"# Sprint Report: {clean_sprint}",
                 "",
                 f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | **Items:** {len(matching_wis)}",
                 "",
@@ -7680,10 +7749,10 @@ class DevOpsBackend(QObject):
             content = "\n".join(md_lines)
             return {
                 "success": True,
-                "title": f"Sprint Report - {sprint_name}",
+                "title": f"Sprint Report - {clean_sprint}",
                 "format": "markdown",
-                "file_path": fpath,
-                "file_name": f"SPRINT_{sprint_name}.md",
+                "file_path": os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                "file_name": f"SPRINT_REPORT_{clean_sprint}.md",
                 "content": content,
                 "line_count": len(md_lines),
                 "word_count": len(re.findall(r"\b\w+\b", content)),
@@ -7692,13 +7761,19 @@ class DevOpsBackend(QObject):
             }
 
         elif r_type in ("rescheduling", "shifts", "iteration_shifts", "moved_items"):
-            fpath = os.path.join(eff_dir, "RESCHEDULING_REPORT.md")
-            if os.path.isfile(fpath):
-                res = self.get_file_content(fpath)
-                if res.get("success"):
-                    res["title"] = "Iteration Shifts & Rescheduling Report"
-                    res["format"] = "markdown"
-                    return res
+            candidates = [
+                os.path.join(eff_dir, "RESCHEDULING_REPORT.md"),
+                os.path.join(eff_dir, "doc", "04_Development", "RESCHEDULING_REPORT.md"),
+                os.path.join(os.getcwd(), "RESCHEDULING_REPORT.md"),
+                os.path.join(os.getcwd(), "doc", "04_Development", "RESCHEDULING_REPORT.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Iteration Shifts & Rescheduling Report"
+                        res["format"] = "markdown"
+                        return res
             # Fallback draft generation
             try:
                 import generate_rescheduling_report
@@ -7714,7 +7789,7 @@ class DevOpsBackend(QObject):
                         "success": True,
                         "title": "Iteration Shifts & Rescheduling Report (Live)",
                         "format": "markdown",
-                        "file_path": fpath,
+                        "file_path": os.path.join(eff_dir, "RESCHEDULING_REPORT.md"),
                         "file_name": "RESCHEDULING_REPORT.md",
                         "content": md_text,
                         "line_count": len(md_text.splitlines()),
@@ -7724,7 +7799,7 @@ class DevOpsBackend(QObject):
                     }
             except Exception as e:
                 logger.debug(f"Could not build draft rescheduling markdown: {e}")
-            res = self.get_file_content(fpath)
+            res = self.get_file_content(os.path.join(eff_dir, "RESCHEDULING_REPORT.md"))
             res["title"] = "Iteration Shifts & Rescheduling Report"
             res["format"] = "markdown"
             return res

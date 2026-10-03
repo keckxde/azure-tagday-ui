@@ -420,7 +420,7 @@ import "../../components"
 
                             // Description
                             Text {
-                                text: "Evaluates package release status, semantic tags, and merged PR change logs. Generates multi-package REVISION.md and Word formatted REVISION.docx release tracking documents."
+                                text: "Evaluates package release status, semantic tags, and merged PR change logs. Generates multi-package REVISION.md release tracking document."
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 12
                                 color: "#8b949e"
@@ -501,29 +501,6 @@ import "../../components"
                                             var rep = backend.get_report_content("revision");
                                             window.openRightSidebar("report_preview", "Release Notes & Revision", "REVISION.md Markdown Inspector", rep);
                                         }
-                                    }
-                                }
-
-                                Button {
-                                    text: "📘 DOCX"
-                                    font.pixelSize: 12
-                                    contentItem: Text {
-                                        text: parent.text
-                                        font: parent.font
-                                        color: "#58a6ff"
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        implicitHeight: 34
-                                        implicitWidth: 80
-                                        radius: 6
-                                        color: parent.hovered ? "#30363d" : "#21262d"
-                                        border.color: "#30363d"
-                                    }
-                                    onClicked: {
-                                        if (backend)
-                                            backend.open_revision_docx();
                                     }
                                 }
 
