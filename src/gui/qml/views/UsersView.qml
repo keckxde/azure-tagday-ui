@@ -23,6 +23,24 @@ Item {
         ? (backend.get_all_user_profiles() || [])
         : []
 
+    // Candidate other profiles eligible to be linked as an alias
+    readonly property var candidateProfiles: {
+        var list = root.rawProfiles || [];
+        var curName = root.selectedUser ? root.selectedUser.name : "";
+        var existingAliases = (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : [];
+        var res = [];
+        for (var i = 0; i < list.length; i++) {
+            var p = list[i];
+            if (!p || !p.name) continue;
+            if (p.name === curName) continue;
+            if (p.is_aliased) continue;
+            if (existingAliases.indexOf(p.name) !== -1) continue;
+            res.push(p.name);
+        }
+        res.sort(function(a, b) { return a.localeCompare(b); });
+        return res;
+    }
+
     // Filtered and sorted profiles list
     readonly property var filteredProfiles: {
         var list = root.rawProfiles || [];
@@ -46,20 +64,23 @@ Item {
                         }
                     }
                 }
-                if (!nameMatch && !initialsMatch && !personaMatch && !aliasMatch) {
+                var aliasedToMatch = m.is_aliased && m.aliased_to && m.aliased_to.toLowerCase().indexOf(query) !== -1;
+                if (!nameMatch && !initialsMatch && !personaMatch && !aliasMatch && !aliasedToMatch) {
                     return false;
                 }
             }
 
             // Category filters
             if (filter === "has_aliases") {
-                return m.aliases && m.aliases.length > 0;
+                return !m.is_aliased && m.aliases && m.aliases.length > 0;
             } else if (filter === "active_sprint") {
-                return (m.score && m.score > 0) || (m.last_active_date && m.last_active_date !== "");
+                return !m.is_aliased && ((m.score && m.score > 0) || (m.last_active_date && m.last_active_date !== ""));
             } else if (filter === "active_24h") {
-                if (!m.last_active_date) return false;
+                if (m.is_aliased || !m.last_active_date) return false;
                 var lastRel = m.last_activity ? m.last_activity.relative : "";
                 return lastRel.indexOf("m ago") !== -1 || lastRel.indexOf("h ago") !== -1 || lastRel.indexOf("s ago") !== -1 || lastRel.indexOf("Just now") !== -1;
+            } else if (filter === "aliased") {
+                return !!m.is_aliased;
             }
             return true;
         });
@@ -67,6 +88,10 @@ Item {
         // Sorting
         var s = root.sortBy;
         result.sort(function(a, b) {
+            // Non-aliased profiles always sort before aliased ones when sorting by score or rank
+            if (a.is_aliased !== b.is_aliased && (s === "score" || s === "last_active" || s === "tasks" || s === "commits")) {
+                return a.is_aliased ? 1 : -1;
+            }
             if (s === "score") {
                 return (b.score || 0) - (a.score || 0);
             } else if (s === "name") {
@@ -139,6 +164,14 @@ Item {
         }
     }
 
+    function findUserByName(name) {
+        if (!name || !root.rawProfiles) return null;
+        for (var i = 0; i < root.rawProfiles.length; i++) {
+            if (root.rawProfiles[i].name === name) return root.rawProfiles[i];
+        }
+        return null;
+    }
+
     function addAliasToSelectedUser(alias) {
         if (!selectedUser || !alias || !alias.trim()) return;
         if (backend && typeof backend.add_user_alias === "function") {
@@ -151,6 +184,12 @@ Item {
         if (!selectedUser || !alias) return;
         if (backend && typeof backend.remove_user_alias === "function") {
             backend.remove_user_alias(selectedUser.name, alias);
+        }
+    }
+
+    function unlinkAliasProfile(canonicalName, aliasName) {
+        if (backend && typeof backend.remove_user_alias === "function") {
+            backend.remove_user_alias(canonicalName, aliasName);
         }
     }
 
@@ -350,7 +389,19 @@ Item {
                                 Text { text: "👥"; font.pixelSize: 16 }
                                 Column {
                                     Text { text: "TOTAL USERS"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
-                                    Text { text: "" + (root.rawProfiles ? root.rawProfiles.length : 0); font.pixelSize: 14; font.weight: Font.Bold; color: "#f0f6fc" }
+                                    Text {
+                                        text: {
+                                            var list = root.rawProfiles || [];
+                                            var activeCount = 0;
+                                            var aliasedCount = 0;
+                                            for (var i = 0; i < list.length; i++) {
+                                                if (list[i].is_aliased) aliasedCount++;
+                                                else activeCount++;
+                                            }
+                                            return "" + activeCount + (aliasedCount > 0 ? " (+" + aliasedCount + " 🔗)" : "");
+                                        }
+                                        font.pixelSize: 14; font.weight: Font.Bold; color: "#f0f6fc"
+                                    }
                                 }
                             }
                         }
@@ -376,7 +427,7 @@ Item {
                                             var active = 0;
                                             var list = root.rawProfiles || [];
                                             for (var i = 0; i < list.length; i++) {
-                                                if (list[i].score > 0 || (list[i].last_active_date && list[i].last_active_date !== "")) active++;
+                                                if (!list[i].is_aliased && (list[i].score > 0 || (list[i].last_active_date && list[i].last_active_date !== ""))) active++;
                                             }
                                             return "" + active;
                                         }
@@ -434,9 +485,15 @@ Item {
                                 Column {
                                     Text { text: "LEADER / MVP"; font.pixelSize: 9; font.weight: Font.Bold; color: "#8b949e" }
                                     Text {
-                                        text: (root.rawProfiles && root.rawProfiles.length > 0 && root.rawProfiles[0].score > 0)
-                                            ? (root.rawProfiles[0].name + " (" + root.rawProfiles[0].score + " pts)")
-                                            : "—"
+                                        text: {
+                                            var list = root.rawProfiles || [];
+                                            for (var i = 0; i < list.length; i++) {
+                                                if (!list[i].is_aliased && list[i].score > 0) {
+                                                    return list[i].name + " (" + list[i].score + " pts)";
+                                                }
+                                            }
+                                            return "—";
+                                        }
                                         font.pixelSize: 13
                                         font.weight: Font.Bold
                                         color: "#e3b341"
@@ -527,7 +584,8 @@ Item {
                                 { id: "all", label: "All Users" },
                                 { id: "active_24h", label: "🟢 Active Today" },
                                 { id: "active_sprint", label: "⚡ Active This Sprint" },
-                                { id: "has_aliases", label: "🔗 Has Aliases" }
+                                { id: "has_aliases", label: "🔗 Has Aliases" },
+                                { id: "aliased", label: "🔗 Linked Aliases" }
                             ]
 
                             Rectangle {
@@ -660,6 +718,7 @@ Item {
                             Layout.fillWidth: true
                             implicitHeight: cardCol.implicitHeight + 24
                             radius: 8
+                            opacity: modelData.is_aliased ? 0.55 : 1.0
                             property bool isSelected: root.selectedUser && root.selectedUser.name === modelData.name
                             color: isSelected ? Qt.rgba(31 / 255, 111 / 255, 235 / 255, 0.12) : (cardMa.containsMouse ? "#1c2128" : "#161b22")
                             border.color: isSelected ? "#58a6ff" : (cardMa.containsMouse ? "#484f58" : "#30363d")
@@ -712,8 +771,9 @@ Item {
                                             }
                                         }
 
-                                        // Activity indicator dot
+                                        // Activity indicator dot (hidden for aliased profiles)
                                         Rectangle {
+                                            visible: !modelData.is_aliased
                                             anchors.bottom: parent.bottom
                                             anchors.right: parent.right
                                             width: 12
@@ -746,9 +806,9 @@ Item {
                                                 color: "#f0f6fc"
                                             }
 
-                                            // Rank Badge
+                                            // Rank Badge (active non-aliased members only)
                                             Rectangle {
-                                                visible: !!(modelData.rank && modelData.rank <= 10)
+                                                visible: !modelData.is_aliased && !!(modelData.rank && modelData.rank <= 10)
                                                 implicitWidth: rankText.implicitWidth + 10
                                                 implicitHeight: 18
                                                 radius: 9
@@ -767,9 +827,9 @@ Item {
                                                 }
                                             }
 
-                                            // Streak flame pill
+                                            // Streak flame pill (active non-aliased members only)
                                             Rectangle {
-                                                visible: !!(modelData.current_streak_weeks && modelData.current_streak_weeks >= 2)
+                                                visible: !modelData.is_aliased && !!(modelData.current_streak_weeks && modelData.current_streak_weeks >= 2)
                                                 implicitWidth: streakText.implicitWidth + 8
                                                 implicitHeight: 18
                                                 radius: 9
@@ -787,14 +847,37 @@ Item {
                                                     color: "#ff9b57"
                                                 }
                                             }
+
+                                            // Linked Profile Pill (for aliased profiles)
+                                            Rectangle {
+                                                visible: !!modelData.is_aliased
+                                                implicitWidth: aliasedBadgeText.implicitWidth + 10
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.2)
+                                                border.color: "#a371f7"
+                                                border.width: 1
+
+                                                Text {
+                                                    id: aliasedBadgeText
+                                                    anchors.centerIn: parent
+                                                    text: "🔗 Linked Profile"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#d2a8ff"
+                                                }
+                                            }
                                         }
 
-                                        // Persona & Working Style Chip
+                                        // Persona & Working Style Chip / Linked attribution
                                         Text {
-                                            text: (modelData.time_stats && modelData.time_stats.persona) ? modelData.time_stats.persona : "☀️ Team Contributor"
+                                            text: modelData.is_aliased
+                                                ? ("🔗 Linked alias of @" + (modelData.aliased_to || "primary profile"))
+                                                : ((modelData.time_stats && modelData.time_stats.persona) ? modelData.time_stats.persona : "☀️ Team Contributor")
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
-                                            color: "#8b949e"
+                                            color: modelData.is_aliased ? "#a371f7" : "#8b949e"
                                         }
                                     }
 
@@ -803,18 +886,18 @@ Item {
                                         implicitHeight: 28
                                         implicitWidth: scoreText.implicitWidth + 16
                                         radius: 14
-                                        color: Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.15)
-                                        border.color: "#e3b341"
+                                        color: modelData.is_aliased ? "#21262d" : Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.15)
+                                        border.color: modelData.is_aliased ? "#30363d" : "#e3b341"
                                         border.width: 1
 
                                         Text {
                                             id: scoreText
                                             anchors.centerIn: parent
-                                            text: "👑 " + (modelData.score || 0) + " pts"
+                                            text: modelData.is_aliased ? "🔗 Linked" : ("👑 " + (modelData.score || 0) + " pts")
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
                                             font.weight: Font.Bold
-                                            color: "#e3b341"
+                                            color: modelData.is_aliased ? "#8b949e" : "#e3b341"
                                         }
                                     }
 
@@ -851,8 +934,52 @@ Item {
                                     }
                                 }
 
-                                // Aliases Tag Strip
+                                // Aliased to Primary link tag (shown when this is an aliased profile)
                                 RowLayout {
+                                    visible: !!modelData.is_aliased
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Text {
+                                        text: "Primary Profile:"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: "#8b949e"
+                                    }
+
+                                    Rectangle {
+                                        implicitWidth: primLinkText.implicitWidth + 14
+                                        implicitHeight: 20
+                                        radius: 4
+                                        color: Qt.rgba(88 / 255, 166 / 255, 255 / 255, 0.15)
+                                        border.color: "#388bfd"
+                                        border.width: 1
+
+                                        Text {
+                                            id: primLinkText
+                                            anchors.centerIn: parent
+                                            text: "👤 " + (modelData.aliased_to || "")
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: "#58a6ff"
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var target = root.findUserByName(modelData.aliased_to);
+                                                if (target) root.selectUser(target);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Aliases Tag Strip (shown when this is a canonical profile)
+                                RowLayout {
+                                    visible: !modelData.is_aliased
                                     Layout.fillWidth: true
                                     spacing: 6
 
@@ -1162,7 +1289,7 @@ Item {
                             implicitHeight: heroCol.implicitHeight + 20
                             radius: 8
                             color: "#0d1117"
-                            border.color: "#30363d"
+                            border.color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : "#30363d"
 
                             ColumnLayout {
                                 id: heroCol
@@ -1176,8 +1303,8 @@ Item {
                                         width: 52
                                         height: 52
                                         radius: 26
-                                        color: "#1f6feb"
-                                        border.color: "#58a6ff"
+                                        color: (root.selectedUser && root.selectedUser.is_aliased) ? "#21262d" : "#1f6feb"
+                                        border.color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : "#58a6ff"
                                         border.width: 2
 
                                         Text {
@@ -1193,27 +1320,54 @@ Item {
                                         Layout.fillWidth: true
                                         spacing: 2
 
-                                        Text {
-                                            text: (root.selectedUser && root.selectedUser.name) ? root.selectedUser.name : ""
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 16
-                                            font.weight: Font.Bold
-                                            color: "#ffffff"
+                                        RowLayout {
+                                            spacing: 8
+                                            Text {
+                                                text: (root.selectedUser && root.selectedUser.name) ? root.selectedUser.name : ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 16
+                                                font.weight: Font.Bold
+                                                color: "#ffffff"
+                                            }
+
+                                            Rectangle {
+                                                visible: !!(root.selectedUser && root.selectedUser.is_aliased)
+                                                implicitWidth: heroAliasedTag.implicitWidth + 10
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.2)
+                                                border.color: "#a371f7"
+                                                border.width: 1
+
+                                                Text {
+                                                    id: heroAliasedTag
+                                                    anchors.centerIn: parent
+                                                    text: "🔗 Linked Alias"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#d2a8ff"
+                                                }
+                                            }
                                         }
 
                                         Text {
-                                            text: (root.selectedUser && root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor"
+                                            text: (root.selectedUser && root.selectedUser.is_aliased)
+                                                ? ("🔗 Linked alias of @" + (root.selectedUser.aliased_to || "primary profile"))
+                                                : ((root.selectedUser && root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor")
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
-                                            color: "#58a6ff"
+                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : "#58a6ff"
                                         }
 
                                         Text {
-                                            text: "👑 " + ((root.selectedUser && root.selectedUser.score) ? root.selectedUser.score : 0) + " pts • Rank #" + ((root.selectedUser && root.selectedUser.rank) ? root.selectedUser.rank : "—")
+                                            text: (root.selectedUser && root.selectedUser.is_aliased)
+                                                ? "Statistics aggregated into primary profile • Excluded from rankings"
+                                                : ("👑 " + ((root.selectedUser && root.selectedUser.score) ? root.selectedUser.score : 0) + " pts • Rank #" + ((root.selectedUser && root.selectedUser.rank) ? root.selectedUser.rank : "—"))
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
                                             font.weight: Font.Bold
-                                            color: "#e3b341"
+                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#8b949e" : "#e3b341"
                                         }
                                     }
                                 }
@@ -1227,131 +1381,360 @@ Item {
                             implicitHeight: aliasMgrCol.implicitHeight + 20
                             radius: 8
                             color: "#0d1117"
-                            border.color: "#30363d"
+                            border.color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : "#30363d"
 
                             ColumnLayout {
                                 id: aliasMgrCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 8
+                                spacing: 10
 
-                                RowLayout {
-                                    Text {
-                                        text: "🔗 Configured Aliases"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: "#f0f6fc"
+                                // Case A: If current profile IS an alias linked to another profile
+                                ColumnLayout {
+                                    visible: !!(root.selectedUser && root.selectedUser.is_aliased)
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    RowLayout {
+                                        Text {
+                                            text: "🔗 Linked Profile Status"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#d2a8ff"
+                                        }
                                     }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: ((root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases.length : 0) + " mapped"
-                                        font.pixelSize: 10
-                                        color: "#8b949e"
-                                    }
-                                }
-
-                                Text {
-                                    text: "Commits, PRs, and tickets with these names are combined into this profile."
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 10
-                                    color: "#8b949e"
-                                }
-
-                                // List of aliases with unlink button
-                                Repeater {
-                                    model: (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : []
 
                                     Rectangle {
                                         Layout.fillWidth: true
-                                        implicitHeight: 28
-                                        radius: 4
-                                        color: "#161b22"
-                                        border.color: "#30363d"
+                                        implicitHeight: aliasedBannerInsideCol.implicitHeight + 16
+                                        radius: 6
+                                        color: Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.1)
+                                        border.color: "#a371f7"
+                                        border.width: 1
 
-                                        RowLayout {
+                                        ColumnLayout {
+                                            id: aliasedBannerInsideCol
                                             anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            spacing: 6
+                                            anchors.margins: 10
+                                            spacing: 8
 
-                                            Text { text: "🏷️"; font.pixelSize: 10 }
                                             Text {
-                                                text: "@" + modelData
+                                                text: "This profile is configured as an alias for " + (root.selectedUser ? root.selectedUser.aliased_to : "") + ". All its git activity, merged PRs, and work items are automatically credited to the primary profile. This profile is greyed out and excluded from individual leaderboard calculations."
                                                 font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 11
-                                                color: "#a371f7"
+                                                color: "#c9d1d9"
+                                                wrapMode: Text.Wrap
                                                 Layout.fillWidth: true
                                             }
 
-                                            Text {
-                                                text: "✕ Remove"
-                                                font.pixelSize: 10
-                                                color: "#f85149"
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: root.removeAliasFromSelectedUser(modelData)
+                                            RowLayout {
+                                                spacing: 8
+                                                Layout.topMargin: 4
+
+                                                Button {
+                                                    text: "👤 Open Primary Profile (" + (root.selectedUser ? root.selectedUser.aliased_to : "") + ")"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    contentItem: Text {
+                                                        text: parent.text
+                                                        font: parent.font
+                                                        color: "#ffffff"
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                    background: Rectangle {
+                                                        implicitHeight: 30
+                                                        implicitWidth: 200
+                                                        radius: 4
+                                                        color: parent.hovered ? "#1f6feb" : "#238636"
+                                                    }
+                                                    onClicked: {
+                                                        if (root.selectedUser && root.selectedUser.aliased_to) {
+                                                            var target = root.findUserByName(root.selectedUser.aliased_to);
+                                                            if (target) root.selectUser(target);
+                                                        }
+                                                    }
+                                                }
+
+                                                Button {
+                                                    text: "✕ Unlink Alias"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Bold
+                                                    contentItem: Text {
+                                                        text: parent.text
+                                                        font: parent.font
+                                                        color: "#f85149"
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                    background: Rectangle {
+                                                        implicitHeight: 30
+                                                        implicitWidth: 100
+                                                        radius: 4
+                                                        color: parent.hovered ? Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.2) : "#21262d"
+                                                        border.color: "#f85149"
+                                                        border.width: 1
+                                                    }
+                                                    onClicked: {
+                                                        if (root.selectedUser && root.selectedUser.aliased_to) {
+                                                            root.unlinkAliasProfile(root.selectedUser.aliased_to, root.selectedUser.name);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
 
-                                // Inline Add Alias Input Form
-                                RowLayout {
+                                // Case B: If current profile IS a primary canonical profile
+                                ColumnLayout {
+                                    visible: !root.selectedUser || !root.selectedUser.is_aliased
                                     Layout.fillWidth: true
-                                    spacing: 6
+                                    spacing: 8
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: 30
-                                        radius: 4
-                                        color: "#161b22"
-                                        border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
+                                    RowLayout {
+                                        Text {
+                                            text: "🔗 Configured Aliases"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#f0f6fc"
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: ((root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases.length : 0) + " mapped"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
 
-                                        TextInput {
-                                            id: addAliasInputBox
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            text: root.newAliasInput
-                                            color: "#c9d1d9"
-                                            font.pixelSize: 11
-                                            onTextChanged: root.newAliasInput = text
-                                            onAccepted: {
-                                                root.addAliasToSelectedUser(text);
-                                            }
+                                    Text {
+                                        text: "Commits, PRs, and tickets from mapped aliases and linked user profiles are merged into this profile."
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
 
-                                            Text {
-                                                text: "Enter new alias (e.g. asmith)..."
-                                                font.pixelSize: 11
-                                                color: "#6e7681"
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
+                                    // List of configured aliases with unlink button
+                                    Repeater {
+                                        model: (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : []
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 28
+                                            radius: 4
+                                            color: "#161b22"
+                                            border.color: "#30363d"
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                spacing: 6
+
+                                                Text { text: "🏷️"; font.pixelSize: 10 }
+                                                Text {
+                                                    text: "@" + modelData
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    color: "#a371f7"
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                Text {
+                                                    text: "✕ Remove"
+                                                    font.pixelSize: 10
+                                                    color: "#f85149"
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.removeAliasFromSelectedUser(modelData)
+                                                    }
+                                                }
                                             }
                                         }
                                     }
 
-                                    Button {
-                                        text: "+ Link"
-                                        font.pixelSize: 10
-                                        font.weight: Font.Bold
-                                        contentItem: Text {
-                                            text: parent.text
-                                            font: parent.font
-                                            color: "#ffffff"
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
+                                    // Option 1: Dropdown / ComboBox selector for existing user profiles
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        Layout.topMargin: 4
+
+                                        Text {
+                                            text: "Link User Profile as Alias:"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: "#c9d1d9"
                                         }
-                                        background: Rectangle {
-                                            implicitHeight: 30
-                                            implicitWidth: 60
-                                            radius: 4
-                                            color: parent.hovered ? "#2ea043" : "#238636"
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            ComboBox {
+                                                id: profilePickerCombo
+                                                Layout.fillWidth: true
+                                                implicitHeight: 32
+                                                model: ["— Select profile to link as alias —"].concat(root.candidateProfiles)
+                                                currentIndex: 0
+
+                                                contentItem: Text {
+                                                    leftPadding: 10
+                                                    rightPadding: 10
+                                                    text: profilePickerCombo.displayText
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    color: profilePickerCombo.currentIndex === 0 ? "#8b949e" : "#58a6ff"
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                background: Rectangle {
+                                                    implicitHeight: 32
+                                                    radius: 4
+                                                    color: "#161b22"
+                                                    border.color: profilePickerCombo.activeFocus ? "#58a6ff" : "#30363d"
+                                                    border.width: 1
+                                                }
+
+                                                popup: Popup {
+                                                    y: profilePickerCombo.height + 2
+                                                    width: profilePickerCombo.width
+                                                    implicitHeight: Math.min(contentItem.implicitHeight + 8, 200)
+                                                    padding: 4
+                                                    contentItem: ListView {
+                                                        clip: true
+                                                        implicitHeight: contentHeight
+                                                        model: profilePickerCombo.popup.visible ? profilePickerCombo.delegateModel : null
+                                                        currentIndex: profilePickerCombo.highlightedIndex
+                                                        ScrollIndicator.vertical: ScrollIndicator { }
+                                                    }
+                                                    background: Rectangle {
+                                                        color: "#161b22"
+                                                        border.color: "#30363d"
+                                                        radius: 6
+                                                    }
+                                                }
+
+                                                delegate: ItemDelegate {
+                                                    width: profilePickerCombo.width - 8
+                                                    implicitHeight: 28
+                                                    highlighted: profilePickerCombo.highlightedIndex === index
+                                                    contentItem: Text {
+                                                        text: modelData
+                                                        color: highlighted ? "#58a6ff" : (index === 0 ? "#8b949e" : "#c9d1d9")
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 11
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                    background: Rectangle {
+                                                        color: highlighted ? "#21262d" : "transparent"
+                                                        radius: 4
+                                                    }
+                                                }
+                                            }
+
+                                            Button {
+                                                text: "+ Link Profile"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                enabled: profilePickerCombo.currentIndex > 0
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    font: parent.font
+                                                    color: parent.enabled ? "#ffffff" : "#6e7681"
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+                                                background: Rectangle {
+                                                    implicitHeight: 32
+                                                    implicitWidth: 96
+                                                    radius: 4
+                                                    color: !parent.enabled ? "#21262d" : (parent.hovered ? "#2ea043" : "#238636")
+                                                }
+                                                onClicked: {
+                                                    if (profilePickerCombo.currentIndex > 0) {
+                                                        var chosen = profilePickerCombo.currentText;
+                                                        root.addAliasToSelectedUser(chosen);
+                                                        profilePickerCombo.currentIndex = 0;
+                                                    }
+                                                }
+                                            }
                                         }
-                                        onClicked: root.addAliasToSelectedUser(root.newAliasInput)
+                                    }
+
+                                    // Option 2: Custom Text / Git Handle Alias Input
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        Layout.topMargin: 4
+
+                                        Text {
+                                            text: "Or enter custom git handle / email alias:"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                implicitHeight: 30
+                                                radius: 4
+                                                color: "#161b22"
+                                                border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
+
+                                                TextInput {
+                                                    id: addAliasInputBox
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
+                                                    verticalAlignment: TextInput.AlignVCenter
+                                                    text: root.newAliasInput
+                                                    color: "#c9d1d9"
+                                                    font.pixelSize: 11
+                                                    onTextChanged: root.newAliasInput = text
+                                                    onAccepted: {
+                                                        root.addAliasToSelectedUser(text);
+                                                    }
+
+                                                    Text {
+                                                        text: "Enter custom handle (e.g. asmith, alex@corp.com)..."
+                                                        font.pixelSize: 11
+                                                        color: "#6e7681"
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
+                                                    }
+                                                }
+                                            }
+
+                                            Button {
+                                                text: "+ Add Alias"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                enabled: !!(root.newAliasInput && root.newAliasInput.trim())
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    font: parent.font
+                                                    color: parent.enabled ? "#ffffff" : "#6e7681"
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+                                                background: Rectangle {
+                                                    implicitHeight: 30
+                                                    implicitWidth: 80
+                                                    radius: 4
+                                                    color: !parent.enabled ? "#21262d" : (parent.hovered ? "#388bfd" : "#1f6feb")
+                                                }
+                                                onClicked: root.addAliasToSelectedUser(root.newAliasInput)
+                                            }
+                                        }
                                     }
                                 }
                             }

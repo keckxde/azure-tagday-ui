@@ -1178,6 +1178,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "name": cname,
                 "initials": initials,
                 "aliases": list(known_aliases),
+                "is_aliased": False,
+                "aliased_to": None,
                 "last_active_date": "",
                 "last_activity": None,
                 "recent_activities": [],
@@ -1957,9 +1959,114 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         if s_code not in recent_sprint_weeks:
             recent_sprint_weeks.append(s_code)
 
+    # Inject all configured alias profiles as distinct entries (greyed out / linked)
+    for canon_name, aliases in canonical_to_aliases.items():
+        for alias_name in aliases:
+            a_clean = _clean_user_name(alias_name)
+            if not a_clean or a_clean.lower() == canon_name.lower():
+                continue
+            if a_clean not in members:
+                parts = a_clean.split()
+                initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "??"
+                members[a_clean] = {
+                    "name": a_clean,
+                    "initials": initials,
+                    "aliases": [],
+                    "is_aliased": True,
+                    "aliased_to": canon_name,
+                    "last_active_date": "",
+                    "last_activity": None,
+                    "recent_activities": [],
+                    "assigned_work_items": [],
+                    "recent_prs": [],
+                    "recent_commits": [],
+                    "_last_activity_dt": None,
+                    "prs_created": 0,
+                    "prs_closed": 0,
+                    "prs_fast_merged": 0,
+                    "prs_reviewed": 0,
+                    "prs_approved": 0,
+                    "tasks_created": 0,
+                    "tasks_completed": 0,
+                    "bugs_resolved": 0,
+                    "stories_completed": 0,
+                    "commits_count": 0,
+                    "branches_started": 0,
+                    "branches_closed": 0,
+                    "tags_pushed": 0,
+                    "builds_total": 0,
+                    "builds_succeeded": 0,
+                    "builds_failed": 0,
+                    "build_success_rate": 100.0,
+                    "total_shifts": 0,
+                    "total_delay_weeks": 0,
+                    "avg_pr_hours": 0.0,
+                    "state_changes_count": 0,
+                    "pushbacks_count": 0,
+                    "tasks_cleaned": 0,
+                    "stale_tasks_count": 0,
+                    "open_tasks_assigned": 0,
+                    "oldest_open_task_days": 0,
+                    "oldest_open_task": None,
+                    "tasks_fast_closed": 0,
+                    "avg_task_turnaround_hours": 0.0,
+                    "fastest_task_hours": 0.0,
+                    "task_evidences_count": 0,
+                    "structured_syntax_completed": 0,
+                    "is_cleaner": False,
+                    "is_decliner": False,
+                    "is_ignorer": False,
+                    "night_activities": 0,
+                    "early_bird_activities": 0,
+                    "weekend_activities": 0,
+                    "daytime_activities": 0,
+                    "evening_activities": 0,
+                    "friday_afternoon_activities": 0,
+                    "time_stats": {
+                        "total_actions": 0,
+                        "daytime_count": 0,
+                        "early_bird_count": 0,
+                        "evening_count": 0,
+                        "night_count": 0,
+                        "weekend_count": 0,
+                        "friday_pm_count": 0,
+                        "daytime_pct": 0.0,
+                        "night_pct": 0.0,
+                        "weekend_pct": 0.0,
+                        "early_bird_pct": 0.0,
+                        "hourly_distribution": [0] * 24,
+                        "daily_distribution": [0] * 7,
+                        "peak_hour": 14,
+                        "peak_hour_label": "14:00",
+                        "peak_day": "Monday",
+                        "persona": f"🔗 Alias of {canon_name}",
+                    },
+                    "_pr_durations": [],
+                    "_task_durations": [],
+                    "recent_achievements": [],
+                    "weekly_activity_history": {},
+                    "current_streak_weeks": 0,
+                    "best_streak_weeks": 0,
+                    "score": 0,
+                    "badges": [],
+                    "badges_count": 0,
+                    "rank": None,
+                }
+            else:
+                members[a_clean]["is_aliased"] = True
+                members[a_clean]["aliased_to"] = canon_name
+                members[a_clean]["score"] = 0
+                members[a_clean]["badges"] = []
+                members[a_clean]["badges_count"] = 0
+                members[a_clean]["rank"] = None
+                members[a_clean]["current_streak_weeks"] = 0
+                members[a_clean]["best_streak_weeks"] = 0
+
     member_list = list(members.values())
 
     for m in member_list:
+        if m.get("is_aliased"):
+            continue
         # Calculate Average PR Turnaround
         if m["_pr_durations"]:
             m["avg_pr_hours"] = round(sum(m["_pr_durations"]) / len(m["_pr_durations"]), 1)
@@ -2378,9 +2485,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "achievers_count": len(unique_members_in_cat)
         })
 
-    # 8. Generate Category Leaderboards (Top performers per category)
+    # 8. Generate Category Leaderboards (Top performers per category - excluding aliased profiles)
     def _make_leaderboard(key, title, icon, unit="items", reverse_sort=True):
-        filtered = [m for m in member_list if m.get(key, 0) > 0]
+        filtered = [m for m in member_list if not m.get("is_aliased") and m.get(key, 0) > 0]
         sorted_m = sorted(filtered, key=lambda x: x.get(key, 0), reverse=reverse_sort)
         entries = []
         for rank, item in enumerate(sorted_m[:10], start=1):
@@ -2431,28 +2538,31 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     leaderboard_daytime = _make_leaderboard("daytime_activities", "Daytime Champions (9AM – 6PM)", "☀️", "core acts")
     leaderboard_overall = _make_leaderboard("score", "Sprint MVP (Overall Hall of Fame)", "👑", "pts")
 
-    # Team Overview Summary
-    team_total_prs_created = sum(m["prs_created"] for m in member_list)
-    team_total_prs_closed = sum(m["prs_closed"] for m in member_list)
-    team_total_commits = sum(m["commits_count"] for m in member_list)
-    team_total_branches_started = sum(m["branches_started"] for m in member_list)
-    team_total_branches_closed = sum(m["branches_closed"] for m in member_list)
-    team_total_tasks_completed = sum(m["tasks_completed"] for m in member_list)
-    team_total_bugs_resolved = sum(m["bugs_resolved"] for m in member_list)
-    team_total_reviews = sum(m["prs_reviewed"] for m in member_list)
-    team_total_approvals = sum(m["prs_approved"] for m in member_list)
-    team_total_tags = sum(m["tags_pushed"] for m in member_list)
-    team_total_builds = sum(m["builds_total"] for m in member_list)
-    team_total_builds_succeeded = sum(m["builds_succeeded"] for m in member_list)
-    team_total_builds_failed = sum(m["builds_failed"] for m in member_list)
-    team_total_state_changes = sum(m["state_changes_count"] for m in member_list)
-    team_total_pushbacks = sum(m["pushbacks_count"] for m in member_list)
-    team_total_stale_tasks = sum(m["stale_tasks_count"] for m in member_list)
-    team_total_fast_closed = sum(m["tasks_fast_closed"] for m in member_list)
-    team_total_evidences = sum(m["task_evidences_count"] for m in member_list)
-    team_oldest_task_days = max((m["oldest_open_task_days"] for m in member_list), default=0)
+    # Team Overview Summary (calculated from active canonical members only)
+    active_members = [m for m in member_list if not m.get("is_aliased")]
+    aliased_members = [m for m in member_list if m.get("is_aliased")]
+
+    team_total_prs_created = sum(m["prs_created"] for m in active_members)
+    team_total_prs_closed = sum(m["prs_closed"] for m in active_members)
+    team_total_commits = sum(m["commits_count"] for m in active_members)
+    team_total_branches_started = sum(m["branches_started"] for m in active_members)
+    team_total_branches_closed = sum(m["branches_closed"] for m in active_members)
+    team_total_tasks_completed = sum(m["tasks_completed"] for m in active_members)
+    team_total_bugs_resolved = sum(m["bugs_resolved"] for m in active_members)
+    team_total_reviews = sum(m["prs_reviewed"] for m in active_members)
+    team_total_approvals = sum(m["prs_approved"] for m in active_members)
+    team_total_tags = sum(m["tags_pushed"] for m in active_members)
+    team_total_builds = sum(m["builds_total"] for m in active_members)
+    team_total_builds_succeeded = sum(m["builds_succeeded"] for m in active_members)
+    team_total_builds_failed = sum(m["builds_failed"] for m in active_members)
+    team_total_state_changes = sum(m["state_changes_count"] for m in active_members)
+    team_total_pushbacks = sum(m["pushbacks_count"] for m in active_members)
+    team_total_stale_tasks = sum(m["stale_tasks_count"] for m in active_members)
+    team_total_fast_closed = sum(m["tasks_fast_closed"] for m in active_members)
+    team_total_evidences = sum(m["task_evidences_count"] for m in active_members)
+    team_oldest_task_days = max((m["oldest_open_task_days"] for m in active_members), default=0)
     team_build_success_rate = round((team_total_builds_succeeded / team_total_builds * 100.0), 1) if team_total_builds > 0 else 100.0
-    active_contributors_count = sum(1 for m in member_list if m["score"] > 0)
+    active_contributors_count = sum(1 for m in active_members if m["score"] > 0)
 
     # Compute Team Time Analytics
     def _format_breakdown_label(commits, prs, tasks, builds):
@@ -2581,6 +2691,10 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m["last_active_date"] = m["last_activity"].get("timestamp", "")
 
         # Format recent highlights
+        if m.get("is_aliased"):
+            m["recent_achievements"] = [f"🔗 Linked to {m.get('aliased_to')}"]
+            continue
+
         highlights = []
         if m["prs_closed"] > 0:
             highlights.append(f"Merged {m['prs_closed']} PR{'s' if m['prs_closed'] > 1 else ''}")
@@ -2620,18 +2734,24 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             highlights.append(f"🔥 {m['current_streak_weeks']}-week streak")
         m["recent_achievements"] = highlights
 
-    # Top 3 Podium and overall rankings
-    podium = []
-    sorted_all = sorted(member_list, key=lambda x: x["score"], reverse=True)
-    for idx, m in enumerate(sorted_all, start=1):
+    # Top 3 Podium and overall rankings (active canonical members only)
+    sorted_active = sorted(active_members, key=lambda x: x["score"], reverse=True)
+    for idx, m in enumerate(sorted_active, start=1):
         m["rank"] = idx
 
-    if len(sorted_all) >= 1 and sorted_all[0]["score"] > 0:
-        podium.append({"rank": 1, "medal": "🥇", "title": "1st Place", "member": sorted_all[0]})
-    if len(sorted_all) >= 2 and sorted_all[1]["score"] > 0:
-        podium.append({"rank": 2, "medal": "🥈", "title": "2nd Place", "member": sorted_all[1]})
-    if len(sorted_all) >= 3 and sorted_all[2]["score"] > 0:
-        podium.append({"rank": 3, "medal": "🥉", "title": "3rd Place", "member": sorted_all[2]})
+    for m in aliased_members:
+        m["rank"] = None
+        m["score"] = 0
+
+    podium = []
+    if len(sorted_active) >= 1 and sorted_active[0]["score"] > 0:
+        podium.append({"rank": 1, "medal": "🥇", "title": "1st Place", "member": sorted_active[0]})
+    if len(sorted_active) >= 2 and sorted_active[1]["score"] > 0:
+        podium.append({"rank": 2, "medal": "🥈", "title": "2nd Place", "member": sorted_active[1]})
+    if len(sorted_active) >= 3 and sorted_active[2]["score"] > 0:
+        podium.append({"rank": 3, "medal": "🥉", "title": "3rd Place", "member": sorted_active[2]})
+
+    sorted_all = sorted_active + sorted(aliased_members, key=lambda x: x["name"].lower())
 
 
     return {
@@ -2678,7 +2798,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         },
         "stale_radar": sorted(stale_radar, key=lambda x: x["days_idle"], reverse=True)[:25],
         "podium": podium,
-        "members": sorted_all,
+        "members": sorted_active,
+        "all_user_profiles": sorted_all,
         "leaderboards": {
             "overall": leaderboard_overall,
             "syntax_master": leaderboard_syntax,

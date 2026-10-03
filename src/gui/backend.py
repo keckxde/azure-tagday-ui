@@ -4382,8 +4382,8 @@ class DevOpsBackend(QObject):
         """Returns all aggregated individual user profiles sorted by last activity and score."""
         if not self._team_motivation_data:
             self.recompute_team_motivation()
-        members = self._team_motivation_data.get("members", [])
-        return sorted(members, key=lambda m: (m.get("last_active_date", "") or "", m.get("score", 0)), reverse=True)
+        members = self._team_motivation_data.get("all_user_profiles") or self._team_motivation_data.get("members", [])
+        return sorted(members, key=lambda m: (m.get("is_aliased", False), -(m.get("score", 0)), m.get("name", "").lower()))
 
     @Slot(str, result=dict)
     def get_user_profile(self, user_name_or_alias):
