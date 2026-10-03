@@ -768,9 +768,18 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"🌿 Fetching Area Path settings from TFS for project '{proj}'...")
             area_settings = handler.get_project_area_path_settings(project_id=proj, team_name=team)
             if area_settings:
-                self._default_area_path = area_settings.get("default_area", "")
-                self._area_path_rules = area_settings.get("rules", [])
-                self._all_discovered_area_paths = area_settings.get("all_areas", [])
+                had_perm_err = bool(area_settings.get("had_permission_error", False))
+                disc = area_settings.get("all_areas", [])
+                rules = area_settings.get("rules", [])
+
+                # If we retrieved new areas or had no prior rules, adopt the retrieved settings
+                if rules and (len(rules) > 1 or rules[0].get("path") != proj or not self._area_path_rules):
+                    self._default_area_path = area_settings.get("default_area", "")
+                    self._area_path_rules = rules
+                    self._all_discovered_area_paths = disc
+                elif disc and len(disc) > 1:
+                    self._all_discovered_area_paths = disc
+
                 if self._cache_db:
                     self._cache_db.set_area_path_settings(
                         enabled=self._area_path_filter_enabled,
@@ -780,13 +789,34 @@ class DevOpsBackend(QObject):
                     )
                 self.areaPathSettingsChanged.emit()
                 self.refresh_all_data()
+
+                if had_perm_err:
+                    perm_msg = "ℹ️ Note: PAT lacks full permissions for project classification nodes / teamsettings (HTTP 401/403). Fallback Area Path was set; you can configure custom Area Path rules manually below."
+                    self.logMessage.emit(perm_msg)
+                    return {
+                        "success": True,
+                        "is_permission_warning": True,
+                        "message": perm_msg,
+                        "default_area": self._default_area_path,
+                        "rules_count": len(self._area_path_rules)
+                    }
+
                 msg = f"✓ Discovered {len(self._all_discovered_area_paths)} Area Path(s) with {len(self._area_path_rules)} active rule(s)."
                 self.logMessage.emit(msg)
                 return {"success": True, "message": msg, "default_area": self._default_area_path, "rules_count": len(self._area_path_rules)}
             else:
                 return {"success": False, "error": "No Area Path settings returned"}
         except Exception as e:
-            logger.error("Error fetching Area Paths from TFS: %s", e)
+            err_str = str(e)
+            is_unauth = "401" in err_str or "403" in err_str or "authentication" in err_str.lower() or "unauthorized" in err_str.lower() or "forbidden" in err_str.lower() or "permission" in err_str.lower()
+            logger.warning("Error fetching Area Paths from TFS: %s", e)
+            if is_unauth:
+                friendly_msg = (
+                    "Your Personal Access Token (PAT) lacks permissions to read project team settings or classification nodes (HTTP 401/403). "
+                    "You can still define and manage your Area Path filter rules manually below, or upgrade your PAT with 'Project and Team (Read)' permissions."
+                )
+                self.logMessage.emit(f"⚠️ {friendly_msg}")
+                return {"success": False, "is_permission_error": True, "error": friendly_msg}
             self.logMessage.emit(f"⚠️ Error fetching Area Paths: {e}")
             return {"success": False, "error": str(e)}
 

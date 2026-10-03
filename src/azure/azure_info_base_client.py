@@ -8,8 +8,8 @@ to ensure backwards compatibility with legacy imports.
 """
 
 try:
-    from .azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
+    from .azure_base_client import AzureBaseClient, AzureServerConnectionError, AzureAuthenticationError, is_connection_error
 except ImportError:
-    from azure_base_client import AzureBaseClient, AzureServerConnectionError, is_connection_error
+    from azure_base_client import AzureBaseClient, AzureServerConnectionError, AzureAuthenticationError, is_connection_error
 
-__all__ = ["AzureBaseClient", "AzureServerConnectionError", "is_connection_error"]
+__all__ = ["AzureBaseClient", "AzureServerConnectionError", "AzureAuthenticationError", "is_connection_error"]

@@ -251,7 +251,8 @@ class TestTeamMotivation(unittest.TestCase):
         """
         now = datetime.now()
         one_year_ago = now - timedelta(days=365)
-        last_week = now - timedelta(days=4)
+        # Ensure last_week timestamp reliably falls in the previous calendar week (7 to 13 days ago)
+        last_week = now - timedelta(days=now.weekday() + 4)
 
         # 1. Old task closed 1 year ago, but System.ChangedDate updated last week (e.g. tag/bulk edit)
         self.cache.save_work_item(

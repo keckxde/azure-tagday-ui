@@ -56,7 +56,20 @@ class TaskWorker(QThread):
                 self.log_message.emit("Task was aborted.")
                 self.finished_task.emit(False, "Task aborted by user")
             else:
-                err_msg = f"Task error: {e}"
-                logger.error(err_msg, exc_info=True)
-                self.log_message.emit(err_msg)
-                self.finished_task.emit(False, str(e))
+                err_str = str(e)
+                status_code = getattr(e, "status_code", None)
+                is_auth_error = status_code in (401, 403) or "401" in err_str or "403" in err_str or "Unauthorized" in err_str or "Forbidden" in err_str or "Authentication failed" in err_str
+                
+                if is_auth_error:
+                    friendly_err = (
+                        "🔐 Authentication Error (HTTP 401/403): Personal Access Token (PAT) was rejected by the server. "
+                        "Please open Settings and update or upgrade your PAT with required scopes (Work Items, Code, Project & Team)."
+                    )
+                    logger.error("Authentication error in background task: %s", e)
+                    self.log_message.emit(friendly_err)
+                    self.finished_task.emit(False, friendly_err)
+                else:
+                    err_msg = f"Task error: {e}"
+                    logger.error(err_msg, exc_info=True)
+                    self.log_message.emit(err_msg)
+                    self.finished_task.emit(False, str(e))

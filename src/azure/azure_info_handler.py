@@ -1750,6 +1750,7 @@ class AzureInfoHandler(AzureBaseClient):
         default_area = ""
         rules = []
         all_areas = []
+        had_permission_error = False
 
         # 1. Try team field values
         try:
@@ -1768,7 +1769,10 @@ class AzureInfoHandler(AzureBaseClient):
                             "includeChildren": inc_children
                         })
         except Exception as e:
-            logger.debug("Could not retrieve team field values for project %s, team %s: %s", target_proj, team, e)
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg or "Authentication" in err_msg:
+                had_permission_error = True
+            logger.info("Could not retrieve team field values for project %s, team %s: %s", target_proj, team, e)
 
         # If specific team failed and team was specified, try without team (project default team)
         if not rules and team:
@@ -1788,7 +1792,10 @@ class AzureInfoHandler(AzureBaseClient):
                                 "includeChildren": inc_children
                             })
             except Exception as e:
-                logger.debug("Could not retrieve default team field values for project %s: %s", target_proj, e)
+                err_msg = str(e)
+                if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg:
+                    had_permission_error = True
+                logger.info("Could not retrieve default team field values for project %s: %s", target_proj, e)
 
         # 2. Retrieve classification nodes for areas (hierarchy tree)
         try:
@@ -1803,7 +1810,10 @@ class AzureInfoHandler(AzureBaseClient):
                     return res
                 all_areas = _collect(tree)
         except Exception as e:
-            logger.debug("Could not retrieve classification nodes for areas in project %s: %s", target_proj, e)
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg:
+                had_permission_error = True
+            logger.info("Could not retrieve classification nodes for areas in project %s: %s", target_proj, e)
 
         # Fallback if no rules found from team settings
         if not rules and all_areas:
@@ -1835,7 +1845,8 @@ class AzureInfoHandler(AzureBaseClient):
             "default_value": def_val,
             "rules": rules,
             "all_areas": disc_areas,
-            "all_discovered": disc_areas
+            "all_discovered": disc_areas,
+            "had_permission_error": had_permission_error
         }
 
     def create_repository_tag(self, project_id, repo_id_or_name, tag_name, branch_name="dev", message="", cache_db=None):

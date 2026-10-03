@@ -21,6 +21,21 @@ class AzureServerConnectionError(ConnectionError):
         self.status_code = status_code
 
 
+class AzureAuthenticationError(AzureServerConnectionError):
+    """Raised when authentication or authorization fails with the TFS / Azure DevOps server (HTTP 401 Unauthorized or HTTP 403 Forbidden)."""
+    def __init__(self, message=None, original_error=None, status_code=None):
+        status = status_code or (getattr(original_error, "code", None) if original_error else 401)
+        if not message:
+            err_type = "Unauthorized (HTTP 401)" if status == 401 else "Forbidden / Access Denied (HTTP 403)"
+            message = (
+                f"Authentication failed with Azure DevOps / TFS server: {err_type}. "
+                f"Your Personal Access Token (PAT) may be expired, invalid, or lacking required scopes. "
+                f"Please update or upgrade your PAT in Project Settings with 'Work Items (Read & Write)', "
+                f"'Code (Read)', and 'Project and Team (Read)' permissions."
+            )
+        super().__init__(message, original_error=original_error, status_code=status)
+
+
 def is_connection_error(exc):
     """
     Returns True if the exception represents a lost connection or unreachable repository server.
@@ -138,7 +153,14 @@ class AzureBaseClient:
                 print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
                 logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
             if err.code in (401, 403):
-                raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
+                err_type_str = "Unauthorized (HTTP 401)" if err.code == 401 else "Forbidden / Access Denied (HTTP 403)"
+                msg = (
+                    f"Authentication failed with repository server ({self.url}): {err_type_str}. "
+                    f"Your Personal Access Token (PAT) may be expired, invalid, or lacking required scopes. "
+                    f"Please update or upgrade your PAT in Project Settings with 'Work Items (Read & Write)', "
+                    f"'Code (Read)', and 'Project and Team (Read)' permissions."
+                )
+                raise AzureAuthenticationError(msg, original_error=err, status_code=err.code) from err
             elif err.code in (408, 502, 503, 504):
                 raise AzureServerConnectionError(f"Repository server unavailable ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             raise err

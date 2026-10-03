@@ -1763,10 +1763,12 @@ Item {
                         if (res && res.success) {
                             loadAreaSettings();
                             root.bannerMsg = res.message || "Area Path settings fetched from TFS successfully.";
-                            root.bannerType = "success";
+                            root.bannerType = res.is_permission_warning ? "info" : "success";
                         } else if (res && res.error) {
-                            root.bannerMsg = "Failed to fetch Area Paths from TFS: " + res.error;
-                            root.bannerType = "error";
+                            root.bannerMsg = res.is_permission_error 
+                                ? res.error 
+                                : ("Failed to fetch Area Paths from TFS: " + res.error);
+                            root.bannerType = res.is_permission_error ? "warning" : "error";
                         }
                     }
                 }
@@ -1824,7 +1826,7 @@ Item {
                                 color: "#f0f6fc"
                             }
                             Text {
-                                text: "Read Area Path settings from Azure DevOps / TFS and automatically filter considered work items across Tag Day reports, sprint metrics, workload explorer, and dashboards."
+                                text: "Read Area Path settings from Azure DevOps / TFS and automatically filter considered work items across Tag Day reports, sprint metrics, workload explorer, and dashboards. If PAT lacks teamsettings permissions, custom Area Path rules can still be configured manually below."
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 color: "#8b949e"
