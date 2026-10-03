@@ -1674,9 +1674,6 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
 
                 ColumnLayout {
                     width: parent.width - 16
