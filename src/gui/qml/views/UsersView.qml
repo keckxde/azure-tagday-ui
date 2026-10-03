@@ -2111,20 +2111,25 @@ Item {
 
                                         Rectangle {
                                             Layout.fillWidth: true
-                                            implicitHeight: actEntryCol.implicitHeight + 12
-                                            radius: 4
+                                            implicitHeight: actEntryCol.implicitHeight + 14
+                                            radius: 6
                                             color: "#161b22"
                                             border.color: "#21262d"
+                                            border.width: 1
 
                                             ColumnLayout {
                                                 id: actEntryCol
                                                 anchors.fill: parent
                                                 anchors.margins: 8
-                                                spacing: 2
+                                                spacing: 4
 
+                                                // Row 1: Icon + Activity Title + Relative Time
                                                 RowLayout {
+                                                    Layout.fillWidth: true
                                                     spacing: 6
-                                                    Text { text: modelData.icon || "📌"; font.pixelSize: 11 }
+
+                                                    Text { text: modelData.icon || "📌"; font.pixelSize: 12 }
+
                                                     Text {
                                                         text: modelData.title
                                                         font.family: "Segoe UI, sans-serif"
@@ -2134,18 +2139,94 @@ Item {
                                                         elide: Text.ElideRight
                                                         Layout.fillWidth: true
                                                     }
+
                                                     Text {
-                                                        text: modelData.relative
+                                                        text: modelData.relative || ""
                                                         font.pixelSize: 9
                                                         color: "#58a6ff"
                                                     }
                                                 }
 
-                                                Text {
-                                                    text: modelData.timestamp + (modelData.repo_or_id ? " • " + modelData.repo_or_id : "")
-                                                    font.pixelSize: 9
-                                                    color: "#6e7681"
-                                                    anchors.leftMargin: 18
+                                                // Row 2: Timestamp & Direct TFS / Sprint Board Links
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 6
+
+                                                    Text {
+                                                        text: modelData.timestamp
+                                                        font.pixelSize: 9
+                                                        color: "#6e7681"
+                                                    }
+
+                                                    Item { Layout.fillWidth: true }
+
+                                                    // TFS Work Item Link Pill
+                                                    Rectangle {
+                                                        property var wid: (modelData.meta && modelData.meta.work_item_id) ? modelData.meta.work_item_id : (modelData.repo_or_id && modelData.repo_or_id.indexOf("#") === 0 ? modelData.repo_or_id.replace("#", "") : null)
+                                                        visible: !!wid
+                                                        implicitHeight: 18
+                                                        implicitWidth: tfsWiTxt.implicitWidth + 10
+                                                        radius: 3
+                                                        color: wiLinkMa.containsMouse ? "#1f6feb" : "#21262d"
+                                                        border.color: wiLinkMa.containsMouse ? "#388bfd" : "#30363d"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            id: tfsWiTxt
+                                                            anchors.centerIn: parent
+                                                            text: "🔗 TFS #" + parent.wid
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.DemiBold
+                                                            color: parent.color === "#1f6feb" ? "#ffffff" : "#58a6ff"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: wiLinkMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend && parent.wid) {
+                                                                    backend.open_work_item_in_browser(parent.wid);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // TFS Sprint Board Link Pill
+                                                    Rectangle {
+                                                        property var wid: (modelData.meta && modelData.meta.work_item_id) ? modelData.meta.work_item_id : (modelData.repo_or_id && modelData.repo_or_id.indexOf("#") === 0 ? modelData.repo_or_id.replace("#", "") : null)
+                                                        visible: !!wid
+                                                        implicitHeight: 18
+                                                        implicitWidth: boardLinkTxt.implicitWidth + 10
+                                                        radius: 3
+                                                        color: boardLinkMa.containsMouse ? "#238636" : "#16243b"
+                                                        border.color: boardLinkMa.containsMouse ? "#2ea043" : "#388bfd"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            id: boardLinkTxt
+                                                            anchors.centerIn: parent
+                                                            text: "📋 Sprint Board"
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.DemiBold
+                                                            color: parent.color === "#238636" ? "#ffffff" : "#79c0ff"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: boardLinkMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend && parent.wid) {
+                                                                    backend.open_sprint_in_browser(parent.wid);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -2242,10 +2323,10 @@ Item {
 
                                         Rectangle {
                                             Layout.fillWidth: true
-                                            implicitHeight: 30
+                                            implicitHeight: 34
                                             radius: 4
-                                            color: "#161b22"
-                                            border.color: "#21262d"
+                                            color: taskRowMa.containsMouse ? "#1c2128" : "#161b22"
+                                            border.color: taskRowMa.containsMouse ? "#388bfd" : "#21262d"
 
                                             RowLayout {
                                                 anchors.fill: parent
@@ -2273,7 +2354,78 @@ Item {
                                                 Text {
                                                     text: modelData.state
                                                     font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
                                                     color: "#3fb950"
+                                                }
+
+                                                // Quick TFS Sprint Board button
+                                                Rectangle {
+                                                    implicitHeight: 20
+                                                    implicitWidth: 54
+                                                    radius: 3
+                                                    color: tBoardMa.containsMouse ? "#238636" : "#21262d"
+                                                    border.color: "#30363d"
+                                                    border.width: 1
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "📋 Board"
+                                                        font.pixelSize: 9
+                                                        color: tBoardMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                    }
+
+                                                    MouseArea {
+                                                        id: tBoardMa
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            if (backend) {
+                                                                backend.open_sprint_in_browser(modelData.id);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                // Quick TFS Work Item button
+                                                Rectangle {
+                                                    implicitHeight: 20
+                                                    implicitWidth: 46
+                                                    radius: 3
+                                                    color: tItemMa.containsMouse ? "#1f6feb" : "#21262d"
+                                                    border.color: "#30363d"
+                                                    border.width: 1
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "🔗 TFS"
+                                                        font.pixelSize: 9
+                                                        color: tItemMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                    }
+
+                                                    MouseArea {
+                                                        id: tItemMa
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            if (backend) {
+                                                                backend.open_work_item_in_browser(modelData.id);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: taskRowMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (backend) {
+                                                        backend.open_work_item_in_browser(modelData.id);
+                                                    }
                                                 }
                                             }
                                         }

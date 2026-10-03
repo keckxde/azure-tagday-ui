@@ -1906,7 +1906,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m_act = _get_or_create_member(activated_by)
                 if m_act:
                     m_act["state_changes_count"] += 1
-                    _track_activity_time(m_act, activated_date_raw, "state_change", f"Activated {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
+                    act_meta = {"work_item_id": wid, "work_item_title": wi_title, "work_item_type": wi_type.capitalize(), "state": "Active", "is_state_transition": True}
+                    _track_activity_time(m_act, activated_date_raw, "state_change", f"Activated {wi_type.capitalize()} #{wid} — {wi_title}", repo_or_id=f"#{wid}", meta=act_meta)
 
         # Evaluate Completed Work Items within timeframe
         if is_closed_state:
@@ -1929,7 +1930,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["tasks_completed"] += 1
                         m["tasks_cleaned"] += 1
                         m["state_changes_count"] += 1
-                        _track_activity_time(m, effective_close_raw, "task_close", f"Closed {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
+                        close_meta = {"work_item_id": wid, "work_item_title": wi_title, "work_item_type": wi_type.capitalize(), "state": state, "is_state_transition": True}
+                        _track_activity_time(m, effective_close_raw, "task_close", f"Closed {wi_type.capitalize()} #{wid} — {wi_title}", repo_or_id=f"#{wid}", meta=close_meta)
                         if "bug" in wi_type or "defect" in wi_type or "problem" in wi_type:
                             m["bugs_resolved"] += 1
                         elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
@@ -1964,8 +1966,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m_ch = _get_or_create_member(effective_changer)
                         if m_ch:
                             m_ch["state_changes_count"] += 1
-                            action_title = f"Updated {wi_type.capitalize()} #{wid} [{state}]: {wi_title[:60]}" if state else f"Updated {wi_type.capitalize()} #{wid}: {wi_title[:60]}"
-                            _track_activity_time(m_ch, changed_date_raw, "state_change", action_title, repo_or_id=f"#{wid}")
+                            upd_meta = {"work_item_id": wid, "work_item_title": wi_title, "work_item_type": wi_type.capitalize(), "state": state, "is_state_transition": True}
+                            action_title = f"Updated {wi_type.capitalize()} #{wid} [{state}] — {wi_title}" if state else f"Updated {wi_type.capitalize()} #{wid} — {wi_title}"
+                            _track_activity_time(m_ch, changed_date_raw, "state_change", action_title, repo_or_id=f"#{wid}", meta=upd_meta)
 
         # Evaluate Created Work Items within timeframe
         if created_date_str and filter_start_str and filter_end_str:
@@ -1975,7 +1978,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(effective_creator)
                     if m:
                         m["tasks_created"] += 1
-                        _track_activity_time(m, created_date_raw, "task_create", f"Created {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
+                        create_meta = {"work_item_id": wid, "work_item_title": wi_title, "work_item_type": wi_type.capitalize(), "state": state}
+                        _track_activity_time(m, created_date_raw, "task_create", f"Created {wi_type.capitalize()} #{wid} — {wi_title}", repo_or_id=f"#{wid}", meta=create_meta)
 
     # 2. Process Recorded State Transition Events (Pushbacks, Reopenings & State Transitions)
     for ev in all_state_events:
@@ -1999,7 +2003,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     else:
                         m["tasks_cleaned"] += 1
                     transition_desc = f"{old_st} ➔ {new_st}" if (old_st and new_st) else (new_st or "State changed")
-                    _track_activity_time(m, ev_date_raw, "state_change", f"State transition #{wid} ({wtype}): {transition_desc}", repo_or_id=f"#{wid}")
+                    st_meta = {"work_item_id": wid, "work_item_title": title, "work_item_type": wtype, "old_state": old_st, "new_state": new_st, "is_state_transition": True}
+                    _track_activity_time(m, ev_date_raw, "state_change", f"State transition #{wid} ({wtype}): {transition_desc} — {title}", repo_or_id=f"#{wid}", meta=st_meta)
 
     # 3. Process Pull Requests, Merges, Reviews & Approvals
     for pr in all_prs:
