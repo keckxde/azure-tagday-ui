@@ -1446,7 +1446,7 @@ Rectangle {
                                     spacing: 3
 
                                     Text {
-                                        text: rightSidebarRoot.sidebarData ? rightSidebarRoot.sidebarData.name : "Badge Details"
+                                        text: (rightSidebarRoot.sidebarData && rightSidebarRoot.sidebarData.name) ? rightSidebarRoot.sidebarData.name : "Badge Details"
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 16
                                         font.weight: Font.Bold

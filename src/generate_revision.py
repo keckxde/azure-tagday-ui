@@ -222,9 +222,10 @@ def generate_revision_md(db_path, revision_md_path=None):
         for trow in tags_rows:
             tag_date = safe_iso_parse(trow["commit_date"])
             if not tag_date:
-                if trow.get("raw_json"):
+                raw_json_str = trow["raw_json"] if "raw_json" in trow.keys() else None
+                if raw_json_str:
                     try:
-                        meta = json.loads(trow["raw_json"])
+                        meta = json.loads(raw_json_str)
                         c_date = (meta.get("addinfo") or {}).get("taggedBy", {}).get("date") or meta.get("CommitDate")
                         if c_date:
                             tag_date = safe_iso_parse(c_date)
