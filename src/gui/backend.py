@@ -1539,6 +1539,24 @@ class DevOpsBackend(QObject):
             return (y or 0, w or 0)
         return sorted(seen, key=sort_key, reverse=True)
 
+    @Property(str, constant=True)
+    def currentSprintName(self):
+        """Returns the current ISO week sprint name in week-YYWW format (e.g. week-2640)."""
+        today = date.today()
+        cur_y, cur_w, _ = today.isocalendar()
+        return f"week-{str(cur_y)[-2:]}{cur_w:02d}"
+
+    def _get_default_sprint_name(self, sprint_name=""):
+        clean = (sprint_name or "").strip()
+        if clean and clean.lower() != "latest":
+            return clean
+        curr = self.currentSprintName
+        if self.availableSprintList:
+            if curr in self.availableSprintList:
+                return curr
+            return self.availableSprintList[0]
+        return curr
+
     @Property(list, notify=pullRequestsChanged)
     def pullRequests(self):
         return self._pull_requests
@@ -4276,9 +4294,7 @@ class DevOpsBackend(QObject):
             return {}
         try:
             import generate_sprint_report
-            clean_sprint = (sprint_name or "").strip()
-            if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-                clean_sprint = self.availableSprintList[0]
+            clean_sprint = self._get_default_sprint_name(sprint_name)
             work_items = self._work_items if self._work_items else None
             return generate_sprint_report.generate_sprint_report_data(
                 self._cache_db, sprint_name=clean_sprint, work_items=work_items
@@ -4296,11 +4312,7 @@ class DevOpsBackend(QObject):
         if self._is_busy:
             return
 
-        clean_sprint = (sprint_name or "").strip()
-        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-            clean_sprint = self.availableSprintList[0]
-        elif not clean_sprint:
-            clean_sprint = "latest"
+        clean_sprint = self._get_default_sprint_name(sprint_name)
 
         reports_dir = self.get_effective_reports_dir()
         if not md_path:
@@ -4329,11 +4341,7 @@ class DevOpsBackend(QObject):
     @Slot(str)
     def open_sprint_report_file(self, sprint_name=""):
         """Opens generated sprint report markdown in default editor."""
-        clean_sprint = (sprint_name or "").strip()
-        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-            clean_sprint = self.availableSprintList[0]
-        elif not clean_sprint:
-            clean_sprint = "latest"
+        clean_sprint = self._get_default_sprint_name(sprint_name)
         reports_dir = self.get_effective_reports_dir()
         path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
         if not os.path.exists(path):
@@ -7646,7 +7654,7 @@ class DevOpsBackend(QObject):
             }
 
         elif r_type in ("sprint", "sprint_report"):
-            sprint_name = param or (self.availableSprintList[0] if self.availableSprintList else "")
+            sprint_name = self._get_default_sprint_name(param)
             fpath = os.path.join(eff_dir, f"SPRINT_{sprint_name}.md")
             if os.path.isfile(fpath):
                 res = self.get_file_content(fpath)

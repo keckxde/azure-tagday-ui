@@ -93,11 +93,20 @@ Item {
         }
     }
 
+    function getDefaultSprint() {
+        if (!backend || !backend.availableSprintList || backend.availableSprintList.length === 0)
+            return "";
+        var cur = backend.currentSprintName || "";
+        if (cur && backend.availableSprintList.indexOf(cur) >= 0)
+            return cur;
+        return backend.availableSprintList[0];
+    }
+
     function openSprintReport(sprintName) {
         if (sprintName) {
             root.selectedSprintReport = sprintName;
-        } else if (!root.selectedSprintReport && backend && backend.availableSprintList && backend.availableSprintList.length > 0) {
-            root.selectedSprintReport = backend.availableSprintList[0];
+        } else if (!root.selectedSprintReport) {
+            root.selectedSprintReport = root.getDefaultSprint();
         }
         root.activeReportTab = 4;
         if (backend && root.selectedSprintReport) {
@@ -106,8 +115,8 @@ Item {
     }
 
     function refreshSprintReport() {
-        if (!root.selectedSprintReport && backend && backend.availableSprintList && backend.availableSprintList.length > 0) {
-            root.selectedSprintReport = backend.availableSprintList[0];
+        if (!root.selectedSprintReport) {
+            root.selectedSprintReport = root.getDefaultSprint();
         }
         if (backend && root.selectedSprintReport) {
             root.sprintReportData = backend.get_sprint_report_data(root.selectedSprintReport);
@@ -116,6 +125,12 @@ Item {
 
     function openStorageReport() {
         root.activeReportTab = 2;
+    }
+
+    Component.onCompleted: {
+        if (!root.selectedSprintReport) {
+            root.selectedSprintReport = root.getDefaultSprint();
+        }
     }
 
     onSelectedSprintReportChanged: {
@@ -855,7 +870,12 @@ Item {
                                     implicitHeight: 34
                                     font.pixelSize: 12
                                     model: (backend && backend.availableSprintList) ? backend.availableSprintList : []
-                                    currentIndex: 0
+                                    currentIndex: {
+                                        if (!backend || !backend.availableSprintList || backend.availableSprintList.length === 0) return 0;
+                                        var target = root.selectedSprintReport || root.getDefaultSprint();
+                                        var idx = backend.availableSprintList.indexOf(target);
+                                        return idx >= 0 ? idx : 0;
+                                    }
                                     background: Rectangle {
                                         color: "#0d1117"
                                         radius: 6
@@ -867,6 +887,11 @@ Item {
                                         font: sprintSelectCombo.font
                                         color: "#58a6ff"
                                         verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onActivated: function(index) {
+                                        if (backend && backend.availableSprintList && backend.availableSprintList[index]) {
+                                            root.selectedSprintReport = backend.availableSprintList[index];
+                                        }
                                     }
                                 }
 
@@ -4248,8 +4273,9 @@ Item {
                                 font.pixelSize: 12
                                 model: (backend && backend.availableSprintList) ? backend.availableSprintList : []
                                 currentIndex: {
-                                    if (!backend || !backend.availableSprintList) return 0;
-                                    var idx = backend.availableSprintList.indexOf(root.selectedSprintReport);
+                                    if (!backend || !backend.availableSprintList || backend.availableSprintList.length === 0) return 0;
+                                    var target = root.selectedSprintReport || root.getDefaultSprint();
+                                    var idx = backend.availableSprintList.indexOf(target);
                                     return idx >= 0 ? idx : 0;
                                 }
                                 background: Rectangle {
