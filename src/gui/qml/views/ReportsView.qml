@@ -15,7 +15,9 @@ Item {
     property string shiftSourceFilter: "all" // "all", "user_gui", "tfs_sync"
     property string shiftReviewFilter: "all" // "all", "pending", "accepted"
     property bool shiftSprintOnlyFilter: false
-    property string tdRepoFilter: "all" // "all", "prs", "branches"
+    property string tdRepoFilter: "changes" // "changes", "prs", "branches", "none" (when none active, paged mode)
+    property int tdCurrentPage: 1
+    property int tdPageSize: 15
     property bool isTdSidebarOpen: true
     property real minTdSidebarWidth: 380
     property real maxTdSidebarWidth: Math.max(650, Math.floor(root.width * 0.52))
@@ -52,6 +54,8 @@ Item {
                 rName = root.selectedRepo.name;
             else if (backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0)
                 rName = backend.tagDayData.repos_summary[0].name;
+            else if (backend && backend.tagDayData && backend.tagDayData.all_repos_summary && backend.tagDayData.all_repos_summary.length > 0)
+                rName = backend.tagDayData.all_repos_summary[0].name;
             else
                 rName = "";
         }
@@ -76,9 +80,11 @@ Item {
     }
 
     readonly property var selectedRepo: {
-        if (!selectedRepoName || !backend || !backend.tagDayData || !backend.tagDayData.repos_summary)
+        if (!selectedRepoName || !backend || !backend.tagDayData)
             return null;
-        var list = backend.tagDayData.repos_summary;
+        var list = (backend.tagDayData.all_repos_summary && backend.tagDayData.all_repos_summary.length > 0)
+            ? backend.tagDayData.all_repos_summary
+            : (backend.tagDayData.repos_summary || []);
         for (var i = 0; i < list.length; i++) {
             if (list[i].name === selectedRepoName) {
                 return list[i];

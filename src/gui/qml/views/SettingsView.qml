@@ -10,7 +10,7 @@ Item {
     property var discoveredDatabases: []
     property string bannerMsg: ""
     property string bannerType: "info" // "info", "success", "error"
-    property string activeTab: "connection" // "connection", "workitems", "reports", "aliases", "motivation", "general"
+    property string activeTab: "connection" // "connection", "workitems", "reports", "categories", "aliases", "motivation", "general"
 
     // Team Motivation Score System Form Model
     property int scorePrsClosed: 15
@@ -150,50 +150,265 @@ Item {
         }
     }
 
-    ScrollView {
+    // Full screen / full space Master-Detail Layout
+    RowLayout {
         anchors.fill: parent
-        contentWidth: parent.width
-        clip: true
+        spacing: 0
 
-        ColumnLayout {
-            width: Math.min(1080, parent.width - 48)
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 16
+        // ============================================================
+        // LEFT SIDEBAR: Navigation Rail & Project Status
+        // ============================================================
+        Rectangle {
+            Layout.fillHeight: true
+            implicitWidth: 260
+            Layout.minimumWidth: 240
+            Layout.maximumWidth: 280
+            color: "#0d1117"
+            border.color: "#30363d"
+            border.width: 1
 
-            Item { height: 6 }
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 12
 
-            // ==========================================
-            // Page Header with Connect New Project Button
-            // ==========================================
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 16
-
-                Column {
+                // Sidebar Header Area
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: 8
 
                     Text {
-                        text: "Settings & Project Configuration"
+                        text: "⚙️ Settings"
                         font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 20
+                        font.pixelSize: 16
                         font.weight: Font.Bold
                         color: "#f0f6fc"
                     }
 
-                    Text {
-                        text: "Manage TFS connections, background sync, Work Item filters, Area Paths, reports directory, and UI preferences."
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        color: "#8b949e"
+                    Item { Layout.fillWidth: true }
+
+                    // Project Connection Status Indicator
+                    Rectangle {
+                        implicitHeight: 18
+                        implicitWidth: connBadgeTxt.implicitWidth + 10
+                        radius: 9
+                        color: (backend && backend.dbPath) ? "#162b20" : "#3c1e1e"
+                        border.color: (backend && backend.dbPath) ? "#238636" : "#f85149"
+                        border.width: 1
+
+                        Text {
+                            id: connBadgeTxt
+                            anchors.centerIn: parent
+                            text: (backend && backend.dbPath) ? "● Connected" : "● Offline"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 9
+                            font.weight: Font.DemiBold
+                            color: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                        }
                     }
                 }
 
-                // Connect New Project Button
+                Text {
+                    text: "Configuration, rules & workspace"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: "#21262d"
+                }
+
+                // Vertical Tab Navigation List
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 4
+
+                        Repeater {
+                            model: [
+                                {
+                                    id: "connection",
+                                    icon: "🌐",
+                                    label: "Connection & Sync",
+                                    desc: "TFS, Database & Auto-Sync",
+                                    badge: (backend && backend.dbPath) ? "Active" : "Offline",
+                                    badgeColor: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                                },
+                                {
+                                    id: "workitems",
+                                    icon: "📋",
+                                    label: "Agile & Work Items",
+                                    desc: "Area Paths, Tags & Sprints",
+                                    badge: (backend && backend.areaPathFilterEnabled && backend.areaPathRules && backend.areaPathRules.length > 0) ? (backend.areaPathRules.length + " Rules") : "",
+                                    badgeColor: "#58a6ff"
+                                },
+                                {
+                                    id: "reports",
+                                    icon: "📊",
+                                    label: "Reports & Git Filters",
+                                    desc: "Reports Path & Branches",
+                                    badge: (backend && backend.branchFilterPatterns && backend.branchFilterPatterns.length > 0) ? (backend.branchFilterPatterns.length + " Filters") : "",
+                                    badgeColor: "#d29922"
+                                },
+                                {
+                                    id: "categories",
+                                    icon: "🏷️",
+                                    label: "Repo Categories",
+                                    desc: "Classification & Overrides",
+                                    badge: (backend && backend.repoCategories && backend.repoCategories.length > 0) ? (backend.repoCategories.length + " Categories") : "",
+                                    badgeColor: "#bc8cff"
+                                },
+                                {
+                                    id: "aliases",
+                                    icon: "👤",
+                                    label: "Users & Aliases",
+                                    desc: "Git & TFS User Identities",
+                                    badge: (function() {
+                                        var aCount = (backend && backend.userAliases) ? backend.userAliases.length : 0;
+                                        var sCount = (backend && backend.systemUsersCount) ? backend.systemUsersCount : 0;
+                                        if (aCount > 0 && sCount > 0) return aCount + " Mapped";
+                                        if (aCount > 0) return aCount + " Mapped";
+                                        if (sCount > 0) return sCount + " Bots";
+                                        return "";
+                                    })(),
+                                    badgeColor: "#a371f7"
+                                },
+                                {
+                                    id: "motivation",
+                                    icon: "🏆",
+                                    label: "Team Motivation",
+                                    desc: "Score Weights & Badges",
+                                    badge: "Gamification",
+                                    badgeColor: "#f0883e"
+                                },
+                                {
+                                    id: "general",
+                                    icon: "⚙️",
+                                    label: "General & Tools",
+                                    desc: "Display, Backup & About",
+                                    badge: backend ? backend.appVersion : "",
+                                    badgeColor: "#8b949e"
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 52
+                                radius: 6
+                                property bool isSelected: root.activeTab === modelData.id
+                                color: isSelected 
+                                    ? Qt.rgba(31/255, 111/255, 235/255, 0.20) 
+                                    : (tabMa.containsMouse ? "#161b22" : "transparent")
+                                border.color: isSelected 
+                                    ? "#388bfd" 
+                                    : (tabMa.containsMouse ? "#30363d" : "transparent")
+                                border.width: 1
+
+                                // Left accent marker bar for active tab
+                                Rectangle {
+                                    width: 3
+                                    height: parent.height - 12
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    radius: 1.5
+                                    color: "#58a6ff"
+                                    visible: parent.isSelected
+                                }
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: parent.isSelected ? 12 : 10
+                                    anchors.rightMargin: 10
+                                    spacing: 8
+
+                                    Text {
+                                        text: modelData.icon
+                                        font.pixelSize: 16
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Text {
+                                                text: modelData.label
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: parent.parent.parent.parent.isSelected ? Font.Bold : Font.DemiBold
+                                                color: parent.parent.parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Rectangle {
+                                                visible: modelData.badge !== ""
+                                                implicitHeight: 15
+                                                implicitWidth: tabBadgeTxt.implicitWidth + 8
+                                                radius: 7
+                                                color: "#161b22"
+                                                border.color: modelData.badgeColor
+                                                border.width: 1
+
+                                                Text {
+                                                    id: tabBadgeTxt
+                                                    anchors.centerIn: parent
+                                                    text: modelData.badge
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 8
+                                                    font.weight: Font.Bold
+                                                    color: modelData.badgeColor
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: modelData.desc
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: parent.parent.parent.isSelected ? "#79c0ff" : "#8b949e"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: tabMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.activeTab = modelData.id
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Sidebar Footer: Active Database Pill & Connect New Project Button
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: "#21262d"
+                }
+
                 Button {
+                    Layout.fillWidth: true
                     text: "➕ Connect New Project..."
                     font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
                     contentItem: Text {
                         text: parent.text
@@ -203,8 +418,7 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        implicitHeight: 36
-                        implicitWidth: 190
+                        implicitHeight: 32
                         radius: 6
                         color: parent.hovered ? "#2ea043" : "#238636"
                         border.color: "#3fb950"
@@ -213,307 +427,213 @@ Item {
                     onClicked: newProjectDialog.open()
                 }
             }
+        }
 
-            // Notification / Feedback Banner
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 34
-                radius: 6
-                visible: root.bannerMsg !== ""
-                color: root.bannerType === "success" ? "#162b20" : (root.bannerType === "error" ? "#3c1e1e" : "#16243b")
-                border.color: root.bannerType === "success" ? "#238636" : (root.bannerType === "error" ? "#f85149" : "#388bfd")
-                border.width: 1
+        // ============================================================
+        // RIGHT MAIN CONTENT AREA: Uses ALL Available Width and Height
+        // ============================================================
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "#0d1117"
+            clip: true
 
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                // Top Header of Active Settings Tab
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 8
+                    Layout.fillWidth: true
+                    spacing: 12
 
-                    Text {
-                        text: root.bannerType === "success" ? "✓" : (root.bannerType === "error" ? "⚠️" : "ℹ️")
-                        font.pixelSize: 12
-                        font.weight: Font.Bold
-                        color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#58a6ff")
-                    }
-
-                    Text {
-                        text: root.bannerMsg
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 11
-                        color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#79c0ff")
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        elide: Text.ElideRight
-                    }
+                        spacing: 2
 
-                    Text {
-                        text: "✕"
-                        font.pixelSize: 11
-                        color: "#8b949e"
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.bannerMsg = ""
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Settings Category Tab Navigation Bar
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: tabNavLayout.implicitHeight + 16
-                radius: 8
-                color: "#161b22"
-                border.color: "#30363d"
-                border.width: 1
-
-                RowLayout {
-                    id: tabNavLayout
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 8
-
-                    Repeater {
-                        model: [
-                            {
-                                id: "connection",
-                                icon: "🌐",
-                                label: "Connection & Sync",
-                                desc: "TFS, Database & Auto-Sync",
-                                badge: (backend && backend.dbPath) ? "Connected" : "Not Connected",
-                                badgeColor: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
-                            },
-                            {
-                                id: "workitems",
-                                icon: "📋",
-                                label: "Agile & Work Items",
-                                desc: "Area Paths, Tags & Sprints",
-                                badge: (backend && backend.areaPathFilterEnabled && backend.areaPathRules && backend.areaPathRules.length > 0) ? (backend.areaPathRules.length + " Area Rules") : "",
-                                badgeColor: "#58a6ff"
-                            },
-                            {
-                                id: "reports",
-                                icon: "📊",
-                                label: "Reports & Git Filters",
-                                desc: "Reports Path & Branch Filters",
-                                badge: (backend && backend.branchFilterPatterns && backend.branchFilterPatterns.length > 0) ? (backend.branchFilterPatterns.length + " Branch Filters") : "",
-                                badgeColor: "#d29922"
-                            },
-                            {
-                                id: "categories",
-                                icon: "🏷️",
-                                label: "Repo Categories",
-                                desc: "Classification & Overrides",
-                                badge: (backend && backend.repoCategories && backend.repoCategories.length > 0) ? (backend.repoCategories.length + " Categories") : "",
-                                badgeColor: "#bc8cff"
-                            },
-                            {
-                                id: "aliases",
-                                icon: "👤",
-                                label: "Users & Aliases",
-                                desc: "Git & TFS User Identities",
-                                badge: (function() {
-                                    var aCount = (backend && backend.userAliases) ? backend.userAliases.length : 0;
-                                    var sCount = (backend && backend.systemUsersCount) ? backend.systemUsersCount : 0;
-                                    if (aCount > 0 && sCount > 0) return aCount + " Mapped • " + sCount + " Bots";
-                                    if (aCount > 0) return aCount + " Mapped";
-                                    if (sCount > 0) return sCount + " Bots Excluded";
-                                    return "";
-                                })(),
-                                badgeColor: "#a371f7"
-                            },
-                            {
-                                id: "motivation",
-                                icon: "🏆",
-                                label: "Team Motivation",
-                                desc: "Score System & Point Weights",
-                                badge: "Gamification",
-                                badgeColor: "#f0883e"
-                            },
-                            {
-                                id: "general",
-                                icon: "⚙️",
-                                label: "General & Tools",
-                                desc: "Display, Backup & About",
-                                badge: backend ? backend.appVersion : "",
-                                badgeColor: "#8b949e"
+                        Text {
+                            text: {
+                                if (root.activeTab === "connection") return "🌐 Connection & Project Sync";
+                                if (root.activeTab === "workitems") return "📋 Agile Sprints & Work Item Filters";
+                                if (root.activeTab === "reports") return "📊 Reports Export & Git Branch Filters";
+                                if (root.activeTab === "categories") return "🏷️ Repository Categories & Classification Rules";
+                                if (root.activeTab === "aliases") return "👤 User Aliases & Identity Mapping";
+                                if (root.activeTab === "motivation") return "🏆 Team Motivation Point System & Gamification";
+                                if (root.activeTab === "general") return "⚙️ General Preferences & Application Tools";
+                                return "Project Settings";
                             }
-                        ]
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 18
+                            font.weight: Font.Bold
+                            color: "#f0f6fc"
+                        }
 
-                        Rectangle {
+                        Text {
+                            text: {
+                                if (root.activeTab === "connection") return "Manage TFS server URLs, personal access tokens (PAT), SQLite cache databases, and background sync.";
+                                if (root.activeTab === "workitems") return "Configure Area Path filters, TFS Team names, custom deadline field names, and Sprint URL syntax templates.";
+                                if (root.activeTab === "reports") return "Configure reports output directory, auto-generation options, and Git change notification branch/category filters.";
+                                if (root.activeTab === "categories") return "Define custom repository categories, color branding, prefix-matching classification rules, and explicit overrides.";
+                                if (root.activeTab === "aliases") return "Map Git committer identities to Azure DevOps TFS accounts and exclude automated system bots from leaderboards.";
+                                if (root.activeTab === "motivation") return "Customize gamification point weights, activity rewards, penalties, and preset scoring profiles for team members.";
+                                if (root.activeTab === "general") return "UI display scaling, database backup & export, diagnostic logs, and application metadata.";
+                                return "Configure your project environment and preferences.";
+                            }
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            color: "#8b949e"
                             Layout.fillWidth: true
-                            implicitHeight: 50
-                            radius: 6
-                            property bool isSelected: root.activeTab === modelData.id
-                            color: isSelected 
-                                ? Qt.rgba(31/255, 111/255, 235/255, 0.18) 
-                                : (tabMa.containsMouse ? "#21262d" : "#0d1117")
-                            border.color: isSelected 
-                                ? "#58a6ff" 
-                                : (tabMa.containsMouse ? "#388bfd" : "#30363d")
-                            border.width: isSelected ? 2 : 1
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
 
-                            RowLayout {
+                // Notification / Feedback Banner (Full Width)
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    radius: 6
+                    visible: root.bannerMsg !== ""
+                    color: root.bannerType === "success" ? "#162b20" : (root.bannerType === "error" ? "#3c1e1e" : "#16243b")
+                    border.color: root.bannerType === "success" ? "#238636" : (root.bannerType === "error" ? "#f85149" : "#388bfd")
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 8
+
+                        Text {
+                            text: root.bannerType === "success" ? "✓" : (root.bannerType === "error" ? "⚠️" : "ℹ️")
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#58a6ff")
+                        }
+
+                        Text {
+                            text: root.bannerMsg
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#79c0ff")
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            text: "✕"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                            MouseArea {
                                 anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                spacing: 10
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.bannerMsg = ""
+                            }
+                        }
+                    }
+                }
 
-                                Text {
-                                    text: modelData.icon
-                                    font.pixelSize: 18
-                                }
+                // Scrollable Full-Width / Full-Height Tab Content Area
+                ScrollView {
+                    id: rightContentScroll
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: rightContentScroll.width
+                    clip: true
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 2
+                    Item {
+                        width: rightContentScroll.width - 12
+                        implicitHeight: activeTabStack.implicitHeight + 20
 
-                                    RowLayout {
-                                        spacing: 6
-                                        Text {
-                                            text: modelData.label
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: parent.parent.parent.parent.isSelected ? Font.Bold : Font.DemiBold
-                                            color: parent.parent.parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
-                                        }
-
-                                        Rectangle {
-                                            visible: modelData.badge !== ""
-                                            implicitHeight: 16
-                                            implicitWidth: tabBadgeTxt.implicitWidth + 8
-                                            radius: 8
-                                            color: "#161b22"
-                                            border.color: modelData.badgeColor
-                                            border.width: 1
-
-                                            Text {
-                                                id: tabBadgeTxt
-                                                anchors.centerIn: parent
-                                                text: modelData.badge
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 9
-                                                font.weight: Font.Bold
-                                                color: modelData.badgeColor
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        text: modelData.desc
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        color: parent.parent.parent.isSelected ? "#79c0ff" : "#8b949e"
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                }
+                        StackLayout {
+                            id: activeTabStack
+                            width: parent.width
+                            currentIndex: {
+                                if (root.activeTab === "connection") return 0;
+                                if (root.activeTab === "workitems") return 1;
+                                if (root.activeTab === "reports") return 2;
+                                if (root.activeTab === "categories") return 3;
+                                if (root.activeTab === "aliases") return 4;
+                                if (root.activeTab === "motivation") return 5;
+                                if (root.activeTab === "general") return 6;
+                                return 0;
                             }
 
-                            MouseArea {
-                                id: tabMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.activeTab = modelData.id
+                            // Tab 0: Connection & Sync
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "connection" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsConnectionTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 1: Agile & Work Items
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "workitems" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsWorkItemsTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 2: Reports & Git Filters
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "reports" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsReportsTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 3: Repository Categories
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "categories" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsCategoriesTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 4: Users & Aliases
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "aliases" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsAliasesTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 5: Team Motivation
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "motivation" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsMotivationTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 6: General & Tools
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "general" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsGeneralTab.qml"
+                                onLoaded: _loaded = true
                             }
                         }
                     }
                 }
             }
-
-            // ==========================================
-            // Lazy-Loaded Tab Contents
-            // ==========================================
-
-            // Tab 1: Connection & Sync
-            Loader {
-                id: connectionTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "connection" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsConnectionTab.qml"
-                visible: root.activeTab === "connection"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 2: Agile & Work Items
-            Loader {
-                id: workItemsTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "workitems" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsWorkItemsTab.qml"
-                visible: root.activeTab === "workitems"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 3: Reports & Git Filters
-            Loader {
-                id: reportsTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "reports" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsReportsTab.qml"
-                visible: root.activeTab === "reports"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 4: Repository Categories
-            Loader {
-                id: categoriesTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "categories" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsCategoriesTab.qml"
-                visible: root.activeTab === "categories"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 4: Users & Aliases
-            Loader {
-                id: aliasesTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "aliases" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsAliasesTab.qml"
-                visible: root.activeTab === "aliases"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 5: Team Motivation
-            Loader {
-                id: motivationTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "motivation" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsMotivationTab.qml"
-                visible: root.activeTab === "motivation"
-                onLoaded: _loaded = true
-            }
-
-            // Tab 6: General & Tools
-            Loader {
-                id: generalTabLoader
-                Layout.fillWidth: true
-                active: root.activeTab === "general" || _loaded
-                property bool _loaded: false
-                asynchronous: true
-                source: "settings/SettingsGeneralTab.qml"
-                visible: root.activeTab === "general"
-                onLoaded: _loaded = true
-            }
-
-            Item { height: 20 }
         }
     }
 

@@ -2358,117 +2358,30 @@ class DevOpsBackend(QObject):
 
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
+        all_repos_raw = td_raw.get("all_repositories") or {}
+        if not all_repos_raw:
+            all_repos_raw = repos_changed_map
+
+        all_repos_summary = []
         repos_summary = []
-        for rname, rinfo in sorted(repos_changed_map.items()):
-            latest_tag = rinfo.get("latest_tag")
-            tag_name = "-"
-            tag_details = None
-            if isinstance(latest_tag, dict):
-                tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
-                tag_details = {
-                    "name": tag_name,
-                    "commit_date": latest_tag.get("commit_date") or "",
-                    "committer": latest_tag.get("committer") or "",
-                    "comment": latest_tag.get("comment") or "",
-                }
-
-            prs_after_tag = rinfo.get("prs_after_tag", [])
-            active_prs = rinfo.get("active_prs", [])
-            all_prs = rinfo.get("all_prs", [])
-            unmerged_branches = rinfo.get("unmerged_branches", [])
-
-            enriched_prs_after_tag = []
-            for p in prs_after_tag:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_prs_after_tag.append(p_copy)
-
-            enriched_active_prs = []
-            for p in active_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_active_prs.append(p_copy)
-
-            enriched_all_prs = []
-            for p in all_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_all_prs.append(p_copy)
-
-            r_web_url = rinfo.get("web_url", "")
-            clean_branches = []
-            for b in unmerged_branches:
-                prep_pr_id = ""
-                prep_pr_title = ""
-                prep_pr_status = ""
-                is_abandoned = b.get("is_abandoned", False)
-                if b.get("prepared_pr"):
-                    prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
-                    prep_pr_title = str(b["prepared_pr"].get("title", ""))
-                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
-                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
-                        is_abandoned = True
-
-                b_name = b.get("branch_name", "")
-                clean_b_name = b_name.replace("refs/heads/", "")
-                branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
-
-                clean_branches.append({
-                    "branch_name": b_name,
-                    "repo_name": rname,
-                    "repo_url": r_web_url,
-                    "branch_url": branch_url,
-                    "repo_category": rinfo.get("category", "OTHERS"),
-                    "default_branch": rinfo.get("default_branch", "main"),
-                    "commit_id": b.get("commit_id", ""),
-                    "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
-                    "commit_date": b.get("commit_date", ""),
-                    "committer": b.get("committer", ""),
-                    "comment": b.get("comment", ""),
-                    "ahead": b.get("ahead", 0),
-                    "behind": b.get("behind", 0),
-                    "prepared_pr_id": prep_pr_id,
-                    "prepared_pr_title": prep_pr_title,
-                    "prepared_pr_status": prep_pr_status,
-                    "is_abandoned": is_abandoned,
-                })
-
-            has_untagged_prs = len(prs_after_tag) > 0
-
-            repos_summary.append({
-                "name": rname,
-                "id": rinfo.get("id", ""),
-                "default_branch": rinfo.get("default_branch", "main"),
-                "web_url": rinfo.get("web_url", ""),
-                "category": rinfo.get("category", "OTHERS"),
-                "is_disabled": rinfo.get("is_disabled", False),
-                "latest_tag": tag_name,
-                "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
-                "prs_count": len(prs_after_tag),
-                "active_prs_count": len(active_prs),
-                "all_prs_count": len(all_prs),
-                "branches_count": len(unmerged_branches),
-                "prs": enriched_prs_after_tag,
-                "prs_after_tag": enriched_prs_after_tag,
-                "active_prs": enriched_active_prs,
-                "all_prs": enriched_all_prs,
-                "unmerged_branches": clean_branches,
-            })
+        for rname, rinfo in sorted(all_repos_raw.items()):
+            item = self._format_repo_summary_item(rname, rinfo, all_wis_map)
+            all_repos_summary.append(item)
+            if rname in repos_changed_map or item["prs_count"] > 0 or item["active_prs_count"] > 0 or item["branches_count"] > 0:
+                repos_summary.append(item)
 
         repos_with_prs_count = sum(1 for r in repos_summary if r.get("prs_count", 0) > 0)
         repos_with_branches_count = sum(1 for r in repos_summary if r.get("branches_count", 0) > 0)
 
         tagday_data = {
-            "repos_analyzed": len(td_raw.get("all_repositories", {})),
-            "repos_with_changes_count": len(repos_changed_map),
+            "repos_analyzed": len(all_repos_summary),
+            "repos_with_changes_count": len(repos_summary),
             "repos_with_prs_count": repos_with_prs_count,
             "repos_with_branches_count": repos_with_branches_count,
             "timeline_items_count": len(timeline),
             "timeline": timeline[:100],
             "repos_summary": repos_summary,
+            "all_repos_summary": all_repos_summary,
             "generated_at": td_raw.get("generated_at", ""),
         }
 
@@ -7392,6 +7305,108 @@ class DevOpsBackend(QObject):
                 })
         return tasks
 
+    def _format_repo_summary_item(self, rname: str, rinfo: dict, wis_map: dict = None) -> dict:
+        """Helper to format a single repository entry for TagDay summaries."""
+        latest_tag = rinfo.get("latest_tag")
+        tag_name = "-"
+        tag_details = None
+        if isinstance(latest_tag, dict):
+            tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
+            tag_details = {
+                "name": tag_name,
+                "commit_date": latest_tag.get("commit_date") or "",
+                "committer": latest_tag.get("committer") or "",
+                "comment": latest_tag.get("comment") or "",
+            }
+        elif isinstance(latest_tag, str) and latest_tag:
+            tag_name = latest_tag
+
+        prs_after_tag = rinfo.get("prs_after_tag", [])
+        active_prs = rinfo.get("active_prs", [])
+        all_prs = rinfo.get("all_prs", [])
+        unmerged_branches = rinfo.get("unmerged_branches", [])
+
+        enriched_prs_after_tag = []
+        for p in prs_after_tag:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_prs_after_tag.append(p_copy)
+
+        enriched_active_prs = []
+        for p in active_prs:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_active_prs.append(p_copy)
+
+        enriched_all_prs = []
+        for p in all_prs:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_all_prs.append(p_copy)
+
+        r_web_url = rinfo.get("web_url", "")
+        clean_branches = []
+        for b in unmerged_branches:
+            prep_pr_id = ""
+            prep_pr_title = ""
+            prep_pr_status = ""
+            is_abandoned = b.get("is_abandoned", False)
+            if b.get("prepared_pr"):
+                prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
+                prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                    is_abandoned = True
+
+            b_name = b.get("branch_name", "")
+            clean_b_name = b_name.replace("refs/heads/", "")
+            branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
+
+            clean_branches.append({
+                "branch_name": b_name,
+                "repo_name": rname,
+                "repo_url": r_web_url,
+                "branch_url": branch_url,
+                "repo_category": rinfo.get("category", "OTHERS"),
+                "default_branch": rinfo.get("default_branch", "main"),
+                "commit_id": b.get("commit_id", ""),
+                "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
+                "commit_date": b.get("commit_date", ""),
+                "committer": b.get("committer", ""),
+                "comment": b.get("comment", ""),
+                "ahead": b.get("ahead", 0),
+                "behind": b.get("behind", 0),
+                "prepared_pr_id": prep_pr_id,
+                "prepared_pr_title": prep_pr_title,
+                "prepared_pr_status": prep_pr_status,
+                "is_abandoned": is_abandoned,
+            })
+
+        has_untagged_prs = len(prs_after_tag) > 0
+
+        return {
+            "name": rname,
+            "id": rinfo.get("id", ""),
+            "default_branch": rinfo.get("default_branch", "main"),
+            "web_url": r_web_url,
+            "category": rinfo.get("category", "OTHERS"),
+            "is_disabled": rinfo.get("is_disabled", False),
+            "latest_tag": tag_name,
+            "latest_tag_details": tag_details,
+            "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+            "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+            "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
+            "prs_count": len(prs_after_tag),
+            "active_prs_count": len(active_prs),
+            "all_prs_count": len(all_prs),
+            "branches_count": len(unmerged_branches),
+            "prs": enriched_prs_after_tag,
+            "prs_after_tag": enriched_prs_after_tag,
+            "active_prs": enriched_active_prs,
+            "all_prs": enriched_all_prs,
+            "unmerged_branches": clean_branches,
+        }
+
     def _populate_tagday_data(self, td_raw, work_items_map=None):
         """Populates _tagday_data structure and emits tagDayDataChanged."""
         if not td_raw:
@@ -7401,103 +7416,30 @@ class DevOpsBackend(QObject):
 
         wis_map = work_items_map if work_items_map is not None else getattr(self, "_work_items_map", None)
 
+        all_repos_raw = td_raw.get("all_repositories") or {}
+        if not all_repos_raw:
+            all_repos_raw = repos_changed
+
+        all_repos_summary = []
         repos_summary = []
-        for rname, rinfo in sorted(repos_changed.items()):
-            latest_tag = rinfo.get("latest_tag")
-            tag_name = "-"
-            tag_details = None
-            if isinstance(latest_tag, dict):
-                tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
-                tag_details = {
-                    "name": tag_name,
-                    "commit_date": latest_tag.get("commit_date") or "",
-                    "committer": latest_tag.get("committer") or "",
-                    "comment": latest_tag.get("comment") or "",
-                }
+        for rname, rinfo in sorted(all_repos_raw.items()):
+            item = self._format_repo_summary_item(rname, rinfo, wis_map)
+            all_repos_summary.append(item)
+            if rname in repos_changed or item["prs_count"] > 0 or item["active_prs_count"] > 0 or item["branches_count"] > 0:
+                repos_summary.append(item)
 
-            prs_after_tag = rinfo.get("prs_after_tag", [])
-            active_prs = rinfo.get("active_prs", [])
-            all_prs = rinfo.get("all_prs", [])
-            unmerged_branches = rinfo.get("unmerged_branches", [])
-
-            # Enrich PRs with referenced tasks queried from memory cache or DB
-            enriched_prs_after_tag = []
-            for p in prs_after_tag:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_prs_after_tag.append(p_copy)
-
-            enriched_active_prs = []
-            for p in active_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_active_prs.append(p_copy)
-
-            enriched_all_prs = []
-            for p in all_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_all_prs.append(p_copy)
-
-            clean_branches = []
-            for b in unmerged_branches:
-                prep_pr_id = ""
-                prep_pr_title = ""
-                prep_pr_status = ""
-                is_abandoned = b.get("is_abandoned", False)
-                if b.get("prepared_pr"):
-                    prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
-                    prep_pr_title = str(b["prepared_pr"].get("title", ""))
-                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
-                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
-                        is_abandoned = True
-
-                clean_branches.append({
-                    "branch_name": b.get("branch_name", ""),
-                    "commit_id": b.get("commit_id", ""),
-                    "short_hash": b.get("short_hash", ""),
-                    "commit_date": b.get("commit_date", ""),
-                    "committer": b.get("committer", ""),
-                    "comment": b.get("comment", ""),
-                    "ahead": b.get("ahead", 0),
-                    "behind": b.get("behind", 0),
-                    "prepared_pr_id": prep_pr_id,
-                    "prepared_pr_title": prep_pr_title,
-                    "prepared_pr_status": prep_pr_status,
-                    "is_abandoned": is_abandoned,
-                })
-
-            has_untagged_prs = len(prs_after_tag) > 0
-
-            repos_summary.append({
-                "name": rname,
-                "id": rinfo.get("id", ""),
-                "default_branch": rinfo.get("default_branch", "main"),
-                "web_url": rinfo.get("web_url", ""),
-                "category": rinfo.get("category", "OTHERS"),
-                "is_disabled": rinfo.get("is_disabled", False),
-                "latest_tag": tag_name,
-                "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
-                "prs_count": len(prs_after_tag),
-                "active_prs_count": len(active_prs),
-                "all_prs_count": len(all_prs),
-                "branches_count": len(unmerged_branches),
-                "prs": enriched_prs_after_tag,
-                "prs_after_tag": enriched_prs_after_tag,
-                "active_prs": enriched_active_prs,
-                "all_prs": enriched_all_prs,
-                "unmerged_branches": clean_branches,
-            })
+        repos_with_prs_count = sum(1 for r in repos_summary if r.get("prs_count", 0) > 0)
+        repos_with_branches_count = sum(1 for r in repos_summary if r.get("branches_count", 0) > 0)
 
         self._tagday_data = {
-            "repos_analyzed": len(td_raw.get("all_repositories", {})),
-            "repos_with_changes_count": len(repos_changed),
+            "repos_analyzed": len(all_repos_summary),
+            "repos_with_changes_count": len(repos_summary),
+            "repos_with_prs_count": repos_with_prs_count,
+            "repos_with_branches_count": repos_with_branches_count,
             "timeline_items_count": len(timeline),
             "timeline": timeline[:100],
             "repos_summary": repos_summary,
+            "all_repos_summary": all_repos_summary,
             "generated_at": td_raw.get("generated_at", ""),
         }
         self.tagDayDataChanged.emit()
