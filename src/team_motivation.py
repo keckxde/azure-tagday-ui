@@ -1263,12 +1263,12 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     filter_start_str = ""
     filter_end_str = ""
 
-    if timeframe == "last_week":
+    if timeframe in ("last_week", "last_sprint", "previous_week"):
         target_sprint = last_sprint_name
         range_label = f"Last Week ({last_sprint_name} • {last_start_str} to {last_end_str})"
         filter_start_str = last_start_str
         filter_end_str = cur_start_str  # up to current week start
-    elif timeframe == "current_week":
+    elif timeframe in ("current_week", "this_sprint", "current_sprint", "sprint_current"):
         target_sprint = cur_sprint_name
         range_label = f"Current Sprint ({cur_sprint_name} • {cur_start_str} to {cur_end_str})"
         filter_start_str = cur_start_str
@@ -1296,11 +1296,11 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             filter_end_str = "2099-12-31"
             range_label = f"Sprint {clean_s}"
     else:
-        # Default fallback to last week
-        target_sprint = last_sprint_name
-        range_label = f"Last Week ({last_sprint_name} • {last_start_str} to {last_end_str})"
-        filter_start_str = last_start_str
-        filter_end_str = cur_start_str
+        # Default fallback to current sprint
+        target_sprint = cur_sprint_name
+        range_label = f"Current Sprint ({cur_sprint_name} • {cur_start_str} to {cur_end_str})"
+        filter_start_str = cur_start_str
+        filter_end_str = (cur_end_dt + timedelta(days=3)).strftime("%Y-%m-%d")
 
     # Check Area Path filter rules configuration
     area_cfg = {}
@@ -1953,6 +1953,20 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                             except Exception:
                                 pass
 
+        # Track Work Item Updates, Modifications & State Transitions in timeframe
+        if changed_date_str and not is_closed_state and created_date_str:
+            is_distinct_update = (changed_date_str != created_date_str) and (str(changed_date_raw)[:16] != str(created_date_raw)[:16])
+            if is_distinct_update:
+                in_tf = (filter_start_str <= changed_date_str < filter_end_str or timeframe == "all_time") if (filter_start_str and filter_end_str) else True
+                if in_tf:
+                    effective_changer = changed_by or assigned_name
+                    if _is_valid(effective_changer):
+                        m_ch = _get_or_create_member(effective_changer)
+                        if m_ch:
+                            m_ch["state_changes_count"] += 1
+                            action_title = f"Updated {wi_type.capitalize()} #{wid} [{state}]: {wi_title[:60]}" if state else f"Updated {wi_type.capitalize()} #{wid}: {wi_title[:60]}"
+                            _track_activity_time(m_ch, changed_date_raw, "state_change", action_title, repo_or_id=f"#{wid}")
+
         # Evaluate Created Work Items within timeframe
         if created_date_str and filter_start_str and filter_end_str:
             if filter_start_str <= created_date_str < filter_end_str or timeframe == "all_time":
@@ -1969,6 +1983,11 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         ev_date_str = ev_date_raw[:10]
         changer = _clean_user_name(ev.get("changed_by"))
         is_pushback = bool(ev.get("is_pushback", 0))
+        old_st = ev.get("old_state") or ""
+        new_st = ev.get("new_state") or ""
+        wid = ev.get("work_item_id")
+        title = ev.get("title") or f"Work Item #{wid}"
+        wtype = (ev.get("type") or "Task").capitalize()
 
         if ev_date_str and (filter_start_str <= ev_date_str < filter_end_str or timeframe == "all_time"):
             if _is_valid(changer):
@@ -1979,7 +1998,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["pushbacks_count"] += 1
                     else:
                         m["tasks_cleaned"] += 1
-                    _track_activity_time(m, ev_date_raw, "state_change", f"State transition #{ev.get('work_item_id')}", repo_or_id=f"#{ev.get('work_item_id')}")
+                    transition_desc = f"{old_st} ➔ {new_st}" if (old_st and new_st) else (new_st or "State changed")
+                    _track_activity_time(m, ev_date_raw, "state_change", f"State transition #{wid} ({wtype}): {transition_desc}", repo_or_id=f"#{wid}")
 
     # 3. Process Pull Requests, Merges, Reviews & Approvals
     for pr in all_prs:
@@ -2721,7 +2741,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 badges.append(_build_awarded_badge("streak_master", "bronze", times=m["current_streak_weeks"], metric_label=f"{m['current_streak_weeks']} wks"))
 
         # Determine Ignorer / Stasher persona
-        if m["stale_tasks_count"] >= 2 and m["state_changes_count"] == 0:
+        if m["stale_tasks_count"] >= 2 and m["tasks_completed"] == 0 and m["tasks_cleaned"] == 0 and m["prs_closed"] == 0:
             m["is_ignorer"] = True
             m["time_stats"]["persona"] = "💤 Backlog Stasher"
         elif m["pushbacks_count"] >= 2:
@@ -3204,7 +3224,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "weekend_warriors": leaderboard_weekend_warriors,
             "daytime": leaderboard_daytime,
         },
-        "all_badges": list(BADGE_DEFINITIONS.values()),
+        "all_badges": all_badges_enriched,
+        "badge_categories": badge_categories,
         "score_config": active_score_config,
         "score_presets": SCORE_PRESETS,
         "system_users": system_users_list,

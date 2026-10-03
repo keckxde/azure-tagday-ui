@@ -2149,8 +2149,22 @@ Item {
                                                 }
                                             }
                                         }
+                                    // Empty state message
+                                    Rectangle {
+                                        visible: !(root.selectedUser && root.selectedUser.recent_activities && root.selectedUser.recent_activities.length > 0)
+                                        Layout.fillWidth: true
+                                        implicitHeight: 40
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: "#21262d"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "No recent activities recorded for this timeframe"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#8b949e"
+                                        }
                                     }
-                                }
                             }
                         }
 

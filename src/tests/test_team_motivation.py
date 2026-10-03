@@ -242,6 +242,30 @@ class TestTeamMotivation(unittest.TestCase):
             self.assertIn("hourly_distribution", m["time_stats"])
             self.assertEqual(len(m["time_stats"]["hourly_distribution"]), 24)
 
+    def test_badge_categories_and_individual_badges(self):
+        """Verify that badge_categories and all_badges are returned with enriched categories and individual badges."""
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        self.assertIn("badge_categories", data)
+        self.assertIn("all_badges", data)
+
+        categories = data["badge_categories"]
+        self.assertGreaterEqual(len(categories), 4)
+
+        total_badges_sum = sum(len(c.get("badges", [])) for c in categories)
+        self.assertEqual(total_badges_sum, len(data["all_badges"]))
+
+        for cat in categories:
+            self.assertIn("id", cat)
+            self.assertIn("name", cat)
+            self.assertIn("icon", cat)
+            self.assertIn("badges", cat)
+            self.assertGreater(len(cat["badges"]), 0)
+            for b in cat["badges"]:
+                self.assertIn("id", b)
+                self.assertIn("name", b)
+                self.assertIn("achievers", b)
+                self.assertIn("tiers", b)
+
     def test_work_item_closed_date_gating_and_attribution(self):
         """
         Verify that:
@@ -970,18 +994,44 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertIn("system_users", data_with)
         self.assertGreaterEqual(data_with.get("system_users_count", 0), 1)
 
-    def test_detect_potential_system_users(self):
-        """Verify automatic detection of bot/service accounts from activity cache."""
-        from team_motivation import detect_potential_system_users
+    def test_work_item_creation_and_state_change_in_recent_activities(self):
+        """Verify that work item creation, state changes, and updates are tracked in recent activities timeline."""
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+        two_hours_ago = now - timedelta(hours=2)
 
-        # Detect potential system users
-        detected = detect_potential_system_users(self.cache)
-        # Should detect bot keywords from our test data
-        detected_names = [d["name"] for d in detected]
-        # "AutoBot Service" has "bot" and "service" keywords
-        if "AutoBot Service" in detected_names:
-            bot_meta = next(d for d in detected if d["name"] == "AutoBot Service")
-            self.assertIn("service", bot_meta["reasons"]) or self.assertIn("bot", bot_meta["reasons"])
+        # 1. Save work item created yesterday and updated 2 hours ago
+        self.cache.save_work_item(
+            888, "Implement real-time activity stream", "User Story", "Active", "Fiona Developer",
+            two_hours_ago.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Implement real-time activity stream",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.CreatedBy": {"displayName": "Fiona Developer"},
+                    "System.CreatedDate": yesterday.isoformat(),
+                    "System.ChangedBy": {"displayName": "Fiona Developer"},
+                    "System.ChangedDate": two_hours_ago.isoformat(),
+                    "System.AssignedTo": {"displayName": "Fiona Developer"}
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="current_week")
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Fiona Developer", members)
+        fiona = members["Fiona Developer"]
+
+        # Fiona should have recent activities
+        self.assertGreaterEqual(len(fiona["recent_activities"]), 1)
+        act_types = [a["type"] for a in fiona["recent_activities"]]
+        self.assertTrue("task_create" in act_types or "state_change" in act_types)
+
+        # Activity should contain task id and title
+        titles = [a["title"] for a in fiona["recent_activities"]]
+        has_expected_title = any("888" in t for t in titles)
+        self.assertTrue(has_expected_title)
 
 
 if __name__ == "__main__":

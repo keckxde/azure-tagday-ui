@@ -352,7 +352,7 @@ class DevOpsBackend(QObject):
         self._last_week_activity = {}
         self._current_week_planned = {}
         self._team_motivation_data = {}
-        self._team_motivation_timeframe = "last_week"
+        self._team_motivation_timeframe = "current_week"
         self._team_motivation_custom_sprint = ""
         import team_motivation
         self._team_motivation_score_config = user_cfg.get("team_motivation_score_config")
