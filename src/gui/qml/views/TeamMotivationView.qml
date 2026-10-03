@@ -269,6 +269,52 @@ Item {
                             }
                         }
 
+                        // Score System Settings Button
+                        Rectangle {
+                            implicitHeight: 34
+                            implicitWidth: scoreBtnRow.implicitWidth + 20
+                            radius: 6
+                            color: scoreMa.containsMouse ? "#2d2218" : "#161b22"
+                            border.color: "#f0883e"
+                            border.width: 1
+
+                            RowLayout {
+                                id: scoreBtnRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: "⚙️"
+                                    font.pixelSize: 13
+                                }
+                                Text {
+                                    text: "Score Settings"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: "#f0883e"
+                                }
+                            }
+
+                            ToolTip.visible: scoreMa.containsMouse
+                            ToolTip.text: "Configure Team Motivation Score Weights & Points Rules"
+                            ToolTip.delay: 200
+
+                            MouseArea {
+                                id: scoreMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (typeof window !== "undefined" && typeof window.openSettingsPage === "function") {
+                                        window.openSettingsPage("motivation");
+                                    } else if (typeof window !== "undefined") {
+                                        window.currentTabIndex = 6;
+                                        if (window.settingsView) window.settingsView.activeTab = "motivation";
+                                    }
+                                }
+                            }
+                        }
+
                         // Refresh Button
                         Rectangle {
                             width: 34

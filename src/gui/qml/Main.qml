@@ -206,6 +206,21 @@ ApplicationWindow {
         }
     }
 
+    function openSettingsPage(tabId) {
+        window.currentTabIndex = 6;
+        if (settingsView && tabId) {
+            settingsView.activeTab = tabId;
+        } else if (settingsViewLoader && tabId) {
+            var conn = function() {
+                if (settingsViewLoader.item) {
+                    settingsViewLoader.loaded.disconnect(conn);
+                    settingsViewLoader.item.activeTab = tabId;
+                }
+            };
+            settingsViewLoader.loaded.connect(conn);
+        }
+    }
+
     property bool isSyncLogDrawerOpen: false
     property real syncLogDrawerHeight: 380
     property bool isSidebarCollapsed: backend ? backend.sidebarCollapsed : false

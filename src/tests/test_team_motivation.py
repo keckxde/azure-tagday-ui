@@ -857,6 +857,63 @@ class TestTeamMotivation(unittest.TestCase):
             self.assertGreater(p["member"]["score"], 0)
             self.assertTrue(p["member"].get("has_activity"))
 
+    def test_default_score_config_and_presets(self):
+        """Verify that DEFAULT_SCORE_CONFIG and SCORE_PRESETS have all required activity keys and positive multipliers."""
+        from team_motivation import DEFAULT_SCORE_CONFIG, SCORE_PRESETS, get_default_score_config, get_score_presets
+
+        default_cfg = get_default_score_config()
+        self.assertIsInstance(default_cfg, dict)
+        required_keys = [
+            "prs_closed", "prs_created", "prs_approved", "prs_reviewed",
+            "commits_count", "branches_closed", "tags_pushed",
+            "tasks_completed", "tasks_created", "bugs_resolved",
+            "stories_completed", "tasks_cleaned", "pushbacks_count",
+            "tasks_fast_closed", "task_evidences_count", "structured_syntax_completed",
+            "builds_succeeded", "badge_bonus", "streak_week_bonus",
+            "delay_week_penalty", "build_failed_penalty", "stale_task_penalty"
+        ]
+        for rk in required_keys:
+            self.assertIn(rk, default_cfg)
+            self.assertGreater(default_cfg[rk], 0)
+
+        presets = get_score_presets()
+        self.assertIn("balanced", presets)
+        self.assertIn("code_pr_focused", presets)
+        self.assertIn("agile_quality_focused", presets)
+        self.assertIn("high_velocity", presets)
+
+        for p_key, p_val in presets.items():
+            self.assertIn("id", p_val)
+            self.assertIn("name", p_val)
+            self.assertIn("config", p_val)
+            for rk in required_keys:
+                self.assertIn(rk, p_val["config"])
+
+    def test_custom_score_config_calculation(self):
+        """Verify that passing a custom score_config correctly alters computed scores."""
+        # Standard score with default config
+        data_default = compute_team_motivation_data(self.cache, timeframe="last_week")
+        alice_default = next((m for m in data_default["members"] if m["name"] == "Alice Smith"), None)
+        self.assertIsNotNone(alice_default)
+        score_default = alice_default["score"]
+        self.assertGreater(score_default, 0)
+
+        # Custom score with huge PR weight (e.g. 100 pts per PR closed instead of 15)
+        custom_cfg = {
+            "prs_closed": 100,
+            "prs_created": 50,
+            "commits_count": 10,
+        }
+        data_custom = compute_team_motivation_data(self.cache, timeframe="last_week", score_config=custom_cfg)
+        alice_custom = next((m for m in data_custom["members"] if m["name"] == "Alice Smith"), None)
+        self.assertIsNotNone(alice_custom)
+        score_custom = alice_custom["score"]
+
+        # Since Alice closed PRs, her score should be significantly higher with custom_cfg
+        self.assertGreater(score_custom, score_default)
+        self.assertEqual(data_custom["score_config"]["prs_closed"], 100)
+        self.assertEqual(data_custom["score_config"]["prs_created"], 50)
+
 
 if __name__ == "__main__":
     unittest.main()

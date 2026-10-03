@@ -1,10 +1,16 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import os
+import sys
 import tempfile
 import yaml
 
-from src.gui.backend import DevOpsBackend, USER_SETTINGS_PATH
+py_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if py_dir not in sys.path:
+    sys.path.insert(0, py_dir)
+
+import utils
+from gui.backend import DevOpsBackend, USER_SETTINGS_PATH
 
 
 class TestWorkloadParentGrouping(unittest.TestCase):
@@ -233,7 +239,7 @@ class TestWorkloadParentGrouping(unittest.TestCase):
         """Test getting, setting, and persisting bugHierarchyMode."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_yaml = os.path.join(tmpdir, "user_settings.yaml")
-            with patch("src.gui.backend.USER_SETTINGS_PATH", test_yaml):
+            with patch("gui.backend.USER_SETTINGS_PATH", test_yaml), patch("src.gui.backend.USER_SETTINGS_PATH", test_yaml, create=True):
                 # Set to like_task
                 self.backend.setBugHierarchyMode("like_task")
                 self.assertEqual(self.backend.bugHierarchyMode, "like_task")
@@ -335,6 +341,134 @@ class TestWorkloadParentGrouping(unittest.TestCase):
         self.assertEqual(cell_curr["tasks_not_started_count"], 1)
         self.assertEqual(cell_curr["tasks_active_count"], 1)
         self.assertEqual(cell_curr["tasks_closed_count"], 1)
+
+    def test_group_item_owner_sees_all_subtasks_including_blockers(self):
+        """Test that when User B owns a Story, they see subtasks assigned to User A and User C, with blockers identified."""
+        from datetime import date
+        curr_y, curr_w, _ = date.today().isocalendar()
+        curr_sprint = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+
+        all_wis_by_id = {
+            200: {
+                "id": 200,
+                "type": "User Story",
+                "title": "Core Payment Gateway",
+                "state": "Active",
+                "assigned_to": "Bob",
+                "parent_id": None,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+            201: {
+                "id": 201,
+                "type": "Task",
+                "title": "Write Payment API Client",
+                "state": "Closed",
+                "assigned_to": "Bob",
+                "parent_id": 200,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+            202: {
+                "id": 202,
+                "type": "Task",
+                "title": "Implement Webhook Verification",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "parent_id": 200,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+            203: {
+                "id": 203,
+                "type": "Task",
+                "title": "QA Test Sandbox Webhooks",
+                "state": "New",
+                "assigned_to": "Charlie",
+                "parent_id": 200,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+        }
+
+        self.backend._work_items = list(all_wis_by_id.values())
+        matrix = self.backend.getWorkloadMatrix(horizon_weeks=4)
+
+        # Bob's row
+        bob_row = next(r for r in matrix["assignee_rows"] if r["assignee"] == "Bob")
+        bob_cell = next(c for c in bob_row["cells"] if c["sprint_name"] == curr_sprint)
+
+        # Bob's cell grouped containers should contain Story 200 with all 3 tasks
+        self.assertEqual(len(bob_cell["grouped_containers"]), 1)
+        c200 = bob_cell["grouped_containers"][0]
+        self.assertEqual(c200["id"], 200)
+        self.assertEqual(c200["assigned_to"], "Bob")
+        self.assertFalse(c200["is_external_parent"])
+        self.assertFalse(c200["is_contributor_only"])
+        self.assertEqual(len(c200["tasks"]), 3)
+
+        # Verify all tasks are listed and cross-assignees flagged
+        task_assignees = {t["id"]: t["assigned_to"] for t in c200["tasks"]}
+        self.assertEqual(task_assignees[201], "Bob")
+        self.assertEqual(task_assignees[202], "Alice")
+        self.assertEqual(task_assignees[203], "Charlie")
+
+        # Verify blocker metrics
+        self.assertEqual(c200["total_tasks_count"], 3)
+        self.assertEqual(c200["completed_tasks_count"], 1) # 201 is closed
+        self.assertEqual(c200["blocking_tasks_count"], 2)  # 202 (Alice, Active) & 203 (Charlie, New)
+        self.assertTrue(c200["has_blocking_external_tasks"])
+        self.assertIn("Alice", c200["blocking_assignees"])
+        self.assertIn("Charlie", c200["blocking_assignees"])
+
+    def test_contributor_only_group_item_isolation(self):
+        """Test that a contributing user only gets their own task and the open parent is marked is_contributor_only."""
+        from datetime import date
+        curr_y, curr_w, _ = date.today().isocalendar()
+        curr_sprint = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+
+        all_wis_by_id = {
+            200: {
+                "id": 200,
+                "type": "User Story",
+                "title": "Core Payment Gateway",
+                "state": "Active",
+                "assigned_to": "Bob",
+                "parent_id": None,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+            202: {
+                "id": 202,
+                "type": "Task",
+                "title": "Implement Webhook Verification",
+                "state": "Closed",
+                "assigned_to": "Alice",
+                "parent_id": 200,
+                "iteration_path": f"Project\\{curr_sprint}",
+                "sprint_week_name": curr_sprint,
+            },
+        }
+
+        self.backend._work_items = list(all_wis_by_id.values())
+        matrix = self.backend.getWorkloadMatrix(horizon_weeks=4)
+
+        # Alice's row
+        alice_row = next(r for r in matrix["assignee_rows"] if r["assignee"] == "Alice")
+        self.assertEqual(alice_row["stats"]["stories"], 0) # Alice does NOT own Story 200
+        self.assertEqual(alice_row["stats"]["tasks"], 1)
+
+        alice_cell = next(c for c in alice_row["cells"] if c["sprint_name"] == curr_sprint)
+        self.assertEqual(alice_cell["stories_count"], 0)
+        self.assertEqual(alice_cell["tasks_count"], 1)
+
+        # Alice's container for Story 200
+        self.assertEqual(len(alice_cell["grouped_containers"]), 1)
+        c200_alice = alice_cell["grouped_containers"][0]
+        self.assertEqual(c200_alice["id"], 200)
+        self.assertTrue(c200_alice["is_external_parent"])
+        self.assertTrue(c200_alice["is_contributor_only"])
+        self.assertTrue(c200_alice["user_contributions_done"]) # Task 202 is Closed
 
 
 if __name__ == "__main__":

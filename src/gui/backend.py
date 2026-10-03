@@ -244,6 +244,7 @@ class DevOpsBackend(QObject):
     reportsDirChanged = Signal()
     teamMotivationChanged = Signal()
     teamMotivationTimeframeChanged = Signal()
+    teamMotivationScoreConfigChanged = Signal()
     areaPathSettingsChanged = Signal()
     userAliasesChanged = Signal()
     userProfilesChanged = Signal()
@@ -352,6 +353,10 @@ class DevOpsBackend(QObject):
         self._team_motivation_data = {}
         self._team_motivation_timeframe = "last_week"
         self._team_motivation_custom_sprint = ""
+        import team_motivation
+        self._team_motivation_score_config = user_cfg.get("team_motivation_score_config")
+        if not self._team_motivation_score_config or not isinstance(self._team_motivation_score_config, dict):
+            self._team_motivation_score_config = team_motivation.get_default_score_config()
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
         self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
         if self._reports_dir:
@@ -483,6 +488,14 @@ class DevOpsBackend(QObject):
                     pass
             if "FILTER_VERSION_TAGS_FORMAT" in db_cfg:
                 devops_helper.FILTER_VERSION_TAGS_FORMAT = str(db_cfg["FILTER_VERSION_TAGS_FORMAT"]).lower() == "true"
+            if "MOTIVATION_SCORE_CONFIG" in db_cfg:
+                try:
+                    sc_db = json.loads(db_cfg["MOTIVATION_SCORE_CONFIG"]) if isinstance(db_cfg["MOTIVATION_SCORE_CONFIG"], str) else db_cfg["MOTIVATION_SCORE_CONFIG"]
+                    if isinstance(sc_db, dict):
+                        self._team_motivation_score_config = sc_db
+                        self.teamMotivationScoreConfigChanged.emit()
+                except Exception:
+                    pass
             
             # Load Area Path settings
             try:
@@ -1239,6 +1252,15 @@ class DevOpsBackend(QObject):
     @Property(str, notify=teamMotivationTimeframeChanged)
     def teamMotivationCustomSprint(self):
         return self._team_motivation_custom_sprint
+
+    @Property(dict, notify=teamMotivationScoreConfigChanged)
+    def teamMotivationScoreConfig(self):
+        return self._team_motivation_score_config or {}
+
+    @Property(dict, notify=teamMotivationScoreConfigChanged)
+    def teamMotivationScorePresets(self):
+        import team_motivation
+        return team_motivation.get_score_presets()
 
     @Property(list, notify=repositoriesChanged)
     def repositories(self):
@@ -2642,12 +2664,15 @@ class DevOpsBackend(QObject):
         team_motivation_data = {}
         try:
             import team_motivation
+            user_aliases = _load_user_settings().get("user_aliases")
             team_motivation_data = team_motivation.compute_team_motivation_data(
                 self._cache_db,
                 timeframe=self._team_motivation_timeframe,
                 custom_sprint=self._team_motivation_custom_sprint,
                 work_items=sorted_wis,
-                pull_requests=sorted_prs
+                pull_requests=sorted_prs,
+                user_aliases=user_aliases,
+                score_config=self._team_motivation_score_config
             )
         except Exception as e:
             logger.debug(f"Could not compute initial team motivation data: {e}")
@@ -3751,6 +3776,17 @@ class DevOpsBackend(QObject):
 
         all_wis_by_id = {wi["id"]: wi for wi in self._work_items if not wi.get("deleted")}
 
+        # Index children by parent_id
+        children_by_parent = {}
+        for wi in self._work_items:
+            if wi.get("deleted"):
+                continue
+            p_id = wi.get("parent_id")
+            if p_id:
+                if p_id not in children_by_parent:
+                    children_by_parent[p_id] = []
+                children_by_parent[p_id].append(wi)
+
         assignee_rows = []
         for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
             cells = []
@@ -3773,7 +3809,8 @@ class DevOpsBackend(QObject):
                 # Group items by parent containers
                 grouped = self._group_items_into_containers(
                     items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode,
-                    milestones_by_date=milestones_by_date, all_milestones=all_milestones
+                    milestones_by_date=milestones_by_date, all_milestones=all_milestones,
+                    children_by_parent=children_by_parent, cell_assignee=assignee, sprint_name=s_name
                 )
 
                 tk_closed_percent = round((tk_closed / max(1, tk_count)) * 100) if tk_count > 0 else 0
@@ -3886,15 +3923,20 @@ class DevOpsBackend(QObject):
             "suggested_lookback_offset": suggested_lookback_offset,
         }
 
-    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None):
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None, children_by_parent=None, cell_assignee=None, sprint_name=None):
         """
         Groups work items in a sprint cell by parent container.
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
         - If bug_mode == 'like_task': Bugs are child tasks grouped under parent User Stories / Requirements.
+        - If a user owns a group item (Bug / Story): All subtasks (even owned by other users) are visible under the container,
+          especially the open subtasks keeping the group item from being closed.
+        - If a user only contributed to a group item owned by someone else: Marked as is_external_parent / is_contributor_only,
+          so the open parent item is not counted with the contributing user when their own tasks are closed.
         """
         story_types = {"requirement", "user story", "story", "product backlog item"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
         m_map = milestones_by_date or {}
+        p_children_map = children_by_parent if children_by_parent is not None else {}
 
         def _is_container_type(t_str):
             t = (t_str or "").lower()
@@ -3910,6 +3952,15 @@ class DevOpsBackend(QObject):
             st = (item_dict.get("state") or "").lower()
             return st in done_states
 
+        def _get_state_category(st_str):
+            s = (st_str or "").lower().strip()
+            if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
+                return "closed"
+            elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
+                return "active"
+            else:
+                return "not_started"
+
         cell_containers = []
         cell_children = []
         for it in items_in_cell:
@@ -3923,14 +3974,16 @@ class DevOpsBackend(QObject):
             cid = c["id"]
             c_done = _is_item_done(c)
             matched_c_m = utils.match_work_item_to_milestone(c, all_milestones, m_map)
+            c_owner = (c.get("assigned_to") or cell_assignee or "Unassigned").strip()
             container_map[cid] = {
                 "id": cid,
                 "title": c.get("title") or f"#{cid}",
                 "type": c.get("type") or "Story",
                 "state": c.get("state") or "Active",
-                "assigned_to": c.get("assigned_to") or "Unassigned",
+                "assigned_to": c_owner,
                 "is_parent_in_cell": True,
                 "is_external_parent": False,
+                "is_contributor_only": False,
                 "tfs_url": c.get("tfs_url", ""),
                 "deadline_str": c.get("deadline_str", ""),
                 "milestone_name": matched_c_m.get("name", "") if matched_c_m else "",
@@ -4022,6 +4075,7 @@ class DevOpsBackend(QObject):
                         "assigned_to": p_wi.get("assigned_to") or "Unassigned",
                         "is_parent_in_cell": False,
                         "is_external_parent": True,
+                        "is_contributor_only": True,
                         "tfs_url": p_wi.get("tfs_url", ""),
                         "deadline_str": "" if is_p_epic_or_feature else p_wi.get("deadline_str", ""),
                         "milestone_name": matched_p_m.get("name", "") if matched_p_m else "",
@@ -4062,29 +4116,82 @@ class DevOpsBackend(QObject):
             else:
                 unparented_children.append(ch)
 
-        def _get_state_category(st_str):
-            s = (st_str or "").lower().strip()
-            if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
-                return "closed"
-            elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
-                return "active"
-            else:
-                return "not_started"
+        # For containers owned by the cell assignee (not external parents),
+        # pull in all subtasks (including those assigned to other users)
+        for cid, c_obj in list(container_map.items()):
+            if not c_obj.get("is_external_parent"):
+                existing_task_ids = {t["id"] for t in c_obj["tasks"] if "id" in t}
+                # Check children from p_children_map or all_wis_by_id
+                all_children = p_children_map.get(cid, [])
+                if not all_children and all_wis_by_id:
+                    all_children = [w for w in all_wis_by_id.values() if w.get("parent_id") == cid]
+
+                for raw_child in all_children:
+                    r_id = raw_child.get("id")
+                    if r_id and r_id not in existing_task_ids:
+                        existing_task_ids.add(r_id)
+                        child_assignee = (raw_child.get("assigned_to") or "Unassigned").strip()
+                        child_done = _is_item_done(raw_child)
+                        child_m = utils.match_work_item_to_milestone(raw_child, all_milestones, m_map)
+                        child_cat = _get_state_category(raw_child.get("state"))
+                        task_entry = {
+                            "id": r_id,
+                            "title": raw_child.get("title") or f"#{r_id}",
+                            "type": raw_child.get("type") or "Task",
+                            "state": raw_child.get("state") or "Active",
+                            "state_category": child_cat,
+                            "assigned_to": child_assignee,
+                            "parent_id": cid,
+                            "sprint_name": raw_child.get("sprint_week_name") or raw_child.get("iteration_path") or sprint_name or "",
+                            "deadline_str": raw_child.get("deadline_str") or raw_child.get("target_date") or "",
+                            "milestone_name": child_m.get("name", "") if child_m else "",
+                            "milestone_icon": child_m.get("category_icon", "") if child_m else "",
+                            "milestone_color": child_m.get("category_color", "") if child_m else "",
+                            "milestone_bg": child_m.get("category_bg_color", "") if child_m else "",
+                            "milestone_category": child_m.get("category_name", "") if child_m else "",
+                            "urgency_status": raw_child.get("urgency_status", "none"),
+                            "urgency_badge": raw_child.get("urgency_badge", "—"),
+                            "urgency_color": raw_child.get("urgency_color", "#8b949e"),
+                            "tfs_url": raw_child.get("tfs_url", ""),
+                            "iteration_path": raw_child.get("iteration_path", ""),
+                            "is_done": child_done,
+                            "is_external_assignee": (child_assignee != c_obj.get("assigned_to")),
+                            "is_blocking": not child_done,
+                            "is_task": (raw_child.get("type") or "").lower() in ("task", "subtask"),
+                            "is_bug": (raw_child.get("type") or "").lower() in ("bug", "defect", "problem"),
+                            "is_story": (raw_child.get("type") or "").lower() in story_types,
+                        }
+                        c_obj["tasks"].append(task_entry)
 
         containers_list = []
         for cid, c_obj in container_map.items():
             tsks = c_obj["tasks"]
+            # Sort tasks: open blocking tasks first, external tasks first, then by ID
+            tsks.sort(key=lambda t: (1 if _is_item_done(t) else 0, 0 if t.get("is_external_assignee") else 1, -t.get("id", 0)))
             tot = len(tsks)
             comp = sum(1 for t in tsks if _is_item_done(t))
             pct = round((comp / tot * 100)) if tot > 0 else (100 if c_obj["is_done"] else 0)
+            open_tasks = [t for t in tsks if not _is_item_done(t)]
+            blocking_assignees = list(dict.fromkeys([t.get("assigned_to") for t in open_tasks if t.get("assigned_to") and t.get("assigned_to") != c_obj.get("assigned_to")]))
+            external_tasks = [t for t in tsks if t.get("assigned_to") != c_obj.get("assigned_to")]
+
             c_obj["total_tasks_count"] = tot
             c_obj["completed_tasks_count"] = comp
             c_obj["tasks_not_started_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "not_started")
             c_obj["tasks_active_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "active")
             c_obj["tasks_closed_count"] = comp
+            c_obj["open_tasks_count"] = len(open_tasks)
+            c_obj["blocking_tasks_count"] = len(open_tasks)
+            c_obj["blocking_assignees"] = blocking_assignees
+            c_obj["blocking_assignees_str"] = ", ".join(blocking_assignees)
+            c_obj["has_blocking_external_tasks"] = bool(blocking_assignees)
+            c_obj["external_tasks_count"] = len(external_tasks)
+            c_obj["has_external_subtasks"] = bool(external_tasks)
             c_obj["state_category"] = _get_state_category(c_obj.get("state"))
             c_obj["progress_percent"] = pct
             c_obj["progress_pct"] = pct
+            c_obj["is_contributor_only"] = bool(c_obj.get("is_external_parent"))
+            c_obj["user_contributions_done"] = (comp == tot and tot > 0)
             containers_list.append(c_obj)
 
         # Prioritize complying [<NR>] <Name> containers first, then Prio 1 focus items, then cell parents, then ID
@@ -4255,12 +4362,72 @@ class DevOpsBackend(QObject):
                 custom_sprint=self._team_motivation_custom_sprint,
                 work_items=self._work_items,
                 pull_requests=self._pull_requests,
-                user_aliases=user_aliases
+                user_aliases=user_aliases,
+                score_config=self._team_motivation_score_config
             )
             self.teamMotivationChanged.emit()
             self.userProfilesChanged.emit()
         except Exception as e:
             logger.error(f"Error computing team motivation data: {e}", exc_info=True)
+
+    @Slot("QVariantMap", result=bool)
+    @Slot(dict, result=bool)
+    @Slot(str, result=bool)
+    def save_team_motivation_score_config(self, cfg_data):
+        """
+        Saves custom team motivation score weights to user settings and SQLite project_config,
+        and recomputes all gamification scores.
+        """
+        try:
+            import team_motivation
+            parsed = json.loads(cfg_data) if isinstance(cfg_data, str) else dict(cfg_data)
+            clean_cfg = team_motivation.get_default_score_config()
+            for k, v in parsed.items():
+                if k in clean_cfg:
+                    try:
+                        clean_cfg[k] = int(v)
+                    except (ValueError, TypeError):
+                        pass
+
+            self._team_motivation_score_config = clean_cfg
+
+            # Persist to user_settings.yaml
+            cfg = _load_user_settings()
+            cfg["team_motivation_score_config"] = clean_cfg
+            _save_user_settings(cfg)
+
+            # Persist to project_config in database
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("MOTIVATION_SCORE_CONFIG", json.dumps(clean_cfg))
+                except Exception as dbe:
+                    logger.debug(f"Could not persist score config to DB: {dbe}")
+
+            self.teamMotivationScoreConfigChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Saved Team Motivation score system configuration")
+            self.logMessage.emit("🏆 Team Motivation score weights updated successfully!")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving team motivation score config: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def apply_team_motivation_preset(self, preset_id):
+        """Applies a built-in scoring preset (balanced, code_pr_focused, agile_quality_focused, high_velocity)."""
+        import team_motivation
+        presets = team_motivation.get_score_presets()
+        target = presets.get(preset_id)
+        if not target:
+            return False
+        return self.save_team_motivation_score_config(target.get("config", {}))
+
+    @Slot(result=bool)
+    def reset_team_motivation_score_config(self):
+        """Resets team motivation score weights back to built-in default values."""
+        import team_motivation
+        defaults = team_motivation.get_default_score_config()
+        return self.save_team_motivation_score_config(defaults)
 
     @Slot(result=str)
     def get_team_motivation_markdown_summary(self):

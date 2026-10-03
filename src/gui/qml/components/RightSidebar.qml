@@ -35,7 +35,12 @@ Rectangle {
             var c = containers[i];
             var openTasks = getFilteredCellTasks(c.tasks || [], hideClosed);
             if (hideClosed) {
-                if (openTasks.length === 0 && c.is_done) continue;
+                if (c.is_external_parent || c.is_contributor_only) {
+                    // Contributing user only owns their own tasks; do not count or keep open parent work items owned by others
+                    if (openTasks.length === 0) continue;
+                } else {
+                    if (openTasks.length === 0 && c.is_done) continue;
+                }
             }
             res.push(c);
         }
@@ -2468,19 +2473,20 @@ Rectangle {
                                                 }
                                             }
 
-                                            // External Parent
+                                            // External / Contributor Parent Badge
                                             Rectangle {
-                                                visible: !!modelData.is_external_parent
+                                                visible: !!(modelData.is_external_parent || modelData.is_contributor_only)
                                                 implicitHeight: 20
-                                                implicitWidth: cellCExtLabel.implicitWidth + 10
+                                                implicitWidth: cellCExtLabel.implicitWidth + 12
                                                 radius: 10
                                                 color: "#16243b"
                                                 border.color: "#1f6feb"
                                                 Text {
                                                     id: cellCExtLabel
                                                     anchors.centerIn: parent
-                                                    text: "🌐 External Parent"
+                                                    text: "🤝 Contributor (Owned by " + (modelData.assigned_to || "other") + ")"
                                                     font.pixelSize: 9
+                                                    font.weight: Font.DemiBold
                                                     color: "#58a6ff"
                                                 }
                                             }
@@ -2812,6 +2818,55 @@ Rectangle {
                                     }
                                 }
 
+                                // Blocker Warning Callout for open subtasks assigned to other team members
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: cellBlockerCol.implicitHeight + 12
+                                    radius: 6
+                                    color: "#271704"
+                                    border.color: "#d29922"
+                                    border.width: 1
+                                    visible: !modelData.is_external_parent && !!modelData.has_blocking_external_tasks
+
+                                    RowLayout {
+                                        id: cellBlockerCol
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        anchors.topMargin: 6
+                                        anchors.bottomMargin: 6
+                                        spacing: 8
+
+                                        Text {
+                                            text: "⚠️"
+                                            font.pixelSize: 13
+                                            Layout.alignment: Qt.AlignVCenter
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 1
+
+                                            Text {
+                                                text: (modelData.blocking_tasks_count || 0) + " open subtask(s) keeping this item open"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: "#f0883e"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "Assigned to: " + (modelData.blocking_assignees_str || "Other team members")
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                color: "#c9d1d9"
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Recessed Child Tasks Area
                                 Rectangle {
                                     Layout.fillWidth: true
@@ -2837,7 +2892,7 @@ Rectangle {
                                                 implicitHeight: cellTaskRow.implicitHeight + 10
                                                 radius: 4
                                                 color: cellTaskMa.containsMouse ? "#21262d" : "#0d1117"
-                                                border.color: cellTaskMa.containsMouse ? "#388bfd" : "#30363d"
+                                                border.color: cellTaskMa.containsMouse ? "#388bfd" : (modelData.is_external_assignee && !modelData.is_done ? "#8c4409" : "#30363d")
                                                 border.width: 1
 
                                                 // Context Menu
@@ -2846,8 +2901,8 @@ Rectangle {
                                                     MenuItem {
                                                         text: "🏃 Open Sprint Taskboard (TFS)"
                                                         onTriggered: {
-                                                            var sName = (rightSidebarRoot.sidebarData ? rightSidebarRoot.sidebarData.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
-                                                            if (backend) backend.open_sprint_in_browser(modelData.id || sName, sName);
+                                                             var sName = (rightSidebarRoot.sidebarData ? rightSidebarRoot.sidebarData.sprint_name : "") || modelData.sprint_week_name || modelData.iteration_name || modelData.iteration_path || "";
+                                                             if (backend) backend.open_sprint_in_browser(modelData.id || sName, sName);
                                                         }
                                                     }
                                                     MenuItem {
@@ -2990,6 +3045,43 @@ Rectangle {
                                                         elide: Text.ElideRight
                                                         ToolTip.visible: cellTaskMa.containsMouse
                                                         ToolTip.text: (modelData.title || "") + "\n• Left-Click: Open Sprint Taskboard in TFS\n• Click #" + modelData.id + ": Open Work Item Editor\n• Right-Click: More sprint & item options"
+                                                    }
+
+                                                    // Assignee Pill (Highlighted when assigned to another user)
+                                                    Rectangle {
+                                                        visible: !!modelData.assigned_to && modelData.assigned_to !== ""
+                                                        implicitHeight: 16
+                                                        implicitWidth: cellTkAssigneeText.implicitWidth + 10
+                                                        radius: 8
+                                                        color: modelData.is_external_assignee ? (modelData.is_done ? "#16243b" : "#2d1b06") : "#161b22"
+                                                        border.color: modelData.is_external_assignee ? (modelData.is_done ? "#388bfd" : "#f0883e") : "#30363d"
+                                                        border.width: 1
+                                                        Text {
+                                                            id: cellTkAssigneeText
+                                                            anchors.centerIn: parent
+                                                            text: "👤 " + (modelData.assigned_to || "Unassigned")
+                                                            font.pixelSize: 9
+                                                            font.weight: modelData.is_external_assignee ? Font.DemiBold : Font.Normal
+                                                            color: modelData.is_external_assignee ? (modelData.is_done ? "#79c0ff" : "#ffc680") : "#8b949e"
+                                                        }
+                                                    }
+
+                                                    // Blocker Pill for active external tasks
+                                                    Rectangle {
+                                                        visible: !modelData.is_done && !!modelData.is_external_assignee
+                                                        implicitHeight: 16
+                                                        implicitWidth: cellTkBlockerText.implicitWidth + 8
+                                                        radius: 8
+                                                        color: "#3d1417"
+                                                        border.color: "#f85149"
+                                                        Text {
+                                                            id: cellTkBlockerText
+                                                            anchors.centerIn: parent
+                                                            text: "⏳ Keeping Open"
+                                                            font.pixelSize: 9
+                                                            font.weight: Font.Bold
+                                                            color: "#ff7b72"
+                                                        }
                                                     }
 
                                                     // Type Pill (Task vs Bug)

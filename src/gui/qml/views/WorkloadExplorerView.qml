@@ -143,9 +143,14 @@ Item {
             }
 
             var openTasks = getFilteredTasks(c.tasks || []);
-            // Keep container if it has open child tasks, or if the parent container itself is not done/closed
+            // Keep container if it has open child tasks, or if the user owns the parent container and it is not done/closed
             if (root.hideClosedTasks) {
-                if (openTasks.length === 0 && c.is_done) continue;
+                if (c.is_external_parent || c.is_contributor_only) {
+                    // Contributing user only owns their own tasks; do not count or keep open parent work items owned by others
+                    if (openTasks.length === 0) continue;
+                } else {
+                    if (openTasks.length === 0 && c.is_done) continue;
+                }
             }
             res.push(c);
         }

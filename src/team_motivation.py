@@ -593,6 +593,154 @@ BADGE_DEFINITIONS = {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Default Motivation Score Weights Configuration & Presets
+# ---------------------------------------------------------------------------
+DEFAULT_SCORE_CONFIG = {
+    # Pull Requests & Code Reviews
+    "prs_closed": 15,
+    "prs_created": 10,
+    "prs_approved": 8,
+    "prs_reviewed": 6,
+    "commits_count": 3,
+    "branches_closed": 5,
+    "tags_pushed": 12,
+
+    # Work Items & Quality
+    "tasks_completed": 8,
+    "tasks_created": 3,
+    "bugs_resolved": 10,
+    "stories_completed": 10,
+    "tasks_cleaned": 3,
+    "pushbacks_count": 4,
+    "tasks_fast_closed": 4,
+    "task_evidences_count": 2,
+    "structured_syntax_completed": 7,
+
+    # CI/CD & Builds
+    "builds_succeeded": 4,
+
+    # Streaks & Badges
+    "badge_bonus": 5,
+    "streak_week_bonus": 4,
+
+    # Penalties & Deductions
+    "delay_week_penalty": 3,
+    "build_failed_penalty": 2,
+    "stale_task_penalty": 2,
+}
+
+SCORE_PRESETS = {
+    "balanced": {
+        "id": "balanced",
+        "name": "Balanced (Default)",
+        "icon": "⚖️",
+        "description": "Standard balanced distribution rewarding PRs, code commits, agile delivery, quality reviews, and consistency.",
+        "config": dict(DEFAULT_SCORE_CONFIG)
+    },
+    "code_pr_focused": {
+        "id": "code_pr_focused",
+        "name": "Code & PR Focused",
+        "icon": "💻",
+        "description": "Amplified points for pull requests, thorough code reviews, branches, commits, release tags, and CI builds.",
+        "config": {
+            "prs_closed": 25,
+            "prs_created": 15,
+            "prs_approved": 12,
+            "prs_reviewed": 10,
+            "commits_count": 5,
+            "branches_closed": 8,
+            "tags_pushed": 20,
+            "tasks_completed": 5,
+            "tasks_created": 2,
+            "bugs_resolved": 8,
+            "stories_completed": 8,
+            "tasks_cleaned": 2,
+            "pushbacks_count": 3,
+            "tasks_fast_closed": 3,
+            "task_evidences_count": 1,
+            "structured_syntax_completed": 5,
+            "builds_succeeded": 6,
+            "badge_bonus": 5,
+            "streak_week_bonus": 5,
+            "delay_week_penalty": 2,
+            "build_failed_penalty": 4,
+            "stale_task_penalty": 1,
+        }
+    },
+    "agile_quality_focused": {
+        "id": "agile_quality_focused",
+        "name": "Agile & Quality Focused",
+        "icon": "🎯",
+        "description": "Emphasizes stories delivered, bugs fixed, fast turnaround, structured PBS syntax, and traceability.",
+        "config": {
+            "prs_closed": 10,
+            "prs_created": 8,
+            "prs_approved": 8,
+            "prs_reviewed": 6,
+            "commits_count": 2,
+            "branches_closed": 4,
+            "tags_pushed": 8,
+            "tasks_completed": 12,
+            "tasks_created": 4,
+            "bugs_resolved": 20,
+            "stories_completed": 20,
+            "tasks_cleaned": 6,
+            "pushbacks_count": 6,
+            "tasks_fast_closed": 8,
+            "task_evidences_count": 4,
+            "structured_syntax_completed": 12,
+            "builds_succeeded": 4,
+            "badge_bonus": 8,
+            "streak_week_bonus": 6,
+            "delay_week_penalty": 5,
+            "build_failed_penalty": 2,
+            "stale_task_penalty": 4,
+        }
+    },
+    "high_velocity": {
+        "id": "high_velocity",
+        "name": "High Velocity & Turnaround",
+        "icon": "🚀",
+        "description": "Maximizes points for rapid sprint task completion, long-running streaks, and quick turnarounds.",
+        "config": {
+            "prs_closed": 20,
+            "prs_created": 12,
+            "prs_approved": 10,
+            "prs_reviewed": 8,
+            "commits_count": 4,
+            "branches_closed": 6,
+            "tags_pushed": 15,
+            "tasks_completed": 15,
+            "tasks_created": 5,
+            "bugs_resolved": 15,
+            "stories_completed": 15,
+            "tasks_cleaned": 4,
+            "pushbacks_count": 5,
+            "tasks_fast_closed": 10,
+            "task_evidences_count": 3,
+            "structured_syntax_completed": 8,
+            "builds_succeeded": 5,
+            "badge_bonus": 6,
+            "streak_week_bonus": 8,
+            "delay_week_penalty": 4,
+            "build_failed_penalty": 3,
+            "stale_task_penalty": 3,
+        }
+    }
+}
+
+
+def get_default_score_config():
+    """Returns a fresh copy of the default motivation score configuration."""
+    return dict(DEFAULT_SCORE_CONFIG)
+
+
+def get_score_presets():
+    """Returns all built-in scoring preset profiles."""
+    return dict(SCORE_PRESETS)
+
+
 
 
 def _clean_user_name(user_obj_or_str):
@@ -864,7 +1012,7 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
     return sorted(suggestions, key=lambda s: (conf_order.get(s["confidence"], 3), -s["activity_count"], s["canonical"]))
 
 
-def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None, user_aliases=None):
+def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None, user_aliases=None, score_config=None):
     """
     Computes team activity, leaderboards, streaks, badges, user profiles, and team pulse stats.
 
@@ -875,6 +1023,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         work_items (list): Optional pre-fetched work items list.
         pull_requests (list): Optional pre-fetched pull requests list.
         user_aliases (dict/list): Optional user aliases mapping to combine identities.
+        score_config (dict): Optional custom point weights dictionary.
 
     Returns:
         dict: Full motivational analysis payload ready for QML UI consumption.
@@ -891,6 +1040,26 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             user_aliases = None
 
     alias_lookup, canonical_to_aliases = normalize_user_aliases(user_aliases)
+
+    # Normalize score configuration
+    active_score_config = dict(DEFAULT_SCORE_CONFIG)
+    if score_config is None:
+        try:
+            from utils import _load_active_user_settings
+            cfg_scores = _load_active_user_settings().get("team_motivation_score_config")
+            if cfg_scores and isinstance(cfg_scores, dict):
+                score_config = cfg_scores
+        except Exception:
+            pass
+
+    if score_config and isinstance(score_config, dict):
+        for k, v in score_config.items():
+            if k in active_score_config:
+                try:
+                    active_score_config[k] = int(v)
+                except (ValueError, TypeError):
+                    pass
+
 
 
     now = datetime.now()
@@ -2388,30 +2557,30 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         if has_current_activity:
             m["has_activity"] = True
             pos_score = (
-                m["prs_closed"] * 15
-                + m["prs_created"] * 10
-                + m["commits_count"] * 3
-                + m["branches_closed"] * 5
-                + m["tasks_completed"] * 8
-                + m["tasks_created"] * 3
-                + m["bugs_resolved"] * 10
-                + m["stories_completed"] * 10
-                + m["prs_approved"] * 8
-                + m["prs_reviewed"] * 6
-                + m["tags_pushed"] * 12
-                + m["builds_succeeded"] * 4
-                + m["tasks_cleaned"] * 3
-                + m["pushbacks_count"] * 4
-                + m["tasks_fast_closed"] * 4
-                + min(m["task_evidences_count"], 25) * 2
-                + (m["structured_syntax_completed"] * 7)
-                + len(badges) * 5
-                + m["current_streak_weeks"] * 4
+                m["prs_closed"] * active_score_config["prs_closed"]
+                + m["prs_created"] * active_score_config["prs_created"]
+                + m["commits_count"] * active_score_config["commits_count"]
+                + m["branches_closed"] * active_score_config["branches_closed"]
+                + m["tasks_completed"] * active_score_config["tasks_completed"]
+                + m["tasks_created"] * active_score_config["tasks_created"]
+                + m["bugs_resolved"] * active_score_config["bugs_resolved"]
+                + m["stories_completed"] * active_score_config["stories_completed"]
+                + m["prs_approved"] * active_score_config["prs_approved"]
+                + m["prs_reviewed"] * active_score_config["prs_reviewed"]
+                + m["tags_pushed"] * active_score_config["tags_pushed"]
+                + m["builds_succeeded"] * active_score_config["builds_succeeded"]
+                + m["tasks_cleaned"] * active_score_config["tasks_cleaned"]
+                + m["pushbacks_count"] * active_score_config["pushbacks_count"]
+                + m["tasks_fast_closed"] * active_score_config["tasks_fast_closed"]
+                + min(m["task_evidences_count"], 25) * active_score_config["task_evidences_count"]
+                + (m["structured_syntax_completed"] * active_score_config["structured_syntax_completed"])
+                + len(badges) * active_score_config["badge_bonus"]
+                + m["current_streak_weeks"] * active_score_config["streak_week_bonus"]
             )
             neg_score = (
-                (m["total_delay_weeks"] * 3)
-                + (m["builds_failed"] * 2)
-                + (min(m["stale_tasks_count"], 4) * 2)
+                (m["total_delay_weeks"] * active_score_config["delay_week_penalty"])
+                + (m["builds_failed"] * active_score_config["build_failed_penalty"])
+                + (min(m["stale_tasks_count"], 4) * active_score_config["stale_task_penalty"])
             )
             raw_final = pos_score - neg_score
             m["score"] = max(0, raw_final)
@@ -2853,6 +3022,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "daytime": leaderboard_daytime,
         },
         "all_badges": list(BADGE_DEFINITIONS.values()),
+        "score_config": active_score_config,
+        "score_presets": SCORE_PRESETS,
     }
 
 
