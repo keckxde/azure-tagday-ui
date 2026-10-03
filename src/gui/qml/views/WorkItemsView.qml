@@ -603,55 +603,6 @@ Item {
                     }
                 }
             }
-
-            Button {
-                text: "↻ Refresh"
-                enabled: backend ? !backend.isBusy : false
-                font.weight: Font.DemiBold
-                ToolTip.visible: hovered
-                ToolTip.text: "Reload work items cache directly from local database"
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: "#f0f6fc"
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 34
-                    implicitWidth: 85
-                    radius: 6
-                    color: parent.hovered ? "#30363d" : "#21262d"
-                    border.color: "#30363d"
-                }
-                onClicked: {
-                    if (backend)
-                        backend.refresh_all_data();
-                }
-            }
-
-            Button {
-                text: "⚡ Sync WIQL"
-                enabled: backend ? !backend.isBusy : false
-                font.weight: Font.DemiBold
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: "#ffffff"
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 34
-                    implicitWidth: 110
-                    radius: 6
-                    color: parent.enabled ? (parent.hovered ? "#388bfd" : "#1f6feb") : "#30363d"
-                }
-                onClicked: {
-                    if (backend)
-                        backend.sync_work_items_async();
-                }
-            }
         }
 
         // Excel Export Success Banner
@@ -723,1109 +674,1147 @@ Item {
             }
         }
 
-        // ====================== Filter Section Container (Collapsible) ======================
-        ColumnLayout {
-            id: filtersSection
+        // ====================== Filters Group Box ======================
+        Rectangle {
+            id: filtersGroupBox
             Layout.fillWidth: true
-            spacing: 10
-            visible: !root.isFiltersCollapsed
+            radius: 8
+            color: "#161b22"
+            border.color: root.hasActiveFilters ? "#388bfd" : "#30363d"
+            border.width: 1
 
-            // ====================== State Filter Row ======================
-            RowLayout {
-                Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 10
                 spacing: 8
 
-            Text {
-                text: "State:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 42
-            }
+                // Header / Expand-Collapse Toggle Bar
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    radius: 6
+                    color: groupHeaderMa.containsMouse ? "#21262d" : "#1c2128"
+                    border.color: groupHeaderMa.containsMouse ? "#388bfd" : "#30363d"
+                    border.width: 1
 
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
+                    MouseArea {
+                        id: groupHeaderMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
+                    }
 
-                Repeater {
-                    model: root.statesList
-                    Button {
-                        text: {
-                            if (modelData === "ALL") return "All States"
-                            if (modelData === "DELETED") return "Deleted"
-                            if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "🔍 To Be Investigated"
-                            if (modelData === "ignored" || modelData === "IGNORED") return "🚫 Ignored"
-                            return modelData
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        Text {
+                            text: root.isFiltersCollapsed ? "▶" : "▼"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.Bold
+                            color: root.hasActiveFilters ? "#58a6ff" : "#8b949e"
                         }
-                        checkable: true
-                        checked: root.filterState === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+
+                        Text {
+                            text: "Filters"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            color: root.hasActiveFilters ? "#58a6ff" : "#f0f6fc"
                         }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: stateLabel.implicitWidth + 20
-                            radius: 13
-                            property color stateC: {
-                                if (modelData === "ALL") return "#1f6feb"
-                                if (modelData === "DELETED") return "#da3633"
-                                if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "#f0883e"
-                                if (modelData === "ignored" || modelData === "IGNORED") return "#6e7681"
-                                return root.stateColor(modelData, false)
-                            }
-                            color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(stateC, 1.3) : "#30363d"
+
+                        // Active filter badge if any active
+                        Rectangle {
+                            visible: root.hasActiveFilters
+                            implicitHeight: 20
+                            implicitWidth: activePillTxt.implicitWidth + 12
+                            radius: 10
+                            color: "#1f334d"
+                            border.color: "#388bfd"
+                            border.width: 1
                             Text {
-                                id: stateLabel
-                                text: parent.parent.text
-                                visible: false
+                                id: activePillTxt
+                                anchors.centerIn: parent
+                                text: "Active Filters"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: "#58a6ff"
                             }
                         }
-                        onClicked: {
-                            root.filterState = modelData
-                            root.currentPage = 1
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: root.isFiltersCollapsed ? "Click to expand all filters ▾" : "Click to collapse filters ▴"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                        }
+
+                        Button {
+                            visible: root.hasActiveFilters
+                            text: "✖ Reset Filters"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f85149"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 22
+                                implicitWidth: 88
+                                radius: 4
+                                color: parent.hovered ? "#3c1e1e" : "#211515"
+                                border.color: "#da3633"
+                            }
+                            onClicked: root.resetAllFilters()
                         }
                     }
                 }
-            }
-        }
 
-        // ====================== Type Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+                // ================= Always-Visible Filter Row: Subsystem (L1 & L2) & Priority =================
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
 
-            Text {
-                text: "Type:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 54
-            }
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Repeater {
-                    model: root.typesList
-                    Button {
-                        text: modelData === "ALL" ? "All Types" : modelData
-                        checkable: true
-                        checked: root.filterType === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                    // Subsystem L1
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Sub-System (L1):"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
                         }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: typeLabel.implicitWidth + 20
-                            radius: 13
-                            property color typeC: modelData === "ALL" ? "#1f6feb" : root.typeColor(modelData)
-                            color: parent.checked ? typeC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(typeC, 1.3) : "#30363d"
+                        ComboBox {
+                            id: level1Combo
+                            implicitWidth: 190
+                            implicitHeight: 28
+                            font.pixelSize: 11
+                            editable: true
+                            model: root.level1List
+                            editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
+
+                            onEditTextChanged: {
+                                var val = editText ? editText.trim() : "";
+                                root.filterLevel1 = (val === "" ? "ALL" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            onActivated: function(index) {
+                                var val = root.level1List[index] || "ALL";
+                                root.filterLevel1 = val;
+                                editText = (val === "ALL" ? "" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            background: Rectangle {
+                                color: "#161b22"
+                                radius: 6
+                                border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
+                            }
+
+                            contentItem: TextField {
+                                leftPadding: 8
+                                rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
+                                text: level1Combo.editText
+                                placeholderText: "Type or select L1..."
+                                placeholderTextColor: "#484f58"
+                                font: level1Combo.font
+                                color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                background: Item {}
+                                onTextChanged: {
+                                    if (text !== level1Combo.editText) {
+                                        level1Combo.editText = text;
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
+                            text: "✖"
+                            font.pixelSize: 10
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                            onClicked: {
+                                root.filterLevel1 = "ALL";
+                                level1Combo.currentIndex = 0;
+                                level1Combo.editText = "";
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+                    }
+
+                    Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                    // Subsystem / Component L2
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Component (L2):"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+                        ComboBox {
+                            id: level2Combo
+                            implicitWidth: 190
+                            implicitHeight: 28
+                            font.pixelSize: 11
+                            editable: true
+                            model: root.level2List
+                            editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
+
+                            onEditTextChanged: {
+                                var val = editText ? editText.trim() : "";
+                                root.filterLevel2 = (val === "" ? "ALL" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            onActivated: function(index) {
+                                var val = root.level2List[index] || "ALL";
+                                root.filterLevel2 = val;
+                                editText = (val === "ALL" ? "" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            background: Rectangle {
+                                color: "#161b22"
+                                radius: 6
+                                border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
+                            }
+
+                            contentItem: TextField {
+                                leftPadding: 8
+                                rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
+                                text: level2Combo.editText
+                                placeholderText: "Type or select L2..."
+                                placeholderTextColor: "#484f58"
+                                font: level2Combo.font
+                                color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                background: Item {}
+                                onTextChanged: {
+                                    if (text !== level2Combo.editText) {
+                                        level2Combo.editText = text;
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
+                            text: "✖"
+                            font.pixelSize: 10
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                            onClicked: {
+                                root.filterLevel2 = "ALL";
+                                level2Combo.currentIndex = 0;
+                                level2Combo.editText = "";
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+                    }
+
+                    Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                    // Priority Filter
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Priority:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+                        Repeater {
+                            model: root.priorityOptions
+                            Button {
+                                text: modelData.label
+                                checkable: true
+                                checked: root.filterPriority === modelData.value
+                                font.pixelSize: 11
+                                font.weight: checked ? Font.DemiBold : Font.Normal
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.checked ? (modelData.value === "PRIO1" ? "#f0883e" : "#ffffff") : "#8b949e"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 26
+                                    implicitWidth: pLabel.implicitWidth + 18
+                                    radius: 13
+                                    color: parent.checked ? (modelData.value === "PRIO1" ? "#3d2800" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                                    border.color: parent.checked ? (modelData.value === "PRIO1" ? "#d29922" : "#388bfd") : "#30363d"
+                                    Text { id: pLabel; text: parent.parent.text; visible: false }
+                                }
+                                onClicked: {
+                                    root.filterPriority = modelData.value
+                                    root.currentPage = 1
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // ================= Expandable Filters Section (Visible when !isFiltersCollapsed) =================
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: !root.isFiltersCollapsed
+
+                    // ====================== State Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "State:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.statesList
+                                Button {
+                                    text: {
+                                        if (modelData === "ALL") return "All States"
+                                        if (modelData === "DELETED") return "Deleted"
+                                        if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "🔍 To Be Investigated"
+                                        if (modelData === "ignored" || modelData === "IGNORED") return "🚫 Ignored"
+                                        return modelData
+                                    }
+                                    checkable: true
+                                    checked: root.filterState === modelData
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: stateLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color stateC: {
+                                            if (modelData === "ALL") return "#1f6feb"
+                                            if (modelData === "DELETED") return "#da3633"
+                                            if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "#f0883e"
+                                            if (modelData === "ignored" || modelData === "IGNORED") return "#6e7681"
+                                            return root.stateColor(modelData, false)
+                                        }
+                                        color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(stateC, 1.3) : "#30363d"
+                                        Text {
+                                            id: stateLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterState = modelData
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Type Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Type:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.typesList
+                                Button {
+                                    text: modelData === "ALL" ? "All Types" : modelData
+                                    checkable: true
+                                    checked: root.filterType === modelData
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: typeLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color typeC: modelData === "ALL" ? "#1f6feb" : root.typeColor(modelData)
+                                        color: parent.checked ? typeC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(typeC, 1.3) : "#30363d"
+                                        Text {
+                                            id: typeLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterType = modelData
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Deadline Urgency Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Deadline:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.urgencyOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterUrgency === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: urgLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color urgC: {
+                                            if (modelData.value === "OVERDUE") return "#f85149"
+                                            if (modelData.value === "DUE_THIS_WEEK") return "#d29922"
+                                            if (modelData.value === "DUE_NEXT_WEEK") return "#388bfd"
+                                            if (modelData.value === "FUTURE") return "#58a6ff"
+                                            return "#1f6feb"
+                                        }
+                                        color: parent.checked ? urgC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(urgC, 1.3) : "#30363d"
+                                        Text {
+                                            id: urgLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterUrgency = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Additional Filters Row (Modified, User, Iteration) ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        // Modified Date Filter
+                        RowLayout {
+                            spacing: 6
                             Text {
-                                id: typeLabel
-                                text: parent.parent.text
-                                visible: false
+                                text: "Modified:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            Repeater {
+                                model: root.modifiedOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterModified === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: modLabel.implicitWidth + 18
+                                        radius: 13
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                        Text { id: modLabel; text: parent.parent.text; visible: false }
+                                    }
+                                    onClicked: {
+                                        root.filterModified = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
                             }
                         }
-                        onClicked: {
-                            root.filterType = modelData
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-        }
 
-        // ====================== Deadline Urgency Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            Text {
-                text: "Deadline:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 54
-            }
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Repeater {
-                    model: root.urgencyOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterUrgency === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: urgLabel.implicitWidth + 20
-                            radius: 13
-                            property color urgC: {
-                                if (modelData.value === "OVERDUE") return "#f85149"
-                                if (modelData.value === "DUE_THIS_WEEK") return "#d29922"
-                                if (modelData.value === "DUE_NEXT_WEEK") return "#388bfd"
-                                if (modelData.value === "FUTURE") return "#58a6ff"
-                                return "#1f6feb"
-                            }
-                            color: parent.checked ? urgC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(urgC, 1.3) : "#30363d"
+                        // Assignee / User Filter
+                        RowLayout {
+                            spacing: 6
                             Text {
-                                id: urgLabel
-                                text: parent.parent.text
-                                visible: false
+                                text: "User:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            ComboBox {
+                                id: assigneeCombo
+                                implicitWidth: 170
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.assigneesList
+                                currentIndex: {
+                                    var idx = root.assigneesList.indexOf(root.filterAssignee)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: {
+                                    if (currentIndex === 0 || currentText === "ALL") return "All Users"
+                                    if (currentIndex === 1 || currentText === "UNASSIGNED") return "Unassigned"
+                                    return currentText
+                                }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: assigneeCombo.hovered || assigneeCombo.activeFocus ? "#58a6ff" : (root.filterAssignee !== "ALL" ? "#1f6feb" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8
+                                    rightPadding: 24
+                                    text: assigneeCombo.displayText
+                                    font: assigneeCombo.font
+                                    color: root.filterAssignee !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    var val = root.assigneesList[index] || "ALL"
+                                    root.filterAssignee = val
+                                    root.currentPage = 1
+                                }
                             }
                         }
-                        onClicked: {
-                            root.filterUrgency = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-        }
 
-        // ====================== Additional Filters Row (Modified, User, Iteration) ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            // Modified Date Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Modified:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                        // Iteration Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Iteration:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                Repeater {
-                    model: root.modifiedOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterModified === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: modLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#388bfd" : "#30363d"
-                            Text { id: modLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterModified = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
+                            Row {
+                                spacing: 4
+                                Button {
+                                    text: "All"
+                                    checkable: true
+                                    checked: root.filterIteration === "ALL"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 38; radius: 13
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "ALL"
+                                        root.currentPage = 1
+                                    }
+                                }
 
-            Rectangle { width: 1; height: 18; color: "#30363d" }
+                                Button {
+                                    text: "🎯 Planned"
+                                    checkable: true
+                                    checked: root.filterIteration === "PLANNED"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#58a6ff"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 80; radius: 13
+                                        color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#1f6feb" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "PLANNED"
+                                        root.currentPage = 1
+                                    }
+                                }
 
-            // Assignee / User Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "User:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                                Button {
+                                    text: "📋 Backlog"
+                                    checkable: true
+                                    checked: root.filterIteration === "UNPLANNED"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 78; radius: 13
+                                        color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#8b949e" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "UNPLANNED"
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
 
-                ComboBox {
-                    id: assigneeCombo
-                    implicitWidth: 170
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.assigneesList
-                    currentIndex: {
-                        var idx = root.assigneesList.indexOf(root.filterAssignee)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: {
-                        if (currentIndex === 0 || currentText === "ALL") return "All Users"
-                        if (currentIndex === 1 || currentText === "UNASSIGNED") return "Unassigned"
-                        return currentText
-                    }
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: assigneeCombo.hovered || assigneeCombo.activeFocus ? "#58a6ff" : (root.filterAssignee !== "ALL" ? "#1f6feb" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: 24
-                        text: assigneeCombo.displayText
-                        font: assigneeCombo.font
-                        color: root.filterAssignee !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    onActivated: function(index) {
-                        var val = root.assigneesList[index] || "ALL"
-                        root.filterAssignee = val
-                        root.currentPage = 1
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Iteration Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Iteration:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                Row {
-                    spacing: 4
-                    Button {
-                        text: "All"
-                        checkable: true
-                        checked: root.filterIteration === "ALL"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 38; radius: 13
-                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#388bfd" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "ALL"
-                            root.currentPage = 1
-                        }
-                    }
-
-                    Button {
-                        text: "🎯 Planned"
-                        checkable: true
-                        checked: root.filterIteration === "PLANNED"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#58a6ff"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 80; radius: 13
-                            color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#1f6feb" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "PLANNED"
-                            root.currentPage = 1
-                        }
-                    }
-
-                    Button {
-                        text: "📋 Backlog"
-                        checkable: true
-                        checked: root.filterIteration === "UNPLANNED"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 78; radius: 13
-                            color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#8b949e" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "UNPLANNED"
-                            root.currentPage = 1
-                        }
-                    }
-                }
-
-                ComboBox {
-                    id: iterationCombo
-                    implicitWidth: 175
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.iterationsList
-                    currentIndex: {
-                        var idx = root.iterationsList.indexOf(root.filterIteration)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: {
-                        if (currentIndex === 0 || currentText === "ALL") return "Specific Sprint..."
-                        if (currentIndex === 1 || currentText === "PLANNED") return "🎯 Planned (Any)"
-                        if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 Unplanned (Backlog)"
-                        return "🎯 " + currentText
-                    }
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: iterationCombo.hovered || iterationCombo.activeFocus ? "#58a6ff" : ((root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#1f6feb" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: 24
-                        text: iterationCombo.displayText
-                        font: iterationCombo.font
-                        color: (root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    onActivated: function(index) {
-                        var val = root.iterationsList[index] || "ALL"
-                        root.filterIteration = val
-                        root.currentPage = 1
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            // Clear / Reset filters button
-            Button {
-                visible: root.hasActiveFilters
-                text: "✖ Reset Filters"
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-                contentItem: Text {
-                    text: parent.text; font: parent.font
-                    color: "#f85149"
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 26; implicitWidth: 96; radius: 6
-                    color: parent.hovered ? "#3c1e1e" : "#211515"
-                    border.color: "#da3633"
-                }
-                onClicked: root.resetAllFilters()
-            }
-        }
-
-        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Milestone Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            // Level 1: Sub-Systems (Epics)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Sub-System (L1):"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: level1Combo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.level1List
-                    editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterLevel1 = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    onActivated: function(index) {
-                        var val = root.level1List[index] || "ALL";
-                        root.filterLevel1 = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
-                    }
-
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
-                        text: level1Combo.editText
-                        placeholderText: "Type or select L1..."
-                        placeholderTextColor: "#484f58"
-                        font: level1Combo.font
-                        color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== level1Combo.editText) {
-                                level1Combo.editText = text;
+                            ComboBox {
+                                id: iterationCombo
+                                implicitWidth: 175
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.iterationsList
+                                currentIndex: {
+                                    var idx = root.iterationsList.indexOf(root.filterIteration)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: {
+                                    if (currentIndex === 0 || currentText === "ALL") return "Specific Sprint..."
+                                    if (currentIndex === 1 || currentText === "PLANNED") return "🎯 Planned (Any)"
+                                    if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 Unplanned (Backlog)"
+                                    return "🎯 " + currentText
+                                }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: iterationCombo.hovered || iterationCombo.activeFocus ? "#58a6ff" : ((root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#1f6feb" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8
+                                    rightPadding: 24
+                                    text: iterationCombo.displayText
+                                    font: iterationCombo.font
+                                    color: (root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    var val = root.iterationsList[index] || "ALL"
+                                    root.filterIteration = val
+                                    root.currentPage = 1
+                                }
                             }
                         }
-                    }
-                }
 
-                // Clear L1 filter button
-                Button {
-                    visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterLevel1 = "ALL";
-                        level1Combo.currentIndex = 0;
-                        level1Combo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Level 2: Components (Features)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Component (L2):"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: level2Combo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.level2List
-                    editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterLevel2 = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
+                        Item { Layout.fillWidth: true }
                     }
 
-                    onActivated: function(index) {
-                        var val = root.level2List[index] || "ALL";
-                        root.filterLevel2 = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                    // ====================== Milestone, Area Path, Tag & PBS Grouping Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
-                    }
+                        // Milestone Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Milestone:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
-                        text: level2Combo.editText
-                        placeholderText: "Type or select L2..."
-                        placeholderTextColor: "#484f58"
-                        font: level2Combo.font
-                        color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== level2Combo.editText) {
-                                level2Combo.editText = text;
+                            ComboBox {
+                                id: wiMilestoneCombo
+                                implicitWidth: 180
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.milestonesList
+                                editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterMilestone = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                onActivated: function(index) {
+                                    var val = root.milestonesList[index] || "ALL";
+                                    root.filterMilestone = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiMilestoneCombo.hovered || wiMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
+                                }
+
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
+                                    text: wiMilestoneCombo.editText
+                                    placeholderText: "Type or select milestone..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiMilestoneCombo.font
+                                    color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiMilestoneCombo.editText) {
+                                            wiMilestoneCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterMilestone = "ALL";
+                                    wiMilestoneCombo.currentIndex = 0;
+                                    wiMilestoneCombo.editText = "";
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
                             }
                         }
-                    }
-                }
 
-                // Clear L2 filter button
-                Button {
-                    visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterLevel2 = "ALL";
-                        level2Combo.currentIndex = 0;
-                        level2Combo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            Rectangle { width: 1; height: 18; color: "#30363d" }
+                        // Area Path Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Area Path:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-            // Milestone Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Milestone:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                            ComboBox {
+                                id: wiAreaPathCombo
+                                implicitWidth: 180
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.areaPathsList
+                                editText: root.filterAreaPath === "ALL" ? "" : root.filterAreaPath
 
-                ComboBox {
-                    id: wiMilestoneCombo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.milestonesList
-                    editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterAreaPath = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
 
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterMilestone = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                                onActivated: function(index) {
+                                    var val = root.areaPathsList[index] || "ALL";
+                                    root.filterAreaPath = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
 
-                    onActivated: function(index) {
-                        var val = root.milestonesList[index] || "ALL";
-                        root.filterMilestone = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiAreaPathCombo.hovered || wiAreaPathCombo.activeFocus ? "#58a6ff" : (root.filterAreaPath !== "ALL" ? "#3fb950" : "#30363d")
+                                }
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiMilestoneCombo.hovered || wiMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
-                    }
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterAreaPath !== "ALL") ? 32 : 24
+                                    text: wiAreaPathCombo.editText
+                                    placeholderText: "Type or select Area..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiAreaPathCombo.font
+                                    color: root.filterAreaPath !== "ALL" ? "#3fb950" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiAreaPathCombo.editText) {
+                                            wiAreaPathCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
 
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
-                        text: wiMilestoneCombo.editText
-                        placeholderText: "Type or select milestone..."
-                        placeholderTextColor: "#484f58"
-                        font: wiMilestoneCombo.font
-                        color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== wiMilestoneCombo.editText) {
-                                wiMilestoneCombo.editText = text;
+                            Button {
+                                visible: root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterAreaPath = "ALL";
+                                    wiAreaPathCombo.currentIndex = 0;
+                                    wiAreaPathCombo.editText = "";
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
                             }
                         }
-                    }
-                }
 
-                // Clear Milestone filter button
-                Button {
-                    visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterMilestone = "ALL";
-                        wiMilestoneCombo.currentIndex = 0;
-                        wiMilestoneCombo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            Rectangle { width: 1; height: 18; color: "#30363d" }
+                        // Tag Category + Tag Filter
+                        RowLayout {
+                            spacing: 6
 
-            // Area Path Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Area Path:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                            Text {
+                                text: "Cat:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                ComboBox {
-                    id: wiAreaPathCombo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.areaPathsList
-                    editText: root.filterAreaPath === "ALL" ? "" : root.filterAreaPath
+                            ComboBox {
+                                id: wiTagCategoryCombo
+                                implicitWidth: 130
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.tagCategoryList
+                                currentIndex: {
+                                    var idx = root.tagCategoryList.indexOf(root.filterTagCategory)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: currentIndex === 0 ? "All Categories" : currentText
 
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterAreaPath = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiTagCategoryCombo.hovered || wiTagCategoryCombo.activeFocus ? "#58a6ff" : (root.filterTagCategory !== "ALL" ? "#a371f7" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8; rightPadding: 24
+                                    text: wiTagCategoryCombo.displayText
+                                    font: wiTagCategoryCombo.font
+                                    color: root.filterTagCategory !== "ALL" ? "#a371f7" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    root.filterTagCategory = root.tagCategoryList[index] || "ALL"
+                                    root.filterTag = "ALL"
+                                    if (wiTagCombo) { wiTagCombo.currentIndex = 0; wiTagCombo.editText = "" }
+                                    root.refreshTagsList()
+                                    root.currentPage = 1
+                                    root.updateFilteredModel()
+                                }
+                            }
 
-                    onActivated: function(index) {
-                        var val = root.areaPathsList[index] || "ALL";
-                        root.filterAreaPath = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                            Text {
+                                text: "Tag:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiAreaPathCombo.hovered || wiAreaPathCombo.activeFocus ? "#58a6ff" : (root.filterAreaPath !== "ALL" ? "#3fb950" : "#30363d")
-                    }
+                            ComboBox {
+                                id: wiTagCombo
+                                implicitWidth: 160
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.tagsList
+                                editText: root.filterTag === "ALL" ? "" : root.filterTag
 
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterAreaPath !== "ALL") ? 32 : 24
-                        text: wiAreaPathCombo.editText
-                        placeholderText: "Type or select Area..."
-                        placeholderTextColor: "#484f58"
-                        font: wiAreaPathCombo.font
-                        color: root.filterAreaPath !== "ALL" ? "#3fb950" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== wiAreaPathCombo.editText) {
-                                wiAreaPathCombo.editText = text;
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterTag = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                onActivated: function(index) {
+                                    var val = root.tagsList[index] || "ALL";
+                                    root.filterTag = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiTagCombo.hovered || wiTagCombo.activeFocus ? "#58a6ff" : (root.filterTag !== "ALL" ? "#58a6ff" : "#30363d")
+                                }
+
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterTag !== "ALL") ? 32 : 24
+                                    text: wiTagCombo.editText
+                                    placeholderText: root.filterTagCategory !== "ALL" ? ("Tag in '" + root.filterTagCategory + "'...") : "Type or select tag..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiTagCombo.font
+                                    color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiTagCombo.editText) {
+                                            wiTagCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                visible: root.filterTag !== "ALL" || root.filterTagCategory !== "ALL"
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterTagCategory = "ALL";
+                                    root.filterTag = "ALL";
+                                    wiTagCategoryCombo.currentIndex = 0;
+                                    wiTagCombo.currentIndex = 0;
+                                    wiTagCombo.editText = "";
+                                    root.refreshTagsList();
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
                             }
                         }
+
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                        // 🚨 Overdue Deadlines Only Toggle
+                        Button {
+                            text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
+                            checkable: true
+                            checked: root.filterUrgency === "OVERDUE"
+                            font.pixelSize: 11
+                            font.weight: checked ? Font.Bold : Font.DemiBold
+                            ToolTip.visible: hovered
+                            ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 28
+                                implicitWidth: 110
+                                radius: 6
+                                color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
+                                border.color: parent.checked ? "#f85149" : "#30363d"
+                            }
+                            onClicked: {
+                                root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                        // PBS Grouping Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "PBS:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+                            Repeater {
+                                model: root.groupingOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterGrouping === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: gLabel.implicitWidth + 18
+                                        radius: 13
+                                        color: parent.checked ? (modelData.value === "UNGROUPED" ? "#3c1e1e" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? (modelData.value === "UNGROUPED" ? "#da3633" : "#388bfd") : "#30363d"
+                                        Text { id: gLabel; text: parent.parent.text; visible: false }
+                                    }
+                                    onClicked: {
+                                        root.filterGrouping = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
                     }
                 }
 
-                // Clear Area Path filter button
-                Button {
-                    visible: root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterAreaPath = "ALL";
-                        wiAreaPathCombo.currentIndex = 0;
-                        wiAreaPathCombo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Tag Category + Tag Two-Step Filter
-            RowLayout {
-                spacing: 6
-
-                Text {
-                    text: "Cat:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                    ToolTip.visible: catLabelMa.containsMouse
-                    ToolTip.text: "Select a tag category first, then pick a specific tag"
-                    MouseArea { id: catLabelMa; anchors.fill: parent; hoverEnabled: true }
-                }
-
-                // Category combo
-                ComboBox {
-                    id: wiTagCategoryCombo
-                    implicitWidth: 150
+                // ================= Collapsed Active Filter Summary Bar =================
+                Rectangle {
+                    Layout.fillWidth: true
                     implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.tagCategoryList
-                    currentIndex: {
-                        var idx = root.tagCategoryList.indexOf(root.filterTagCategory)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: currentIndex === 0 ? "All Categories" : currentText
+                    radius: 4
+                    color: "#16202c"
+                    border.color: "#388bfd"
+                    border.width: 1
+                    visible: root.isFiltersCollapsed && root.hasActiveFilters
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiTagCategoryCombo.hovered || wiTagCategoryCombo.activeFocus ? "#58a6ff" : (root.filterTagCategory !== "ALL" ? "#a371f7" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8; rightPadding: 24
-                        text: wiTagCategoryCombo.displayText
-                        font: wiTagCategoryCombo.font
-                        color: root.filterTagCategory !== "ALL" ? "#a371f7" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    delegate: ItemDelegate {
-                        width: wiTagCategoryCombo.width
-                        contentItem: Text {
-                            text: modelData === "ALL" ? "All Categories" : modelData
-                            font: wiTagCategoryCombo.font
-                            color: "#f0f6fc"
-                            verticalAlignment: Text.AlignVCenter
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 8
+
+                        Text {
+                            text: "🔍 Other Active Filters:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            color: "#58a6ff"
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: {
+                                var parts = [];
+                                if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
+                                if (root.filterState !== "ALL") {
+                                    var stDesc = root.filterState;
+                                    if (stDesc === "to be investigated") stDesc = "To Be Investigated";
+                                    else if (stDesc === "ignored") stDesc = "Ignored";
+                                    else if (stDesc === "DELETED") stDesc = "Deleted";
+                                    parts.push("State: " + stDesc);
+                                }
+                                if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
+                                if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
+                                if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
+                                if (root.filterUrgency !== "ALL") parts.push("Deadline: " + root.filterUrgency);
+                                if (root.filterMilestone !== "ALL") parts.push("Milestone: " + root.filterMilestone);
+                                if (root.filterAreaPath !== "ALL") parts.push("Area: " + root.filterAreaPath);
+                                if (root.filterTagCategory !== "ALL") parts.push("Cat: " + root.filterTagCategory);
+                                if (root.filterTag !== "ALL") parts.push("Tag: " + root.filterTag);
+                                if (root.filterGrouping !== "ALL") parts.push("PBS: " + root.filterGrouping);
+                                return parts.length > 0 ? parts.join("  •  ") : "L1/L2 or Priority filter active above";
+                            }
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            color: "#8b949e"
                             elide: Text.ElideRight
                         }
-                        background: Rectangle {
-                            color: highlighted ? "#21262d" : "#161b22"
-                        }
-                        highlighted: wiTagCategoryCombo.highlightedIndex === index
-                    }
-                    popup: Popup {
-                        y: wiTagCategoryCombo.height + 2
-                        width: wiTagCategoryCombo.width
-                        implicitHeight: contentItem.implicitHeight
-                        padding: 1
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: wiTagCategoryCombo.delegateModel
-                            ScrollIndicator.vertical: ScrollIndicator {}
-                        }
-                        background: Rectangle { color: "#161b22"; border.color: "#30363d"; radius: 6 }
-                    }
-                    onActivated: function(index) {
-                        root.filterTagCategory = root.tagCategoryList[index] || "ALL"
-                        // Reset tag selection when category changes
-                        root.filterTag = "ALL"
-                        if (wiTagCombo) { wiTagCombo.currentIndex = 0; wiTagCombo.editText = "" }
-                        root.refreshTagsList()
-                        root.currentPage = 1
-                        root.updateFilteredModel()
-                    }
-                }
 
-                Text {
-                    text: "Tag:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: wiTagCombo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.tagsList
-                    editText: root.filterTag === "ALL" ? "" : root.filterTag
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterTag = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    onActivated: function(index) {
-                        var val = root.tagsList[index] || "ALL";
-                        root.filterTag = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiTagCombo.hovered || wiTagCombo.activeFocus ? "#58a6ff" : (root.filterTag !== "ALL" ? "#58a6ff" : "#30363d")
-                    }
-
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterTag !== "ALL") ? 32 : 24
-                        text: wiTagCombo.editText
-                        placeholderText: root.filterTagCategory !== "ALL" ? ("Tag in '" + root.filterTagCategory + "'...") : "Type or select tag..."
-                        placeholderTextColor: "#484f58"
-                        font: wiTagCombo.font
-                        color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== wiTagCombo.editText) {
-                                wiTagCombo.editText = text;
-                            }
+                        Button {
+                            text: "Expand All"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitHeight: 20; implicitWidth: 68; radius: 4; color: parent.hovered ? "#21262d" : "transparent"; border.color: "#388bfd" }
+                            onClicked: root.isFiltersCollapsed = false
                         }
                     }
-                }
-
-                // Clear Tag filter button (resets both category and tag)
-                Button {
-                    visible: root.filterTag !== "ALL" || root.filterTagCategory !== "ALL"
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterTagCategory = "ALL";
-                        root.filterTag = "ALL";
-                        wiTagCategoryCombo.currentIndex = 0;
-                        wiTagCombo.currentIndex = 0;
-                        wiTagCombo.editText = "";
-                        root.refreshTagsList();
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // 🚨 Overdue Deadlines Only Toggle (positioned right next to Tag)
-            Button {
-                text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
-                checkable: true
-                checked: root.filterUrgency === "OVERDUE"
-                font.pixelSize: 11
-                font.weight: checked ? Font.Bold : Font.DemiBold
-                ToolTip.visible: hovered
-                ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 28
-                    implicitWidth: 115
-                    radius: 6
-                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
-                    border.color: parent.checked ? "#f85149" : "#30363d"
-                }
-                onClicked: {
-                    root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
-                    root.currentPage = 1;
-                    root.updateFilteredModel();
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-        }
-
-        // ====================== Priority & PBS Grouping Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            // Priority Focus Filter (OI, MP, SCEN, SPEC, PA, CS, DOC)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Priority:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-                Repeater {
-                    model: root.priorityOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterPriority === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? (modelData.value === "PRIO1" ? "#f0883e" : "#ffffff") : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: pLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? (modelData.value === "PRIO1" ? "#3d2800" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? (modelData.value === "PRIO1" ? "#d29922" : "#388bfd") : "#30363d"
-                            Text { id: pLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterPriority = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // PBS Grouping Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "PBS:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-                Repeater {
-                    model: root.groupingOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterGrouping === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: gLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? (modelData.value === "UNGROUPED" ? "#3c1e1e" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? (modelData.value === "UNGROUPED" ? "#da3633" : "#388bfd") : "#30363d"
-                            Text { id: gLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterGrouping = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-        }
-        } // End of filtersSection
-
-        // ====================== Active Filter Bar (Shown when collapsed & filters active) ======================
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 34
-            radius: 6
-            color: "#16202c"
-            border.color: "#388bfd"
-            border.width: 1
-            visible: root.isFiltersCollapsed && root.hasActiveFilters
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
-
-                Text {
-                    text: "🔍 Active Filters Applied"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    color: "#58a6ff"
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: {
-                        var parts = [];
-                        if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
-                        if (root.filterState !== "ALL") {
-                            var stDesc = root.filterState;
-                            if (stDesc === "to be investigated") stDesc = "To Be Investigated";
-                            else if (stDesc === "ignored") stDesc = "Ignored";
-                            else if (stDesc === "DELETED") stDesc = "Deleted";
-                            parts.push("State: " + stDesc);
-                        }
-                        if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
-                        if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
-                        if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
-                        if (root.filterUrgency !== "ALL") parts.push("Deadline: " + root.filterUrgency);
-                        if (root.filterLevel1 !== "ALL") parts.push("L1: " + root.filterLevel1);
-                        if (root.filterLevel2 !== "ALL") parts.push("L2: " + root.filterLevel2);
-                        if (root.filterMilestone !== "ALL") parts.push("Milestone: " + root.filterMilestone);
-                        if (root.filterTagCategory !== "ALL") parts.push("Cat: " + root.filterTagCategory);
-                        if (root.filterTag !== "ALL") parts.push("Tag: " + root.filterTag);
-                        if (root.filterPriority !== "ALL") parts.push("Prio: " + root.filterPriority);
-                        if (root.filterGrouping !== "ALL") parts.push("PBS: " + root.filterGrouping);
-                        return parts.join("  •  ");
-                    }
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 11
-                    color: "#8b949e"
-                    elide: Text.ElideRight
-                }
-
-                Button {
-                    text: "Show Filters"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitHeight: 22; implicitWidth: 84; radius: 4; color: parent.hovered ? "#21262d" : "transparent"; border.color: "#388bfd" }
-                    onClicked: root.isFiltersCollapsed = false
-                }
-
-                Button {
-                    text: "Reset All"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#f85149"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitHeight: 22; implicitWidth: 72; radius: 4; color: parent.hovered ? "#3c1e1e" : "transparent"; border.color: "#da3633" }
-                    onClicked: root.resetAllFilters()
                 }
             }
         }
