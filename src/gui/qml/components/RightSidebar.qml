@@ -1938,7 +1938,7 @@ Rectangle {
                                 anchors.centerIn: parent
                                 spacing: 4
                                 Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    Layout.alignment: Qt.AlignHCenter
                                     text: "🎯 No Achievers Yet in This Timeframe"
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 12
@@ -1946,7 +1946,7 @@ Rectangle {
                                     color: "#8b949e"
                                 }
                                 Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    Layout.alignment: Qt.AlignHCenter
                                     text: "Complete Bronze criteria to be the first champion!"
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 10
@@ -3313,7 +3313,7 @@ Rectangle {
                             anchors.centerIn: parent
                             spacing: 4
                             Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
+                                Layout.alignment: Qt.AlignHCenter
                                 text: "📋 No Tasks in This Sprint Cell"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 12

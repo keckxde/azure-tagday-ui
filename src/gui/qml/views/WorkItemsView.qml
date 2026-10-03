@@ -367,7 +367,7 @@ Item {
 
             // Clickable Area Path Filter Pill in Top Header
             Rectangle {
-                visible: (backend && backend.areaPathFilterEnabled) || (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                visible: !!((backend && backend.areaPathFilterEnabled) || (root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""))
                 implicitHeight: 24
                 implicitWidth: areaTopText.implicitWidth + 16
                 radius: 12

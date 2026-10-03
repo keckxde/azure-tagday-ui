@@ -634,7 +634,7 @@ Item {
                                 font.family: "Consolas, monospace"
                                 font.pixelSize: 11
                                 color: "#8b949e"
-                                visible: backend && backend.defaultAreaPath !== ""
+                                visible: !!(backend && backend.defaultAreaPath && backend.defaultAreaPath !== "")
                             }
                         }
                     }
@@ -2226,7 +2226,7 @@ Item {
 
                                 // Delete / Clear Default Area button
                                 Button {
-                                    visible: backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== ""
+                                    visible: !!(backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "")
                                     implicitHeight: 20
                                     implicitWidth: 20
                                     text: "✖"
@@ -2518,7 +2518,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
-                        visible: backend && backend.allDiscoveredAreaPaths && backend.allDiscoveredAreaPaths.length > 0
+                        visible: !!(backend && backend.allDiscoveredAreaPaths && backend.allDiscoveredAreaPaths.length > 0)
 
                         Text {
                             text: "Discovered Area Paths in Project:"

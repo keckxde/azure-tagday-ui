@@ -424,7 +424,7 @@ Item {
 
                         // Custom Sprint Dropdown selector if available
                         RowLayout {
-                            visible: backend && backend.availableSprintList && backend.availableSprintList.length > 0
+                            visible: !!(backend && backend.availableSprintList && backend.availableSprintList.length > 0)
                             spacing: 6
 
                             Text {

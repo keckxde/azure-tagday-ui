@@ -849,7 +849,7 @@ Item {
                         // Milestones Section (if any)
                         ColumnLayout {
                             Layout.fillWidth: true
-                            visible: (backend && backend.lastWeekActivity && backend.lastWeekActivity.milestones && backend.lastWeekActivity.milestones.length > 0)
+                            visible: !!(backend && backend.lastWeekActivity && backend.lastWeekActivity.milestones && backend.lastWeekActivity.milestones.length > 0)
                             spacing: 4
 
                             RowLayout {
@@ -1162,7 +1162,7 @@ Item {
 
                             // Empty placeholder when no activities
                             Text {
-                                visible: (!backend || !backend.lastWeekActivity || !backend.lastWeekActivity.total_count)
+                                visible: !!(!backend || !backend.lastWeekActivity || !backend.lastWeekActivity.total_count)
                                 text: "No pull requests merged or work items closed in last week's interval."
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
@@ -1288,7 +1288,7 @@ Item {
                         // Milestones Section (if any)
                         ColumnLayout {
                             Layout.fillWidth: true
-                            visible: (backend && backend.currentWeekPlanned && backend.currentWeekPlanned.milestones && backend.currentWeekPlanned.milestones.length > 0)
+                            visible: !!(backend && backend.currentWeekPlanned && backend.currentWeekPlanned.milestones && backend.currentWeekPlanned.milestones.length > 0)
                             spacing: 4
 
                             RowLayout {
@@ -1621,7 +1621,7 @@ Item {
 
                             // Empty placeholder when no planned items
                             Text {
-                                visible: (!backend || !backend.currentWeekPlanned || !backend.currentWeekPlanned.total_count)
+                                visible: !!(!backend || !backend.currentWeekPlanned || !backend.currentWeekPlanned.total_count)
                                 text: "No work items or active pull requests assigned to this week's sprint."
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11

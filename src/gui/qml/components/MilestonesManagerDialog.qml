@@ -903,13 +903,13 @@ Dialog {
                                     spacing: 8
 
                                     Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: "🎯"
                                         font.pixelSize: 28
                                     }
 
                                     Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: root.milestonesList.length === 0 ? "No milestones defined yet." :
                                               (root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery) ?
                                               ("All " + root.historicCount + " milestone(s) are historic (past).") : "No matching milestones found."
@@ -921,7 +921,7 @@ Dialog {
 
                                     Button {
                                         visible: root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: "Show " + root.historicCount + " historic milestone" + (root.historicCount > 1 ? "s" : "")
                                         font.pixelSize: 11
                                         font.weight: Font.DemiBold
