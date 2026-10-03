@@ -26,6 +26,103 @@ Item {
     property int totalMatchingCount: 0
     property var matchedItemsList: []
 
+    // Sorting & Grouping Controls
+    property string sortColumn: "id"         // "id", "state", "iteration", "deadline"
+    property string sortDirection: "desc"    // "asc", "desc"
+    property bool groupByStoryBug: true      // Group tasks under parent User Story / Bug
+
+    function toggleSort(col) {
+        if (root.sortColumn === col) {
+            root.sortDirection = (root.sortDirection === "asc" ? "desc" : "asc");
+        } else {
+            root.sortColumn = col;
+            root.sortDirection = (col === "id" ? "desc" : "asc");
+        }
+        root.currentPage = 1;
+        root.updateFilteredModel();
+    }
+
+    function typeIcon(t) {
+        switch((t || "").toLowerCase()) {
+            case "bug":         return "🐛"
+            case "feature":     return "🎯"
+            case "epic":        return "👑"
+            case "user story":  return "📖"
+            case "requirement": return "📜"
+            case "task":        return "📋"
+            case "test case":   return "🧪"
+            case "test plan":   return "🧪"
+            case "test suite":  return "🧪"
+            default:            return "📌"
+        }
+    }
+
+    function formatCompactDeadline(badge, status, daysDiff, deadlineStr) {
+        if (!badge || badge === "—" || badge === "") {
+            return "";
+        }
+        var bLower = badge.toLowerCase();
+        if (status === "overdue" || bLower.indexOf("overdue") !== -1) {
+            var match = badge.match(/^(\d+[dwmyh])/i);
+            if (match) return match[1];
+            if (daysDiff !== undefined && daysDiff !== null && daysDiff < 0) {
+                return Math.abs(daysDiff) + "d";
+            }
+            return badge.replace(/\s*overdue\s*/i, "").trim() || "Overdue";
+        }
+        if (bLower.indexOf("today") !== -1) return "Today";
+        if (bLower.indexOf("tomorrow") !== -1) return "1d";
+        if (bLower.indexOf("left") !== -1) {
+            var leftMatch = badge.match(/^(\d+[dwmyh])/i);
+            if (leftMatch) return leftMatch[1];
+        }
+        if (bLower.indexOf("completed") !== -1 || bLower.indexOf("done") !== -1) return "Done";
+        return badge;
+    }
+
+    function formatCompactIteration(iterName, isPlanned, hasMilestone) {
+        if (!iterName || iterName === "" || iterName === "CH_SAPH_KAWEST") {
+            return hasMilestone ? "Backlog" : "—";
+        }
+        var clean = iterName.replace(/^(sprint|iteration)[\s_-]*/i, "").trim();
+        if (clean === "") return "—";
+        return clean;
+    }
+
+    function compareItems(a, b, col, dir) {
+        var factor = (dir === "desc" ? -1 : 1);
+        if (col === "id") {
+            return factor * ((a.id || 0) - (b.id || 0));
+        } else if (col === "state") {
+            var sA = (a.state || "").toLowerCase();
+            var sB = (b.state || "").toLowerCase();
+            if (sA < sB) return -1 * factor;
+            if (sA > sB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        } else if (col === "iteration") {
+            var itA = (a.iteration_name || a.iteration_path || "").toLowerCase();
+            var itB = (b.iteration_name || b.iteration_path || "").toLowerCase();
+            var numA = parseInt(itA.replace(/\D+/g, "")) || 0;
+            var numB = parseInt(itB.replace(/\D+/g, "")) || 0;
+            if (numA && numB && numA !== numB) {
+                return factor * (numA - numB);
+            }
+            if (itA < itB) return -1 * factor;
+            if (itA > itB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        } else if (col === "deadline") {
+            var dA = a.target_date || a.deadline_str || "";
+            var dB = b.target_date || b.deadline_str || "";
+            if (!dA && !dB) return (b.id || 0) - (a.id || 0);
+            if (!dA) return 1;
+            if (!dB) return -1;
+            if (dA < dB) return -1 * factor;
+            if (dA > dB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        }
+        return (b.id || 0) - (a.id || 0);
+    }
+
     property int overdueItemsCount: {
         if (!backend || !backend.workItems) return 0;
         var count = 0;
@@ -446,6 +543,35 @@ Item {
                     border.color: root.isFiltersCollapsed && root.hasActiveFilters ? "#388bfd" : "#30363d"
                 }
                 onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
+            }
+
+            // Group by Story / Bug Toggle Button
+            Button {
+                id: toggleGroupingBtn
+                text: root.groupByStoryBug ? "📑 Grouped (Story/Bug)" : "📄 Flat View"
+                font.weight: Font.DemiBold
+                font.pixelSize: 11
+                ToolTip.visible: hovered
+                ToolTip.text: root.groupByStoryBug ? "Currently grouping Tasks under their parent User Story or Bug.\nClick to view flat table list." : "Currently showing flat table list.\nClick to group Tasks under their parent User Story or Bug."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: root.groupByStoryBug ? "#58a6ff" : "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 34
+                    implicitWidth: 155
+                    radius: 6
+                    color: parent.hovered ? "#30363d" : (root.groupByStoryBug ? "#1f334d" : "#21262d")
+                    border.color: root.groupByStoryBug ? "#388bfd" : "#30363d"
+                }
+                onClicked: {
+                    root.groupByStoryBug = !root.groupByStoryBug;
+                    root.currentPage = 1;
+                    root.updateFilteredModel();
+                }
             }
 
             // Export to Excel Button
@@ -1722,14 +1848,173 @@ Item {
                 anchors.rightMargin: 24
                 spacing: 12
 
-                Text { text: "ID";          Layout.preferredWidth: 64;  Layout.minimumWidth: 64;  Layout.maximumWidth: 64;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TYPE";        Layout.preferredWidth: 92;  Layout.minimumWidth: 92;  Layout.maximumWidth: 92;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TITLE";       Layout.fillWidth: true;     Layout.minimumWidth: 140; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "STATE";       Layout.preferredWidth: 88;  Layout.minimumWidth: 88;  Layout.maximumWidth: 88;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ITERATION";   Layout.preferredWidth: 125; Layout.minimumWidth: 125; Layout.maximumWidth: 125; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "DEADLINE";    Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "REFS";        Layout.preferredWidth: 75;  Layout.minimumWidth: 75;  Layout.maximumWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                // ID (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 64
+                    Layout.minimumWidth: 64
+                    Layout.maximumWidth: 64
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "ID"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "id" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "id" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "id" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "id"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("id")
+                    }
+                }
+
+                // TYPE (Compact Icon Column Header)
+                Text {
+                    text: "TYP"
+                    Layout.preferredWidth: 32
+                    Layout.minimumWidth: 32
+                    Layout.maximumWidth: 32
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                // TITLE
+                Text {
+                    text: "TITLE"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 140
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                // STATE (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 84
+                    Layout.minimumWidth: 84
+                    Layout.maximumWidth: 84
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "STATE"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "state" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "state" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "state" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "state"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("state")
+                    }
+                }
+
+                // ITERATION (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 80
+                    Layout.minimumWidth: 80
+                    Layout.maximumWidth: 80
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "SPRINT"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "iteration" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "iteration" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "iteration" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "iteration"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("iteration")
+                    }
+                }
+
+                // DEADLINE (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 78
+                    Layout.minimumWidth: 78
+                    Layout.maximumWidth: 78
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "DUE"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "deadline" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "deadline" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "deadline" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "deadline"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("deadline")
+                    }
+                }
+
+                // ASSIGNED TO
+                Text {
+                    text: "ASSIGNED TO"
+                    Layout.preferredWidth: 115
+                    Layout.minimumWidth: 115
+                    Layout.maximumWidth: 115
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                // REFS
+                Text {
+                    text: "REFS"
+                    Layout.preferredWidth: 55
+                    Layout.minimumWidth: 55
+                    Layout.maximumWidth: 55
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
             }
         }
 
@@ -1835,36 +2120,51 @@ Item {
                         anchors.rightMargin: 24
                         spacing: 12
 
-                        // ID
-                        Text {
-                            text: "#" + model.id
+                        // ID (with child connector if child task)
+                        RowLayout {
                             Layout.preferredWidth: 64
                             Layout.minimumWidth: 64
                             Layout.maximumWidth: 64
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 13
-                            font.weight: Font.Bold
-                            color: model.deleted ? "#f85149" : "#58a6ff"
+                            spacing: 3
+                            Text {
+                                text: "↳"
+                                font.pixelSize: 13
+                                font.weight: Font.Bold
+                                color: "#58a6ff"
+                                visible: !!model.is_child_task
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "#" + model.id
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: model.is_child_task ? 12 : 13
+                                font.weight: Font.Bold
+                                color: model.deleted ? "#f85149" : (model.is_child_task ? "#79c0ff" : "#58a6ff")
+                                elide: Text.ElideRight
+                            }
                         }
 
-                        // Type badge
+                        // Type Icon Pill
                         Rectangle {
-                            Layout.preferredWidth: 92
-                            Layout.minimumWidth: 92
-                            Layout.maximumWidth: 92
-                            height: 22
-                            radius: 11
+                            Layout.preferredWidth: 32
+                            Layout.minimumWidth: 32
+                            Layout.maximumWidth: 32
+                            height: 24
+                            radius: 12
                             property color typeC: root.typeColor(model.type)
                             color: Qt.rgba(typeC.r, typeC.g, typeC.b, 0.15)
                             border.color: Qt.rgba(typeC.r, typeC.g, typeC.b, 0.5)
                             Text {
                                 anchors.centerIn: parent
-                                text: model.type || "Task"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: root.typeColor(model.type)
-                                elide: Text.ElideRight
+                                text: root.typeIcon(model.type)
+                                font.pixelSize: 12
+                            }
+                            ToolTip.visible: typeMa.containsMouse
+                            ToolTip.text: model.type || "Work Item"
+                            MouseArea {
+                                id: typeMa
+                                anchors.fill: parent
+                                hoverEnabled: true
                             }
                         }
 
@@ -1874,6 +2174,39 @@ Item {
                             Layout.minimumWidth: 140
                             clip: true
                             spacing: 6
+
+                            // Child Tasks Count Badge (for parent story/bug)
+                            Rectangle {
+                                implicitHeight: 18
+                                implicitWidth: childTaskCountText.implicitWidth + 10
+                                radius: 4
+                                visible: !model.is_child_task && (model.child_task_count || 0) > 0
+                                color: (model.child_tasks_done === model.child_task_count) ? "#1f3322" : "#1f2a3d"
+                                border.color: (model.child_tasks_done === model.child_task_count) ? "#238636" : "#388bfd"
+                                border.width: 1
+                                RowLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 3
+                                    Text {
+                                        text: (model.child_tasks_done === model.child_task_count) ? "✓" : "📋"
+                                        font.pixelSize: 9
+                                    }
+                                    Text {
+                                        id: childTaskCountText
+                                        text: (model.child_tasks_done || 0) + "/" + (model.child_task_count || 0) + " tasks"
+                                        font.pixelSize: 9
+                                        font.weight: Font.DemiBold
+                                        color: (model.child_tasks_done === model.child_task_count) ? "#7ee787" : "#58a6ff"
+                                    }
+                                }
+                                ToolTip.visible: childTasksMa.containsMouse
+                                ToolTip.text: (model.child_tasks_done || 0) + " of " + (model.child_task_count || 0) + " tasks completed"
+                                MouseArea {
+                                    id: childTasksMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                }
+                            }
 
                             // Milestone Strategic Badge (Direct or Inherited)
                             Rectangle {
@@ -2050,7 +2383,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 13
                                 font.weight: Font.Normal
-                                color: model.deleted ? "#8b949e" : "#f0f6fc"
+                                color: model.deleted ? "#8b949e" : (model.is_child_task ? "#c9d1d9" : "#f0f6fc")
                                 font.strikeout: model.deleted
                                 elide: Text.ElideRight
                             }
@@ -2058,9 +2391,9 @@ Item {
 
                         // State badge
                         Rectangle {
-                            Layout.preferredWidth: 88
-                            Layout.minimumWidth: 88
-                            Layout.maximumWidth: 88
+                            Layout.preferredWidth: 84
+                            Layout.minimumWidth: 84
+                            Layout.maximumWidth: 84
                             height: 22
                             radius: 11
                             property color stateC: root.stateColor(model.state)
@@ -2079,31 +2412,23 @@ Item {
 
                         // Iteration Pill
                         Rectangle {
-                            Layout.preferredWidth: 125
-                            Layout.minimumWidth: 125
-                            Layout.maximumWidth: 125
+                            Layout.preferredWidth: 80
+                            Layout.minimumWidth: 80
+                            Layout.maximumWidth: 80
                             height: 24
                             radius: 12
                             color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : (model.has_milestone ? "#3d2800" : "#21262d")) : (model.is_iteration_planned ? "#0d2344" : (model.has_milestone ? "#241700" : "#161b22"))
                             border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : (model.has_milestone ? "#d29922" : "#30363d"))
                             border.width: 1
                             RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 4
-                                Text { text: model.is_iteration_planned ? "🎯" : "📋"; font.pixelSize: 10 }
+                                anchors.centerIn: parent
+                                spacing: 3
                                 Text {
-                                    Layout.fillWidth: true
-                                    text: {
-                                        if (model.is_iteration_planned) {
-                                            return model.iteration_name || "Planned"
-                                        } else if (model.has_milestone) {
-                                            return "Backlog"
-                                        } else {
-                                            return (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST") ? model.iteration_name : "Unplanned"
-                                        }
-                                    }
+                                    text: model.is_iteration_planned ? "🎯" : (model.has_milestone ? "🚩" : "📋")
+                                    font.pixelSize: 10
+                                }
+                                Text {
+                                    text: root.formatCompactIteration(model.iteration_name, model.is_iteration_planned, model.has_milestone)
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     font.weight: (model.is_iteration_planned || model.has_milestone) ? Font.DemiBold : Font.Normal
@@ -2126,9 +2451,9 @@ Item {
 
                         // Deadline Pill
                         Rectangle {
-                            Layout.preferredWidth: 115
-                            Layout.minimumWidth: 115
-                            Layout.maximumWidth: 115
+                            Layout.preferredWidth: 78
+                            Layout.minimumWidth: 78
+                            Layout.maximumWidth: 78
                             height: 22
                             radius: 11
                             property bool hasDeadline: (model.deadline_str || "") !== ""
@@ -2136,10 +2461,24 @@ Item {
                             color: deadMa.containsMouse ? (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.25) : "#21262d") : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15) : "#161b22")
                             border.color: deadMa.containsMouse ? "#58a6ff" : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5) : "#30363d")
                             border.width: 1
-                            RowLayout { anchors.centerIn: parent; spacing: 4
-                                Text { text: parent.parent.hasDeadline ? (model.urgency_badge || model.deadline_str || "—") : "➕ Set Date"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; color: parent.parent.hasDeadline ? parent.parent.uColor : "#8b949e"; elide: Text.ElideRight }
+                            Text {
+                                anchors.centerIn: parent
+                                text: parent.hasDeadline ? (root.formatCompactDeadline(model.urgency_badge, model.urgency_status, model.days_diff, model.deadline_str) || "—") : "➕"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: parent.hasDeadline ? Font.DemiBold : Font.Normal
+                                color: parent.hasDeadline ? parent.uColor : "#8b949e"
+                                elide: Text.ElideRight
                             }
-                            MouseArea { id: deadMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, ""); }
+                            MouseArea {
+                                id: deadMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.text: parent.hasDeadline ? ("Deadline: " + model.deadline_str + (model.urgency_badge ? (" (" + model.urgency_badge + ")") : "")) : "Click to set deadline"
+                                onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, "");
+                            }
                         }
 
                         // Assigned To (Interactive chip that opens Right Sidebar)
@@ -2183,29 +2522,29 @@ Item {
 
                         // References pill
                         Item {
-                            Layout.preferredWidth: 75
-                            Layout.minimumWidth: 75
-                            Layout.maximumWidth: 75
+                            Layout.preferredWidth: 55
+                            Layout.minimumWidth: 55
+                            Layout.maximumWidth: 55
                             height: 22
                             Row {
-                                spacing: 5
+                                spacing: 3
                                 anchors.verticalCenter: parent.verticalCenter
                                 Rectangle {
-                                    width: prRefText.implicitWidth + 12
+                                    width: prRefText.implicitWidth + 8
                                     height: 20
                                     radius: 10
                                     color: (model.linked_pr_count || 0) > 0 ? "#1f6feb" : "#21262d"
                                     visible: (model.linked_pr_count || 0) > 0
-                                    Text { id: prRefText; anchors.centerIn: parent; text: "PR: " + (model.linked_pr_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    Text { id: prRefText; anchors.centerIn: parent; text: "PR " + (model.linked_pr_count || 0); font.pixelSize: 9; font.weight: Font.DemiBold; color: "#ffffff" }
                                     MouseArea { id: prRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
                                 Rectangle {
-                                    width: repoRefText.implicitWidth + 12
+                                    width: repoRefText.implicitWidth + 8
                                     height: 20
                                     radius: 10
                                     color: (model.linked_repo_count || 0) > 0 ? "#238636" : "#21262d"
                                     visible: (model.linked_repo_count || 0) > 0
-                                    Text { id: repoRefText; anchors.centerIn: parent; text: "Repo: " + (model.linked_repo_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    Text { id: repoRefText; anchors.centerIn: parent; text: "R " + (model.linked_repo_count || 0); font.pixelSize: 9; font.weight: Font.DemiBold; color: "#ffffff" }
                                     MouseArea { id: repoRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
                                 Text {
@@ -2961,29 +3300,116 @@ Item {
             }
         }
 
-        // Sort items complying with [<NR>] <Name> rule before all other items
-        matched.sort(function(a, b) {
-            var aGrouped = a.is_grouped ? 1 : 0
-            var bGrouped = b.is_grouped ? 1 : 0
-            if (aGrouped !== bGrouped) return bGrouped - aGrouped
+        var allMap = {}
+        for (var k = 0; k < list.length; k++) {
+            allMap[list[k].id] = list[k]
+        }
 
-            var aPrio = a.is_prio1 ? 1 : 0
-            var bPrio = b.is_prio1 ? 1 : 0
-            if (aPrio !== bPrio) return bPrio - aPrio
+        var sortedItems = []
+        if (root.groupByStoryBug) {
+            // Group child tasks under their parent User Story or Bug
+            var matchedMap = {}
+            for (var m = 0; m < matched.length; m++) {
+                matchedMap[matched[m].id] = matched[m]
+            }
 
-            return (b.id || 0) - (a.id || 0)
-        })
+            var parentItems = []
+            var parentChildrenMap = {}
+            var standaloneTasks = []
 
-        root.matchedItemsList = matched
-        root.totalMatchingCount = matched.length
-        root.totalPages = Math.ceil(matched.length / root.pageSize) || 1
+            for (var n = 0; n < matched.length; n++) {
+                var it = matched[n]
+                var itType = (it.type || "").toLowerCase()
+                var isTask = (itType === "task" || it.level === 4)
+
+                if (isTask && it.parent_id && (matchedMap[it.parent_id] || allMap[it.parent_id])) {
+                    var pId = it.parent_id
+                    if (!parentChildrenMap[pId]) {
+                        parentChildrenMap[pId] = []
+                    }
+                    parentChildrenMap[pId].push(it)
+                } else if (isTask) {
+                    standaloneTasks.push(it)
+                } else {
+                    parentItems.push(it)
+                }
+            }
+
+            // Sort parent items using comparator
+            parentItems.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+
+            // Sort standalone tasks
+            standaloneTasks.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+
+            for (var p = 0; p < parentItems.length; p++) {
+                var parentItem = parentItems[p]
+                var children = parentChildrenMap[parentItem.id] || []
+
+                // Sort children by active sort column
+                children.sort(function(a, b) {
+                    return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+                })
+
+                var doneCount = 0
+                for (var c = 0; c < children.length; c++) {
+                    var chState = (children[c].state || "").toLowerCase()
+                    if (chState === "closed" || chState === "done" || chState === "resolved" || chState === "completed") {
+                        doneCount++
+                    }
+                }
+
+                var pClone = Object.assign({}, parentItem)
+                pClone.is_child_task = false
+                pClone.child_task_count = children.length
+                pClone.child_tasks_done = doneCount
+                sortedItems.push(pClone)
+
+                for (var cc = 0; cc < children.length; cc++) {
+                    var cClone = Object.assign({}, children[cc])
+                    cClone.is_child_task = true
+                    cClone.parent_title = parentItem.title || ""
+                    cClone.child_task_count = 0
+                    cClone.child_tasks_done = 0
+                    sortedItems.push(cClone)
+                }
+            }
+
+            // Append standalone tasks
+            for (var stIdx = 0; stIdx < standaloneTasks.length; stIdx++) {
+                var stClone = Object.assign({}, standaloneTasks[stIdx])
+                stClone.is_child_task = false
+                stClone.child_task_count = 0
+                stClone.child_tasks_done = 0
+                sortedItems.push(stClone)
+            }
+        } else {
+            // Flat list sorted by active sort column
+            matched.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+            for (var f = 0; f < matched.length; f++) {
+                var fClone = Object.assign({}, matched[f])
+                fClone.is_child_task = false
+                fClone.child_task_count = 0
+                fClone.child_tasks_done = 0
+                sortedItems.push(fClone)
+            }
+        }
+
+        root.matchedItemsList = sortedItems
+        root.totalMatchingCount = sortedItems.length
+        root.totalPages = Math.ceil(sortedItems.length / root.pageSize) || 1
         if (root.currentPage > root.totalPages) root.currentPage = root.totalPages
         if (root.currentPage < 1) root.currentPage = 1
 
         var startIdx = (root.currentPage - 1) * root.pageSize
-        var endIdx = Math.min(startIdx + root.pageSize, matched.length)
+        var endIdx = Math.min(startIdx + root.pageSize, sortedItems.length)
         for (var j = startIdx; j < endIdx; j++) {
-            var wi = matched[j]
+            var wi = sortedItems[j]
             var entry = {
                 id: wi.id || 0,
                 title: wi.title || "",
@@ -3034,6 +3460,10 @@ Item {
                 linked_repo_count: wi.linked_repo_count || 0,
                 linked_prs: wi.linked_prs || [],
                 linked_repos: wi.linked_repos || [],
+                is_child_task: !!wi.is_child_task,
+                child_task_count: wi.child_task_count || 0,
+                child_tasks_done: wi.child_tasks_done || 0,
+                parent_title: wi.parent_title || "",
             }
             filteredWorkItems.append(entry)
         }
