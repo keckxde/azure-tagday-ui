@@ -1847,6 +1847,124 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
     }
 
 
+def parse_target_milestone_area_path(area_path):
+    """
+    Parses an AreaPath to extract planned TargetMilestone definitions formatted as:
+    *\\TargetMilestone\\<Year>_<Week>[ <Title Format>]
+
+    The target date is purely calculated as the first day of the ISO week (Monday).
+
+    Examples:
+        "Project\\TargetMilestone\\2026_33 Feature Freeze" -> {
+            "name": "2026_33 Feature Freeze",
+            "title": "Feature Freeze",
+            "year": 2026,
+            "week": 33,
+            "target_date": "2026-08-10",  # Monday of week 33
+            "start_date": "2026-08-10",
+            "end_date": "2026-08-14",    # Friday of week 33
+            "area_path": "Project\\TargetMilestone\\2026_33 Feature Freeze",
+            "category_name": "Target Milestone",
+            "category_icon": "🚩",
+            "category_color": "#f0883e",
+            "category_bg_color": "#3d2800"
+        }
+    """
+    if not area_path or not isinstance(area_path, str):
+        return None
+
+    norm_path = area_path.replace("/", "\\").strip("\\")
+    parts = [p.strip() for p in norm_path.split("\\") if p.strip()]
+    if not parts:
+        return None
+
+    # Search for TargetMilestone segment
+    tm_idx = -1
+    for i, p in enumerate(parts):
+        p_clean = re.sub(r'[\s_-]+', '', p).lower()
+        if p_clean in ("targetmilestone", "targetmilestones", "targetmileston", "target_milestone"):
+            tm_idx = i
+            break
+
+    node_str = ""
+    if tm_idx != -1 and tm_idx + 1 < len(parts):
+        node_str = parts[tm_idx + 1]
+    else:
+        # Fallback: check if any segment matches <Year>_<Week>
+        for p in parts:
+            if re.match(r'^\d{2,4}_\d{1,2}(?:[\s_-].*)?$', p):
+                node_str = p
+                break
+
+    if not node_str:
+        return None
+
+    m = re.match(r'^(\d{2,4})_(\d{1,2})(?:[\s_-]+(.*))?$', node_str)
+    if not m:
+        return None
+
+    raw_year = int(m.group(1))
+    year = 2000 + raw_year if raw_year < 100 else raw_year
+    if not (2000 <= year <= 2100):
+        return None
+
+    week = int(m.group(2))
+    if not (1 <= week <= 53):
+        return None
+
+    raw_title = (m.group(3) or "").strip()
+    title = raw_title if raw_title else node_str
+
+    try:
+        from datetime import date
+        # First day of the week (Monday)
+        start_d = date.fromisocalendar(year, week, 1)
+        end_d = date.fromisocalendar(year, week, 5)
+        start_str = start_d.strftime("%Y-%m-%d")
+        end_str = end_d.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+    return {
+        "name": node_str,
+        "title": title,
+        "year": year,
+        "week": week,
+        "target_date": start_str,
+        "start_date": start_str,
+        "end_date": end_str,
+        "date_display": start_str,
+        "area_path": norm_path,
+        "category_id": "target_milestone",
+        "category_name": "Target Milestone",
+        "category_icon": "🚩",
+        "category_color": "#f0883e",
+        "category_bg_color": "#3d2800",
+        "is_multi_day": False,
+        "is_area_path_milestone": True,
+    }
+
+
+def extract_milestones_from_area_paths(area_paths):
+    """
+    Extracts all unique TargetMilestone definitions from an iterable of AreaPath strings.
+    Returns a list of milestone dictionaries sorted by target_date.
+    """
+    if not area_paths:
+        return []
+
+    milestones_map = {}
+    for ap in area_paths:
+        if not ap:
+            continue
+        ms = parse_target_milestone_area_path(str(ap))
+        if ms and ms["name"] not in milestones_map:
+            milestones_map[ms["name"]] = ms
+
+    sorted_list = sorted(milestones_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+    return sorted_list
+
+
 def extract_target_milestone_tags(tags_val):
     """
     Extracts target milestone short names from work item tags formatted as Target:<TargetShortName>.
@@ -1895,25 +2013,49 @@ def is_date_in_milestone_range(date_str, milestone):
     return False
 
 
-def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
+def match_work_item_to_milestone(wi, all_milestones=None, milestones_by_date=None):
     """
     Identifies the target milestone for a work item.
     Matching precedence:
-    1. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
-    2. Date matching against the milestone start/target_date or multi-day range [start_date, end_date].
+    1. AreaPath matching: Area paths containing TargetMilestone\\<Year>_<Week> Title Format.
+    2. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
+    3. Date matching against the milestone start/target_date or multi-day range [start_date, end_date].
 
     Args:
         wi (dict): Work item dictionary.
-        all_milestones (list of dict): Configured milestones list.
+        all_milestones (list of dict, optional): Configured milestones list.
         milestones_by_date (dict, optional): Map of target_date (YYYY-MM-DD) -> milestone dict.
 
     Returns:
         dict or None: The matched milestone dictionary, or None if no match.
     """
-    if not all_milestones or not wi:
+    if not wi:
         return None
 
-    # 1. Tag-based matching
+    # 1. Area Path based matching (primary planned milestone mechanism)
+    area_path = wi.get("area_path") or ""
+    if not area_path and wi.get("raw_json"):
+        try:
+            raw_data = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+            fields = raw_data.get("fields", {}) if isinstance(raw_data, dict) else {}
+            area_path = fields.get("System.AreaPath") or fields.get("AreaPath") or ""
+        except Exception:
+            area_path = ""
+
+    if area_path:
+        ap_ms = parse_target_milestone_area_path(area_path)
+        if ap_ms:
+            # Check if an entry in all_milestones matches this AreaPath milestone name or target date
+            if all_milestones:
+                for m in all_milestones:
+                    if (m.get("name") or "").strip().lower() == ap_ms["name"].lower():
+                        return m
+            return ap_ms
+
+    if not all_milestones:
+        return None
+
+    # 2. Tag-based matching
     target_tags = wi.get("target_tags")
     if target_tags is None:
         raw_tags = wi.get("tags") or ""
@@ -1942,7 +2084,7 @@ def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
                 if t_lower in m_name or m_name in t_lower:
                     return m
 
-    # 2. Date-based matching (fallback)
+    # 3. Date-based matching (fallback for pure visualization)
     wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0].strip()
     if wi_deadline:
         if milestones_by_date is not None and wi_deadline in milestones_by_date:

@@ -2088,12 +2088,14 @@ class DevOpsBackend(QObject):
                 else:
                     active_wi_count += 1
 
-            if not iter_path:
-                iter_path = raw_fields.get("System.IterationPath") or ""
-
-            target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=deadline_field_setting)
-            if not target_date:
-                target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
+            # AreaPath TargetMilestone target date calculation (Monday of the milestone week)
+            area_ms_info = utils.parse_target_milestone_area_path(area_path)
+            if area_ms_info:
+                target_date = area_ms_info["target_date"]
+            else:
+                target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=deadline_field_setting)
+                if not target_date:
+                    target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
 
             raw_tags = raw_fields.get("System.Tags") or raw_fields.get("Tags") or wi.get("tags") or ""
             if isinstance(raw_tags, list):
@@ -5734,15 +5736,15 @@ class DevOpsBackend(QObject):
         if all_wis_map is None:
             all_wis_map = {w["id"]: w for w in target_items}
 
-        # First pass: direct milestone match
+        # First pass: direct milestone match (TargetMilestone AreaPath / Tag / Configured Milestone)
         for item in target_items:
             matched_m = utils.match_work_item_to_milestone(item, all_milestones, milestones_by_date)
             if matched_m:
                 item["milestone_name"] = matched_m.get("name", "")
-                item["milestone_icon"] = matched_m.get("category_icon", "")
-                item["milestone_color"] = matched_m.get("category_color", "")
-                item["milestone_bg"] = matched_m.get("category_bg_color", "")
-                item["milestone_category"] = matched_m.get("category_name", "")
+                item["milestone_icon"] = matched_m.get("category_icon", "🚩")
+                item["milestone_color"] = matched_m.get("category_color", "#f0883e")
+                item["milestone_bg"] = matched_m.get("category_bg_color", "#3d2800")
+                item["milestone_category"] = matched_m.get("category_name", "Target Milestone")
                 item["milestone_start_date"] = matched_m.get("start_date") or matched_m.get("target_date") or ""
                 item["milestone_end_date"] = matched_m.get("end_date") or item["milestone_start_date"]
                 item["milestone_date_display"] = matched_m.get("date_display") or item["milestone_start_date"]
@@ -5751,6 +5753,11 @@ class DevOpsBackend(QObject):
                 item["has_milestone"] = True
                 item["effective_milestone_name"] = matched_m.get("name", "")
                 item["is_milestone_inherited"] = False
+                # If matched through AreaPath or if work item has no target_date, set target_date to Monday
+                if matched_m.get("is_area_path_milestone") or not item.get("target_date"):
+                    if matched_m.get("target_date"):
+                        item["target_date"] = matched_m["target_date"]
+                        item["deadline_str"] = matched_m["target_date"]
             else:
                 item["milestone_name"] = ""
                 item["milestone_icon"] = ""
@@ -5788,6 +5795,9 @@ class DevOpsBackend(QObject):
                         item["has_milestone"] = True
                         item["effective_milestone_name"] = p_item.get("effective_milestone_name", "") or p_item.get("milestone_name", "")
                         item["is_milestone_inherited"] = True
+                        if not item.get("target_date") and p_item.get("target_date"):
+                            item["target_date"] = p_item["target_date"]
+                            item["deadline_str"] = p_item["target_date"]
                         break
                     curr_pid = p_item.get("parent_id")
 
@@ -5820,10 +5830,47 @@ class DevOpsBackend(QObject):
 
     @Slot(result=list)
     def get_milestones(self):
-        """Returns all configured milestones."""
+        """Returns all milestones discovered from Area Paths (*\\TargetMilestone\\<Year>_<Week> Title Format) combined with configured milestones for GANTT visualization."""
+        all_paths = set()
+        if hasattr(self, "_all_discovered_area_paths") and self._all_discovered_area_paths:
+            for p in self._all_discovered_area_paths:
+                if p:
+                    all_paths.add(p)
+        if hasattr(self, "_work_items") and self._work_items:
+            for wi in self._work_items:
+                ap = wi.get("area_path")
+                if ap:
+                    all_paths.add(ap)
+
+        area_milestones = utils.extract_milestones_from_area_paths(all_paths)
+
+        db_milestones = []
         if self._cache_db:
-            return self._cache_db.get_milestones()
-        return []
+            try:
+                db_milestones = self._cache_db.get_milestones()
+            except Exception:
+                db_milestones = []
+
+        # Merge, prioritizing area path milestones while preserving categories and custom metadata
+        merged_map = {}
+        for m in area_milestones:
+            merged_map[m["name"].lower()] = dict(m)
+
+        for dm in db_milestones:
+            k = (dm.get("name") or "").lower()
+            if k not in merged_map:
+                merged_map[k] = dict(dm)
+            else:
+                if dm.get("category_name"):
+                    merged_map[k]["category_name"] = dm.get("category_name")
+                if dm.get("category_icon"):
+                    merged_map[k]["category_icon"] = dm.get("category_icon")
+                if dm.get("category_color"):
+                    merged_map[k]["category_color"] = dm.get("category_color")
+                if dm.get("category_bg_color"):
+                    merged_map[k]["category_bg_color"] = dm.get("category_bg_color")
+
+        return sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
 
     @Slot(result=list)
     def get_coming_milestones(self):
