@@ -247,6 +247,7 @@ class DevOpsBackend(QObject):
     areaPathSettingsChanged = Signal()
     userAliasesChanged = Signal()
     userProfilesChanged = Signal()
+    rightSidebarWidthChanged = Signal(int)
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -271,6 +272,7 @@ class DevOpsBackend(QObject):
         self._font_size_mode = user_cfg.get("font_size_mode", "medium")
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
         self._sidebar_collapsed = bool(user_cfg.get("sidebar_collapsed", False))
+        self._right_sidebar_width = int(user_cfg.get("right_sidebar_width", 440))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
         self._tfs_team_name = user_cfg.get("tfs_team_name", "")
         self._sprint_url_template = user_cfg.get("sprint_url_template", "")
@@ -1015,6 +1017,28 @@ class DevOpsBackend(QObject):
     @Slot()
     def toggleSidebar(self):
         self.setSidebarCollapsed(not self._sidebar_collapsed)
+
+    @Property(int, notify=rightSidebarWidthChanged)
+    def rightSidebarWidth(self):
+        return self._right_sidebar_width
+
+    @Slot(int)
+    def setRightSidebarWidth(self, width):
+        try:
+            val = max(280, min(1400, int(width)))
+        except (ValueError, TypeError):
+            val = 440
+        if self._right_sidebar_width != val:
+            self._right_sidebar_width = val
+            cfg = _load_user_settings()
+            cfg["right_sidebar_width"] = self._right_sidebar_width
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("RIGHT_SIDEBAR_WIDTH", str(self._right_sidebar_width))
+                except Exception:
+                    pass
+            self.rightSidebarWidthChanged.emit(self._right_sidebar_width)
 
     @Property(bool, notify=autoSyncChanged)
     def autoSyncEnabled(self):

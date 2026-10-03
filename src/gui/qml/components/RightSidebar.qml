@@ -74,6 +74,60 @@ Rectangle {
     clip: true
     z: 10
 
+    // Vertical drag-resize handle bar at the left edge of the sidebar
+    Rectangle {
+        id: dragHandle
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 6
+        color: dragHandleMa.containsMouse ? Qt.rgba(88 / 255, 166 / 255, 255 / 255, 0.4) : "transparent"
+        z: 30
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 2
+            height: 32
+            radius: 1
+            color: dragHandleMa.containsMouse ? "#58a6ff" : "#30363d"
+        }
+
+        property real _startGlobalX: 0
+        property real _startW: 0
+
+        MouseArea {
+            id: dragHandleMa
+            anchors.fill: parent
+            anchors.leftMargin: -3
+            anchors.rightMargin: -3
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            onPressed: function(mouse) {
+                var pt = mapToItem(null, mouse.x, mouse.y);
+                dragHandle._startGlobalX = pt.x;
+                dragHandle._startW = rightSidebarRoot.preferredWidth;
+            }
+            onPositionChanged: function(mouse) {
+                if (pressed) {
+                    var pt = mapToItem(null, mouse.x, mouse.y);
+                    var delta = dragHandle._startGlobalX - pt.x;
+                    var minW = 280;
+                    var maxW = Math.min(1200, Math.round((typeof window !== "undefined" && window.width) ? window.width * 0.8 : 1000));
+                    var newW = Math.max(minW, Math.min(maxW, dragHandle._startW + delta));
+                    rightSidebarRoot.preferredWidth = newW;
+                    if (typeof window !== "undefined") {
+                        window.rightSidebarWidth = newW;
+                    }
+                }
+            }
+            onReleased: function(mouse) {
+                if (backend && typeof backend.setRightSidebarWidth === "function") {
+                    backend.setRightSidebarWidth(Math.round(rightSidebarRoot.preferredWidth));
+                }
+            }
+        }
+    }
+
     Behavior on Layout.preferredWidth {
         enabled: !dragHandleMa.pressed
         NumberAnimation {
@@ -258,10 +312,13 @@ Rectangle {
                         color: parent.hovered ? "#21262d" : "transparent"
                     }
                     onClicked: {
-                        if (rightSidebarRoot.preferredWidth > 500) {
-                            rightSidebarRoot.preferredWidth = 440;
-                        } else {
-                            rightSidebarRoot.preferredWidth = 640;
+                        var newW = rightSidebarRoot.preferredWidth > 500 ? 440 : 640;
+                        rightSidebarRoot.preferredWidth = newW;
+                        if (typeof window !== "undefined") {
+                            window.rightSidebarWidth = newW;
+                        }
+                        if (backend && typeof backend.setRightSidebarWidth === "function") {
+                            backend.setRightSidebarWidth(newW);
                         }
                     }
                 }

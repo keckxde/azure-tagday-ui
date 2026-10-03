@@ -215,7 +215,14 @@ ApplicationWindow {
     property string rightSidebarTitle: "Context Details"
     property string rightSidebarSubtitle: ""
     property var rightSidebarData: null
-    property real rightSidebarWidth: 440
+    property real rightSidebarWidth: (backend && backend.rightSidebarWidth) ? backend.rightSidebarWidth : 440
+
+    Connections {
+        target: backend
+        function onRightSidebarWidthChanged(w) {
+            window.rightSidebarWidth = w;
+        }
+    }
 
     function openRightSidebar(mode, title, subtitle, data) {
         window.rightSidebarMode = mode || "workload_member";

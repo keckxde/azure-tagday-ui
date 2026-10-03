@@ -17,6 +17,29 @@ Item {
     property string manualCanonInput: ""
     property string manualAliasInput: ""
     property bool isAddAliasModalOpen: false
+    property bool isAliasesCollapsed: false
+    property bool isLastActivityCollapsed: false
+    property bool isTimelineCollapsed: false
+    property bool isTasksCollapsed: false
+    property bool isBadgesCollapsed: false
+    property real inspectorWidth: (backend && backend.rightSidebarWidth) ? backend.rightSidebarWidth : 420
+
+    Connections {
+        target: backend
+        function onRightSidebarWidthChanged(w) {
+            root.inspectorWidth = w;
+        }
+    }
+
+    function toggleAllInspectorGroups() {
+        var allCollapsed = isAliasesCollapsed && isLastActivityCollapsed && isTimelineCollapsed && isTasksCollapsed && isBadgesCollapsed;
+        var newState = !allCollapsed;
+        isAliasesCollapsed = newState;
+        isLastActivityCollapsed = newState;
+        isTimelineCollapsed = newState;
+        isTasksCollapsed = newState;
+        isBadgesCollapsed = newState;
+    }
 
     // Raw profiles from backend
     readonly property var rawProfiles: (backend && typeof backend.get_all_user_profiles === "function")
@@ -1210,11 +1233,59 @@ Item {
         Rectangle {
             id: inspectorPanel
             visible: root.isInspectorOpen
-            Layout.preferredWidth: 420
+            Layout.preferredWidth: Math.max(300, Math.min(1200, root.inspectorWidth))
             Layout.fillHeight: true
             color: "#161b22"
             border.color: "#30363d"
             border.width: 1
+
+            // Left edge resizer handle
+            Rectangle {
+                id: inspDragHandle
+                width: 6
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                z: 20
+                color: inspDragMa.pressed ? "#58a6ff" : (inspDragMa.containsMouse ? Qt.rgba(88 / 255, 166 / 255, 255 / 255, 0.3) : "transparent")
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 2
+                    height: 24
+                    radius: 1
+                    color: inspDragMa.containsMouse ? "#58a6ff" : "#30363d"
+                }
+
+                MouseArea {
+                    id: inspDragMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeHorCursor
+                    property real startX: 0
+                    property real startWidth: 0
+
+                    onPressed: function(mouse) {
+                        startX = mouse.x;
+                        startWidth = inspectorPanel.width;
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (pressed) {
+                            var delta = mouse.x - startX;
+                            var newW = Math.max(300, Math.min(1200, startWidth - delta));
+                            root.inspectorWidth = newW;
+                        }
+                    }
+
+                    onReleased: {
+                        if (backend && typeof backend.setRightSidebarWidth === "function") {
+                            backend.setRightSidebarWidth(Math.round(root.inspectorWidth));
+                        }
+                    }
+                }
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -1244,9 +1315,35 @@ Item {
 
                         Item { Layout.fillWidth: true }
 
+                        // Toggle All Sections (Expand / Collapse All)
                         Rectangle {
-                            width: 24
-                            height: 24
+                            width: 28
+                            height: 28
+                            radius: 4
+                            color: toggleAllMa.containsMouse ? "#30363d" : "transparent"
+                            ToolTip.visible: toggleAllMa.containsMouse
+                            ToolTip.text: (root.isAliasesCollapsed && root.isLastActivityCollapsed && root.isTimelineCollapsed && root.isTasksCollapsed && root.isBadgesCollapsed) ? "Expand all sections" : "Collapse all sections"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: (root.isAliasesCollapsed && root.isLastActivityCollapsed && root.isTimelineCollapsed && root.isTasksCollapsed && root.isBadgesCollapsed) ? "⊞" : "⊟"
+                                font.pixelSize: 14
+                                color: "#8b949e"
+                            }
+
+                            MouseArea {
+                                id: toggleAllMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleAllInspectorGroups()
+                            }
+                        }
+
+                        // Close Inspector Button
+                        Rectangle {
+                            width: 28
+                            height: 28
                             radius: 4
                             color: closeInspMa.containsMouse ? "#30363d" : "transparent"
 
@@ -1374,7 +1471,7 @@ Item {
                             }
                         }
 
-                        // Section 1: Alias Manager
+                        // Section 1: Alias Manager (Collapsible)
                         Rectangle {
                             visible: !!root.selectedUser
                             Layout.fillWidth: true
@@ -1387,352 +1484,378 @@ Item {
                                 id: aliasMgrCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 10
+                                spacing: root.isAliasesCollapsed ? 0 : 10
 
-                                // Case A: If current profile IS an alias linked to another profile
-                                ColumnLayout {
-                                    visible: !!(root.selectedUser && root.selectedUser.is_aliased)
+                                // Section 1 Header (Clickable)
+                                Rectangle {
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    implicitHeight: 24
+                                    color: aliasHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
 
                                     RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
                                         Text {
-                                            text: "🔗 Linked Profile Status"
+                                            text: root.isAliasesCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: (root.selectedUser && root.selectedUser.is_aliased) ? "🔗 Linked Profile Status" : "🔗 Configured Aliases"
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 12
                                             font.weight: Font.Bold
-                                            color: "#d2a8ff"
+                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#d2a8ff" : "#f0f6fc"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: (root.selectedUser && root.selectedUser.is_aliased) ? "Linked" : (((root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases.length : 0) + " mapped")
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
                                         }
                                     }
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: aliasedBannerInsideCol.implicitHeight + 16
-                                        radius: 6
-                                        color: Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.1)
-                                        border.color: "#a371f7"
-                                        border.width: 1
-
-                                        ColumnLayout {
-                                            id: aliasedBannerInsideCol
-                                            anchors.fill: parent
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Text {
-                                                text: "This profile is configured as an alias for " + (root.selectedUser ? root.selectedUser.aliased_to : "") + ". All its git activity, merged PRs, and work items are automatically credited to the primary profile. This profile is greyed out and excluded from individual leaderboard calculations."
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
-                                                color: "#c9d1d9"
-                                                wrapMode: Text.Wrap
-                                                Layout.fillWidth: true
-                                            }
-
-                                            RowLayout {
-                                                spacing: 8
-                                                Layout.topMargin: 4
-
-                                                Button {
-                                                    text: "👤 Open Primary Profile (" + (root.selectedUser ? root.selectedUser.aliased_to : "") + ")"
-                                                    font.pixelSize: 11
-                                                    font.weight: Font.Bold
-                                                    contentItem: Text {
-                                                        text: parent.text
-                                                        font: parent.font
-                                                        color: "#ffffff"
-                                                        horizontalAlignment: Text.AlignHCenter
-                                                        verticalAlignment: Text.AlignVCenter
-                                                    }
-                                                    background: Rectangle {
-                                                        implicitHeight: 30
-                                                        implicitWidth: 200
-                                                        radius: 4
-                                                        color: parent.hovered ? "#1f6feb" : "#238636"
-                                                    }
-                                                    onClicked: {
-                                                        if (root.selectedUser && root.selectedUser.aliased_to) {
-                                                            var target = root.findUserByName(root.selectedUser.aliased_to);
-                                                            if (target) root.selectUser(target);
-                                                        }
-                                                    }
-                                                }
-
-                                                Button {
-                                                    text: "✕ Unlink Alias"
-                                                    font.pixelSize: 11
-                                                    font.weight: Font.Bold
-                                                    contentItem: Text {
-                                                        text: parent.text
-                                                        font: parent.font
-                                                        color: "#f85149"
-                                                        horizontalAlignment: Text.AlignHCenter
-                                                        verticalAlignment: Text.AlignVCenter
-                                                    }
-                                                    background: Rectangle {
-                                                        implicitHeight: 30
-                                                        implicitWidth: 100
-                                                        radius: 4
-                                                        color: parent.hovered ? Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.2) : "#21262d"
-                                                        border.color: "#f85149"
-                                                        border.width: 1
-                                                    }
-                                                    onClicked: {
-                                                        if (root.selectedUser && root.selectedUser.aliased_to) {
-                                                            root.unlinkAliasProfile(root.selectedUser.aliased_to, root.selectedUser.name);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                    MouseArea {
+                                        id: aliasHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isAliasesCollapsed = !root.isAliasesCollapsed
                                     }
                                 }
 
-                                // Case B: If current profile IS a primary canonical profile
+                                // Section 1 Content Body
                                 ColumnLayout {
-                                    visible: !root.selectedUser || !root.selectedUser.is_aliased
+                                    visible: !root.isAliasesCollapsed
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: 10
 
-                                    RowLayout {
-                                        Text {
-                                            text: "🔗 Configured Aliases"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#f0f6fc"
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: ((root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases.length : 0) + " mapped"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                        }
-                                    }
-
-                                    Text {
-                                        text: "Commits, PRs, and tickets from mapped aliases and linked user profiles are merged into this profile."
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        color: "#8b949e"
-                                    }
-
-                                    // List of configured aliases with unlink button
-                                    Repeater {
-                                        model: (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : []
+                                    // Case A: If current profile IS an alias linked to another profile
+                                    ColumnLayout {
+                                        visible: !!(root.selectedUser && root.selectedUser.is_aliased)
+                                        Layout.fillWidth: true
+                                        spacing: 8
 
                                         Rectangle {
                                             Layout.fillWidth: true
-                                            implicitHeight: 28
-                                            radius: 4
-                                            color: "#161b22"
-                                            border.color: "#30363d"
+                                            implicitHeight: aliasedBannerInsideCol.implicitHeight + 16
+                                            radius: 6
+                                            color: Qt.rgba(163 / 255, 113 / 255, 247 / 255, 0.1)
+                                            border.color: "#a371f7"
+                                            border.width: 1
 
-                                            RowLayout {
+                                            ColumnLayout {
+                                                id: aliasedBannerInsideCol
                                                 anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                spacing: 6
+                                                anchors.margins: 10
+                                                spacing: 8
 
-                                                Text { text: "🏷️"; font.pixelSize: 10 }
                                                 Text {
-                                                    text: "@" + modelData
+                                                    text: "This profile is configured as an alias for " + (root.selectedUser ? root.selectedUser.aliased_to : "") + ". All its git activity, merged PRs, and work items are automatically credited to the primary profile. This profile is greyed out and excluded from individual leaderboard calculations."
                                                     font.family: "Segoe UI, sans-serif"
                                                     font.pixelSize: 11
-                                                    color: "#a371f7"
+                                                    color: "#c9d1d9"
+                                                    wrapMode: Text.Wrap
                                                     Layout.fillWidth: true
                                                 }
 
-                                                Text {
-                                                    text: "✕ Remove"
-                                                    font.pixelSize: 10
-                                                    color: "#f85149"
-                                                    MouseArea {
-                                                        anchors.fill: parent
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: root.removeAliasFromSelectedUser(modelData)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                                RowLayout {
+                                                    spacing: 8
+                                                    Layout.topMargin: 4
 
-                                    // Option 1: Dropdown / ComboBox selector for existing user profiles
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 4
-                                        Layout.topMargin: 4
-
-                                        Text {
-                                            text: "Link User Profile as Alias:"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            font.weight: Font.DemiBold
-                                            color: "#c9d1d9"
-                                        }
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
-
-                                            ComboBox {
-                                                id: profilePickerCombo
-                                                Layout.fillWidth: true
-                                                implicitHeight: 32
-                                                model: ["— Select profile to link as alias —"].concat(root.candidateProfiles)
-                                                currentIndex: 0
-
-                                                contentItem: Text {
-                                                    leftPadding: 10
-                                                    rightPadding: 10
-                                                    text: profilePickerCombo.displayText
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 11
-                                                    color: profilePickerCombo.currentIndex === 0 ? "#8b949e" : "#58a6ff"
-                                                    verticalAlignment: Text.AlignVCenter
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                background: Rectangle {
-                                                    implicitHeight: 32
-                                                    radius: 4
-                                                    color: "#161b22"
-                                                    border.color: profilePickerCombo.activeFocus ? "#58a6ff" : "#30363d"
-                                                    border.width: 1
-                                                }
-
-                                                popup: Popup {
-                                                    y: profilePickerCombo.height + 2
-                                                    width: profilePickerCombo.width
-                                                    implicitHeight: Math.min(contentItem.implicitHeight + 8, 200)
-                                                    padding: 4
-                                                    contentItem: ListView {
-                                                        clip: true
-                                                        implicitHeight: contentHeight
-                                                        model: profilePickerCombo.popup.visible ? profilePickerCombo.delegateModel : null
-                                                        currentIndex: profilePickerCombo.highlightedIndex
-                                                        ScrollIndicator.vertical: ScrollIndicator { }
-                                                    }
-                                                    background: Rectangle {
-                                                        color: "#161b22"
-                                                        border.color: "#30363d"
-                                                        radius: 6
-                                                    }
-                                                }
-
-                                                delegate: ItemDelegate {
-                                                    width: profilePickerCombo.width - 8
-                                                    implicitHeight: 28
-                                                    highlighted: profilePickerCombo.highlightedIndex === index
-                                                    contentItem: Text {
-                                                        text: modelData
-                                                        color: highlighted ? "#58a6ff" : (index === 0 ? "#8b949e" : "#c9d1d9")
-                                                        font.family: "Segoe UI, sans-serif"
+                                                    Button {
+                                                        text: "👤 Open Primary Profile (" + (root.selectedUser ? root.selectedUser.aliased_to : "") + ")"
                                                         font.pixelSize: 11
-                                                        verticalAlignment: Text.AlignVCenter
+                                                        font.weight: Font.Bold
+                                                        contentItem: Text {
+                                                            text: parent.text
+                                                            font: parent.font
+                                                            color: "#ffffff"
+                                                            horizontalAlignment: Text.AlignHCenter
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
+                                                        background: Rectangle {
+                                                            implicitHeight: 30
+                                                            implicitWidth: 200
+                                                            radius: 4
+                                                            color: parent.hovered ? "#1f6feb" : "#238636"
+                                                        }
+                                                        onClicked: {
+                                                            if (root.selectedUser && root.selectedUser.aliased_to) {
+                                                                var target = root.findUserByName(root.selectedUser.aliased_to);
+                                                                if (target) root.selectUser(target);
+                                                            }
+                                                        }
                                                     }
-                                                    background: Rectangle {
-                                                        color: highlighted ? "#21262d" : "transparent"
-                                                        radius: 4
-                                                    }
-                                                }
-                                            }
 
-                                            Button {
-                                                text: "+ Link Profile"
-                                                font.pixelSize: 10
-                                                font.weight: Font.Bold
-                                                enabled: profilePickerCombo.currentIndex > 0
-                                                contentItem: Text {
-                                                    text: parent.text
-                                                    font: parent.font
-                                                    color: parent.enabled ? "#ffffff" : "#6e7681"
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    verticalAlignment: Text.AlignVCenter
-                                                }
-                                                background: Rectangle {
-                                                    implicitHeight: 32
-                                                    implicitWidth: 96
-                                                    radius: 4
-                                                    color: !parent.enabled ? "#21262d" : (parent.hovered ? "#2ea043" : "#238636")
-                                                }
-                                                onClicked: {
-                                                    if (profilePickerCombo.currentIndex > 0) {
-                                                        var chosen = profilePickerCombo.currentText;
-                                                        root.addAliasToSelectedUser(chosen);
-                                                        profilePickerCombo.currentIndex = 0;
+                                                    Button {
+                                                        text: "✕ Unlink Alias"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.Bold
+                                                        contentItem: Text {
+                                                            text: parent.text
+                                                            font: parent.font
+                                                            color: "#f85149"
+                                                            horizontalAlignment: Text.AlignHCenter
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
+                                                        background: Rectangle {
+                                                            implicitHeight: 30
+                                                            implicitWidth: 100
+                                                            radius: 4
+                                                            color: parent.hovered ? Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.2) : "#21262d"
+                                                            border.color: "#f85149"
+                                                            border.width: 1
+                                                        }
+                                                        onClicked: {
+                                                            if (root.selectedUser && root.selectedUser.aliased_to) {
+                                                                root.unlinkAliasProfile(root.selectedUser.aliased_to, root.selectedUser.name);
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
 
-                                    // Option 2: Custom Text / Git Handle Alias Input
+                                    // Case B: If current profile IS a primary canonical profile
                                     ColumnLayout {
+                                        visible: !root.selectedUser || !root.selectedUser.is_aliased
                                         Layout.fillWidth: true
-                                        spacing: 4
-                                        Layout.topMargin: 4
+                                        spacing: 8
 
                                         Text {
-                                            text: "Or enter custom git handle / email alias:"
+                                            text: "Commits, PRs, and tickets from mapped aliases and linked user profiles are merged into this profile."
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 10
                                             color: "#8b949e"
                                         }
 
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
+                                        // List of configured aliases with unlink button
+                                        Repeater {
+                                            model: (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : []
 
                                             Rectangle {
                                                 Layout.fillWidth: true
-                                                implicitHeight: 30
+                                                implicitHeight: 28
                                                 radius: 4
                                                 color: "#161b22"
-                                                border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
+                                                border.color: "#30363d"
 
-                                                TextInput {
-                                                    id: addAliasInputBox
+                                                RowLayout {
                                                     anchors.fill: parent
                                                     anchors.leftMargin: 8
                                                     anchors.rightMargin: 8
-                                                    verticalAlignment: TextInput.AlignVCenter
-                                                    text: root.newAliasInput
-                                                    color: "#c9d1d9"
-                                                    font.pixelSize: 11
-                                                    onTextChanged: root.newAliasInput = text
-                                                    onAccepted: {
-                                                        root.addAliasToSelectedUser(text);
+                                                    spacing: 6
+
+                                                    Text { text: "🏷️"; font.pixelSize: 10 }
+                                                    Text {
+                                                        text: "@" + modelData
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 11
+                                                        color: "#a371f7"
+                                                        Layout.fillWidth: true
                                                     }
 
                                                     Text {
-                                                        text: "Enter custom handle (e.g. asmith, alex@corp.com)..."
-                                                        font.pixelSize: 11
-                                                        color: "#6e7681"
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
+                                                        text: "✕ Remove"
+                                                        font.pixelSize: 10
+                                                        color: "#f85149"
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: root.removeAliasFromSelectedUser(modelData)
+                                                        }
                                                     }
                                                 }
                                             }
+                                        }
 
-                                            Button {
-                                                text: "+ Add Alias"
+                                        // Option 1: Dropdown / ComboBox selector for existing user profiles
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            Layout.topMargin: 4
+
+                                            Text {
+                                                text: "Link User Profile as Alias:"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                font.weight: Font.DemiBold
+                                                color: "#c9d1d9"
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                ComboBox {
+                                                    id: profilePickerCombo
+                                                    Layout.fillWidth: true
+                                                    implicitHeight: 32
+                                                    model: ["— Select profile to link as alias —"].concat(root.candidateProfiles)
+                                                    currentIndex: 0
+
+                                                    contentItem: Text {
+                                                        leftPadding: 10
+                                                        rightPadding: 10
+                                                        text: profilePickerCombo.displayText
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 11
+                                                        color: profilePickerCombo.currentIndex === 0 ? "#8b949e" : "#58a6ff"
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    background: Rectangle {
+                                                        implicitHeight: 32
+                                                        radius: 4
+                                                        color: "#161b22"
+                                                        border.color: profilePickerCombo.activeFocus ? "#58a6ff" : "#30363d"
+                                                        border.width: 1
+                                                    }
+
+                                                    popup: Popup {
+                                                        y: profilePickerCombo.height + 2
+                                                        width: profilePickerCombo.width
+                                                        implicitHeight: Math.min(contentItem.implicitHeight + 8, 200)
+                                                        padding: 4
+                                                        contentItem: ListView {
+                                                            clip: true
+                                                            implicitHeight: contentHeight
+                                                            model: profilePickerCombo.popup.visible ? profilePickerCombo.delegateModel : null
+                                                            currentIndex: profilePickerCombo.highlightedIndex
+                                                            ScrollIndicator.vertical: ScrollIndicator { }
+                                                        }
+                                                        background: Rectangle {
+                                                            color: "#161b22"
+                                                            border.color: "#30363d"
+                                                            radius: 6
+                                                        }
+                                                    }
+
+                                                    delegate: ItemDelegate {
+                                                        width: profilePickerCombo.width - 8
+                                                        implicitHeight: 28
+                                                        highlighted: profilePickerCombo.highlightedIndex === index
+                                                        contentItem: Text {
+                                                            text: modelData
+                                                            color: highlighted ? "#58a6ff" : (index === 0 ? "#8b949e" : "#c9d1d9")
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 11
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
+                                                        background: Rectangle {
+                                                            color: highlighted ? "#21262d" : "transparent"
+                                                            radius: 4
+                                                        }
+                                                    }
+                                                }
+
+                                                Button {
+                                                    text: "+ Link Profile"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    enabled: profilePickerCombo.currentIndex > 0
+                                                    contentItem: Text {
+                                                        text: parent.text
+                                                        font: parent.font
+                                                        color: parent.enabled ? "#ffffff" : "#6e7681"
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                    background: Rectangle {
+                                                        implicitHeight: 32
+                                                        implicitWidth: 96
+                                                        radius: 4
+                                                        color: !parent.enabled ? "#21262d" : (parent.hovered ? "#2ea043" : "#238636")
+                                                    }
+                                                    onClicked: {
+                                                        if (profilePickerCombo.currentIndex > 0) {
+                                                            var chosen = profilePickerCombo.currentText;
+                                                            root.addAliasToSelectedUser(chosen);
+                                                            profilePickerCombo.currentIndex = 0;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Option 2: Custom Text / Git Handle Alias Input
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            Layout.topMargin: 4
+
+                                            Text {
+                                                text: "Or enter custom git handle / email alias:"
+                                                font.family: "Segoe UI, sans-serif"
                                                 font.pixelSize: 10
-                                                font.weight: Font.Bold
-                                                enabled: !!(root.newAliasInput && root.newAliasInput.trim())
-                                                contentItem: Text {
-                                                    text: parent.text
-                                                    font: parent.font
-                                                    color: parent.enabled ? "#ffffff" : "#6e7681"
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    verticalAlignment: Text.AlignVCenter
-                                                }
-                                                background: Rectangle {
+                                                color: "#8b949e"
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Rectangle {
+                                                    Layout.fillWidth: true
                                                     implicitHeight: 30
-                                                    implicitWidth: 80
                                                     radius: 4
-                                                    color: !parent.enabled ? "#21262d" : (parent.hovered ? "#388bfd" : "#1f6feb")
+                                                    color: "#161b22"
+                                                    border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
+
+                                                    TextInput {
+                                                        id: addAliasInputBox
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 8
+                                                        anchors.rightMargin: 8
+                                                        verticalAlignment: TextInput.AlignVCenter
+                                                        text: root.newAliasInput
+                                                        color: "#c9d1d9"
+                                                        font.pixelSize: 11
+                                                        onTextChanged: root.newAliasInput = text
+                                                        onAccepted: {
+                                                            root.addAliasToSelectedUser(text);
+                                                        }
+
+                                                        Text {
+                                                            text: "Enter custom handle (e.g. asmith, alex@corp.com)..."
+                                                            font.pixelSize: 11
+                                                            color: "#6e7681"
+                                                            anchors.verticalCenter: parent.verticalCenter
+                                                            visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
+                                                        }
+                                                    }
                                                 }
-                                                onClicked: root.addAliasToSelectedUser(root.newAliasInput)
+
+                                                Button {
+                                                    text: "+ Add Alias"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    enabled: !!(root.newAliasInput && root.newAliasInput.trim())
+                                                    contentItem: Text {
+                                                        text: parent.text
+                                                        font: parent.font
+                                                        color: parent.enabled ? "#ffffff" : "#6e7681"
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+                                                    background: Rectangle {
+                                                        implicitHeight: 30
+                                                        implicitWidth: 80
+                                                        radius: 4
+                                                        color: !parent.enabled ? "#21262d" : (parent.hovered ? "#388bfd" : "#1f6feb")
+                                                    }
+                                                    onClicked: root.addAliasToSelectedUser(root.newAliasInput)
+                                                }
                                             }
                                         }
                                     }
@@ -1740,7 +1863,7 @@ Item {
                             }
                         }
 
-                        // Section 2: Last Activity Spotlight
+                        // Section 2: Last Activity Spotlight (Collapsible)
                         Rectangle {
                             visible: !!(root.selectedUser && root.selectedUser.last_activity)
                             Layout.fillWidth: true
@@ -1754,28 +1877,62 @@ Item {
                                 id: lastActCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 6
+                                spacing: root.isLastActivityCollapsed ? 0 : 6
 
-                                RowLayout {
-                                    Text { text: "⏱️"; font.pixelSize: 12 }
-                                    Text {
-                                        text: "LATEST ACTIVITY TRACKED"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        font.weight: Font.Bold
-                                        color: "#58a6ff"
+                                // Section 2 Header (Clickable)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 24
+                                    color: lastActHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
+                                        Text {
+                                            text: root.isLastActivityCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#58a6ff"
+                                        }
+
+                                        Text { text: "⏱️"; font.pixelSize: 12 }
+
+                                        Text {
+                                            text: "LATEST ACTIVITY TRACKED"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: "#58a6ff"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: (root.selectedUser && root.selectedUser.last_activity) ? root.selectedUser.last_activity.relative : ""
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: "#79c0ff"
+                                        }
                                     }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: (root.selectedUser && root.selectedUser.last_activity) ? root.selectedUser.last_activity.relative : ""
-                                        font.pixelSize: 10
-                                        font.weight: Font.Bold
-                                        color: "#79c0ff"
+
+                                    MouseArea {
+                                        id: lastActHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isLastActivityCollapsed = !root.isLastActivityCollapsed
                                     }
                                 }
 
+                                // Section 2 Body
                                 RowLayout {
+                                    visible: !root.isLastActivityCollapsed
                                     spacing: 8
+                                    Layout.fillWidth: true
+
                                     Text {
                                         text: (root.selectedUser && root.selectedUser.last_activity && root.selectedUser.last_activity.icon) ? root.selectedUser.last_activity.icon : "📌"
                                         font.pixelSize: 16
@@ -1802,7 +1959,7 @@ Item {
                             }
                         }
 
-                        // Section 3: Activity Timeline History
+                        // Section 3: Activity Timeline History (Collapsible)
                         Rectangle {
                             visible: !!root.selectedUser
                             Layout.fillWidth: true
@@ -1815,64 +1972,100 @@ Item {
                                 id: actStreamCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 8
+                                spacing: root.isTimelineCollapsed ? 0 : 8
 
-                                RowLayout {
-                                    Text {
-                                        text: "📜 Recent Activity Timeline"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: "#f0f6fc"
+                                // Section 3 Header (Clickable)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 24
+                                    color: timelineHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
+                                        Text {
+                                            text: root.isTimelineCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: "📜 Recent Activity Timeline"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#f0f6fc"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: ((root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities.length : 0) + " events"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
                                     }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: ((root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities.length : 0) + " events"
-                                        font.pixelSize: 10
-                                        color: "#8b949e"
+
+                                    MouseArea {
+                                        id: timelineHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isTimelineCollapsed = !root.isTimelineCollapsed
                                     }
                                 }
 
-                                Repeater {
-                                    model: (root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities : []
+                                // Section 3 Body
+                                ColumnLayout {
+                                    visible: !root.isTimelineCollapsed
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: actEntryCol.implicitHeight + 12
-                                        radius: 4
-                                        color: "#161b22"
-                                        border.color: "#21262d"
+                                    Repeater {
+                                        model: (root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities : []
 
-                                        ColumnLayout {
-                                            id: actEntryCol
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            spacing: 2
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: actEntryCol.implicitHeight + 12
+                                            radius: 4
+                                            color: "#161b22"
+                                            border.color: "#21262d"
 
-                                            RowLayout {
-                                                spacing: 6
-                                                Text { text: modelData.icon || "📌"; font.pixelSize: 11 }
-                                                Text {
-                                                    text: modelData.title
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 11
-                                                    font.weight: Font.DemiBold
-                                                    color: "#c9d1d9"
-                                                    elide: Text.ElideRight
-                                                    Layout.fillWidth: true
+                                            ColumnLayout {
+                                                id: actEntryCol
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 2
+
+                                                RowLayout {
+                                                    spacing: 6
+                                                    Text { text: modelData.icon || "📌"; font.pixelSize: 11 }
+                                                    Text {
+                                                        text: modelData.title
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.DemiBold
+                                                        color: "#c9d1d9"
+                                                        elide: Text.ElideRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Text {
+                                                        text: modelData.relative
+                                                        font.pixelSize: 9
+                                                        color: "#58a6ff"
+                                                    }
                                                 }
+
                                                 Text {
-                                                    text: modelData.relative
+                                                    text: modelData.timestamp + (modelData.repo_or_id ? " • " + modelData.repo_or_id : "")
                                                     font.pixelSize: 9
-                                                    color: "#58a6ff"
+                                                    color: "#6e7681"
+                                                    anchors.leftMargin: 18
                                                 }
-                                            }
-
-                                            Text {
-                                                text: modelData.timestamp + (modelData.repo_or_id ? " • " + modelData.repo_or_id : "")
-                                                font.pixelSize: 9
-                                                color: "#6e7681"
-                                                anchors.leftMargin: 18
                                             }
                                         }
                                     }
@@ -1880,7 +2073,7 @@ Item {
                             }
                         }
 
-                        // Section 4: Assigned Work Items
+                        // Section 4: Assigned Work Items (Collapsible)
                         Rectangle {
                             visible: !!(root.selectedUser && root.selectedUser.assigned_work_items && root.selectedUser.assigned_work_items.length > 0)
                             Layout.fillWidth: true
@@ -1893,55 +2086,97 @@ Item {
                                 id: wiCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 8
+                                spacing: root.isTasksCollapsed ? 0 : 8
 
-                                RowLayout {
-                                    Text {
-                                        text: "📋 Active Assigned Tasks (" + ((root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items.length : 0) + ")"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: "#f0f6fc"
+                                // Section 4 Header (Clickable)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 24
+                                    color: tasksHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
+                                        Text {
+                                            text: root.isTasksCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: "📋 Active Assigned Tasks"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#f0f6fc"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: ((root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items.length : 0) + " tasks"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: tasksHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isTasksCollapsed = !root.isTasksCollapsed
                                     }
                                 }
 
-                                Repeater {
-                                    model: (root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items : []
+                                // Section 4 Body
+                                ColumnLayout {
+                                    visible: !root.isTasksCollapsed
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: 30
-                                        radius: 4
-                                        color: "#161b22"
-                                        border.color: "#21262d"
+                                    Repeater {
+                                        model: (root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items : []
 
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            spacing: 6
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 30
+                                            radius: 4
+                                            color: "#161b22"
+                                            border.color: "#21262d"
 
-                                            Text {
-                                                text: "#" + modelData.id
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 10
-                                                font.weight: Font.Bold
-                                                color: "#58a6ff"
-                                            }
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                spacing: 6
 
-                                            Text {
-                                                text: modelData.title
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 10
-                                                color: "#c9d1d9"
-                                                Layout.fillWidth: true
-                                                elide: Text.ElideRight
-                                            }
+                                                Text {
+                                                    text: "#" + modelData.id
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#58a6ff"
+                                                }
 
-                                            Text {
-                                                text: modelData.state
-                                                font.pixelSize: 9
-                                                color: "#3fb950"
+                                                Text {
+                                                    text: modelData.title
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    color: "#c9d1d9"
+                                                    Layout.fillWidth: true
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    text: modelData.state
+                                                    font.pixelSize: 9
+                                                    color: "#3fb950"
+                                                }
                                             }
                                         }
                                     }
@@ -1949,7 +2184,7 @@ Item {
                             }
                         }
 
-                        // Section 5: Badges Showcase
+                        // Section 5: Badges Showcase (Collapsible)
                         Rectangle {
                             visible: !!(root.selectedUser && root.selectedUser.badges && root.selectedUser.badges.length > 0)
                             Layout.fillWidth: true
@@ -1962,17 +2197,56 @@ Item {
                                 id: badgesCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 8
+                                spacing: root.isBadgesCollapsed ? 0 : 8
 
-                                Text {
-                                    text: "🏅 Earned Badges (" + ((root.selectedUser && root.selectedUser.badges) ? root.selectedUser.badges.length : 0) + ")"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Bold
-                                    color: "#f0f6fc"
+                                // Section 5 Header (Clickable)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 24
+                                    color: badgesHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
+                                        Text {
+                                            text: root.isBadgesCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: "🏅 Earned Badges"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#f0f6fc"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: ((root.selectedUser && root.selectedUser.badges) ? root.selectedUser.badges.length : 0) + " badges"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: badgesHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isBadgesCollapsed = !root.isBadgesCollapsed
+                                    }
                                 }
 
+                                // Section 5 Body
                                 Flow {
+                                    visible: !root.isBadgesCollapsed
                                     Layout.fillWidth: true
                                     spacing: 6
 
