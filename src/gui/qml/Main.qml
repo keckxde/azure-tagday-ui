@@ -31,6 +31,25 @@ ApplicationWindow {
     readonly property var teamMotivationView: teamMotivationViewLoader ? teamMotivationViewLoader.item : null
     readonly property var usersView: usersViewLoader ? usersViewLoader.item : null
 
+    function openReportsTab(tabIndex) {
+        window.currentTabIndex = 4;
+        if (reportsView) {
+            reportsView.activeReportTab = tabIndex;
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item) {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    reportsViewLoader.item.activeReportTab = tabIndex;
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openTagDay() {
+        openReportsTab(1);
+    }
+
     function navigateToTagDayRepo(repoName) {
         window.currentTabIndex = 4;
         if (reportsView) {
@@ -47,18 +66,7 @@ ApplicationWindow {
     }
 
     function navigateToRepos(categoryFilter) {
-        window.currentTabIndex = 4;
-        if (reportsView) {
-            reportsView.activeReportTab = 1;
-        } else if (reportsViewLoader) {
-            var conn = function() {
-                if (reportsViewLoader.item) {
-                    reportsViewLoader.loaded.disconnect(conn);
-                    reportsViewLoader.item.activeReportTab = 1;
-                }
-            };
-            reportsViewLoader.loaded.connect(conn);
-        }
+        openReportsTab(1);
     }
 
     function navigateToPullRequests(filterArg, isStatus) {
@@ -559,10 +567,7 @@ ApplicationWindow {
                                 label: "Tagday Explorer"
                                 active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 1 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 4;
-                                    if (reportsView) reportsView.activeReportTab = 1;
-                                }
+                                onClicked: window.openReportsTab(1)
                             }
 
                             NavItem {
@@ -570,10 +575,7 @@ ApplicationWindow {
                                 label: "Release Generation"
                                 active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 3 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 4;
-                                    if (reportsView) reportsView.activeReportTab = 3;
-                                }
+                                onClicked: window.openReportsTab(3)
                             }
 
                             // ==========================================
@@ -646,10 +648,7 @@ ApplicationWindow {
                                 label: "Activity Reports"
                                 active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 4 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 4;
-                                    if (reportsView) reportsView.activeReportTab = 4;
-                                }
+                                onClicked: window.openReportsTab(4)
                             }
 
                             NavItem {
@@ -714,10 +713,7 @@ ApplicationWindow {
                                 label: "Report"
                                 active: window.currentTabIndex === 4 && (reportsView ? (reportsView.activeReportTab === 0 || reportsView.activeReportTab === 5) : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 4;
-                                    if (reportsView) reportsView.activeReportTab = 0;
-                                }
+                                onClicked: window.openReportsTab(0)
                             }
 
                             // ==========================================
@@ -1572,7 +1568,6 @@ ApplicationWindow {
                         id: pullRequestsViewLoader
                         active: window.currentTabIndex === 1 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/PullRequestsView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1581,7 +1576,6 @@ ApplicationWindow {
                         id: workItemsViewLoader
                         active: window.currentTabIndex === 2 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/WorkItemsView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1590,7 +1584,6 @@ ApplicationWindow {
                         id: workloadExplorerViewLoader
                         active: window.currentTabIndex === 3 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/WorkloadExplorerView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1599,7 +1592,6 @@ ApplicationWindow {
                         id: reportsViewLoader
                         active: window.currentTabIndex === 4 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/ReportsView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1608,7 +1600,6 @@ ApplicationWindow {
                         id: settingsViewLoader
                         active: window.currentTabIndex === 5 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/SettingsView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1617,7 +1608,6 @@ ApplicationWindow {
                         id: teamMotivationViewLoader
                         active: window.currentTabIndex === 6 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/TeamMotivationView.qml"
                         onLoaded: _hasLoaded = true
                     }
@@ -1626,7 +1616,6 @@ ApplicationWindow {
                         id: usersViewLoader
                         active: window.currentTabIndex === 7 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/UsersView.qml"
                         onLoaded: _hasLoaded = true
                     }

@@ -143,9 +143,6 @@ Item {
     }
 
     Component.onCompleted: {
-        if (!root.selectedSprintReport) {
-            root.selectedSprintReport = root.getDefaultSprint();
-        }
         if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
             window.closeRightSidebar();
         }
@@ -161,7 +158,7 @@ Item {
     }
 
     onSelectedSprintReportChanged: {
-        if (backend && root.selectedSprintReport) {
+        if (root.activeReportTab === 4 && backend && root.selectedSprintReport) {
             root.sprintReportData = backend.get_sprint_report_data(root.selectedSprintReport);
         }
     }
@@ -187,10 +184,14 @@ Item {
     Connections {
         target: backend
         function onWorkItemsChanged() {
-            root.refreshSprintReport();
+            if (root.activeReportTab === 4) {
+                root.refreshSprintReport();
+            }
         }
         function onSprintReportGenerated(data, mdText) {
-            root.refreshSprintReport();
+            if (root.activeReportTab === 4) {
+                root.refreshSprintReport();
+            }
         }
         function onTagDayDataChanged() {
             if (root.activeReportTab === 1 && !root.selectedRepoName && backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0) {

@@ -31,21 +31,27 @@ Item {
             loadContent();
         }
     }
-    onReportTypeChanged: loadContent()
-    onReportParamChanged: loadContent()
+    onReportTypeChanged: {
+        if (visible) loadContent();
+    }
+    onReportParamChanged: {
+        if (visible) loadContent();
+    }
 
-    Component.onCompleted: loadContent()
+    Component.onCompleted: {
+        if (visible) loadContent();
+    }
 
     Connections {
         target: backend
         function onStorageDataChanged() {
-            if (previewPaneRoot.reportType === "storage" || previewPaneRoot.visible) previewPaneRoot.loadContent();
+            if (previewPaneRoot.visible && (previewPaneRoot.reportType === "storage")) previewPaneRoot.loadContent();
         }
         function onSprintReportGenerated(data, mdText) {
-            if (previewPaneRoot.reportType === "sprint" || previewPaneRoot.visible) previewPaneRoot.loadContent();
+            if (previewPaneRoot.visible && (previewPaneRoot.reportType === "sprint")) previewPaneRoot.loadContent();
         }
         function onTagDayDataChanged() {
-            if (previewPaneRoot.reportType === "tagday" || previewPaneRoot.visible) previewPaneRoot.loadContent();
+            if (previewPaneRoot.visible && (previewPaneRoot.reportType === "tagday")) previewPaneRoot.loadContent();
         }
         function onWorkItemsChanged() {
             if (previewPaneRoot.visible) previewPaneRoot.loadContent();
@@ -61,7 +67,7 @@ Item {
         function onSelectedSprintReportChanged() {
             if (previewPaneRoot.reportType === "sprint") {
                 previewPaneRoot.reportParam = (previewPaneRoot.root && previewPaneRoot.root.selectedSprintReport) ? previewPaneRoot.root.selectedSprintReport : "";
-                previewPaneRoot.loadContent();
+                if (previewPaneRoot.visible) previewPaneRoot.loadContent();
             }
         }
         function onActiveReportTabChanged() {
