@@ -25,188 +25,21 @@ from gui.workers import TaskWorker
 logger = logging.getLogger("gui.backend")
 
 
-class QtLogEmitter(QObject):
-    """Bridge for cross-thread signal emission of logging records to Qt main thread."""
-    recordReady = Signal(str, str, str, str)  # timestamp, level, logger_name, message
+from gui.services.logging_service import QtLogEmitter, QtLogHandler, ConsoleOutputTee
+from gui.services.settings_service import (
+    USER_SETTINGS_PATH,
+    get_user_settings_path,
+    load_user_settings,
+    save_user_settings,
+    DEFAULT_TAG_CATEGORIES,
+    classify_tag,
+    scale_for_font_mode,
+)
 
-
-class QtLogHandler(logging.Handler):
-    """
-    Custom logging handler that intercepts all Python logger messages
-    (INFO, WARNING, ERROR, CRITICAL) and forwards them safely to the Qt event loop.
-    """
-    def __init__(self, emitter):
-        super().__init__()
-        self.emitter = emitter
-        self._in_emit = False
-
-    def emit(self, record):
-        if self._in_emit:
-            return
-        if record.name.startswith("gui.qt_log"):
-            return
-        try:
-            from PySide6.QtCore import QCoreApplication
-            if not QCoreApplication.instance():
-                return
-            from shiboken6 import isValid
-            if self.emitter is None or not isValid(self.emitter):
-                return
-        except Exception:
-            return
-        try:
-            self._in_emit = True
-            msg = self.format(record)
-            ts = datetime.now().strftime("%H:%M:%S")
-            lvl = record.levelname.upper()
-            if lvl in ("WARN", "WARNING"):
-                lvl = "WARNING"
-            elif lvl in ("ERROR", "CRITICAL"):
-                lvl = "ERROR"
-            else:
-                lvl = "INFO"
-            if self.emitter is not None:
-                self.emitter.recordReady.emit(ts, lvl, record.name, msg)
-        except Exception:
-            pass
-        finally:
-            self._in_emit = False
-
-
-class ConsoleOutputTee:
-    """
-    Captures console stdout prints and feeds them to the GUI Sync Log as INFO records,
-    while preserving standard console printing in the terminal.
-    """
-    def __init__(self, original_stream, callback):
-        self.original_stream = original_stream
-        self.callback = callback
-        self._buffer = ""
-
-    def write(self, text):
-        if self.original_stream:
-            try:
-                self.original_stream.write(text)
-            except Exception:
-                pass
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            line = line.strip("\r\n")
-            if line:
-                try:
-                    self.callback(line)
-                except Exception:
-                    pass
-
-    def flush(self):
-        if self.original_stream:
-            try:
-                self.original_stream.flush()
-            except Exception:
-                pass
-        if self._buffer.strip():
-            try:
-                self.callback(self._buffer.strip())
-            except Exception:
-                pass
-            self._buffer = ""
-
-
-def _get_user_settings_path():
-    if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(sys.executable)
-        return os.path.join(exe_dir, "config", "user_settings.yaml")
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.yaml"
-    )
-
-
-USER_SETTINGS_PATH = _get_user_settings_path()
-
-
-def _load_user_settings():
-    """Loads user configuration from YAML (with fallback to legacy JSON or .yml)."""
-    candidates = [
-        USER_SETTINGS_PATH,
-        os.path.join(os.path.dirname(USER_SETTINGS_PATH), "user_settings.yml"),
-        os.path.join(os.path.dirname(USER_SETTINGS_PATH), "user_settings.json"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.yml"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.json"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "user_settings.yaml"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "user_settings.json"),
-    ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.yaml"))
-        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.json"))
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            try:
-                if candidate.endswith(".json"):
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                else:
-                    import yaml
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = yaml.safe_load(f)
-                if isinstance(data, dict):
-                    return data
-            except Exception as e:
-                logger.warning(f"Failed to read user settings from {candidate}: {e}")
-    return {}
-
-
-def _save_user_settings(settings):
-    """Saves user configuration dictionary to top-level config/user_settings.yaml."""
-    try:
-        import yaml
-        os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)
-        with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as f:
-            yaml.safe_dump(settings, f, default_flow_style=False, sort_keys=False)
-    except Exception as e:
-        logger.error(f"Failed to save user settings to {USER_SETTINGS_PATH}: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Tag-category helpers (module level so they can be tested independently)
-# ---------------------------------------------------------------------------
-
-#: Default tag-category rules shipped with the application.
-#: Users can override / extend these in Settings → Tag Categories.
-DEFAULT_TAG_CATEGORIES = [
-    {"pattern": "Target:*",    "category": "Milestone"},
-    {"pattern": "Subsystem:*", "category": "PBS"},
-    {"pattern": "v*.*.*",      "category": "Software Revision"},
-    {"pattern": "OI",          "category": "Open Item"},
-    {"pattern": "MP",          "category": "Merkpunkt"},
-]
-
-
-def classify_tag(tag, tag_categories):
-    """
-    Returns the category name for *tag* by testing it against the ordered
-    *tag_categories* list (each entry is ``{"pattern": str, "category": str}``).
-
-    Matching is done with :func:`fnmatch.fnmatch` which supports ``*`` and ``?``
-    wildcards.  The first matching rule wins.  If no rule matches, ``"Other"``
-    is returned.
-
-    Args:
-        tag (str): The raw tag string from a work item.
-        tag_categories (list): Ordered list of ``{pattern, category}`` dicts.
-
-    Returns:
-        str: Category name, or ``"Other"`` when no rule matches.
-    """
-    import fnmatch
-    for entry in (tag_categories or []):
-        pattern = (entry.get("pattern") or "").strip()
-        if not pattern:
-            continue
-        if fnmatch.fnmatch(tag, pattern):
-            return (entry.get("category") or "Other").strip() or "Other"
-    return "Other"
-
+# Compatibility aliases
+_get_user_settings_path = get_user_settings_path
+_load_user_settings = load_user_settings
+_save_user_settings = save_user_settings
 
 DEFAULT_SPRINT_URL_TEMPLATE = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
 
