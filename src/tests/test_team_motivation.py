@@ -697,6 +697,135 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertIsNotNone(alice)
         self.assertGreater(alice["score"], 0)
 
+    def test_user_alias_normalization_and_resolution(self):
+        """Verify alias normalization and canonical user resolution with case-insensitivity."""
+        from team_motivation import normalize_user_aliases, resolve_canonical_user
+
+        # 1. Dict format
+        config_dict = {
+            "Alice Smith": ["asmith", "alice.smith@corp.com", "asmith_git"],
+            "Bob Jones": ["bjones", "bob@example.com"]
+        }
+        lookup = normalize_user_aliases(config_dict)
+        self.assertEqual(resolve_canonical_user("asmith", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user("ASMITH", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user("alice.smith@corp.com", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user({"displayName": "bjones"}, lookup), "Bob Jones")
+        self.assertEqual(resolve_canonical_user("Unknown User", lookup), "Unknown User")
+        self.assertEqual(resolve_canonical_user("", lookup), "Unassigned")
+
+        # 2. List format [{"canonical": ..., "aliases": [...]}]
+        config_list = [
+            {"canonical": "Charlie Brown", "aliases": ["cbrown", "charlie@peanuts.org"]}
+        ]
+        lookup_list = normalize_user_aliases(config_list)
+        self.assertEqual(resolve_canonical_user("cbrown", lookup_list), "Charlie Brown")
+        self.assertEqual(resolve_canonical_user("CHARLIE@PEANUTS.ORG", lookup_list), "Charlie Brown")
+
+    def test_user_alias_profile_combination_and_metrics(self):
+        """
+        Verify that commits, PRs, and work items created under various aliases
+        are combined into a single canonical user profile, avoiding duplicate user cards.
+        """
+        now = datetime.now()
+
+        # Add commit by git username 'asmith'
+        self.cache.save_commits("repo1", [{
+            "commitId": "alias_commit_1",
+            "author": {"name": "asmith", "email": "asmith@dev.local", "date": (now - timedelta(hours=3)).isoformat()},
+            "committer": {"name": "asmith", "email": "asmith@dev.local", "date": (now - timedelta(hours=3)).isoformat()},
+            "comment": "Optimized database caching logic",
+            "changeCounts": {"Add": 10, "Edit": 5, "Delete": 0}
+        }])
+
+        # Add work item assigned to email alias 'alice.smith@corp.com'
+        self.cache.save_work_item(
+            9901, "Unified profile task", "Task", "Closed", "alice.smith@corp.com",
+            (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Unified profile task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "alice.smith@corp.com"},
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "alice.smith@corp.com"},
+                    "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    "System.ChangedDate": (now - timedelta(hours=2)).isoformat(),
+                }
+            }
+        )
+
+        aliases_cfg = {
+            "Alice Smith": ["asmith", "alice.smith@corp.com", "asmith@dev.local"]
+        }
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time", user_aliases=aliases_cfg)
+        member_names = [m["name"] for m in data["members"]]
+        members_map = {m["name"]: m for m in data["members"]}
+
+        # 'asmith' and 'alice.smith@corp.com' must NOT be separate members
+        self.assertNotIn("asmith", member_names)
+        self.assertNotIn("alice.smith@corp.com", member_names)
+        self.assertIn("Alice Smith", member_names)
+
+        alice = members_map["Alice Smith"]
+        # Alice should have aliases recorded
+        self.assertIn("aliases", alice)
+        self.assertIn("asmith", alice["aliases"])
+
+        # Check metrics combined: from setUp (2 commits) + alias_commit_1 (1 commit) = >= 3 commits
+        self.assertGreaterEqual(alice["commits_count"], 3)
+        # Check task 9901 combined into Alice
+        self.assertGreaterEqual(alice["tasks_completed"], 3)
+
+    def test_last_activity_tracking_and_timeline(self):
+        """Verify that the last activity timestamp and recent activity timeline are accurately tracked."""
+        now = datetime.now()
+
+        # Add a very recent commit for Bob Jones
+        self.cache.save_commits("repo1", [{
+            "commitId": "recent_bob_sha",
+            "author": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(minutes=15)).isoformat()},
+            "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(minutes=15)).isoformat()},
+            "comment": "Hotfix: resolve auth deadlock",
+            "changeCounts": {"Add": 2, "Edit": 4, "Delete": 1}
+        }])
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members_map = {m["name"]: m for m in data["members"]}
+
+        bob = members_map.get("Bob Jones")
+        self.assertIsNotNone(bob)
+        self.assertIsNotNone(bob["last_activity"])
+        self.assertEqual(bob["last_activity"]["type"], "commit")
+        self.assertIn("Hotfix: resolve auth deadlock", bob["last_activity"]["title"])
+        self.assertIsNotNone(bob["last_active_date"])
+        self.assertGreater(len(bob["recent_activities"]), 0)
+
+        # Check relative time formatting
+        self.assertIn("last_active_relative", bob)
+        self.assertTrue(any(unit in bob["last_active_relative"] for unit in ["min", "m ago", "just now", "hour", "h ago"]))
+
+    def test_auto_detect_aliases(self):
+        """Verify that potential user aliases are detected from commits and PRs."""
+        from team_motivation import detect_potential_user_aliases
+
+        now = datetime.now()
+        # Add a commit with git username 'asmith'
+        self.cache.save_commits("repo1", [{
+            "commitId": "autodetect_commit_1",
+            "author": {"name": "asmith", "email": "asmith@dev.local", "date": now.isoformat()},
+            "committer": {"name": "asmith", "email": "asmith@dev.local", "date": now.isoformat()},
+            "comment": "Detect me",
+            "changeCounts": {"Add": 1, "Edit": 1, "Delete": 0}
+        }])
+
+        suggestions = detect_potential_user_aliases(self.cache, existing_aliases={})
+        self.assertIsInstance(suggestions, list)
+
+        # Should suggest linking 'asmith' to 'Alice Smith'
+        found = any(s["canonical"] == "Alice Smith" and s["alias"] == "asmith" for s in suggestions)
+        self.assertTrue(found, f"Should suggest linking asmith to Alice Smith, got: {suggestions}")
 
 
 if __name__ == "__main__":

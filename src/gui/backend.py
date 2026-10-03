@@ -245,6 +245,8 @@ class DevOpsBackend(QObject):
     teamMotivationChanged = Signal()
     teamMotivationTimeframeChanged = Signal()
     areaPathSettingsChanged = Signal()
+    userAliasesChanged = Signal()
+    userProfilesChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -4217,19 +4219,22 @@ class DevOpsBackend(QObject):
 
     @Slot()
     def recompute_team_motivation(self):
-        """Recomputes team motivation, streaks, and leaderboards."""
+        """Recomputes team motivation, streaks, leaderboards, and user profiles."""
         if not self._cache_db:
             return
         try:
             import team_motivation
+            user_aliases = _load_user_settings().get("user_aliases")
             self._team_motivation_data = team_motivation.compute_team_motivation_data(
                 self._cache_db,
                 timeframe=self._team_motivation_timeframe,
                 custom_sprint=self._team_motivation_custom_sprint,
                 work_items=self._work_items,
-                pull_requests=self._pull_requests
+                pull_requests=self._pull_requests,
+                user_aliases=user_aliases
             )
             self.teamMotivationChanged.emit()
+            self.userProfilesChanged.emit()
         except Exception as e:
             logger.error(f"Error computing team motivation data: {e}", exc_info=True)
 
@@ -4255,7 +4260,136 @@ class DevOpsBackend(QObject):
         for m in members:
             if m.get("name", "").lower() == target:
                 return m
+            for al in m.get("aliases", []):
+                if al.lower() == target:
+                    return m
         return {}
+
+    # ------------------------------------------------------------------
+    # User Profiles & Aliases Management
+    # ------------------------------------------------------------------
+
+    @Property(list, notify=userAliasesChanged)
+    def userAliases(self):
+        """Returns list of configured user alias mappings: [{"canonical": "...", "aliases": [...]}]"""
+        cfg = _load_user_settings()
+        raw = cfg.get("user_aliases", {})
+        try:
+            import team_motivation
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            results = []
+            for canon, aliases in sorted(canonical_to_aliases.items(), key=lambda x: x[0].lower()):
+                results.append({
+                    "canonical": canon,
+                    "aliases": list(aliases),
+                    "aliases_count": len(aliases)
+                })
+            return results
+        except Exception:
+            return []
+
+    @Slot(result=list)
+    def get_user_aliases(self):
+        """Returns list of configured user aliases."""
+        return self.userAliases
+
+    @Slot(str)
+    def save_user_aliases(self, aliases_json):
+        """Persists user aliases mapping (dict or list format) to user_settings.yaml and refreshes data."""
+        try:
+            data = json.loads(aliases_json) if isinstance(aliases_json, str) else aliases_json
+            import team_motivation
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(data)
+            cfg = _load_user_settings()
+            cfg["user_aliases"] = canonical_to_aliases
+            _save_user_settings(cfg)
+            self.userAliasesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Saved user aliases config: %d users mapped", len(canonical_to_aliases))
+        except Exception as e:
+            logger.error("Error saving user aliases: %s", e)
+
+    @Slot(str, str, result=bool)
+    def add_user_alias(self, canonical_name, alias_name):
+        """Adds a single alias to a canonical user and saves configuration."""
+        c_clean = (canonical_name or "").strip()
+        a_clean = (alias_name or "").strip()
+        if not c_clean or not a_clean or c_clean.lower() == a_clean.lower():
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("user_aliases", {})
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            canonical_to_aliases.setdefault(c_clean, [])
+            if a_clean not in canonical_to_aliases[c_clean]:
+                canonical_to_aliases[c_clean].append(a_clean)
+            cfg["user_aliases"] = canonical_to_aliases
+            _save_user_settings(cfg)
+            self.userAliasesChanged.emit()
+            self.recompute_team_motivation()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding user alias: {e}")
+            return False
+
+    @Slot(str, str, result=bool)
+    def remove_user_alias(self, canonical_name, alias_name):
+        """Removes an alias from a canonical user."""
+        c_clean = (canonical_name or "").strip()
+        a_clean = (alias_name or "").strip()
+        if not c_clean or not a_clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("user_aliases", {})
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            if c_clean in canonical_to_aliases and a_clean in canonical_to_aliases[c_clean]:
+                canonical_to_aliases[c_clean].remove(a_clean)
+                if not canonical_to_aliases[c_clean]:
+                    del canonical_to_aliases[c_clean]
+                cfg["user_aliases"] = canonical_to_aliases
+                _save_user_settings(cfg)
+                self.userAliasesChanged.emit()
+                self.recompute_team_motivation()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error removing user alias: {e}")
+            return False
+
+    @Slot(str, str, result=bool)
+    def merge_user_profiles(self, target_canonical, source_user):
+        """Merges source user profile into target canonical user as an alias."""
+        return self.add_user_alias(target_canonical, source_user)
+
+    @Slot(result=list)
+    def auto_detect_aliases(self):
+        """Scans database and discovers suggested user aliases."""
+        if not self._cache_db:
+            return []
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            return team_motivation.detect_potential_user_aliases(self._cache_db, cfg.get("user_aliases"))
+        except Exception as e:
+            logger.error(f"Error auto-detecting user aliases: {e}")
+            return []
+
+    @Slot(result=list)
+    def get_all_user_profiles(self):
+        """Returns all aggregated individual user profiles sorted by last activity and score."""
+        if not self._team_motivation_data:
+            self.recompute_team_motivation()
+        members = self._team_motivation_data.get("members", [])
+        return sorted(members, key=lambda m: (m.get("last_active_date", "") or "", m.get("score", 0)), reverse=True)
+
+    @Slot(str, result=dict)
+    def get_user_profile(self, user_name_or_alias):
+        """Returns rich user profile for a specific canonical user name or alias."""
+        return self.get_team_member_profile(user_name_or_alias)
+
 
     @Slot(int, str, result=dict)
     def update_work_item_deadline(self, work_item_id, new_date_str):

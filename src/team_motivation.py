@@ -288,9 +288,254 @@ def _is_valid_member(name):
     return True
 
 
-def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None):
+def normalize_user_aliases(aliases_config):
     """
-    Computes team activity, leaderboards, streaks, badges, and team pulse stats including commits, branches, tags, and CI builds.
+    Normalizes user aliases configuration into:
+    - alias_lookup (dict mapping lowercase alias/name -> canonical name)
+    - canonical_to_aliases (dict mapping canonical name -> list of alias strings)
+
+    Supports both dict format { "Alice Smith": ["asmith", "alice@corp.com"] }
+    and list format [ { "canonical": "Alice Smith", "aliases": [...] } ].
+    """
+    alias_lookup = {}
+    canonical_to_aliases = {}
+
+    if not aliases_config:
+        return alias_lookup, canonical_to_aliases
+
+    items = []
+    if isinstance(aliases_config, dict):
+        items = aliases_config.items()
+    elif isinstance(aliases_config, list):
+        for entry in aliases_config:
+            if isinstance(entry, dict) and "canonical" in entry:
+                items.append((entry["canonical"], entry.get("aliases", [])))
+
+    for canon, aliases in items:
+        canon_clean = str(canon).strip()
+        if not canon_clean:
+            continue
+        canonical_to_aliases.setdefault(canon_clean, set())
+        alias_lookup[canon_clean.lower()] = canon_clean
+        if isinstance(aliases, (list, tuple, set)):
+            for a in aliases:
+                a_clean = str(a).strip()
+                if a_clean:
+                    canonical_to_aliases[canon_clean].add(a_clean)
+                    alias_lookup[a_clean.lower()] = canon_clean
+        elif isinstance(aliases, str) and aliases.strip():
+            a_clean = aliases.strip()
+            canonical_to_aliases[canon_clean].add(a_clean)
+            alias_lookup[a_clean.lower()] = canon_clean
+
+    canonical_to_aliases = {k: sorted(list(v)) for k, v in canonical_to_aliases.items()}
+    return alias_lookup, canonical_to_aliases
+
+
+def resolve_canonical_user(user_obj_or_str, alias_lookup=None):
+    """
+    Resolves raw user input (dict, string, username, email) to a canonical user display name
+    using the provided alias lookup dictionary (or tuple from normalize_user_aliases).
+    """
+    if isinstance(alias_lookup, (tuple, list)) and len(alias_lookup) > 0 and isinstance(alias_lookup[0], dict):
+        alias_lookup = alias_lookup[0]
+    raw_name = _clean_user_name(user_obj_or_str)
+    if not raw_name:
+        return "Unassigned"
+    if alias_lookup and isinstance(alias_lookup, dict):
+        low = raw_name.lower()
+        if low in alias_lookup:
+            return alias_lookup[low]
+        if "<" in raw_name and ">" in raw_name:
+            email_match = re.search(r"<([^>]+)>", raw_name)
+            if email_match:
+                em = email_match.group(1).strip().lower()
+                if em in alias_lookup:
+                    return alias_lookup[em]
+        if isinstance(user_obj_or_str, dict):
+            for email_k in ("uniqueName", "email", "mail", "principalName"):
+                em = str(user_obj_or_str.get(email_k) or "").strip().lower()
+                if em and em in alias_lookup:
+                    return alias_lookup[em]
+    return raw_name
+
+
+def format_relative_time(dt_or_str, now=None):
+    """Formats a datetime or ISO string into a human-friendly relative time string."""
+    if not dt_or_str:
+        return "No recorded activity"
+    dt = parse_iso_datetime(dt_or_str) if isinstance(dt_or_str, str) else dt_or_str
+    if not dt or not isinstance(dt, datetime):
+        return str(dt_or_str)[:16]
+    now = now or datetime.now()
+    diff = now - dt
+    total_seconds = int(diff.total_seconds())
+    if total_seconds < 0:
+        return "Just now"
+    if total_seconds < 60:
+        return f"{total_seconds}s ago"
+    minutes = total_seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days == 1:
+        return f"Yesterday at {dt.strftime('%H:%M')}"
+    if days < 7:
+        return f"{days}d ago"
+    if days < 30:
+        weeks = days // 7
+        return f"{weeks}w ago"
+    return dt.strftime("%b %d, %Y")
+
+
+def detect_potential_user_aliases(cache_db, existing_aliases=None):
+    """
+    Analyzes Git commits, PRs, Work Items, and TFS metadata in the cache database
+    to automatically identify potential user alias candidates (e.g. Git author email/username
+    matching TFS display names).
+
+    Returns:
+        list of dict: [{"canonical": str, "alias": str, "source": str, "reason": str, "confidence": str, "activity_count": int}]
+    """
+    if not cache_db:
+        return []
+
+    existing_lookup, _ = normalize_user_aliases(existing_aliases)
+    canonical_candidates = set()
+    raw_candidates = {}
+
+    try:
+        with cache_db._connection() as conn:
+            # Query work items assignees & closers
+            wi_rows = conn.execute("SELECT assigned_to, raw_json FROM work_items WHERE deleted = 0").fetchall()
+            for r in wi_rows:
+                a_name = _clean_user_name(r["assigned_to"])
+                if _is_valid_member(a_name):
+                    if " " in a_name and len(a_name.split()) >= 2:
+                        canonical_candidates.add(a_name)
+                    raw_candidates.setdefault(a_name, {"sources": set(), "activity_count": 0, "emails": set()})
+                    raw_candidates[a_name]["sources"].add("Work Item Assignee")
+                    raw_candidates[a_name]["activity_count"] += 1
+
+            # Query commits authors & emails
+            c_rows = conn.execute("SELECT author_name, author_email, committer_name, committer_email FROM commits LIMIT 10000").fetchall()
+            for cr in c_rows:
+                for n_k, e_k in (("author_name", "author_email"), ("committer_name", "committer_email")):
+                    c_name = _clean_user_name(cr[n_k])
+                    c_email = str(cr[e_k] or "").strip()
+                    if _is_valid_member(c_name):
+                        if " " in c_name and len(c_name.split()) >= 2:
+                            canonical_candidates.add(c_name)
+                        raw_candidates.setdefault(c_name, {"sources": set(), "activity_count": 0, "emails": set()})
+                        raw_candidates[c_name]["sources"].add("Git Commit Author")
+                        raw_candidates[c_name]["activity_count"] += 1
+                        if c_email and "@" in c_email:
+                            raw_candidates[c_name]["emails"].add(c_email.lower())
+                    if c_email and "@" in c_email:
+                        email_user = c_email.split("@")[0].strip()
+                        if _is_valid_member(email_user):
+                            raw_candidates.setdefault(email_user, {"sources": set(), "activity_count": 0, "emails": set()})
+                            raw_candidates[email_user]["sources"].add("Git Email")
+                            raw_candidates[email_user]["activity_count"] += 1
+                            raw_candidates[email_user]["emails"].add(c_email.lower())
+
+            # Query PR creators & reviewers
+            pr_rows = conn.execute("SELECT created_by, closed_by, raw_json FROM pull_requests").fetchall()
+            for pr_r in pr_rows:
+                for u_k in ("created_by", "closed_by"):
+                    u_name = _clean_user_name(pr_r[u_k])
+                    if _is_valid_member(u_name):
+                        if " " in u_name and len(u_name.split()) >= 2:
+                            canonical_candidates.add(u_name)
+                        raw_candidates.setdefault(u_name, {"sources": set(), "activity_count": 0, "emails": set()})
+                        raw_candidates[u_name]["sources"].add("Pull Request")
+                        raw_candidates[u_name]["activity_count"] += 1
+    except Exception as e:
+        logger.debug(f"Error analyzing database for aliases: {e}")
+
+    suggestions = []
+    seen_pairs = set()
+
+    for canon in sorted(canonical_candidates):
+        canon_lower = canon.lower()
+        parts = [p.lower() for p in canon.split() if p.strip()]
+        if len(parts) < 2:
+            continue
+        first_name = parts[0]
+        last_name = parts[-1]
+        first_initial = first_name[0]
+        last_initial = last_name[0]
+
+        expected_patterns = {
+            f"{first_initial}{last_name}": ("Matches First Initial + Last Name (e.g. jdoe)", "high"),
+            f"{first_name}.{last_name}": ("Matches First.Last format", "high"),
+            f"{first_name}_{last_name}": ("Matches First_Last format", "high"),
+            f"{first_name}-{last_name}": ("Matches First-Last format", "high"),
+            f"{first_name}{last_name}": ("Matches First+Last concatenated", "high"),
+            f"{first_name}{last_initial}": ("Matches First Name + Last Initial", "medium"),
+            f"{last_name}{first_initial}": ("Matches Last Name + First Initial", "medium"),
+            f"{last_name}.{first_name}": ("Matches Last.First format", "medium"),
+        }
+
+        for cand_name, cand_info in raw_candidates.items():
+            cand_clean = cand_name.strip()
+            cand_lower = cand_clean.lower()
+
+            if cand_lower == canon_lower:
+                continue
+
+            if cand_lower in existing_lookup and existing_lookup[cand_lower].lower() == canon_lower:
+                continue
+            if (canon, cand_clean) in seen_pairs:
+                continue
+
+            matched_reason = None
+            matched_conf = "low"
+
+            if cand_lower in expected_patterns:
+                matched_reason, matched_conf = expected_patterns[cand_lower]
+            elif cand_lower == first_name and len(canonical_candidates) > 0:
+                same_first = [c for c in canonical_candidates if c.lower().startswith(first_name + " ")]
+                if len(same_first) == 1:
+                    matched_reason = f"Unique First Name ('{first_name}') in team"
+                    matched_conf = "medium"
+            elif cand_lower == last_name and len(canonical_candidates) > 0:
+                same_last = [c for c in canonical_candidates if c.lower().endswith(" " + last_name)]
+                if len(same_last) == 1:
+                    matched_reason = f"Unique Last Name ('{last_name}') in team"
+                    matched_conf = "medium"
+            else:
+                for em in cand_info.get("emails", []):
+                    em_user = em.split("@")[0].lower()
+                    if em_user in expected_patterns:
+                        matched_reason, matched_conf = f"Email username '{em_user}' matches {expected_patterns[em_user][0]}", "high"
+                        break
+                    elif em_user == f"{first_name}.{last_name}" or em_user == f"{first_initial}{last_name}":
+                        matched_reason, matched_conf = f"Email '{em}' matches name structure", "high"
+                        break
+
+            if matched_reason:
+                seen_pairs.add((canon, cand_clean))
+                src_list = ", ".join(sorted(cand_info.get("sources", ["Activity"])))
+                suggestions.append({
+                    "canonical": canon,
+                    "alias": cand_clean,
+                    "reason": matched_reason,
+                    "source": src_list,
+                    "confidence": matched_conf,
+                    "activity_count": cand_info.get("activity_count", 0),
+                })
+
+    conf_order = {"high": 0, "medium": 1, "low": 2}
+    return sorted(suggestions, key=lambda s: (conf_order.get(s["confidence"], 3), -s["activity_count"], s["canonical"]))
+
+
+def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None, user_aliases=None):
+    """
+    Computes team activity, leaderboards, streaks, badges, user profiles, and team pulse stats.
 
     Args:
         cache_db (AzureDevOpsCache): Active SQLite cache database.
@@ -298,12 +543,24 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         custom_sprint (str): Sprint identifier (e.g. 'week-2639') if timeframe is 'sprint' or override.
         work_items (list): Optional pre-fetched work items list.
         pull_requests (list): Optional pre-fetched pull requests list.
+        user_aliases (dict/list): Optional user aliases mapping to combine identities.
 
     Returns:
         dict: Full motivational analysis payload ready for QML UI consumption.
     """
     if not cache_db:
         return {}
+
+    # Normalize user aliases
+    if user_aliases is None:
+        try:
+            from utils import _load_active_user_settings
+            user_aliases = _load_active_user_settings().get("user_aliases")
+        except Exception:
+            user_aliases = None
+
+    alias_lookup, canonical_to_aliases = normalize_user_aliases(user_aliases)
+
 
     now = datetime.now()
     cur_year, cur_week_num, _ = now.isocalendar()
@@ -537,16 +794,26 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     members = {}
 
     def _get_or_create_member(name):
-        cname = _clean_user_name(name)
+        cname = resolve_canonical_user(name, alias_lookup)
+        cname = _clean_user_name(cname)
         if not _is_valid_member(cname):
             return None
         if cname not in members:
             # Generate initials
             parts = cname.split()
             initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "??"
+            known_aliases = canonical_to_aliases.get(cname, [])
             members[cname] = {
                 "name": cname,
                 "initials": initials,
+                "aliases": list(known_aliases),
+                "last_active_date": "",
+                "last_activity": None,
+                "recent_activities": [],
+                "assigned_work_items": [],
+                "recent_prs": [],
+                "recent_commits": [],
+                "_last_activity_dt": None,
                 "prs_created": 0,
                 "prs_closed": 0,
                 "prs_fast_merged": 0,
@@ -619,8 +886,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             }
         return members[cname]
 
-    def _track_activity_time(member_dict, ts_str, act_type="other"):
-        """Categorizes when work happened (daytime vs night-owl vs weekend vs early-bird) and tracks typed activity."""
+    def _track_activity_time(member_dict, ts_str, act_type="other", title="", repo_or_id="", meta=None):
+        """Categorizes when work happened and records last/recent activity timeline for user."""
         if not member_dict or not ts_str:
             return
         dt = parse_iso_datetime(ts_str) if isinstance(ts_str, str) else ts_str
@@ -661,6 +928,47 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             team_time_agg["builds_count"] += 1
             team_time_agg["hourly_builds"][hour] += 1
             team_time_agg["daily_builds"][weekday] += 1
+
+        # Activity icons & last activity tracking
+        act_icons = {
+            "commit": "💻",
+            "pr_create": "🔀",
+            "pr_merge": "🚀",
+            "pr_review": "👁️",
+            "task_create": "➕",
+            "task_close": "✅",
+            "state_change": "🔄",
+            "tag": "🏷️",
+            "build": "⚡",
+        }
+        icon = act_icons.get(act_type, "📌")
+        iso_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        cur_last_dt = member_dict.get("_last_activity_dt")
+        if cur_last_dt is None or dt > cur_last_dt:
+            member_dict["_last_activity_dt"] = dt
+            member_dict["last_active_date"] = iso_ts
+            member_dict["last_active_relative"] = format_relative_time(dt)
+            member_dict["last_activity"] = {
+                "timestamp": iso_ts,
+                "relative": format_relative_time(dt),
+                "type": act_type,
+                "title": title or f"Activity in {act_type}",
+                "repo_or_id": repo_or_id,
+                "icon": icon,
+                "meta": meta or {}
+            }
+
+        if title:
+            member_dict["recent_activities"].append({
+                "timestamp": iso_ts,
+                "relative": format_relative_time(dt),
+                "type": act_type,
+                "title": title,
+                "repo_or_id": repo_or_id,
+                "icon": icon,
+                "meta": meta or {}
+            })
 
         if weekday in (5, 6):
             ts["weekend_count"] += 1
@@ -764,6 +1072,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
         state = str(wi.get("state") or fields.get("System.State") or "").capitalize()
         wi_type = str(wi.get("type") or fields.get("System.WorkItemType") or "").lower()
+        wi_title = str(wi.get("title") or fields.get("System.Title") or "")
         is_closed_state = state in ("Closed", "Resolved", "Done", "Completed")
 
         # Track Task Evidences & Traceability Links (Relations, Commits, PRs, Hyperlinks)
@@ -825,6 +1134,15 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m_as = _get_or_create_member(assigned_name)
                 if m_as:
                     m_as["open_tasks_assigned"] += 1
+                    if len(m_as["assigned_work_items"]) < 25:
+                        m_as["assigned_work_items"].append({
+                            "id": wid,
+                            "title": wi_title or f"#{wid}",
+                            "type": wi_type.capitalize() or "Task",
+                            "state": state or "Active",
+                            "changed_date": changed_date_str or "",
+                            "days_old": age_days,
+                        })
                     if age_days > m_as["oldest_open_task_days"]:
                         m_as["oldest_open_task_days"] = age_days
                         m_as["oldest_open_task"] = {
@@ -863,7 +1181,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m_act = _get_or_create_member(activated_by)
                 if m_act:
                     m_act["state_changes_count"] += 1
-                    _track_activity_time(m_act, activated_date_raw, "state_change")
+                    _track_activity_time(m_act, activated_date_raw, "state_change", f"Activated {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
 
         # Evaluate Completed Work Items within timeframe
         if is_closed_state:
@@ -886,14 +1204,13 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["tasks_completed"] += 1
                         m["tasks_cleaned"] += 1
                         m["state_changes_count"] += 1
-                        _track_activity_time(m, effective_close_raw, "task_close")
+                        _track_activity_time(m, effective_close_raw, "task_close", f"Closed {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
                         if "bug" in wi_type or "defect" in wi_type or "problem" in wi_type:
                             m["bugs_resolved"] += 1
                         elif "story" in wi_type or "requirement" in wi_type or "pbi" in wi_type:
                             m["stories_completed"] += 1
 
                         # Track [<Type>_<nr>] structured syntax convention in title
-                        wi_title = str(wi.get("title") or fields.get("System.Title") or "")
                         if re.search(r"\[[A-Za-z0-9_<>-]+_\d+\]", wi_title, re.IGNORECASE):
                             m["structured_syntax_completed"] += 1
 
@@ -919,7 +1236,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(effective_creator)
                     if m:
                         m["tasks_created"] += 1
-                        _track_activity_time(m, created_date_raw, "task_create")
+                        _track_activity_time(m, created_date_raw, "task_create", f"Created {wi_type.capitalize()} #{wid}: {wi_title[:60]}", repo_or_id=f"#{wid}")
 
     # 2. Process Recorded State Transition Events (Pushbacks, Reopenings & State Transitions)
     for ev in all_state_events:
@@ -937,7 +1254,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m["pushbacks_count"] += 1
                     else:
                         m["tasks_cleaned"] += 1
-                    _track_activity_time(m, ev_date_raw, "state_change")
+                    _track_activity_time(m, ev_date_raw, "state_change", f"State transition #{ev.get('work_item_id')}", repo_or_id=f"#{ev.get('work_item_id')}")
 
     # 3. Process Pull Requests, Merges, Reviews & Approvals
     for pr in all_prs:
@@ -949,6 +1266,10 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 raw = pr
         if not isinstance(raw, dict):
             raw = {}
+
+        pr_id = raw.get("pullRequestId") or raw.get("id") or pr.get("id") or ""
+        pr_title = str(raw.get("title") or pr.get("title") or "")
+        pr_repo = str(raw.get("repository", {}).get("name") if isinstance(raw.get("repository"), dict) else pr.get("repo_id") or "")
 
         cb = _clean_user_name(
             raw.get("createdBy") or
@@ -1034,7 +1355,16 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m["prs_created"] += 1
                     m["branches_started"] += 1
                     m["commits_count"] += 1  # PR branch initiation commit
-                    _track_activity_time(m, c_date_raw, "pr_create")
+                    _track_activity_time(m, c_date_raw, "pr_create", f"Opened PR #{pr_id}: {pr_title[:60]}", repo_or_id=pr_repo)
+                    if len(m["recent_prs"]) < 20:
+                        m["recent_prs"].append({
+                            "id": pr_id,
+                            "title": pr_title,
+                            "role": "Author",
+                            "status": "Opened",
+                            "date": c_date_str,
+                            "repo": pr_repo
+                        })
 
         # Extract Reviewers & Approvers list
         reviewers_list = raw.get("reviewers") or pr.get("reviewers") or []
@@ -1083,7 +1413,16 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                         m_rev["prs_reviewed"] += 1
                         if vote > 0:
                             m_rev["prs_approved"] += 1
-                        _track_activity_time(m_rev, rev_date_raw, "pr_review")
+                        _track_activity_time(m_rev, rev_date_raw, "pr_review", f"Reviewed PR #{pr_id}: {pr_title[:60]}", repo_or_id=pr_repo)
+                        if len(m_rev["recent_prs"]) < 20:
+                            m_rev["recent_prs"].append({
+                                "id": pr_id,
+                                "title": pr_title,
+                                "role": "Reviewer",
+                                "status": "Approved" if vote > 0 else "Reviewed",
+                                "date": rev_date_str,
+                                "repo": pr_repo
+                            })
 
         # Check PR closed timeframe (Feature branch closed/merged)
         if is_completed and cl_date_str and (filter_start_str <= cl_date_str < filter_end_str or timeframe == "all_time"):
@@ -1100,7 +1439,16 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m["prs_closed"] += 1
                     m["branches_closed"] += 1
                     m["commits_count"] += 1  # Merge commit
-                    _track_activity_time(m, cl_date_raw, "pr_merge")
+                    _track_activity_time(m, cl_date_raw, "pr_merge", f"Merged PR #{pr_id}: {pr_title[:60]}", repo_or_id=pr_repo)
+                    if len(m["recent_prs"]) < 20:
+                        m["recent_prs"].append({
+                            "id": pr_id,
+                            "title": pr_title,
+                            "role": "Closer",
+                            "status": "Completed",
+                            "date": cl_date_str,
+                            "repo": pr_repo
+                        })
 
             # Check PR turnaround speed
             if c_date_raw and cl_date_raw:
@@ -1130,7 +1478,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 processed_commit_ids.add(c_id)
             c_date_raw = c.get("committer_date") or c.get("author_date") or ""
             c_date_str = c_date_raw[:10]
-            committer = _clean_user_name(c.get("committer_name") or c.get("author_name"))
+            c_msg = str(c.get("comment") or "")
+            c_repo = str(c.get("repo_name") or c.get("repo_id") or "")
+            committer = _clean_user_name(c.get("committer_name") or c.get("author_name") or c.get("committer_email") or c.get("author_email"))
 
             # Track weekly activity for streaks
             if c_date_str and _is_valid_member(committer):
@@ -1148,7 +1498,14 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m = _get_or_create_member(committer)
                     if m:
                         m["commits_count"] += 1
-                        _track_activity_time(m, c_date_raw, "commit")
+                        _track_activity_time(m, c_date_raw, "commit", f"Commit {str(c_id)[:8]}: {c_msg[:60]}", repo_or_id=c_repo)
+                        if len(m["recent_commits"]) < 20:
+                            m["recent_commits"].append({
+                                "id": str(c_id)[:8],
+                                "comment": c_msg[:80],
+                                "repo": c_repo,
+                                "date": c_date_str
+                            })
 
     # Process branch tips from all_branches that may not be in commits table yet
     for br in all_branches:
@@ -1172,7 +1529,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m = _get_or_create_member(committer)
                 if m:
                     m["commits_count"] += 1
-                    _track_activity_time(m, b_date_raw, "commit")
+                    _track_activity_time(m, b_date_raw, "commit", f"Branch tip {br.get('branch_name')}", repo_or_id=br.get("repo_name"))
 
     # 4. Process Tags
     for tag in all_tags:
@@ -1186,7 +1543,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m["tags_pushed"] += 1
                     if not all_commits:
                         m["commits_count"] += 1
-                    _track_activity_time(m, t_date_raw, "tag")
+                    _track_activity_time(m, t_date_raw, "tag", f"Pushed tag {tag.get('tag_name')}", repo_or_id=tag.get("repo_name"))
 
     # 5. Process CI Builds & Pipeline Executions
     for b in all_builds:
@@ -1200,11 +1557,12 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m = _get_or_create_member(requester)
                 if m:
                     m["builds_total"] += 1
-                    _track_activity_time(m, build_date_raw, "build")
                     if is_succ:
                         m["builds_succeeded"] += 1
-                    elif is_fail:
+                    if is_fail:
                         m["builds_failed"] += 1
+                    _track_activity_time(m, build_date_raw, "build", f"Ran build {b.get('pipeline_name')} ({b.get('result')})", repo_or_id=b.get("pipeline_name"))
+
 
     # 6. Process Shifts & Predictability
     for user, shift_list in shifts_by_user.items():
@@ -1375,6 +1733,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
         m["badges"] = badges
         m["badges_count"] = len(badges)
+        if not m.get("last_active_relative") and m.get("_last_activity_dt"):
+            m["last_active_relative"] = format_relative_time(m["_last_activity_dt"])
+        m.pop("_last_activity_dt", None)
 
         # Composite Motivation Score Formula:
         # Only calculated if member has actual activity in timeframe (or if all_time)
@@ -1605,10 +1966,19 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     pulse_index = (cur_week_num + len(member_list)) % len(motivational_quotes)
     motivational_pulse = motivational_quotes[pulse_index]
 
-    # Clean member list for JSON serialization (remove internal helpers)
+    # Clean member list for JSON serialization (remove internal helpers & sort activities)
     for m in member_list:
         m.pop("_pr_durations", None)
         m.pop("_task_durations", None)
+        m.pop("_last_activity_dt", None)
+
+        # Sort recent activities newest first and limit to 30 items
+        if m.get("recent_activities"):
+            m["recent_activities"] = sorted(m["recent_activities"], key=lambda a: a.get("timestamp", ""), reverse=True)[:30]
+            if not m.get("last_activity"):
+                m["last_activity"] = m["recent_activities"][0]
+                m["last_active_date"] = m["last_activity"].get("timestamp", "")
+
         # Format recent highlights
         highlights = []
         if m["prs_closed"] > 0:
@@ -1649,15 +2019,19 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             highlights.append(f"🔥 {m['current_streak_weeks']}-week streak")
         m["recent_achievements"] = highlights
 
-    # Top 3 Podium (from overall score)
+    # Top 3 Podium and overall rankings
     podium = []
     sorted_all = sorted(member_list, key=lambda x: x["score"], reverse=True)
+    for idx, m in enumerate(sorted_all, start=1):
+        m["rank"] = idx
+
     if len(sorted_all) >= 1 and sorted_all[0]["score"] > 0:
         podium.append({"rank": 1, "medal": "🥇", "title": "1st Place", "member": sorted_all[0]})
     if len(sorted_all) >= 2 and sorted_all[1]["score"] > 0:
         podium.append({"rank": 2, "medal": "🥈", "title": "2nd Place", "member": sorted_all[1]})
     if len(sorted_all) >= 3 and sorted_all[2]["score"] > 0:
         podium.append({"rank": 3, "medal": "🥉", "title": "3rd Place", "member": sorted_all[2]})
+
 
     return {
         "timeframe": timeframe,

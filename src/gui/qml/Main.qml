@@ -30,6 +30,7 @@ ApplicationWindow {
     readonly property var reportsView: reportsViewLoader ? reportsViewLoader.item : null
     readonly property var settingsView: settingsViewLoader ? settingsViewLoader.item : null
     readonly property var teamMotivationView: teamMotivationViewLoader ? teamMotivationViewLoader.item : null
+    readonly property var usersView: usersViewLoader ? usersViewLoader.item : null
 
     function navigateToTagDayRepo(repoName) {
         window.currentTabIndex = 5;
@@ -185,6 +186,23 @@ ApplicationWindow {
                 }
             };
             teamMotivationViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openUsersPage(userName) {
+        window.currentTabIndex = 8;
+        if (usersView && typeof usersView.openUserProfile === "function") {
+            if (userName) {
+                usersView.openUserProfile(userName);
+            }
+        } else if (usersViewLoader && userName) {
+            var conn = function() {
+                if (usersViewLoader.item && typeof usersViewLoader.item.openUserProfile === "function") {
+                    usersViewLoader.loaded.disconnect(conn);
+                    usersViewLoader.item.openUserProfile(userName);
+                }
+            };
+            usersViewLoader.loaded.connect(conn);
         }
     }
 
@@ -573,6 +591,14 @@ ApplicationWindow {
                                 active: window.currentTabIndex === 3
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.currentTabIndex = 3
+                            }
+
+                            NavItem {
+                                iconText: "👤"
+                                label: "Users & Profiles"
+                                active: window.currentTabIndex === 8
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openUsersPage()
                             }
 
                             NavItem {
@@ -1562,6 +1588,15 @@ ApplicationWindow {
                         property bool _hasLoaded: false
                         asynchronous: true
                         source: "views/TeamMotivationView.qml"
+                        onLoaded: _hasLoaded = true
+                    }
+
+                    Loader {
+                        id: usersViewLoader
+                        active: window.currentTabIndex === 8 || _hasLoaded
+                        property bool _hasLoaded: false
+                        asynchronous: true
+                        source: "views/UsersView.qml"
                         onLoaded: _hasLoaded = true
                     }
                 }
