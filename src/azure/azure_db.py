@@ -92,6 +92,53 @@ def _is_scheduled_sprint(iteration_str):
     return False
 
 
+def is_work_item_in_area_path(area_path, rules):
+    """
+    Checks whether a work item's Area Path matches any of the configured Area Path filter rules.
+
+    Args:
+        area_path (str): The work item's System.AreaPath.
+        rules (list): List of rule dicts with 'value'/'path' and 'include_children'/'includeChildren', or list of strings.
+
+    Returns:
+        bool: True if area_path matches at least one rule or if rules is empty/None.
+    """
+    if not rules:
+        return True
+
+    clean_ap = (str(area_path) if area_path is not None else "").strip().replace("/", "\\")
+    if not clean_ap:
+        return False
+
+    clean_ap_lower = clean_ap.lower()
+
+    for r in rules:
+        if isinstance(r, str):
+            r_path = r.strip().replace("/", "\\")
+            inc_children = True
+        elif isinstance(r, dict):
+            r_path = str(r.get("value") or r.get("path") or "").strip().replace("/", "\\")
+            inc_children = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+        else:
+            continue
+
+        if not r_path:
+            continue
+
+        r_path_lower = r_path.lower()
+
+        # Exact match
+        if clean_ap_lower == r_path_lower:
+            return True
+
+        # Prefix match for child / sub-areas
+        if inc_children:
+            if clean_ap_lower.startswith(r_path_lower + "\\"):
+                return True
+
+    return False
+
+
 class AzureDevOpsCache:
     """
     Manages caching of Azure DevOps (TFS) data inside an SQLite database.
@@ -734,6 +781,151 @@ class AzureDevOpsCache:
                     value = excluded.value,
                     updated_at = excluded.updated_at
                 """, (k, val_str, now_str))
+
+    def get_area_path_settings(self):
+        """
+        Retrieves the project Area Path settings from the cache configuration.
+
+        Returns:
+            dict: {
+                "enabled": bool,
+                "filter_enabled": bool,
+                "default_area": str,
+                "default_value": str,
+                "rules": list of dicts [{"value": str, "path": str, "include_children": bool, "includeChildren": bool}],
+                "all_areas": list of str,
+                "all_discovered": list of str
+            }
+        """
+        enabled_val = self.get_config("area_path_filter_enabled", "0")
+        enabled = str(enabled_val).lower() not in ("0", "false", "no", "off", "")
+
+        default_area = self.get_config("area_path_default", "")
+
+        rules_raw = self.get_config("area_path_rules", "")
+        rules = []
+        if rules_raw:
+            try:
+                parsed = json.loads(rules_raw) if isinstance(rules_raw, str) else rules_raw
+                if isinstance(parsed, list):
+                    for r in parsed:
+                        if isinstance(r, dict):
+                            val = str(r.get("value") or r.get("path") or "").strip()
+                            if val:
+                                inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                                rules.append({
+                                    "value": val,
+                                    "path": val,
+                                    "include_children": inc,
+                                    "includeChildren": inc
+                                })
+                        elif isinstance(r, str) and r.strip():
+                            rules.append({
+                                "value": r.strip(),
+                                "path": r.strip(),
+                                "include_children": True,
+                                "includeChildren": True
+                            })
+            except Exception:
+                pass
+
+        all_areas_raw = self.get_config("area_path_all_discovered", "")
+        all_areas = []
+        if all_areas_raw:
+            try:
+                parsed = json.loads(all_areas_raw) if isinstance(all_areas_raw, str) else all_areas_raw
+                if isinstance(parsed, list):
+                    all_areas = [str(a).strip() for a in parsed if str(a).strip()]
+            except Exception:
+                pass
+
+        return {
+            "enabled": enabled,
+            "filter_enabled": enabled,
+            "default_area": default_area,
+            "default_value": default_area,
+            "rules": rules,
+            "all_areas": all_areas,
+            "all_discovered": all_areas
+        }
+
+    def set_area_path_settings(self, settings_dict_or_enabled=None, enabled=None, default_area=None, default_value=None, rules=None, all_areas=None, all_discovered=None):
+        """
+        Saves Area Path settings in the SQLite cache database.
+        Accepts a dictionary or individual keyword/positional arguments.
+        """
+        settings_dict = {}
+        if isinstance(settings_dict_or_enabled, dict):
+            settings_dict = dict(settings_dict_or_enabled)
+        elif isinstance(settings_dict_or_enabled, bool):
+            enabled = settings_dict_or_enabled
+
+        if enabled is None:
+            if "filter_enabled" in settings_dict:
+                enabled = bool(settings_dict["filter_enabled"])
+            elif "enabled" in settings_dict:
+                enabled = bool(settings_dict["enabled"])
+
+        if default_area is None:
+            if default_value is not None:
+                default_area = default_value
+            elif "default_value" in settings_dict:
+                default_area = settings_dict["default_value"]
+            elif "default_area" in settings_dict:
+                default_area = settings_dict["default_area"]
+
+        if rules is None:
+            if "rules" in settings_dict:
+                rules = settings_dict["rules"]
+
+        if all_areas is None:
+            if all_discovered is not None:
+                all_areas = all_discovered
+            elif "all_discovered" in settings_dict:
+                all_areas = settings_dict["all_discovered"]
+            elif "all_areas" in settings_dict:
+                all_areas = settings_dict["all_areas"]
+
+        if enabled is not None:
+            self.set_config("area_path_filter_enabled", "1" if enabled else "0")
+        if default_area is not None:
+            self.set_config("area_path_default", str(default_area).strip())
+        if rules is not None:
+            norm_rules = []
+            if isinstance(rules, str):
+                try:
+                    rules = json.loads(rules)
+                except Exception:
+                    rules = []
+            if isinstance(rules, list):
+                for r in rules:
+                    if isinstance(r, dict):
+                        val = str(r.get("value") or r.get("path") or "").strip()
+                        if val:
+                            inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                            norm_rules.append({
+                                "value": val,
+                                "path": val,
+                                "include_children": inc,
+                                "includeChildren": inc
+                            })
+                    elif isinstance(r, str) and r.strip():
+                        norm_rules.append({
+                            "value": r.strip(),
+                            "path": r.strip(),
+                            "include_children": True,
+                            "includeChildren": True
+                        })
+            self.set_config("area_path_rules", json.dumps(norm_rules))
+        if all_areas is not None:
+            if isinstance(all_areas, str):
+                try:
+                    all_areas = json.loads(all_areas)
+                except Exception:
+                    all_areas = []
+            if isinstance(all_areas, list):
+                clean_areas = [str(a).strip() for a in all_areas if str(a).strip()]
+                self.set_config("area_path_all_discovered", json.dumps(clean_areas))
 
     def get_milestone_categories(self):
         """Returns all milestone categories sorted by sort_order ascending."""
@@ -1381,6 +1573,7 @@ class AzureDevOpsCache:
           - 'milestones': milestone_categories, milestones
           - 'work_item_categories': work_item_tag_categories, custom_deadline_field, reports_dir
           - 'team_assignment_and_sprint_url': tfs_team_name, sprint_url_template, default_tfs_team
+          - 'area_path_settings': area_path_filter_enabled, area_path_default, area_path_rules, area_path_all_discovered
 
         Args:
             include_sections (list of str, optional): Sections to export. If None or empty, all sections are exported.
@@ -1396,6 +1589,8 @@ class AzureDevOpsCache:
             "repo_categories": "repo_categories",
             "milestones": "milestones",
             "work_item_categories": "work_item_categories",
+            "area_path_settings": "area_path_settings",
+            "area_paths": "area_path_settings",
         }
 
         all_sections = [
@@ -1404,6 +1599,7 @@ class AzureDevOpsCache:
             "milestones",
             "work_item_categories",
             "team_assignment_and_sprint_url",
+            "area_path_settings",
         ]
 
         if include_sections:
@@ -1502,6 +1698,10 @@ class AzureDevOpsCache:
             data["settings"]["team_assignment_and_sprint_url"] = team_cfg
             data["settings"]["team_and_sprint_url"] = team_cfg
 
+        # 6. area_path_settings
+        if "area_path_settings" in target_sections:
+            data["settings"]["area_path_settings"] = self.get_area_path_settings()
+
         return data
 
     def import_user_settings(self, data, clear_existing=False, include_sections=None):
@@ -1542,6 +1742,8 @@ class AzureDevOpsCache:
             "repo_categories": "repo_categories",
             "milestones": "milestones",
             "work_item_categories": "work_item_categories",
+            "area_path_settings": "area_path_settings",
+            "area_paths": "area_path_settings",
         }
 
         all_sections = [
@@ -1550,6 +1752,7 @@ class AzureDevOpsCache:
             "milestones",
             "work_item_categories",
             "team_assignment_and_sprint_url",
+            "area_path_settings",
         ]
 
         if include_sections:
@@ -1757,6 +1960,23 @@ class AzureDevOpsCache:
                     summary["config_keys_updated"] += 1
 
                 summary["imported_sections"].append("team_assignment_and_sprint_url")
+
+        # 6. area_path_settings
+        if "area_path_settings" in target_sections and "area_path_settings" in settings:
+            aps_data = settings["area_path_settings"]
+            if isinstance(aps_data, dict):
+                enabled = aps_data.get("enabled")
+                def_area = aps_data.get("default_area")
+                rules = aps_data.get("rules")
+                all_areas = aps_data.get("all_areas")
+                self.set_area_path_settings(
+                    enabled=enabled,
+                    default_area=def_area,
+                    rules=rules,
+                    all_areas=all_areas
+                )
+                summary["config_keys_updated"] += 1
+                summary["imported_sections"].append("area_path_settings")
 
         sec_list = summary.get("imported_sections", [])
         sec_str = ", ".join(sec_list) if sec_list else "none"
@@ -2593,6 +2813,40 @@ class AzureDevOpsCache:
             conn.execute("UPDATE work_items SET raw_json = ? WHERE id = ?", (updated_raw, wi_int))
             return True
 
+    def get_work_item(self, wi_id):
+        """
+        Retrieves a single work item from the cache database.
+        """
+        try:
+            wi_int = int(str(wi_id).lstrip("#"))
+        except (ValueError, TypeError):
+            return None
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if not row:
+                return None
+            raw = {}
+            if row["raw_json"]:
+                try:
+                    raw = json.loads(row["raw_json"])
+                except Exception:
+                    pass
+            fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+            return {
+                "id": row["id"],
+                "title": row["title"] or fields.get("System.Title", ""),
+                "type": row["type"] or fields.get("System.WorkItemType", ""),
+                "state": row["state"] or fields.get("System.State", ""),
+                "assigned_to": row["assigned_to"] or fields.get("System.AssignedTo", {}).get("displayName", ""),
+                "changed_date": row["changed_date"] or fields.get("System.ChangedDate", ""),
+                "iteration_path": fields.get("System.IterationPath") or "",
+                "iteration_id": fields.get("System.IterationId"),
+                "area_path": fields.get("System.AreaPath") or "",
+                "deleted": bool(row["deleted"]),
+                "raw_json": row["raw_json"],
+                "fields": fields
+            }
+
     def get_all_work_item_ids(self, include_deleted=True):
         """
         Retrieves all work item IDs stored in the cache database.
@@ -2615,9 +2869,13 @@ class AzureDevOpsCache:
                 return str(row["max_date"]).strip()
             return None
 
-    def get_all_work_items(self, include_deleted=True):
+    def get_all_work_items(self, include_deleted=True, filter_area_paths=False):
         """
         Retrieves all work items stored in the cache database as structured dictionaries.
+        
+        Args:
+            include_deleted (bool): Whether to include deleted work items. Defaults to True.
+            filter_area_paths (bool): Whether to apply configured Area Path filter rules. Defaults to False.
         """
         filter_deleted = "" if include_deleted else " WHERE (deleted = 0 OR deleted IS NULL)"
         with self._connection() as conn:
@@ -2675,6 +2933,12 @@ class AzureDevOpsCache:
                     "fields": fields,
                     "raw_dict": raw,
                 })
+
+            if filter_area_paths:
+                area_cfg = self.get_area_path_settings()
+                if (area_cfg.get("filter_enabled") or area_cfg.get("enabled")) and area_cfg.get("rules"):
+                    result = [w for w in result if is_work_item_in_area_path(w.get("area_path"), area_cfg.get("rules"))]
+
             return result
 
     def get_all_prs(self):

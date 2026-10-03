@@ -192,6 +192,31 @@ class AzureBaseClient:
         res, _ = self._request("GET", path, params=params)
         return res.get("value", [])
 
+    def get_team_field_values(self, project_id, team_id_or_name=None):
+        """
+        Retrieves the team field values (e.g. Area Path settings) for a team or project in TFS / Azure DevOps.
+
+        Args:
+            project_id (str): The target project ID or name.
+            team_id_or_name (str, optional): Team name or GUID. If None, queries the default team settings.
+
+        Returns:
+            dict: Team field values containing defaultValue and values list:
+                  {
+                      "defaultValue": "ProjectName\\DefaultArea",
+                      "values": [{"value": "ProjectName\\DefaultArea", "includeChildren": True}],
+                      "field": {"referenceName": "System.AreaPath", "name": "Area Path"}
+                  }
+        """
+        if team_id_or_name:
+            encoded_team = urllib.parse.quote(str(team_id_or_name), safe="")
+            path = f"{project_id}/{encoded_team}/_apis/work/teamsettings/teamfieldvalues"
+        else:
+            path = f"{project_id}/_apis/work/teamsettings/teamfieldvalues"
+        params = {"api-version": "6.0"}
+        res, _ = self._request("GET", path, params=params)
+        return res
+
     def get_classification_nodes(self, project_id, structure_group="iterations", depth=4):
         """
         Retrieves the classification nodes tree (e.g. Iterations or Areas) for a project.

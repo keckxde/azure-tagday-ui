@@ -509,6 +509,25 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as ms_err:
             logger.debug("Could not prefill milestones from work item tags: %s", ms_err)
 
+        # Auto-discover and cache Area Path settings for the project
+        try:
+            area_settings = self.get_project_area_path_settings(project_id=target_proj)
+            if area_settings and hasattr(cache_db, "set_area_path_settings"):
+                existing_rules = cache_db.get_config("area_path_rules")
+                if not existing_rules or force_full_sync:
+                    cache_db.set_area_path_settings(
+                        enabled=True,
+                        default_area=area_settings.get("default_area"),
+                        rules=area_settings.get("rules"),
+                        all_areas=area_settings.get("all_areas")
+                    )
+                else:
+                    cache_db.set_area_path_settings(
+                        all_areas=area_settings.get("all_areas")
+                    )
+        except Exception as a_err:
+            logger.debug("Could not auto-discover area path settings during sync: %s", a_err)
+
         unchanged_str = f", {summary.get('unchanged', 0)} already up-to-date" if summary.get("unchanged") else ""
         _notify(
             f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted{unchanged_str}, {summary.get('errors', 0)} errors",
@@ -1717,6 +1736,106 @@ class AzureInfoHandler(AzureBaseClient):
             "total_generated": len(results),
             "created_on_server": created_count,
             "iterations": results
+        }
+
+    def get_project_area_path_settings(self, project_id=None, team_name=None):
+        """
+        Retrieves the configured Area Path settings for a project and team.
+        Attempts to read team field values (teamsettings/teamfieldvalues) and classification nodes.
+        Returns a dictionary with default_area, rules list, and all discovered area paths.
+        """
+        target_proj = project_id or getattr(self, "project_id", "") or "default"
+        team = team_name or getattr(self, "team_name", None)
+
+        default_area = ""
+        rules = []
+        all_areas = []
+
+        # 1. Try team field values
+        try:
+            tfv = self.get_team_field_values(target_proj, team_id_or_name=team)
+            if tfv and isinstance(tfv, dict):
+                default_area = tfv.get("defaultValue") or ""
+                for v in tfv.get("values", []):
+                    val_path = v.get("value") or ""
+                    inc_children = bool(v.get("includeChildren", True))
+                    if val_path:
+                        clean_p = val_path.replace("/", "\\")
+                        rules.append({
+                            "value": clean_p,
+                            "path": clean_p,
+                            "include_children": inc_children,
+                            "includeChildren": inc_children
+                        })
+        except Exception as e:
+            logger.debug("Could not retrieve team field values for project %s, team %s: %s", target_proj, team, e)
+
+        # If specific team failed and team was specified, try without team (project default team)
+        if not rules and team:
+            try:
+                tfv = self.get_team_field_values(target_proj, team_id_or_name=None)
+                if tfv and isinstance(tfv, dict):
+                    default_area = tfv.get("defaultValue") or ""
+                    for v in tfv.get("values", []):
+                        val_path = v.get("value") or ""
+                        inc_children = bool(v.get("includeChildren", True))
+                        if val_path:
+                            clean_p = val_path.replace("/", "\\")
+                            rules.append({
+                                "value": clean_p,
+                                "path": clean_p,
+                                "include_children": inc_children,
+                                "includeChildren": inc_children
+                            })
+            except Exception as e:
+                logger.debug("Could not retrieve default team field values for project %s: %s", target_proj, e)
+
+        # 2. Retrieve classification nodes for areas (hierarchy tree)
+        try:
+            tree = self.get_classification_nodes(target_proj, structure_group="areas", depth=10)
+            if tree and isinstance(tree, dict):
+                def _collect(n, prefix=""):
+                    name = n.get("name", "")
+                    curr = f"{prefix}\\{name}" if prefix else name
+                    res = [curr] if curr else []
+                    for c in n.get("children", []) or []:
+                        res.extend(_collect(c, curr))
+                    return res
+                all_areas = _collect(tree)
+        except Exception as e:
+            logger.debug("Could not retrieve classification nodes for areas in project %s: %s", target_proj, e)
+
+        # Fallback if no rules found from team settings
+        if not rules and all_areas:
+            root_area = all_areas[0]
+            rules.append({
+                "value": root_area,
+                "path": root_area,
+                "include_children": True,
+                "includeChildren": True
+            })
+            if not default_area:
+                default_area = root_area
+        elif not rules:
+            rules.append({
+                "value": target_proj,
+                "path": target_proj,
+                "include_children": True,
+                "includeChildren": True
+            })
+            if not default_area:
+                default_area = target_proj
+
+        def_val = default_area or target_proj
+        disc_areas = all_areas or [target_proj]
+        return {
+            "enabled": True,
+            "filter_enabled": True,
+            "default_area": def_val,
+            "default_value": def_val,
+            "rules": rules,
+            "all_areas": disc_areas,
+            "all_discovered": disc_areas
         }
 
     def create_repository_tag(self, project_id, repo_id_or_name, tag_name, branch_name="dev", message="", cache_db=None):

@@ -19,7 +19,7 @@ if py_dir not in sys.path:
 
 import utils
 import devops_helper
-from azure import AzureDevOpsCache
+from azure import AzureDevOpsCache, is_work_item_in_area_path
 from gui.workers import TaskWorker
 
 logger = logging.getLogger("gui.backend")
@@ -244,6 +244,7 @@ class DevOpsBackend(QObject):
     reportsDirChanged = Signal()
     teamMotivationChanged = Signal()
     teamMotivationTimeframeChanged = Signal()
+    areaPathSettingsChanged = Signal()
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -354,6 +355,14 @@ class DevOpsBackend(QObject):
         self._info_handler = None
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
 
+        # Area Path settings & Work item filtering
+        self._area_path_filter_enabled = True
+        self._default_area_path = ""
+        self._area_path_rules = []
+        self._all_discovered_area_paths = []
+        self._work_items_filtered_by_area_path_count = 0
+        self._work_items_total_before_area_filter = 0
+
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
 
@@ -393,6 +402,18 @@ class DevOpsBackend(QObject):
             logger.error(f"Error initializing SQLite cache: {e}")
             self._db_path = ""
             self._cache_db = None
+
+    def set_cache_db(self, cache_db):
+        """Sets the cache database instance (used for dependency injection and testing)."""
+        self._cache_db = cache_db
+        if cache_db:
+            self._load_project_config_from_db(cache_db)
+
+    def _load_all_data_sync(self):
+        """Synchronously computes and loads all cache data on the current thread."""
+        if self._cache_db:
+            data = self._compute_all_cache_data()
+            self._apply_computed_cache_data(data)
 
     def _load_project_config_from_db(self, cache_db):
         """Loads and applies configuration keys stored in the database's project_config table."""
@@ -458,6 +479,18 @@ class DevOpsBackend(QObject):
                     pass
             if "FILTER_VERSION_TAGS_FORMAT" in db_cfg:
                 devops_helper.FILTER_VERSION_TAGS_FORMAT = str(db_cfg["FILTER_VERSION_TAGS_FORMAT"]).lower() == "true"
+            
+            # Load Area Path settings
+            try:
+                area_cfg = cache_db.get_area_path_settings()
+                self._area_path_filter_enabled = area_cfg.get("enabled", True)
+                self._default_area_path = area_cfg.get("default_area", "")
+                self._area_path_rules = area_cfg.get("rules", [])
+                self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+                self.areaPathSettingsChanged.emit()
+            except Exception as ap_err:
+                logger.debug("Could not load area path settings in _load_project_config_from_db: %s", ap_err)
+
             self.changeFiltersChanged.emit()
         except Exception as e:
             logger.warning(f"Error reading project config from database: {e}")
@@ -563,6 +596,239 @@ class DevOpsBackend(QObject):
                     pass
             self.sprintUrlTemplateChanged.emit()
             self.settingsChanged.emit()
+
+    # ==========================================
+    # Area Path Settings & Work Item Filter
+    # ==========================================
+    @Property(bool, notify=areaPathSettingsChanged)
+    def areaPathFilterEnabled(self):
+        """Returns True if work items are automatically filtered by project Area Path settings."""
+        return self._area_path_filter_enabled
+
+    @Property(str, notify=areaPathSettingsChanged)
+    def defaultAreaPath(self):
+        """Returns the default project or team Area Path."""
+        return self._default_area_path or (self.projectName if self.projectName != "N/A" else "")
+
+    @Property('QVariantList', notify=areaPathSettingsChanged)
+    def areaPathRules(self):
+        """Returns the list of active Area Path rules: [{'path': str, 'include_children': bool}]."""
+        return self._area_path_rules
+
+    @Property('QVariantList', notify=areaPathSettingsChanged)
+    def allDiscoveredAreaPaths(self):
+        """Returns all discovered Area Paths in the project."""
+        return self._all_discovered_area_paths
+
+    @Property(int, notify=statsChanged)
+    def workItemsFilteredByAreaPathCount(self):
+        """Returns count of work items excluded because they were outside active Area Path rules."""
+        return self._work_items_filtered_by_area_path_count
+
+    @Property(int, notify=statsChanged)
+    def workItemsTotalBeforeAreaFilterCount(self):
+        """Returns total count of work items before Area Path filter was applied."""
+        return self._work_items_total_before_area_filter
+
+    @Slot(bool)
+    def setAreaPathFilterEnabled(self, enabled):
+        """Toggles the Area Path filter on or off."""
+        self._area_path_filter_enabled = bool(enabled)
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(enabled=self._area_path_filter_enabled)
+            except Exception as e:
+                logger.error("Error updating area_path_filter_enabled in DB: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+
+    @Slot(str, bool, result=bool)
+    def addAreaPathRule(self, path, include_children=True):
+        """Adds or updates an Area Path rule."""
+        clean_path = (path or "").strip().replace("/", "\\")
+        if not clean_path:
+            return False
+        for r in self._area_path_rules:
+            if str(r.get("path") or r.get("value") or "").strip().lower() == clean_path.lower():
+                r["include_children"] = bool(include_children)
+                r["includeChildren"] = bool(include_children)
+                r["path"] = clean_path
+                r["value"] = clean_path
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+        self._area_path_rules.append({
+            "path": clean_path,
+            "value": clean_path,
+            "include_children": bool(include_children),
+            "includeChildren": bool(include_children)
+        })
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+            except Exception as e:
+                logger.error("Error saving area path rules: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(int, result=bool)
+    @Slot(str, result=bool)
+    def removeAreaPathRule(self, index_or_path):
+        """Removes an Area Path rule by index or path string."""
+        if isinstance(index_or_path, int):
+            if 0 <= index_or_path < len(self._area_path_rules):
+                self._area_path_rules.pop(index_or_path)
+                if self._cache_db:
+                    try:
+                        self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                    except Exception as e:
+                        logger.error("Error saving area path rules after remove: %s", e)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+            return False
+        else:
+            clean = str(index_or_path or "").strip().replace("/", "\\").lower()
+            orig_len = len(self._area_path_rules)
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or (r if isinstance(r, str) else "")).strip().replace("/", "\\").lower() != clean
+            ]
+            if len(self._area_path_rules) != orig_len:
+                if self._cache_db:
+                    try:
+                        self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                    except Exception as e:
+                        logger.error("Error saving area path rules after remove: %s", e)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+            return False
+
+    @Slot(str, bool, result=bool)
+    def saveAreaPathRules(self, rules_json, enabled=True):
+        """Saves full Area Path filter rules from JSON string."""
+        try:
+            parsed = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+            norm_rules = []
+            if isinstance(parsed, list):
+                for r in parsed:
+                    if isinstance(r, dict):
+                        val = str(r.get("path") or r.get("value") or "").strip().replace("/", "\\")
+                        if val:
+                            norm_rules.append({
+                                "path": val,
+                                "value": val,
+                                "include_children": bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True)),
+                                "includeChildren": bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                            })
+                    elif isinstance(r, str) and r.strip():
+                        val = r.strip().replace("/", "\\")
+                        norm_rules.append({
+                            "path": val,
+                            "value": val,
+                            "include_children": True,
+                            "includeChildren": True
+                        })
+            self._area_path_rules = norm_rules
+            self._area_path_filter_enabled = bool(enabled)
+            if self._cache_db:
+                self._cache_db.set_area_path_settings(
+                    enabled=self._area_path_filter_enabled,
+                    rules=self._area_path_rules
+                )
+            self.areaPathSettingsChanged.emit()
+            self.refresh_all_data()
+            return True
+        except Exception as e:
+            logger.error("Error saving area path rules: %s", e)
+            return False
+
+    @Slot(result='QVariantMap')
+    def fetch_area_paths_from_tfs(self):
+        """Queries TFS/Azure DevOps live for project area path settings and classification nodes."""
+        try:
+            proj = getattr(devops_helper, "AZURE_PROJECT_ID", "") or self.projectName
+            if not proj or proj == "N/A":
+                self.logMessage.emit("⚠️ Cannot fetch Area Paths: No active project configured.")
+                return {"success": False, "error": "No project configured"}
+
+            url = devops_helper.AZURE_BASE_URL or ""
+            pat = devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+            if not url or not pat:
+                self.logMessage.emit("⚠️ Cannot fetch Area Paths: Missing TFS URL or Token.")
+                return {"success": False, "error": "Missing TFS URL or Token"}
+
+            from azure.azure_info_handler import AzureInfoHandler
+            handler = AzureInfoHandler(url, pat)
+            team = self._tfs_team_name
+            self.logMessage.emit(f"🌿 Fetching Area Path settings from TFS for project '{proj}'...")
+            area_settings = handler.get_project_area_path_settings(project_id=proj, team_name=team)
+            if area_settings:
+                self._default_area_path = area_settings.get("default_area", "")
+                self._area_path_rules = area_settings.get("rules", [])
+                self._all_discovered_area_paths = area_settings.get("all_areas", [])
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(
+                        enabled=self._area_path_filter_enabled,
+                        default_area=self._default_area_path,
+                        rules=self._area_path_rules,
+                        all_areas=self._all_discovered_area_paths
+                    )
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                msg = f"✓ Discovered {len(self._all_discovered_area_paths)} Area Path(s) with {len(self._area_path_rules)} active rule(s)."
+                self.logMessage.emit(msg)
+                return {"success": True, "message": msg, "default_area": self._default_area_path, "rules_count": len(self._area_path_rules)}
+            else:
+                return {"success": False, "error": "No Area Path settings returned"}
+        except Exception as e:
+            logger.error("Error fetching Area Paths from TFS: %s", e)
+            self.logMessage.emit(f"⚠️ Error fetching Area Paths: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(result=bool)
+    def reset_area_path_settings(self):
+        """Resets Area Path filter settings to project root defaults."""
+        proj = self.projectName if self.projectName != "N/A" else "Project"
+        self._default_area_path = proj
+        self._area_path_rules = [{"path": proj, "value": proj, "include_children": True, "includeChildren": True}]
+        self._area_path_filter_enabled = False
+        if self._cache_db:
+            self._cache_db.set_area_path_settings(
+                enabled=False,
+                default_area=proj,
+                rules=self._area_path_rules
+            )
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(str, result='QVariantMap')
+    def test_area_path_match(self, test_path):
+        """Tests if a sample Area Path string matches the active Area Path filter rules."""
+        clean = (test_path or "").strip().replace("/", "\\")
+        if not clean:
+            return {"matched": False, "rule": "", "matching_rule": None}
+        matched = is_work_item_in_area_path(clean, self._area_path_rules)
+        matching_rule = ""
+        matching_rule_obj = None
+        if matched and self._area_path_rules:
+            for r in self._area_path_rules:
+                rp = str(r.get("path") or r.get("value") or (r if isinstance(r, str) else "")).strip().replace("/", "\\")
+                inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True)) if isinstance(r, dict) else True
+                if clean.lower() == rp.lower():
+                    matching_rule = f"{rp} (exact match)"
+                    matching_rule_obj = r if isinstance(r, dict) else {"path": rp, "value": rp, "include_children": inc, "includeChildren": inc}
+                    break
+                elif inc and clean.lower().startswith(rp.lower() + "\\"):
+                    matching_rule = f"{rp} (sub-area match)"
+                    matching_rule_obj = r if isinstance(r, dict) else {"path": rp, "value": rp, "include_children": inc, "includeChildren": inc}
+                    break
+        return {"matched": matched, "rule": matching_rule, "matching_rule": matching_rule_obj}
 
     @Property(str, notify=settingsChanged)
     def tfsPat(self):
@@ -1530,6 +1796,24 @@ class DevOpsBackend(QObject):
 
         deadline_field_setting = self._custom_deadline_field or ""
 
+        # Check Area Path settings for filtering work items
+        area_filter_enabled = getattr(self, "_area_path_filter_enabled", True)
+        area_rules = getattr(self, "_area_path_rules", [])
+        if self._cache_db and not area_rules:
+            try:
+                area_cfg = self._cache_db.get_area_path_settings()
+                area_filter_enabled = area_cfg.get("enabled", True)
+                area_rules = area_cfg.get("rules", [])
+                self._area_path_filter_enabled = area_filter_enabled
+                self._area_path_rules = area_rules
+                self._default_area_path = area_cfg.get("default_area", "")
+                self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+            except Exception:
+                pass
+
+        total_before_area_filter = len(raw_wis)
+        filtered_by_area_path_count = 0
+
         wi_list = []
         deleted_count = 0
         active_wi_count = 0
@@ -1537,9 +1821,37 @@ class DevOpsBackend(QObject):
 
         for wi in raw_wis:
             is_del = bool(wi.get("deleted"))
+            wi_id = wi.get("id")
+
+            # Extract fields and area path early for filtering
+            iter_path = wi.get("iteration_path") or ""
+            area_path = wi.get("area_path") or ""
+            raw_fields = wi.get("fields")
+            raw_data = wi.get("raw_dict")
+            if raw_fields is None or raw_data is None:
+                raw_s = wi.get("raw_json")
+                if raw_s and isinstance(raw_s, str):
+                    try:
+                        raw_data = json.loads(raw_s)
+                        raw_fields = raw_data.get("fields", {})
+                    except Exception:
+                        raw_fields = {}
+                        raw_data = {}
+                else:
+                    raw_fields = {}
+                    raw_data = {}
+
+            if not area_path:
+                area_path = raw_fields.get("System.AreaPath") or ""
+
+            # Check Area Path filter
+            if area_filter_enabled and area_rules:
+                if not is_work_item_in_area_path(area_path, area_rules):
+                    filtered_by_area_path_count += 1
+                    continue
+
             if is_del:
                 deleted_count += 1
-            wi_id = wi.get("id")
             linked_prs = wi_to_prs.get(wi_id, [])
             linked_repos = sorted(wi_to_repos.get(wi_id, set()))
             html_link = wi.get("htmlLink", "") or ""
@@ -1563,23 +1875,6 @@ class DevOpsBackend(QObject):
                     closed_wi_count += 1
                 else:
                     active_wi_count += 1
-
-            # Iteration and Deadline parsing
-            iter_path = wi.get("iteration_path") or ""
-            raw_fields = wi.get("fields")
-            raw_data = wi.get("raw_dict")
-            if raw_fields is None or raw_data is None:
-                raw_s = wi.get("raw_json")
-                if raw_s and isinstance(raw_s, str):
-                    try:
-                        raw_data = json.loads(raw_s)
-                        raw_fields = raw_data.get("fields", {})
-                    except Exception:
-                        raw_fields = {}
-                        raw_data = {}
-                else:
-                    raw_fields = {}
-                    raw_data = {}
 
             if not iter_path:
                 iter_path = raw_fields.get("System.IterationPath") or ""
@@ -1717,6 +2012,9 @@ class DevOpsBackend(QObject):
                 "linked_repos": linked_repos[:8],
                 "linked_repo_count": len(linked_repos),
             })
+
+        self._work_items_filtered_by_area_path_count = filtered_by_area_path_count
+        self._work_items_total_before_area_filter = total_before_area_filter
 
         # Resolve Backlog Hierarchy (Level 1-4), PBS Syntax Grouping, and Level 3 Prio 1 Priorities
         all_wis_map = {w["id"]: w for w in wi_list}
