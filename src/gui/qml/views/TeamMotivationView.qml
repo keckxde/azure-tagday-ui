@@ -33,7 +33,11 @@ Item {
     function openMemberProfile(memberObj) {
         if (!memberObj) return;
         root.selectedMember = memberObj;
-        root.isProfileDrawerOpen = true;
+        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function") {
+            window.openRightSidebar("contributor_profile", memberObj.name, "Contributor & Gamification Profile", memberObj);
+        } else {
+            root.isProfileDrawerOpen = true;
+        }
     }
 
     function copySummaryToClipboard() {
@@ -161,6 +165,46 @@ Item {
                                     font.pixelSize: 11
                                     font.weight: Font.DemiBold
                                     color: "#79c0ff"
+                                }
+                            }
+                        }
+
+                        // Preview Retro Summary in Sidebar Button
+                        Rectangle {
+                            implicitHeight: 34
+                            implicitWidth: prevBtnRow.implicitWidth + 20
+                            radius: 6
+                            color: prevMa.containsMouse ? "#212836" : "#161b22"
+                            border.color: "#388bfd"
+                            border.width: 1
+
+                            RowLayout {
+                                id: prevBtnRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: "👁️"
+                                    font.pixelSize: 13
+                                }
+                                Text {
+                                    text: "Preview Retro"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: "#58a6ff"
+                                }
+                            }
+
+                            MouseArea {
+                                id: prevMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                        var rep = backend.get_report_content("team_motivation");
+                                        window.openRightSidebar("report_preview", "Sprint Retro & Team Motivation", "Sprint Summary Markdown", rep);
+                                    }
                                 }
                             }
                         }

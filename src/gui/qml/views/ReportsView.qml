@@ -353,6 +353,31 @@ Item {
                                     }
                                 }
 
+                                Button {
+                                    text: "👁️ Preview in Sidebar"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#58a6ff"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 160
+                                        radius: 6
+                                        color: parent.hovered ? "#212836" : "#161b22"
+                                        border.color: "#388bfd"
+                                    }
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                            var rep = backend.get_report_content("tagday");
+                                            window.openRightSidebar("report_preview", "Tag Day Release Report", "Preview & Markdown Inspector", rep);
+                                        }
+                                    }
+                                }
+
                                 Item {
                                     Layout.fillWidth: true
                                 }
@@ -501,6 +526,31 @@ Item {
                                     }
                                 }
 
+                                Button {
+                                    text: "👁️ Preview in Sidebar"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#a371f7"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 160
+                                        radius: 6
+                                        color: parent.hovered ? "#281b3d" : "#161b22"
+                                        border.color: "#a371f7"
+                                    }
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                            var rep = backend.get_report_content("storage");
+                                            window.openRightSidebar("report_preview", "Storage & Artifacts Report", "Storage Footprint Preview", rep);
+                                        }
+                                    }
+                                }
+
                                 Item {
                                     Layout.fillWidth: true
                                 }
@@ -646,6 +696,31 @@ Item {
                                     onClicked: {
                                         if (backend)
                                             backend.open_revision_file();
+                                    }
+                                }
+
+                                Button {
+                                    text: "👁️ Preview in Sidebar"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#3fb950"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 160
+                                        radius: 6
+                                        color: parent.hovered ? "#1b3823" : "#161b22"
+                                        border.color: "#3fb950"
+                                    }
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                            var rep = backend.get_report_content("revision");
+                                            window.openRightSidebar("report_preview", "Release Notes & Revision", "REVISION.md Markdown Inspector", rep);
+                                        }
                                     }
                                 }
 
@@ -841,6 +916,32 @@ Item {
                                         if (backend) {
                                             var targetSprint = sprintSelectCombo.currentText;
                                             backend.open_sprint_report_file(targetSprint);
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    text: "👁️ Preview in Sidebar"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#58a6ff"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 160
+                                        radius: 6
+                                        color: parent.hovered ? "#212836" : "#161b22"
+                                        border.color: "#388bfd"
+                                    }
+                                    onClicked: {
+                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                            var targetSprint = sprintSelectCombo.currentText;
+                                            var rep = backend.get_report_content("sprint", targetSprint);
+                                            window.openRightSidebar("report_preview", "Sprint Report: " + targetSprint, "Sprint Velocity & Items Breakdown", rep);
                                         }
                                     }
                                 }

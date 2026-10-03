@@ -1687,9 +1687,26 @@ Item {
                                 spacing: 0
 
                                 // Assignee Info Column (Pinned Left)
-                                Item {
+                                Rectangle {
                                     Layout.preferredWidth: root.teamMemberColWidth
                                     Layout.fillHeight: true
+                                    color: assigneeColMa.containsMouse ? "#21262d" : "transparent"
+
+                                    MouseArea {
+                                        id: assigneeColMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
+                                                var details = backend.get_member_workload_details(modelData.assignee);
+                                                window.openRightSidebar("workload_member", modelData.assignee, "Member Workload Breakdown", details);
+                                            }
+                                        }
+                                    }
+
+                                    ToolTip.visible: assigneeColMa.containsMouse
+                                    ToolTip.text: "Click to open " + modelData.assignee + " workload details in Right Sidebar"
 
                                     RowLayout {
                                         anchors.fill: parent
@@ -1718,14 +1735,23 @@ Item {
                                             Layout.fillWidth: true
                                             spacing: 3
 
-                                            Text {
+                                            RowLayout {
                                                 Layout.fillWidth: true
-                                                text: modelData.assignee
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 12
-                                                font.weight: Font.DemiBold
-                                                color: modelData.assignee === "Unassigned" ? "#8b949e" : "#f0f6fc"
-                                                elide: Text.ElideRight
+                                                spacing: 4
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: modelData.assignee
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 12
+                                                    font.weight: Font.DemiBold
+                                                    color: modelData.assignee === "Unassigned" ? "#8b949e" : (assigneeColMa.containsMouse ? "#58a6ff" : "#f0f6fc")
+                                                    elide: Text.ElideRight
+                                                }
+                                                Text {
+                                                    text: "👤"
+                                                    font.pixelSize: 10
+                                                    visible: assigneeColMa.containsMouse
+                                                }
                                             }
 
                                             Row {

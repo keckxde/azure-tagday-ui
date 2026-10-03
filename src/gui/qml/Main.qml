@@ -192,11 +192,41 @@ ApplicationWindow {
     property real syncLogDrawerHeight: 380
     property bool isSidebarCollapsed: backend ? backend.sidebarCollapsed : false
 
+    property bool isRightSidebarOpen: false
+    property string rightSidebarMode: "workload_member" // "workload_member", "report_preview", "contributor_profile", "raw_file"
+    property string rightSidebarTitle: "Context Details"
+    property string rightSidebarSubtitle: ""
+    property var rightSidebarData: null
+    property real rightSidebarWidth: 440
+
+    function openRightSidebar(mode, title, subtitle, data) {
+        window.rightSidebarMode = mode || "workload_member";
+        window.rightSidebarTitle = title || "Context Details";
+        window.rightSidebarSubtitle = subtitle || "";
+        window.rightSidebarData = data;
+        window.isRightSidebarOpen = true;
+    }
+
+    function closeRightSidebar() {
+        window.isRightSidebarOpen = false;
+    }
+
+    function toggleRightSidebar() {
+        window.isRightSidebarOpen = !window.isRightSidebarOpen;
+    }
+
     Shortcut {
         sequence: "Ctrl+B"
         onActivated: {
             if (backend)
                 backend.toggleSidebar();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Alt+B"
+        onActivated: {
+            window.toggleRightSidebar();
         }
     }
 
@@ -1626,6 +1656,20 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+
+            // =========================================
+            // Dynamic Right Sidebar
+            // =========================================
+            RightSidebar {
+                id: globalRightSidebar
+                isOpen: window.isRightSidebarOpen
+                mode: window.rightSidebarMode
+                sidebarTitle: window.rightSidebarTitle
+                sidebarSubtitle: window.rightSidebarSubtitle
+                sidebarData: window.rightSidebarData
+                preferredWidth: window.rightSidebarWidth
+                onCloseRequested: window.closeRightSidebar()
             }
         }
     }

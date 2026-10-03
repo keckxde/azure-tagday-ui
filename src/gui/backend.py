@@ -6823,3 +6823,358 @@ class DevOpsBackend(QObject):
         }
         self.tagDayDataChanged.emit()
         return self._tagday_data
+
+    @Slot(str, result="QVariantMap")
+    def get_file_content(self, file_path: str):
+        """
+        Reads and returns text file content and file metadata.
+        Resolves relative paths against effectiveReportsDir or current working directory.
+        """
+        if not file_path:
+            return {"success": False, "error": "No file path provided", "content": ""}
+
+        # Attempt resolving path
+        candidates = [
+            file_path,
+            os.path.join(self.get_effective_reports_dir(), file_path),
+            os.path.join(os.getcwd(), file_path)
+        ]
+        target_path = None
+        for p in candidates:
+            if p and os.path.isfile(p):
+                target_path = os.path.abspath(p)
+                break
+
+        if not target_path:
+            return {
+                "success": False,
+                "error": f"File not found: {file_path}",
+                "file_path": file_path,
+                "file_name": os.path.basename(file_path),
+                "content": "",
+                "line_count": 0,
+                "word_count": 0,
+                "size_bytes": 0,
+                "modified_at": ""
+            }
+
+        try:
+            with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+
+            stats = os.stat(target_path)
+            lines = content.splitlines()
+            word_count = len(re.findall(r"\b\w+\b", content))
+            mod_time = datetime.fromtimestamp(stats.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            return {
+                "success": True,
+                "error": "",
+                "file_path": target_path,
+                "file_name": os.path.basename(target_path),
+                "content": content,
+                "line_count": len(lines),
+                "word_count": word_count,
+                "size_bytes": stats.st_size,
+                "modified_at": mod_time
+            }
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "file_path": target_path or file_path,
+                "file_name": os.path.basename(target_path or file_path),
+                "content": "",
+                "line_count": 0,
+                "word_count": 0,
+                "size_bytes": 0,
+                "modified_at": ""
+            }
+
+    @Slot(str, str, result="QVariantMap")
+    def get_report_content(self, report_type: str, param: str = ""):
+        """
+        Retrieves formatted report content, format type ('markdown'/'csv'/'text'), and file metadata
+        for Right Sidebar preview.
+        Supported report_types: 'tagday', 'revision', 'storage', 'sprint', 'workload_csv', 'team_motivation'.
+        """
+        r_type = (report_type or "").strip().lower()
+        eff_dir = self.get_effective_reports_dir()
+
+        if r_type in ("tagday", "tag_day"):
+            fpath = os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD)
+            res = self.get_file_content(fpath)
+            if res.get("success"):
+                res["title"] = "Tag Day Release Report"
+                res["format"] = "markdown"
+                return res
+            # Fallback to in-memory tag day data if file not yet written to disk
+            if self._tagday_data and self._tagday_data.get("repos_summary"):
+                import generate_tagday_report
+                try:
+                    md_text = generate_tagday_report.build_tagday_markdown(self._tagday_data, project_id=self.selectedProject)
+                    return {
+                        "success": True,
+                        "title": "Tag Day Release Report (Draft / Live)",
+                        "format": "markdown",
+                        "file_path": fpath,
+                        "file_name": devops_helper.TAGDAY_FILE_MD,
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": self._tagday_data.get("generated_at", "") or "Just now"
+                    }
+                except Exception as e:
+                    logger.debug(f"Could not build draft tagday markdown: {e}")
+            res["title"] = "Tag Day Release Report"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("revision", "release_notes"):
+            fpath = os.path.join(eff_dir, devops_helper.REVISION_FILE_MD)
+            res = self.get_file_content(fpath)
+            res["title"] = "Release Notes & Revision History"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("storage", "artifacts"):
+            candidates = [
+                os.path.join(eff_dir, "STORAGE.md"),
+                os.path.join(eff_dir, "BUILD_ARTIFACTS.md"),
+                os.path.join(os.getcwd(), "BUILD_ARTIFACTS.md")
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Storage & Build Artifacts Report"
+                        res["format"] = "markdown"
+                        return res
+            s_data = self._storage_data or {}
+            md_lines = ["# Storage & Build Artifacts Report", "", f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
+            md_lines.append(f"- **Total Storage Used:** {s_data.get('total_size_mb', 0):.2f} MB")
+            md_lines.append(f"- **Total Artifact Packages:** {len(s_data.get('packages', []))}")
+            md_lines.append("")
+            md_lines.append("## Packages Overview")
+            for pkg in s_data.get("packages", []):
+                md_lines.append(f"### {pkg.get('name', 'Package')}")
+                md_lines.append(f"- **Size:** {pkg.get('size_mb', 0):.2f} MB | **Files:** {pkg.get('files_count', 0)}")
+                md_lines.append(f"- **Path:** `{pkg.get('path', '')}`")
+                md_lines.append("")
+            content = "\n".join(md_lines)
+            return {
+                "success": True,
+                "title": "Storage & Build Artifacts Report",
+                "format": "markdown",
+                "file_path": os.path.join(eff_dir, "STORAGE.md"),
+                "file_name": "STORAGE.md",
+                "content": content,
+                "line_count": len(md_lines),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Generated on demand"
+            }
+
+        elif r_type in ("sprint", "sprint_report"):
+            sprint_name = param or (self.availableSprintList[0] if self.availableSprintList else "")
+            fpath = os.path.join(eff_dir, f"SPRINT_{sprint_name}.md")
+            if os.path.isfile(fpath):
+                res = self.get_file_content(fpath)
+                if res.get("success"):
+                    res["title"] = f"Sprint Report - {sprint_name}"
+                    res["format"] = "markdown"
+                    return res
+
+            matching_wis = [w for w in self._work_items if (w.get("sprint_week_name") == sprint_name or sprint_name in (w.get("iteration_path") or ""))]
+            md_lines = [
+                f"# Sprint Report: {sprint_name}",
+                "",
+                f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | **Items:** {len(matching_wis)}",
+                "",
+                "| ID | Type | Title | State | Assigned To | Target Date |",
+                "|---|---|---|---|---|---|"
+            ]
+            for wi in matching_wis:
+                t_date = wi.get("target_date") or "-"
+                md_lines.append(f"| #{wi.get('id')} | {wi.get('type')} | {wi.get('title')} | {wi.get('state')} | {wi.get('assigned_to')} | {t_date} |")
+
+            content = "\n".join(md_lines)
+            return {
+                "success": True,
+                "title": f"Sprint Report - {sprint_name}",
+                "format": "markdown",
+                "file_path": fpath,
+                "file_name": f"SPRINT_{sprint_name}.md",
+                "content": content,
+                "line_count": len(md_lines),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Live snapshot"
+            }
+
+        elif r_type in ("team_motivation", "motivation"):
+            content = self.get_team_motivation_markdown_summary()
+            return {
+                "success": True,
+                "title": "Team Motivation & Sprint Retro Summary",
+                "format": "markdown",
+                "file_path": "clipboard://retro_summary.md",
+                "file_name": "team_retro_summary.md",
+                "content": content,
+                "line_count": len(content.splitlines()),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Live calculated"
+            }
+
+        else:
+            res = self.get_file_content(report_type or param)
+            res["title"] = os.path.basename(res.get("file_path") or report_type)
+            res["format"] = "csv" if (res.get("file_name", "").endswith(".csv")) else ("markdown" if res.get("file_name", "").endswith(".md") else "text")
+            return res
+
+    @Slot(str, result="QVariantMap")
+    def parse_csv_to_table(self, csv_content_or_path: str):
+        """
+        Parses CSV string or file into structured table headers and rows.
+        """
+        import csv
+        import io
+        if not csv_content_or_path:
+            return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0}
+
+        text = csv_content_or_path
+        if os.path.isfile(csv_content_or_path):
+            try:
+                with open(csv_content_or_path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read CSV file: {e}")
+                return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0, "error": str(e)}
+
+        try:
+            reader = csv.reader(io.StringIO(text.strip()))
+            all_rows = list(reader)
+            if not all_rows:
+                return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0}
+
+            headers = all_rows[0]
+            rows = all_rows[1:]
+            return {
+                "headers": headers,
+                "rows": rows[:500],
+                "total_rows": len(rows),
+                "total_cols": len(headers)
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse CSV: {e}")
+            return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0, "error": str(e)}
+
+    @Slot(str, result="QVariantMap")
+    def get_member_workload_details(self, assignee_name: str):
+        """
+        Calculates detailed workload, active sprint focus, work items list,
+        and state breakdown for a specific team member.
+        """
+        name = (assignee_name or "").strip()
+        matching = []
+        is_all = not name or name.upper() == "ALL"
+
+        for wi in self._work_items:
+            assigned = wi.get("assigned_to") or ""
+            if is_all or assigned.strip().lower() == name.lower():
+                matching.append(wi)
+
+        total = len(matching)
+        active_count = 0
+        closed_count = 0
+        new_count = 0
+        overdue_count = 0
+        by_type_map = {}
+        by_sprint_map = {}
+        by_milestone_map = {}
+        by_state_map = {}
+
+        for wi in matching:
+            state = (wi.get("state") or "New").strip()
+            wtype = (wi.get("type") or "Task").strip()
+            sprint = wi.get("sprint_week_name") or "Unplanned"
+            ms = wi.get("milestone_name") or wi.get("effective_milestone_name") or ""
+            urgency = wi.get("urgency_status") or "none"
+
+            s_lower = state.lower()
+            if s_lower in ("closed", "done", "resolved", "completed", "removed", "cut"):
+                closed_count += 1
+            elif s_lower in ("active", "in progress", "doing", "investigating"):
+                active_count += 1
+            else:
+                new_count += 1
+
+            if urgency == "overdue":
+                overdue_count += 1
+
+            by_type_map[wtype] = by_type_map.get(wtype, 0) + 1
+            by_state_map[state] = by_state_map.get(state, 0) + 1
+            if ms:
+                by_milestone_map[ms] = by_milestone_map.get(ms, 0) + 1
+
+            if sprint not in by_sprint_map:
+                by_sprint_map[sprint] = {"sprint": sprint, "total": 0, "active": 0, "closed": 0, "overdue": 0}
+            by_sprint_map[sprint]["total"] += 1
+            if s_lower in ("closed", "done", "resolved", "completed"):
+                by_sprint_map[sprint]["closed"] += 1
+            else:
+                by_sprint_map[sprint]["active"] += 1
+            if urgency == "overdue":
+                by_sprint_map[sprint]["overdue"] += 1
+
+        completion_pct = round((closed_count / total * 100)) if total > 0 else 0
+
+        def sprint_sort_key(s_dict):
+            y, w, _ = utils.parse_sprint_week(s_dict["sprint"])
+            return (y or 0, w or 0)
+        sprints_list = sorted(by_sprint_map.values(), key=sprint_sort_key, reverse=True)
+
+        sorted_wis = sorted(matching, key=lambda x: (x.get("urgency_status") == "overdue", x.get("id") or 0), reverse=True)
+        recent_items = []
+        for wi in sorted_wis[:30]:
+            recent_items.append({
+                "id": wi.get("id"),
+                "title": wi.get("title") or f"Work Item #{wi.get('id')}",
+                "type": wi.get("type") or "Task",
+                "state": wi.get("state") or "New",
+                "sprint_week_name": wi.get("sprint_week_name") or "",
+                "iteration_path": wi.get("iteration_path") or "",
+                "target_date": wi.get("target_date") or "",
+                "deadline_str": wi.get("deadline_str") or "",
+                "urgency_badge": wi.get("urgency_badge") or "",
+                "urgency_color": wi.get("urgency_color") or "#8b949e",
+                "urgency_status": wi.get("urgency_status") or "none",
+                "tfs_url": wi.get("tfs_url") or "",
+                "tfs_sprint_url": wi.get("tfs_sprint_url") or "",
+                "milestone_name": wi.get("milestone_name") or wi.get("effective_milestone_name") or "",
+                "level1_pbs": wi.get("level1_pbs") or "",
+                "level2_pbs": wi.get("level2_pbs") or "",
+                "is_prio1": wi.get("is_prio1", False)
+            })
+
+        parts = name.split()
+        initials = "".join(p[0].upper() for p in parts[:2]) if parts else "U"
+
+        return {
+            "assignee": name,
+            "initials": initials,
+            "total_items": total,
+            "active_items": active_count,
+            "closed_items": closed_count,
+            "new_items": new_count,
+            "overdue_items": overdue_count,
+            "completion_rate": completion_pct,
+            "by_type": [{"type": k, "count": v} for k, v in sorted(by_type_map.items(), key=lambda x: x[1], reverse=True)],
+            "by_state": [{"state": k, "count": v} for k, v in sorted(by_state_map.items(), key=lambda x: x[1], reverse=True)],
+            "by_milestone": [{"milestone": k, "count": v} for k, v in sorted(by_milestone_map.items(), key=lambda x: x[1], reverse=True)],
+            "sprints": sprints_list[:12],
+            "work_items": recent_items
+        }
