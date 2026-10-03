@@ -16,9 +16,9 @@ Item {
     property bool shiftSprintOnlyFilter: false
     property string tdRepoFilter: "all" // "all", "prs", "branches"
     property bool isTdSidebarOpen: true
-    property real tdSidebarWidth: (backend && backend.rightSidebarWidth) ? Math.max(380, Math.min(850, backend.rightSidebarWidth)) : 520
-    property real minTdSidebarWidth: 360
-    property real maxTdSidebarWidth: 850
+    property real minTdSidebarWidth: 380
+    property real maxTdSidebarWidth: Math.max(650, Math.floor(root.width * 0.52))
+    property real tdSidebarWidth: (backend && backend.rightSidebarWidth && backend.rightSidebarWidth >= 400) ? Math.max(minTdSidebarWidth, Math.min(maxTdSidebarWidth, backend.rightSidebarWidth)) : Math.max(minTdSidebarWidth, Math.floor(root.width * 0.50))
     property string tdRepoSearchQuery: ""
     property int tdSidebarView: 0 // 0: Selected Repo Inspector, 1: Global Changes Timeline
 
@@ -194,6 +194,7 @@ Item {
         // ==========================================
         Rectangle {
             Layout.fillWidth: true
+            Layout.minimumWidth: Math.floor(root.width * 0.48)
             Layout.fillHeight: true
             color: "transparent"
             clip: true
@@ -4311,7 +4312,8 @@ Item {
                     onPositionChanged: function(mouse) {
                         if (pressed) {
                             var delta = mouse.x - tdDragHandle._startX;
-                            var newW = Math.max(root.minTdSidebarWidth, Math.min(root.maxTdSidebarWidth, tdDragHandle._startWidth - delta));
+                            var maxW = Math.max(root.minTdSidebarWidth, Math.floor(root.width * 0.52));
+                            var newW = Math.max(root.minTdSidebarWidth, Math.min(maxW, tdDragHandle._startWidth - delta));
                             root.tdSidebarWidth = newW;
                         }
                     }
@@ -4370,7 +4372,7 @@ Item {
                                     font.weight: root.tdSidebarView === 0 ? Font.Bold : Font.Normal
                                     color: root.tdSidebarView === 0 ? "#58a6ff" : "#8b949e"
                                     elide: Text.ElideRight
-                                    Layout.maximumWidth: root.tdSidebarWidth - 220
+                                    Layout.maximumWidth: root.tdSidebarWidth - 140
                                 }
                             }
 
