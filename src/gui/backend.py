@@ -7559,6 +7559,7 @@ class DevOpsBackend(QObject):
                 "modified_at": ""
             }
 
+    @Slot(str, result="QVariantMap")
     @Slot(str, str, result="QVariantMap")
     def get_report_content(self, report_type: str, param: str = ""):
         """
