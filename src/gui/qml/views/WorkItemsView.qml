@@ -312,16 +312,21 @@ Item {
 
     // ========================
     // Color helpers
-    // ========================
     function typeColor(t) {
         switch((t || "").toLowerCase()) {
-            case "bug":         return "#da3633"
+            case "bug":
+            case "defect":
+            case "problem":     return "#da3633"
             case "feature":     return "#388bfd"
             case "epic":        return "#8250df"
-            case "requirement": return "#1a7f37"
+            case "user story":
+            case "story":
+            case "product backlog item":
+            case "pbi":         return "#a371f7"
+            case "requirement": return "#a371f7"
             case "task":        return "#d29922"
-            case "test case":   return "#0969da"
-            case "test plan":   return "#0969da"
+            case "test case":
+            case "test plan":
             case "test suite":  return "#0969da"
             default:            return "#6e7681"
         }
@@ -542,14 +547,14 @@ Item {
                 onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
             }
 
-            // Group by Story / Bug Toggle Button
+            // Group by Story / Req / Bug Toggle Button
             Button {
                 id: toggleGroupingBtn
-                text: root.groupByStoryBug ? "📑 Grouped (Story/Bug)" : "📄 Flat View"
+                text: root.groupByStoryBug ? "📑 Grouped (Story/Req/Bug)" : "📄 Flat View"
                 font.weight: Font.DemiBold
                 font.pixelSize: 11
                 ToolTip.visible: hovered
-                ToolTip.text: root.groupByStoryBug ? "Currently grouping Tasks under their parent User Story or Bug.\nClick to view flat table list." : "Currently showing flat table list.\nClick to group Tasks under their parent User Story or Bug."
+                ToolTip.text: root.groupByStoryBug ? "Currently grouping Tasks under their parent User Story, Requirement, or Bug.\nClick to view flat table list." : "Currently showing flat table list.\nClick to group Tasks under their parent User Story, Requirement, or Bug."
                 contentItem: Text {
                     text: parent.text
                     font: parent.font

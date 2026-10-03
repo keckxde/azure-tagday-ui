@@ -797,8 +797,8 @@ Rectangle {
                                             Text {
                                                 text: {
                                                     var t = (modelData.type || "").toLowerCase();
-                                                    if (t.indexOf("bug") !== -1) return "🐛";
-                                                    if (t.indexOf("story") !== -1 || t.indexOf("user story") !== -1) return "📖";
+                                                    if (t.indexOf("bug") !== -1 || t.indexOf("defect") !== -1) return "🐛";
+                                                    if (t.indexOf("story") !== -1 || t.indexOf("user story") !== -1 || t.indexOf("requirement") !== -1 || t.indexOf("product backlog item") !== -1) return "📖";
                                                     if (t.indexOf("feature") !== -1) return "⭐";
                                                     return "🛠️";
                                                 }
