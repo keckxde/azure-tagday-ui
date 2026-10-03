@@ -12,6 +12,7 @@ Item {
     property var selectedMember: null
     property bool isProfileDrawerOpen: false
     property string copyToastMessage: ""
+    property string activeTab: "overview" // "overview", "leaderboards", "roster", "badges"
 
     readonly property var motivationData: (backend && backend.teamMotivationData) ? backend.teamMotivationData : {}
     readonly property var teamSummary: motivationData && motivationData.team_summary ? motivationData.team_summary : {}
@@ -380,9 +381,145 @@ Item {
             }
 
             // ==========================================
+            // Team Motivation Tab Navigation Bar
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: tabNavLayout.implicitHeight + 16
+                radius: 8
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+
+                RowLayout {
+                    id: tabNavLayout
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 8
+
+                    Repeater {
+                        model: [
+                            {
+                                id: "overview",
+                                icon: "🏆",
+                                label: "Overview & Podium",
+                                desc: "Sprint KPIs, Top 3 & Radar",
+                                badge: (podiumList && podiumList.length > 0) ? (podiumList.length + " on Podium") : "",
+                                badgeColor: "#ffd700"
+                            },
+                            {
+                                id: "leaderboards",
+                                icon: "🥇",
+                                label: "Leaderboards & Rhythm",
+                                desc: "Category Champions & Time",
+                                badge: "8 Categories",
+                                badgeColor: "#58a6ff"
+                            },
+                            {
+                                id: "roster",
+                                icon: "👥",
+                                label: "Team Roster",
+                                desc: "All Contributors & Profiles",
+                                badge: (membersList && membersList.length > 0) ? (membersList.length + " Members") : "",
+                                badgeColor: "#3fb950"
+                            },
+                            {
+                                id: "badges",
+                                icon: "🎖️",
+                                label: "Badges & Achievements",
+                                desc: "Unlockable Badges Gallery",
+                                badge: (allBadgesList && allBadgesList.length > 0) ? (allBadgesList.length + " Badges") : "",
+                                badgeColor: "#d2a8ff"
+                            }
+                        ]
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 50
+                            radius: 6
+                            property bool isSelected: root.activeTab === modelData.id
+                            color: isSelected 
+                                ? Qt.rgba(31/255, 111/255, 235/255, 0.18) 
+                                : (tabMa.containsMouse ? "#21262d" : "#0d1117")
+                            border.color: isSelected 
+                                ? "#58a6ff" 
+                                : (tabMa.containsMouse ? "#388bfd" : "#30363d")
+                            border.width: isSelected ? 2 : 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 10
+
+                                Text {
+                                    text: modelData.icon
+                                    font.pixelSize: 18
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    RowLayout {
+                                        spacing: 6
+                                        Text {
+                                            text: modelData.label
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: parent.parent.parent.parent.isSelected ? Font.Bold : Font.DemiBold
+                                            color: parent.parent.parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
+                                        }
+
+                                        Rectangle {
+                                            visible: modelData.badge !== ""
+                                            implicitHeight: 16
+                                            implicitWidth: tabBadgeTxt.implicitWidth + 8
+                                            radius: 8
+                                            color: "#161b22"
+                                            border.color: modelData.badgeColor
+                                            border.width: 1
+
+                                            Text {
+                                                id: tabBadgeTxt
+                                                anchors.centerIn: parent
+                                                text: modelData.badge
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: modelData.badgeColor
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.desc
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: parent.parent.parent.isSelected ? "#79c0ff" : "#8b949e"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: tabMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.activeTab = modelData.id
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Team Pulse KPI Statistics Cards
             // ==========================================
             GridLayout {
+                visible: root.activeTab === "overview"
                 Layout.fillWidth: true
                 columns: width > 1200 ? 5 : (width > 800 ? 3 : 1)
                 columnSpacing: 12
@@ -467,7 +604,7 @@ Item {
             // Sprint Podium (Top 3 Gold, Silver, Bronze)
             // ==========================================
             Item {
-                visible: podiumList.length > 0
+                visible: (root.activeTab === "overview") && (podiumList.length > 0)
                 Layout.fillWidth: true
                 implicitHeight: 190
 
@@ -639,6 +776,7 @@ Item {
             // Team Activity Rhythms & 24-Hour / 7-Day Time Distribution
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "leaderboards"
                 Layout.fillWidth: true
                 implicitHeight: rhythmCol.implicitHeight + 36
                 radius: 10
@@ -1174,6 +1312,7 @@ Item {
             // Category Competitions & Mini Leaderboards Grid
             // ==========================================
             Text {
+                visible: root.activeTab === "leaderboards"
                 text: "⚔️ Category Champions & Competitions"
                 font.family: "Segoe UI, sans-serif"
                 font.pixelSize: 16
@@ -1183,6 +1322,7 @@ Item {
             }
 
             GridLayout {
+                visible: root.activeTab === "leaderboards"
                 Layout.fillWidth: true
                 columns: width > 1150 ? 4 : (width > 850 ? 2 : 1)
                 columnSpacing: 14
@@ -1312,6 +1452,7 @@ Item {
             // Backlog State Hygiene & Stale Task Radar ("The Ignorer Watch")
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "overview"
                 Layout.fillWidth: true
                 implicitHeight: hygieneCol.implicitHeight + 36
                 radius: 10
@@ -1638,6 +1779,7 @@ Item {
             // Full Team Contributor Table & Badges Showcase
             // ==========================================
             RowLayout {
+                visible: root.activeTab === "roster"
                 Layout.fillWidth: true
                 Layout.topMargin: 10
                 spacing: 12
@@ -1696,6 +1838,7 @@ Item {
 
             // Table Header
             Rectangle {
+                visible: root.activeTab === "roster"
                 Layout.fillWidth: true
                 height: 34
                 color: "#161b22"
@@ -1725,6 +1868,7 @@ Item {
 
             // Members Table Rows
             ColumnLayout {
+                visible: root.activeTab === "roster"
                 Layout.fillWidth: true
                 spacing: 4
 
@@ -1948,6 +2092,7 @@ Item {
             // Badge Legend / Unlockable Badges Gallery
             // ==========================================
             Text {
+                visible: root.activeTab === "badges"
                 text: "🎖️ Unlockable Sprint & Team Badges"
                 font.family: "Segoe UI, sans-serif"
                 font.pixelSize: 16
@@ -1957,6 +2102,7 @@ Item {
             }
 
             GridLayout {
+                visible: root.activeTab === "badges"
                 Layout.fillWidth: true
                 columns: width > 1100 ? 3 : (width > 700 ? 2 : 1)
                 columnSpacing: 12
