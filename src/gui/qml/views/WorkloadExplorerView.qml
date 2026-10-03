@@ -324,11 +324,11 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: detailDrawer.visible ? detailDrawer.left : parent.right
+        anchors.right: parent.right
         anchors.leftMargin: 20
         anchors.topMargin: 20
         anchors.bottomMargin: 20
-        anchors.rightMargin: detailDrawer.visible ? 12 : 20
+        anchors.rightMargin: 20
         spacing: 16
 
         // ====================== Top Header & Controls ======================
