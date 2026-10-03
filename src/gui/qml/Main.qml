@@ -284,6 +284,30 @@ ApplicationWindow {
         }
     }
 
+    function openGlobalSearch(initialQuery) {
+        if (globalSearchDialog) {
+            if (typeof globalSearchDialog.openSearch === "function") {
+                globalSearchDialog.openSearch(initialQuery || "");
+            } else if (typeof globalSearchDialog.open === "function") {
+                globalSearchDialog.open();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        onActivated: {
+            window.openGlobalSearch();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+F"
+        onActivated: {
+            window.openGlobalSearch();
+        }
+    }
+
     // ==========================================
     // Scalable Root Container for Typography & High-DPI Zoom
     // ==========================================
@@ -469,6 +493,16 @@ ApplicationWindow {
                         ColumnLayout {
                             width: sidebarRect.width
                             spacing: 3
+
+                            // Global Search (Ctrl+F)
+                            NavItem {
+                                iconText: "🔍"
+                                label: "Search"
+                                badgeText: "Ctrl+F"
+                                active: false
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openGlobalSearch()
+                            }
 
                             // Top-Level Dashboard
                             NavItem {
@@ -1737,5 +1771,12 @@ ApplicationWindow {
     // ==========================================
     MilestonesManagerDialog {
         id: milestonesManagerDialog
+    }
+
+    // ==========================================
+    // Global Search Modal Dialog (Ctrl+F)
+    // ==========================================
+    GlobalSearchDialog {
+        id: globalSearchDialog
     }
 }

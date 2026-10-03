@@ -7916,3 +7916,572 @@ class DevOpsBackend(QObject):
             "sprints": sprints_list[:12],
             "work_items": recent_items
         }
+
+    # =========================================================================
+    # Universal Global Search (Work Items, Commits, PRs, OI, MP, Scenarios, Repos)
+    # =========================================================================
+    @Slot(str, str, int, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def global_search(self, query: str = "", category_filter: str = "ALL", limit: int = 80) -> dict:
+        """
+        Performs ultra-fast, cross-domain search across Work Items, Git Commits,
+        Pull Requests, Open Item codes (OI/OIL), Merkpunkt codes (MP), Scenarios,
+        Repositories, and Milestones.
+        """
+        q = (query or "").strip()
+        cat_filter = (category_filter or "ALL").upper().strip()
+        max_limit = max(10, min(300, int(limit or 80)))
+
+        counts = {
+            "all": 0,
+            "work_items": 0,
+            "commits": 0,
+            "pull_requests": 0,
+            "open_items": 0,
+            "merkpunkte": 0,
+            "scenarios": 0,
+            "repositories": 0,
+            "milestones": 0,
+        }
+
+        if not q:
+            return {
+                "query": "",
+                "category_filter": cat_filter,
+                "total_count": 0,
+                "counts_by_category": counts,
+                "results": [],
+            }
+
+        q_lower = q.lower()
+        q_clean = q.lstrip("#").lstrip("!").strip()
+        
+        # Check if query contains numeric ID (e.g. 12345, #12345, PR 42, WI 12345)
+        num_match = re.search(r'\b\d+\b', q)
+        query_num = int(num_match.group(0)) if num_match else None
+        
+        # Extract schematic tags from search query (e.g. [OI_171], [MP_01], [SCENARIO_12])
+        extracted_query_schematics = devops_helper.extract_schematics_from_text(q)
+        is_oi_query = bool(re.search(r'\b(oi|oil)[_\-\s]?\d*\b', q_lower)) or any("[OI_" in s or "[OIL_" in s for s in extracted_query_schematics)
+        is_mp_query = bool(re.search(r'\b(mp)[_\-\s]?\d*\b', q_lower)) or any("[MP_" in s for s in extracted_query_schematics)
+        is_scenario_query = bool(re.search(r'\b(scenario|scen)[_\-\s]?\d*\b', q_lower)) or any("[SCENARIO_" in s or "[SCEN_" in s for s in extracted_query_schematics)
+
+        # ADO / TFS URL components
+        base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
+        col = (getattr(devops_helper, "DEFAULT_COLLECTION", "") or getattr(devops_helper, "AZURE_COLLECTION", "") or "").strip("/")
+        proj = (getattr(devops_helper, "DEFAULT_PROJECT", "") or getattr(devops_helper, "AZURE_PROJECT_ID", "") or "").strip("/")
+
+        results_by_cat = {
+            "work_items": [],
+            "commits": [],
+            "pull_requests": [],
+            "open_items": [],
+            "merkpunkte": [],
+            "scenarios": [],
+            "repositories": [],
+            "milestones": [],
+        }
+
+        # ---------------------------------------------------------------------
+        # 1. Search Work Items
+        # ---------------------------------------------------------------------
+        wis_to_search = self._work_items
+        if not wis_to_search and self._cache_db:
+            try:
+                wis_to_search = self._cache_db.get_all_work_items(include_deleted=True)
+            except Exception:
+                wis_to_search = []
+
+        for wi in wis_to_search:
+            if wi.get("deleted"):
+                continue
+            wi_id = wi.get("id") or 0
+            wi_title = wi.get("title") or f"Work Item #{wi_id}"
+            wi_type = wi.get("type") or "Task"
+            wi_state = wi.get("state") or "New"
+            wi_assignee = wi.get("assigned_to") or "Unassigned"
+            wi_tags = wi.get("tags") or ""
+            if not wi_tags and wi.get("fields"):
+                wi_tags = wi.get("fields", {}).get("System.Tags") or ""
+            elif not wi_tags and wi.get("raw_json"):
+                try:
+                    wi_tags = json.loads(wi["raw_json"]).get("fields", {}).get("System.Tags") or ""
+                except Exception:
+                    pass
+
+            wi_sprint = wi.get("sprint_week_name") or wi.get("iteration_name") or ""
+            wi_url = wi.get("tfs_url") or (f"{base_url}/{col}/{proj}/_workitems/edit/{wi_id}" if base_url else "")
+
+            # Extract schematics from title and tags
+            combined_text = f"{wi_title} {wi_tags}"
+            schematics = devops_helper.extract_schematics_from_text(combined_text)
+
+            # Match calculation & Scoring
+            matched = False
+            relevance = 0
+
+            has_schematic_match = (
+                any(s in extracted_query_schematics for s in schematics)
+                or any(q_lower in s.lower() for s in schematics)
+                or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+            )
+
+            if query_num and wi_id == query_num:
+                matched = True
+                relevance += 1000  # Exact ID match gets highest priority
+            elif str(wi_id).startswith(q_clean):
+                matched = True
+                relevance += 500
+            elif q_lower in wi_title.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in str(wi_assignee).lower():
+                matched = True
+                relevance += 100
+            elif q_lower in str(wi_tags).lower():
+                matched = True
+                relevance += 150
+            elif q_lower in str(wi_sprint).lower():
+                matched = True
+                relevance += 50
+            elif has_schematic_match:
+                matched = True
+                relevance += 300
+
+            if matched:
+                t_lower = str(wi_type).lower()
+                is_bug = t_lower in ("bug", "defect", "problem")
+                is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
+                is_feat = t_lower in ("feature", "epic")
+                icon = "🐛" if is_bug else ("🎯" if is_feat else ("📘" if is_story else "📋"))
+                badge_color = "#f85149" if is_bug else ("#a371f7" if is_feat else ("#58a6ff" if is_story else "#3fb950"))
+
+                item_payload = {
+                    "key": f"wi_{wi_id}",
+                    "category": "work_items",
+                    "category_label": "Work Item",
+                    "type": wi_type,
+                    "icon": icon,
+                    "id": str(wi_id),
+                    "title": wi_title,
+                    "subtitle": f"{wi_type} • {wi_state} • {wi_assignee} • {wi_sprint or 'Backlog'}",
+                    "badge": f"#{wi_id}",
+                    "badge_color": badge_color,
+                    "state": wi_state,
+                    "assignee": wi_assignee,
+                    "iteration": wi_sprint,
+                    "schematics": schematics,
+                    "url": wi_url,
+                    "action_type": "open_work_item",
+                    "target_id": wi_id,
+                    "relevance": relevance,
+                }
+                results_by_cat["work_items"].append(item_payload)
+
+                # Check if it belongs to Open Items, Merkpunkte, or Scenarios
+                has_oi = any("[OI_" in s or "[OIL_" in s for s in schematics) or ("OI" in str(wi_tags))
+                has_mp = any("[MP_" in s for s in schematics) or ("MP" in str(wi_tags))
+                has_scen = any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) or ("scenario" in str(wi_tags).lower())
+
+                if has_oi and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                    oi_copy = dict(item_payload)
+                    oi_copy["key"] = f"oi_wi_{wi_id}"
+                    oi_copy["category"] = "open_items"
+                    oi_copy["category_label"] = "Open Item"
+                    oi_copy["icon"] = "📌"
+                    oi_copy["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI #{wi_id}")
+                    oi_copy["badge_color"] = "#d29922"
+                    results_by_cat["open_items"].append(oi_copy)
+
+                if has_mp and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                    mp_copy = dict(item_payload)
+                    mp_copy["key"] = f"mp_wi_{wi_id}"
+                    mp_copy["category"] = "merkpunkte"
+                    mp_copy["category_label"] = "Merkpunkt"
+                    mp_copy["icon"] = "💡"
+                    mp_copy["badge"] = next((s for s in schematics if "[MP_" in s), f"MP #{wi_id}")
+                    mp_copy["badge_color"] = "#3fb950"
+                    results_by_cat["merkpunkte"].append(mp_copy)
+
+                if has_scen and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                    scen_copy = dict(item_payload)
+                    scen_copy["key"] = f"scen_wi_{wi_id}"
+                    scen_copy["category"] = "scenarios"
+                    scen_copy["category_label"] = "Scenario"
+                    scen_copy["icon"] = "🎬"
+                    scen_copy["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario")
+                    scen_copy["badge_color"] = "#f0883e"
+                    results_by_cat["scenarios"].append(scen_copy)
+
+        # ---------------------------------------------------------------------
+        # 2. Search Pull Requests
+        # ---------------------------------------------------------------------
+        prs_to_search = getattr(self, "_pull_requests", None) or []
+        if not prs_to_search and self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    rows = conn.execute(
+                        "SELECT id, repo_id, title, status, source_branch, target_branch, created_by, raw_json FROM pull_requests"
+                    ).fetchall()
+                    prs_to_search = [dict(r) for r in rows]
+            except Exception as e:
+                logger.debug(f"Error fetching PRs from DB for search: {e}")
+                prs_to_search = []
+
+        for pr in prs_to_search:
+            pr_id = pr.get("id") or pr.get("pr_id") or 0
+            pr_title = pr.get("title") or f"PR #{pr_id}"
+            pr_repo = pr.get("repo_name") or pr.get("repo_id") or "Repository"
+            pr_source = pr.get("source_branch") or ""
+            pr_target = pr.get("target_branch") or ""
+            pr_status = pr.get("status") or "active"
+            pr_creator = pr.get("created_by") or ""
+            pr_url = pr.get("web_url") or (f"{base_url}/{col}/{proj}/_git/{pr_repo}/pullrequest/{pr_id}" if base_url else "")
+
+            schematics = devops_helper.extract_schematics_from_text(pr_title)
+
+            matched = False
+            relevance = 0
+
+            has_schematic_match = (
+                any(s in extracted_query_schematics for s in schematics)
+                or any(q_lower in s.lower() for s in schematics)
+                or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+            )
+
+            if query_num and pr_id == query_num:
+                matched = True
+                relevance += 950
+            elif str(pr_id).startswith(q_clean):
+                matched = True
+                relevance += 450
+            elif q_lower in pr_title.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in pr_repo.lower():
+                matched = True
+                relevance += 120
+            elif q_lower in pr_creator.lower():
+                matched = True
+                relevance += 100
+            elif q_lower in pr_source.lower() or q_lower in pr_target.lower():
+                matched = True
+                relevance += 100
+            elif has_schematic_match:
+                matched = True
+                relevance += 300
+
+            if matched:
+                pr_badge_color = "#a371f7" if pr_status == "completed" else ("#3fb950" if pr_status == "active" else "#8b949e")
+                pr_payload = {
+                    "key": f"pr_{pr_id}",
+                    "category": "pull_requests",
+                    "category_label": "Pull Request",
+                    "type": "Pull Request",
+                    "icon": "🔀",
+                    "id": str(pr_id),
+                    "title": pr_title,
+                    "subtitle": f"PR #{pr_id} in {pr_repo} • {pr_source} ➔ {pr_target} • by {pr_creator or 'Unknown'} ({pr_status})",
+                    "badge": f"PR #{pr_id}",
+                    "badge_color": pr_badge_color,
+                    "state": pr_status,
+                    "assignee": pr_creator,
+                    "repo": pr_repo,
+                    "schematics": schematics,
+                    "url": pr_url,
+                    "action_type": "open_url",
+                    "target_id": pr_id,
+                    "relevance": relevance,
+                }
+                results_by_cat["pull_requests"].append(pr_payload)
+
+                # Check if PR maps to OI, MP, or Scenario
+                if any("[OI_" in s or "[OIL_" in s for s in schematics) and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                    oi_pr = dict(pr_payload)
+                    oi_pr["key"] = f"oi_pr_{pr_id}"
+                    oi_pr["category"] = "open_items"
+                    oi_pr["category_label"] = "Open Item (PR)"
+                    oi_pr["icon"] = "📌"
+                    oi_pr["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI (PR #{pr_id})")
+                    oi_pr["badge_color"] = "#d29922"
+                    results_by_cat["open_items"].append(oi_pr)
+
+                if any("[MP_" in s for s in schematics) and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                    mp_pr = dict(pr_payload)
+                    mp_pr["key"] = f"mp_pr_{pr_id}"
+                    mp_pr["category"] = "merkpunkte"
+                    mp_pr["category_label"] = "Merkpunkt (PR)"
+                    mp_pr["icon"] = "💡"
+                    mp_pr["badge"] = next((s for s in schematics if "[MP_" in s), f"MP (PR #{pr_id})")
+                    mp_pr["badge_color"] = "#3fb950"
+                    results_by_cat["merkpunkte"].append(mp_pr)
+
+                if any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                    scen_pr = dict(pr_payload)
+                    scen_pr["key"] = f"scen_pr_{pr_id}"
+                    scen_pr["category"] = "scenarios"
+                    scen_pr["category_label"] = "Scenario (PR)"
+                    scen_pr["icon"] = "🎬"
+                    scen_pr["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario (PR)")
+                    scen_pr["badge_color"] = "#f0883e"
+                    results_by_cat["scenarios"].append(scen_pr)
+
+        # ---------------------------------------------------------------------
+        # 3. Search Git Commits (via SQLite database)
+        # ---------------------------------------------------------------------
+        if self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    commit_sql = """
+                        SELECT commit_id, comment, author_name, author_date, repo_id
+                        FROM commits
+                        WHERE commit_id LIKE ? OR comment LIKE ? OR author_name LIKE ? OR repo_id LIKE ?
+                        ORDER BY author_date DESC
+                        LIMIT 60
+                    """
+                    pattern = f"%{q}%"
+                    c_rows = conn.execute(commit_sql, (pattern, pattern, pattern, pattern)).fetchall()
+                    for cr in c_rows:
+                        cid = cr["commit_id"] or ""
+                        short_cid = cid[:8] if len(cid) >= 8 else cid
+                        comment = (cr["comment"] or "").strip()
+                        c_title = comment.split("\n")[0] if comment else f"Commit {short_cid}"
+                        c_author = cr["author_name"] or "Unknown"
+                        c_date = (cr["author_date"] or "").split("T")[0]
+                        c_repo = cr["repo_id"] or "Repository"
+                        c_url = f"{base_url}/{col}/{proj}/_git/{c_repo}/commit/{cid}" if base_url else ""
+
+                        schematics = devops_helper.extract_schematics_from_text(comment)
+
+                        relevance = 150
+                        has_schematic_match = (
+                            any(s in extracted_query_schematics for s in schematics)
+                            or any(q_lower in s.lower() for s in schematics)
+                            or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                            or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+                        )
+
+                        if cid.lower().startswith(q_lower):
+                            relevance += 700
+                        elif q_lower in short_cid.lower():
+                            relevance += 500
+                        elif q_lower in c_title.lower():
+                            relevance += 180
+                        elif has_schematic_match:
+                            relevance += 250
+
+                        commit_payload = {
+                            "key": f"commit_{short_cid}",
+                            "category": "commits",
+                            "category_label": "Commit",
+                            "type": "Commit",
+                            "icon": "📜",
+                            "id": short_cid,
+                            "full_id": cid,
+                            "title": c_title,
+                            "subtitle": f"Commit {short_cid} in {c_repo} • by {c_author} on {c_date}",
+                            "badge": short_cid,
+                            "badge_color": "#d29922",
+                            "state": "Committed",
+                            "assignee": c_author,
+                            "repo": c_repo,
+                            "schematics": schematics,
+                            "url": c_url,
+                            "action_type": "open_url",
+                            "target_id": cid,
+                            "relevance": relevance,
+                        }
+                        results_by_cat["commits"].append(commit_payload)
+
+                        if any("[OI_" in s or "[OIL_" in s for s in schematics) and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                            oi_c = dict(commit_payload)
+                            oi_c["key"] = f"oi_commit_{short_cid}"
+                            oi_c["category"] = "open_items"
+                            oi_c["category_label"] = "Open Item (Commit)"
+                            oi_c["icon"] = "📌"
+                            oi_c["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI ({short_cid})")
+                            results_by_cat["open_items"].append(oi_c)
+
+                        if any("[MP_" in s for s in schematics) and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                            mp_c = dict(commit_payload)
+                            mp_c["key"] = f"mp_commit_{short_cid}"
+                            mp_c["category"] = "merkpunkte"
+                            mp_c["category_label"] = "Merkpunkt (Commit)"
+                            mp_c["icon"] = "💡"
+                            mp_c["badge"] = next((s for s in schematics if "[MP_" in s), f"MP ({short_cid})")
+                            results_by_cat["merkpunkte"].append(mp_c)
+
+                        if any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                            scen_c = dict(commit_payload)
+                            scen_c["key"] = f"scen_commit_{short_cid}"
+                            scen_c["category"] = "scenarios"
+                            scen_c["category_label"] = "Scenario (Commit)"
+                            scen_c["icon"] = "🎬"
+                            scen_c["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario (Commit)")
+                            results_by_cat["scenarios"].append(scen_c)
+            except Exception as e:
+                logger.debug(f"Error querying commits for search: {e}")
+
+        # ---------------------------------------------------------------------
+        # 4. Search Repositories
+        # ---------------------------------------------------------------------
+        repos_to_search = getattr(self, "_repositories", None) or []
+        if not repos_to_search and self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    rows = conn.execute(
+                        "SELECT id, name, default_branch, web_url FROM repositories"
+                    ).fetchall()
+                    repos_to_search = [dict(r) for r in rows]
+            except Exception as e:
+                logger.debug(f"Error fetching repositories from DB for search: {e}")
+                repos_to_search = []
+
+        for r in repos_to_search:
+            r_name = r.get("name") or ""
+            r_url = r.get("url") or r.get("web_url") or (f"{base_url}/{col}/{proj}/_git/{r_name}" if base_url else "")
+            r_branch = r.get("default_branch") or "main"
+            r_cat = r.get("category") or "General"
+
+            matched = False
+            relevance = 0
+
+            if r_name.lower() == q_lower:
+                matched = True
+                relevance += 900
+            elif q_lower in r_name.lower():
+                matched = True
+                relevance += 400
+            elif q_lower in str(r_cat).lower():
+                matched = True
+                relevance += 150
+
+            if matched:
+                results_by_cat["repositories"].append({
+                    "key": f"repo_{r_name}",
+                    "category": "repositories",
+                    "category_label": "Repository",
+                    "type": "Repository",
+                    "icon": "📦",
+                    "id": r_name,
+                    "title": r_name,
+                    "subtitle": f"Branch: {r_branch} • Category: {r_cat}",
+                    "badge": "Repo",
+                    "badge_color": "#1f6feb",
+                    "state": "Active",
+                    "assignee": "",
+                    "repo": r_name,
+                    "schematics": [],
+                    "url": r_url,
+                    "action_type": "open_repo",
+                    "target_id": r_name,
+                    "relevance": relevance,
+                })
+
+        # ---------------------------------------------------------------------
+        # 5. Search Milestones & Major Scenarios
+        # ---------------------------------------------------------------------
+        all_milestones = self.get_milestones()
+        for m in all_milestones:
+            m_id = m.get("id") or 0
+            m_name = m.get("name") or ""
+            m_desc = m.get("description") or ""
+            m_cat = (m.get("category_id") or "").lower()
+            m_cat_name = m.get("category_name") or "Milestone"
+            m_date = m.get("target_date") or m.get("start_date") or ""
+            m_team = m.get("team") or "All Teams"
+            m_color = m.get("category_color") or "#79c0ff"
+            m_icon = m.get("category_icon") or "🚩"
+
+            matched = False
+            relevance = 0
+
+            if q_lower in m_name.lower():
+                matched = True
+                relevance += 400
+            elif q_lower in m_desc.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in m_cat_name.lower() or q_lower in m_cat:
+                matched = True
+                relevance += 250
+
+            if matched:
+                is_scen = m_cat == "scenario" or "scenario" in m_name.lower()
+                cat_key = "scenarios" if is_scen else "milestones"
+                m_payload = {
+                    "key": f"ms_{m_id}_{m_name}",
+                    "category": cat_key,
+                    "category_label": "Scenario" if is_scen else "Milestone",
+                    "type": "Scenario" if is_scen else "Milestone",
+                    "icon": m_icon if m_icon else ("🎬" if is_scen else "🚩"),
+                    "id": str(m_id),
+                    "title": m_name,
+                    "subtitle": f"Target: {m_date or 'TBD'} • Category: {m_cat_name} • {m_team}",
+                    "badge": m_cat_name,
+                    "badge_color": m_color,
+                    "state": "Planned",
+                    "assignee": m_team,
+                    "repo": "",
+                    "schematics": [],
+                    "url": "",
+                    "action_type": "open_milestones",
+                    "target_id": m_id,
+                    "relevance": relevance,
+                }
+                results_by_cat[cat_key].append(m_payload)
+
+        # ---------------------------------------------------------------------
+        # Count & Filter Aggregation
+        # ---------------------------------------------------------------------
+        for cat_k, cat_items in results_by_cat.items():
+            counts[cat_k] = len(cat_items)
+            counts["all"] += len(cat_items)
+
+        # Select items based on active category filter
+        combined_results = []
+        if cat_filter in ("ALL", ""):
+            for cat_k, cat_items in results_by_cat.items():
+                combined_results.extend(cat_items)
+        elif cat_filter.lower() in results_by_cat:
+            combined_results = results_by_cat[cat_filter.lower()]
+        elif cat_filter == "WORK_ITEMS":
+            combined_results = results_by_cat["work_items"]
+        elif cat_filter == "COMMITS":
+            combined_results = results_by_cat["commits"]
+        elif cat_filter == "PULL_REQUESTS":
+            combined_results = results_by_cat["pull_requests"]
+        elif cat_filter == "OPEN_ITEMS":
+            combined_results = results_by_cat["open_items"]
+        elif cat_filter == "MERKPUNKTE":
+            combined_results = results_by_cat["merkpunkte"]
+        elif cat_filter == "SCENARIOS":
+            combined_results = results_by_cat["scenarios"]
+        elif cat_filter == "REPOSITORIES":
+            combined_results = results_by_cat["repositories"]
+        elif cat_filter == "MILESTONES":
+            combined_results = results_by_cat["milestones"]
+
+        # Sort by relevance descending
+        sorted_results = sorted(combined_results, key=lambda x: x.get("relevance", 0), reverse=True)
+
+        return {
+            "query": q,
+            "category_filter": cat_filter,
+            "total_count": len(sorted_results),
+            "counts_by_category": counts,
+            "results": sorted_results[:max_limit],
+        }
+
+    @Slot(str, str, int, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def globalSearch(self, query: str = "", category_filter: str = "ALL", limit: int = 80) -> dict:
+        """CamelCase alias for global_search."""
+        return self.global_search(query=query, category_filter=category_filter, limit=limit)
+
