@@ -188,45 +188,7 @@ Rectangle {
         }
     }
 
-    // ==========================================
-    // Left Drag-Resize Handle
-    // ==========================================
-    Rectangle {
-        id: leftDragBorder
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 6
-        color: dragHandleMa.containsMouse || dragHandleMa.pressed ? "#58a6ff" : "transparent"
-        z: 30
 
-        MouseArea {
-            id: dragHandleMa
-            anchors.fill: parent
-            anchors.margins: -4
-            hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
-            property real startGlobalX: 0
-            property real startWidth: 0
-
-            onPressed: function(mouse) {
-                var pt = mapToItem(null, mouse.x, mouse.y);
-                startGlobalX = pt.x;
-                startWidth = rightSidebarRoot.preferredWidth;
-            }
-            onPositionChanged: function(mouse) {
-                if (pressed) {
-                    var pt = mapToItem(null, mouse.x, mouse.y);
-                    var delta = startGlobalX - pt.x; // Dragging left increases width
-                    var newW = Math.max(rightSidebarRoot.minWidth, Math.min(rightSidebarRoot.maxWidth, startWidth + delta));
-                    rightSidebarRoot.preferredWidth = newW;
-                    if (typeof window !== "undefined" && typeof window.rightSidebarWidth !== "undefined") {
-                        window.rightSidebarWidth = newW;
-                    }
-                }
-            }
-        }
-    }
 
     ColumnLayout {
         anchors.fill: parent
