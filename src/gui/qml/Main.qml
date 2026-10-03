@@ -65,35 +65,28 @@ ApplicationWindow {
     }
 
     function navigateToPullRequests(filterArg, isStatus) {
-        window.currentTabIndex = 2;
+        window.currentTabIndex = 1;
         var applyPr = function(view) {
             if (!view) return;
-            if (isStatus) {
-                view.filterByStatus(filterArg);
-                view.filterByRepo("ALL");
-            } else if (filterArg) {
-                view.filterByRepo(filterArg);
-                view.filterByStatus("ALL");
-            } else {
-                view.filterByRepo("ALL");
-                view.filterByStatus("ALL");
+            if (typeof view.openPrSidebar === "function") {
+                view.openPrSidebar(filterArg, isStatus);
             }
         };
-        if (pullRequestsView) {
-            applyPr(pullRequestsView);
-        } else if (pullRequestsViewLoader) {
+        if (reposView) {
+            applyPr(reposView);
+        } else if (reposViewLoader) {
             var conn = function() {
-                if (pullRequestsViewLoader.item) {
-                    pullRequestsViewLoader.loaded.disconnect(conn);
-                    applyPr(pullRequestsViewLoader.item);
+                if (reposViewLoader.item) {
+                    reposViewLoader.loaded.disconnect(conn);
+                    applyPr(reposViewLoader.item);
                 }
             };
-            pullRequestsViewLoader.loaded.connect(conn);
+            reposViewLoader.loaded.connect(conn);
         }
     }
 
     function openPullRequestsPage() {
-        navigateToPullRequests("", false);
+        navigateToPullRequests("ALL", false);
     }
 
     function navigateToSprint(sprintName) {
@@ -557,15 +550,18 @@ ApplicationWindow {
                             NavItem {
                                 iconText: "📦"
                                 label: "Repositories"
-                                active: window.currentTabIndex === 1
+                                active: window.currentTabIndex === 1 && (reposView ? !reposView.isPrSidebarOpen : true)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: window.currentTabIndex = 1
+                                onClicked: {
+                                    window.currentTabIndex = 1;
+                                    if (reposView) reposView.isPrSidebarOpen = false;
+                                }
                             }
 
                             NavItem {
                                 iconText: "🔀"
                                 label: "Pull Requests"
-                                active: window.currentTabIndex === 2
+                                active: window.currentTabIndex === 1 && (reposView ? reposView.isPrSidebarOpen : false)
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.openPullRequestsPage()
                             }
