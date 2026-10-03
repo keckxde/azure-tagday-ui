@@ -20,6 +20,21 @@ Item {
     readonly property var podiumList: motivationData && motivationData.podium ? motivationData.podium : []
     readonly property var leaderboards: motivationData && motivationData.leaderboards ? motivationData.leaderboards : {}
     readonly property var membersList: motivationData && motivationData.members ? motivationData.members : []
+    readonly property var top4To10List: {
+        if (!membersList || membersList.length <= 3) return [];
+        var result = [];
+        var maxLen = Math.min(10, membersList.length);
+        for (var i = 3; i < maxLen; i++) {
+            var mem = membersList[i];
+            if (mem && ((mem.score || 0) > 0 || root.selectedTimeframe === "all_time")) {
+                result.push({
+                    rank: i + 1,
+                    member: mem
+                });
+            }
+        }
+        return result;
+    }
     readonly property var allBadgesList: motivationData && motivationData.all_badges ? motivationData.all_badges : []
     readonly property var staleRadarList: motivationData && motivationData.stale_radar ? motivationData.stale_radar : []
 
@@ -403,8 +418,8 @@ Item {
                                 id: "overview",
                                 icon: "🏆",
                                 label: "Overview & Podium",
-                                desc: "Sprint KPIs, Top 3 & Radar",
-                                badge: (podiumList && podiumList.length > 0) ? (podiumList.length + " on Podium") : "",
+                                desc: "Sprint KPIs, Top 10 & Radar",
+                                badge: (podiumList && podiumList.length > 0) ? (Math.min(10, membersList.length) + " Ranked") : "",
                                 badgeColor: "#ffd700"
                             },
                             {
@@ -766,6 +781,286 @@ Item {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.openMemberProfile(modelData.member)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // Places 4–10 (Honor Roll & Contenders)
+            // ==========================================
+            Rectangle {
+                visible: (root.activeTab === "overview") && (top4To10List.length > 0)
+                Layout.fillWidth: true
+                implicitHeight: top4To10Col.implicitHeight + 28
+                radius: 10
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+
+                ColumnLayout {
+                    id: top4To10Col
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 10
+
+                    // Section Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Rectangle {
+                            width: 28
+                            height: 28
+                            radius: 6
+                            color: "#1c2438"
+                            border.color: "#388bfd"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "🏅"
+                                font.pixelSize: 14
+                            }
+                        }
+
+                        ColumnLayout {
+                            spacing: 1
+                            Layout.fillWidth: true
+                            Text {
+                                text: "Hall of Fame Contenders — Places 4 to 10"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 13
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: "Top ranking team contributors chasing the podium with high activity and achievements"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                color: "#8b949e"
+                            }
+                        }
+
+                        Rectangle {
+                            implicitHeight: 22
+                            implicitWidth: top10CountTxt.implicitWidth + 12
+                            radius: 11
+                            color: "#1f334d"
+                            border.color: "#58a6ff"
+                            border.width: 1
+                            Text {
+                                id: top10CountTxt
+                                anchors.centerIn: parent
+                                text: top4To10List.length + " Contenders"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                color: "#79c0ff"
+                            }
+                        }
+                    }
+
+                    // Table / Row list of ranks 4 to 10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Repeater {
+                            model: top4To10List
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 46
+                                radius: 6
+                                color: rowMa.containsMouse ? "#21262d" : "#0d1117"
+                                border.color: rowMa.containsMouse ? "#58a6ff" : "#21262d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 10
+
+                                    // Rank Badge Pill
+                                    Rectangle {
+                                        width: 32
+                                        height: 24
+                                        radius: 12
+                                        color: modelData.rank === 4 ? "#2e2300" : (modelData.rank <= 5 ? "#1b2738" : "#1c2128")
+                                        border.color: modelData.rank === 4 ? "#d29922" : (modelData.rank <= 5 ? "#388bfd" : "#30363d")
+                                        border.width: 1
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "#" + modelData.rank
+                                            font.family: "Consolas, monospace"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: modelData.rank === 4 ? "#e3b341" : (modelData.rank <= 5 ? "#58a6ff" : "#8b949e")
+                                        }
+                                    }
+
+                                    // Initials circle
+                                    Rectangle {
+                                        width: 28
+                                        height: 28
+                                        radius: 14
+                                        color: "#21262d"
+                                        border.color: "#30363d"
+                                        border.width: 1
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.member.initials || "??"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Bold
+                                            color: "#c9d1d9"
+                                        }
+                                    }
+
+                                    // Name & Persona
+                                    ColumnLayout {
+                                        Layout.preferredWidth: 160
+                                        spacing: 1
+
+                                        Text {
+                                            text: modelData.member.name
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                            color: "#f0f6fc"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Text {
+                                            text: (modelData.member.time_stats && modelData.member.time_stats.persona) ? modelData.member.time_stats.persona : "Contributor"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            color: "#8b949e"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    // Activity Metrics Summary Chips
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        clip: true
+
+                                        Text {
+                                            text: (modelData.member.prs_closed || 0) + " PRs merged"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: (modelData.member.prs_closed || 0) > 0 ? "#3fb950" : "#6e7681"
+                                        }
+                                        Text { text: "•"; font.pixelSize: 8; color: "#30363d" }
+                                        Text {
+                                            text: (modelData.member.commits_count || 0) + " commits"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: (modelData.member.commits_count || 0) > 0 ? "#7ee787" : "#6e7681"
+                                        }
+                                        Text { text: "•"; font.pixelSize: 8; color: "#30363d" }
+                                        Text {
+                                            text: (modelData.member.tasks_completed || 0) + " tasks"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: (modelData.member.tasks_completed || 0) > 0 ? "#a371f7" : "#6e7681"
+                                        }
+                                        Text { text: "•"; font.pixelSize: 8; color: "#30363d" }
+                                        Text {
+                                            text: (modelData.member.prs_reviewed || 0) + " rev (" + (modelData.member.prs_approved || 0) + " app)"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: (modelData.member.prs_reviewed || 0) > 0 ? "#39c5cf" : "#6e7681"
+                                        }
+                                    }
+
+                                    // Streak Pill
+                                    Rectangle {
+                                        visible: modelData.member.current_streak_weeks > 0
+                                        implicitHeight: 18
+                                        implicitWidth: stTxt.implicitWidth + 8
+                                        radius: 9
+                                        color: "#3f1a18"
+                                        border.color: "#ff7b72"
+                                        border.width: 1
+
+                                        Text {
+                                            id: stTxt
+                                            anchors.centerIn: parent
+                                            text: "🔥 " + modelData.member.current_streak_weeks + "w"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: "#ff7b72"
+                                        }
+                                    }
+
+                                    // Badges preview
+                                    Row {
+                                        spacing: 3
+                                        Repeater {
+                                            model: (modelData.member.badges || []).slice(0, 3)
+                                            Rectangle {
+                                                width: 18
+                                                height: 18
+                                                radius: 9
+                                                color: modelData.bg_color || "#21262d"
+                                                border.color: modelData.color || "#30363d"
+                                                border.width: 1
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: modelData.icon || "🎖️"
+                                                    font.pixelSize: 9
+                                                }
+                                                ToolTip.visible: bMa.containsMouse
+                                                ToolTip.text: modelData.name + ": " + modelData.description
+                                                ToolTip.delay: 150
+                                                MouseArea { id: bMa; anchors.fill: parent; hoverEnabled: true }
+                                            }
+                                        }
+                                    }
+
+                                    // Score
+                                    Rectangle {
+                                        implicitHeight: 24
+                                        implicitWidth: scTxt.implicitWidth + 14
+                                        radius: 12
+                                        color: "#0d2344"
+                                        border.color: "#1f6feb"
+                                        border.width: 1
+
+                                        Text {
+                                            id: scTxt
+                                            anchors.centerIn: parent
+                                            text: (modelData.member.score || 0) + " pts"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: "#58a6ff"
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "→"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: rowMa.containsMouse ? "#58a6ff" : "#484f58"
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: rowMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.openMemberProfile(modelData.member)
+                                }
                             }
                         }
                     }

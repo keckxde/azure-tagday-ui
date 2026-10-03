@@ -776,7 +776,15 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         url_refs = min(len(re.findall(r"https?://", desc_str)), 3)
         wi_evidences = rel_count + ext_evidence + hash_refs + url_refs
 
-        if wi_evidences > 0:
+        # Only attribute evidences if the work item was active, closed, or created within timeframe
+        wi_in_timeframe = (timeframe == "all_time")
+        if not wi_in_timeframe and filter_start_str and filter_end_str:
+            for d_str in (closed_date_str, changed_date_str, created_date_str):
+                if d_str and filter_start_str <= d_str < filter_end_str:
+                    wi_in_timeframe = True
+                    break
+
+        if wi_evidences > 0 and wi_in_timeframe:
             evidence_owner = assigned_name or closed_by or created_by
             if _is_valid_member(evidence_owner):
                 m_ev = _get_or_create_member(evidence_owner)
@@ -1277,104 +1285,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             else:
                 m["time_stats"]["persona"] = "☀️ Daytime Core"
 
-        # Compute Badges
-        badges = []
-        if m["prs_created"] >= 3:
-            badges.append(BADGE_DEFINITIONS["pr_dynamo"])
-        if m["prs_closed"] >= 3:
-            badges.append(BADGE_DEFINITIONS["the_closer"])
-        if m["tasks_completed"] >= 5:
-            badges.append(BADGE_DEFINITIONS["task_crusher"])
-        if m["bugs_resolved"] >= 2:
-            badges.append(BADGE_DEFINITIONS["bug_slayer"])
-        if m["commits_count"] >= 5:
-            badges.append(BADGE_DEFINITIONS["commit_machine"])
-        if m["branches_started"] >= 2:
-            badges.append(BADGE_DEFINITIONS["branch_architect"])
-        if m["prs_reviewed"] >= 3:
-            badges.append(BADGE_DEFINITIONS["eagle_eye"])
-        if m["prs_fast_merged"] >= 1:
-            badges.append(BADGE_DEFINITIONS["speed_demon"])
-        if m["builds_succeeded"] >= 2 and m["builds_failed"] == 0:
-            badges.append(BADGE_DEFINITIONS["ci_hero"])
-        if m["tasks_completed"] >= 3 and m["total_delay_weeks"] == 0:
-            badges.append(BADGE_DEFINITIONS["sprint_sniper"])
-        if m["current_streak_weeks"] >= 3:
-            badges.append(BADGE_DEFINITIONS["streak_master"])
-        if m["tasks_created"] >= 4:
-            badges.append(BADGE_DEFINITIONS["task_architect"])
-        if m["tags_pushed"] >= 1:
-            badges.append(BADGE_DEFINITIONS["tag_hero"])
-        if m["night_activities"] >= 3:
-            badges.append(BADGE_DEFINITIONS["night_owl"])
-        if m["early_bird_activities"] >= 3:
-            badges.append(BADGE_DEFINITIONS["early_bird"])
-        if m["weekend_activities"] >= 2:
-            badges.append(BADGE_DEFINITIONS["weekend_warrior"])
-        if tot_act >= 5 and (m["daytime_activities"] / tot_act) >= 0.85 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
-            badges.append(BADGE_DEFINITIONS["zen_balancer"])
-        if m["friday_afternoon_activities"] >= 2:
-            badges.append(BADGE_DEFINITIONS["friday_hero"])
-        if m["tasks_cleaned"] >= 3 or m["state_changes_count"] >= 4:
-            badges.append(BADGE_DEFINITIONS["the_cleaner"])
-            m["is_cleaner"] = True
-        if m["pushbacks_count"] >= 1:
-            badges.append(BADGE_DEFINITIONS["the_decliner"])
-            m["is_decliner"] = True
-        if m["state_changes_count"] >= 5:
-            badges.append(BADGE_DEFINITIONS["state_mover"])
-        if m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 2:
-            badges.append(BADGE_DEFINITIONS["stale_sheriff"])
-        if m["task_evidences_count"] >= 5:
-            badges.append(BADGE_DEFINITIONS["evidence_master"])
-        if m["oldest_open_task_days"] >= 90:
-            badges.append(BADGE_DEFINITIONS["relic_keeper"])
-        if m["tasks_fast_closed"] >= 2 or (m["tasks_completed"] >= 2 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
-            badges.append(BADGE_DEFINITIONS["speedy_task_closer"])
-        if m["structured_syntax_completed"] >= 3:
-            badges.append(BADGE_DEFINITIONS["syntax_master"])
-
-        # Determine Ignorer / Stasher persona
-        if m["stale_tasks_count"] >= 2 and m["state_changes_count"] == 0:
-            m["is_ignorer"] = True
-            m["time_stats"]["persona"] = "💤 Backlog Stasher"
-        elif m["pushbacks_count"] >= 2:
-            m["time_stats"]["persona"] = "🛡️ The Gatekeeper"
-        elif m["tasks_cleaned"] >= 4:
-            m["time_stats"]["persona"] = "🧹 The Cleaner"
-
-        m["badges"] = badges
-        m["badges_count"] = len(badges)
-
-        # Composite Motivation Score Formula:
-        # PRs closed * 15 + PRs created * 10 + Commits * 3 + Branches closed * 5 + Tasks completed * 8
-        # + Bugs resolved * 10 + PRs approved * 8 + PRs reviewed * 6 + Tags * 12 + Successful builds * 4
-        # + Tasks cleaned * 3 + Pushbacks * 4 + Fast closes * 4 + Task evidences * 2 + Syntax bonus * 7 + Badges * 5 + Streak * 4
-        # - Delays * 3 - Failed builds * 2 - Stale tasks * 2
-        pos_score = (
-            m["prs_closed"] * 15
-            + m["prs_created"] * 10
-            + m["commits_count"] * 3
-            + m["branches_closed"] * 5
-            + m["tasks_completed"] * 8
-            + m["bugs_resolved"] * 10
-            + m["prs_approved"] * 8
-            + m["prs_reviewed"] * 6
-            + m["tags_pushed"] * 12
-            + m["builds_succeeded"] * 4
-            + m["tasks_cleaned"] * 3
-            + m["pushbacks_count"] * 4
-            + m["tasks_fast_closed"] * 4
-            + min(m["task_evidences_count"], 25) * 2
-            + (m["structured_syntax_completed"] * 7)
-            + len(badges) * 5
-            + m["current_streak_weeks"] * 4
-        )
-        neg_score = (
-            (m["total_delay_weeks"] * 3)
-            + (m["builds_failed"] * 2)
-            + (min(m["stale_tasks_count"], 4) * 2)
-        )
+        # Check if member had actual contribution activity within the selected timeframe
         has_current_activity = (
             m["prs_closed"] > 0
             or m["prs_created"] > 0
@@ -1393,13 +1304,109 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             or m["tasks_fast_closed"] > 0
             or m["task_evidences_count"] > 0
             or m["structured_syntax_completed"] > 0
-            or m["current_streak_weeks"] > 0
         )
-        raw_final = pos_score - neg_score
-        if has_current_activity:
+
+        # Compute Badges - only awarded if active in timeframe (or if all_time)
+        badges = []
+        if has_current_activity or timeframe == "all_time":
+            if m["prs_created"] >= 3:
+                badges.append(BADGE_DEFINITIONS["pr_dynamo"])
+            if m["prs_closed"] >= 3:
+                badges.append(BADGE_DEFINITIONS["the_closer"])
+            if m["tasks_completed"] >= 5:
+                badges.append(BADGE_DEFINITIONS["task_crusher"])
+            if m["bugs_resolved"] >= 2:
+                badges.append(BADGE_DEFINITIONS["bug_slayer"])
+            if m["commits_count"] >= 5:
+                badges.append(BADGE_DEFINITIONS["commit_machine"])
+            if m["branches_started"] >= 2:
+                badges.append(BADGE_DEFINITIONS["branch_architect"])
+            if m["prs_reviewed"] >= 3:
+                badges.append(BADGE_DEFINITIONS["eagle_eye"])
+            if m["prs_fast_merged"] >= 1:
+                badges.append(BADGE_DEFINITIONS["speed_demon"])
+            if m["builds_succeeded"] >= 2 and m["builds_failed"] == 0:
+                badges.append(BADGE_DEFINITIONS["ci_hero"])
+            if m["tasks_completed"] >= 3 and m["total_delay_weeks"] == 0:
+                badges.append(BADGE_DEFINITIONS["sprint_sniper"])
+            if m["current_streak_weeks"] >= 3:
+                badges.append(BADGE_DEFINITIONS["streak_master"])
+            if m["tasks_created"] >= 4:
+                badges.append(BADGE_DEFINITIONS["task_architect"])
+            if m["tags_pushed"] >= 1:
+                badges.append(BADGE_DEFINITIONS["tag_hero"])
+            if m["night_activities"] >= 3:
+                badges.append(BADGE_DEFINITIONS["night_owl"])
+            if m["early_bird_activities"] >= 3:
+                badges.append(BADGE_DEFINITIONS["early_bird"])
+            if m["weekend_activities"] >= 2:
+                badges.append(BADGE_DEFINITIONS["weekend_warrior"])
+            if tot_act >= 5 and (m["daytime_activities"] / tot_act) >= 0.85 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
+                badges.append(BADGE_DEFINITIONS["zen_balancer"])
+            if m["friday_afternoon_activities"] >= 2:
+                badges.append(BADGE_DEFINITIONS["friday_hero"])
+            if m["tasks_cleaned"] >= 3 or m["state_changes_count"] >= 4:
+                badges.append(BADGE_DEFINITIONS["the_cleaner"])
+                m["is_cleaner"] = True
+            if m["pushbacks_count"] >= 1:
+                badges.append(BADGE_DEFINITIONS["the_decliner"])
+                m["is_decliner"] = True
+            if m["state_changes_count"] >= 5:
+                badges.append(BADGE_DEFINITIONS["state_mover"])
+            if m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 2:
+                badges.append(BADGE_DEFINITIONS["stale_sheriff"])
+            if m["task_evidences_count"] >= 5:
+                badges.append(BADGE_DEFINITIONS["evidence_master"])
+            if m["oldest_open_task_days"] >= 90:
+                badges.append(BADGE_DEFINITIONS["relic_keeper"])
+            if m["tasks_fast_closed"] >= 2 or (m["tasks_completed"] >= 2 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
+                badges.append(BADGE_DEFINITIONS["speedy_task_closer"])
+            if m["structured_syntax_completed"] >= 3:
+                badges.append(BADGE_DEFINITIONS["syntax_master"])
+
+        # Determine Ignorer / Stasher persona
+        if m["stale_tasks_count"] >= 2 and m["state_changes_count"] == 0:
+            m["is_ignorer"] = True
+            m["time_stats"]["persona"] = "💤 Backlog Stasher"
+        elif m["pushbacks_count"] >= 2:
+            m["time_stats"]["persona"] = "🛡️ The Gatekeeper"
+        elif m["tasks_cleaned"] >= 4:
+            m["time_stats"]["persona"] = "🧹 The Cleaner"
+
+        m["badges"] = badges
+        m["badges_count"] = len(badges)
+
+        # Composite Motivation Score Formula:
+        # Only calculated if member has actual activity in timeframe (or if all_time)
+        if has_current_activity or timeframe == "all_time":
+            pos_score = (
+                m["prs_closed"] * 15
+                + m["prs_created"] * 10
+                + m["commits_count"] * 3
+                + m["branches_closed"] * 5
+                + m["tasks_completed"] * 8
+                + m["bugs_resolved"] * 10
+                + m["prs_approved"] * 8
+                + m["prs_reviewed"] * 6
+                + m["tags_pushed"] * 12
+                + m["builds_succeeded"] * 4
+                + m["tasks_cleaned"] * 3
+                + m["pushbacks_count"] * 4
+                + m["tasks_fast_closed"] * 4
+                + min(m["task_evidences_count"], 25) * 2
+                + (m["structured_syntax_completed"] * 7)
+                + len(badges) * 5
+                + m["current_streak_weeks"] * 4
+            )
+            neg_score = (
+                (m["total_delay_weeks"] * 3)
+                + (m["builds_failed"] * 2)
+                + (min(m["stale_tasks_count"], 4) * 2)
+            )
+            raw_final = pos_score - neg_score
             m["score"] = max(1, raw_final)
         else:
-            m["score"] = max(0, raw_final)
+            m["score"] = 0
 
     # Award Sprint MVP badge to the top scorer
     sorted_by_score = sorted(member_list, key=lambda x: x["score"], reverse=True)

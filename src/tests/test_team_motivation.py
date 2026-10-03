@@ -659,8 +659,48 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertEqual(lb["oldest_task"]["leader"]["name"], "Old Timer")
         self.assertEqual(lb["fast_closer"]["leader"]["name"], "Speedy Sam")
 
+    def test_timeframe_filtered_scores_and_inactive_contributors(self):
+        """
+        Verify that when a specific timeframe filter (e.g., last_week or specific sprint)
+        is applied, only contributions and achievements within that window are counted.
+        Inactive contributors in that timeframe receive a score of 0 and no badges.
+        """
+        now = datetime.now()
+        
+        # Add a contributor who only did work 60 days ago
+        old_wis = [
+            (301, "Old completed project", "Task", "Closed", "Historic Contributor", (now - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S"),
+             {"fields": {"System.Title": "Old completed project", "System.State": "Closed", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Historic Contributor"}}}),
+        ]
+        for wid, title, wtype, state, assigned, cdate, raw_obj in old_wis:
+            self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
+        
+        # In all_time, Historic Contributor has score and badges
+        all_data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        all_members = {m["name"]: m for m in all_data["members"]}
+        historic = all_members.get("Historic Contributor")
+        self.assertIsNotNone(historic)
+        self.assertGreater(historic["score"], 0)
+
+        # Now compute data for last_week (last 7 days) where Historic Contributor did nothing
+        data_last_week = compute_team_motivation_data(self.cache, timeframe="last_week")
+        members_last_week = {m["name"]: m for m in data_last_week["members"]}
+        
+        # Historic Contributor had 0 events in the last 7 days, so score must be 0 and badges empty
+        historic_last_week = members_last_week.get("Historic Contributor")
+        if historic_last_week:
+            self.assertEqual(historic_last_week["score"], 0)
+            self.assertEqual(len(historic_last_week["badges"]), 0)
+
+        # Alice had PRs and work items in the last 7 days, so Alice should have a positive score
+        alice = members_last_week.get("Alice Smith")
+        self.assertIsNotNone(alice)
+        self.assertGreater(alice["score"], 0)
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
