@@ -304,7 +304,14 @@ Item {
                                 icon: "👤",
                                 label: "Users & Aliases",
                                 desc: "Git & TFS User Identities",
-                                badge: (backend && backend.userAliases && backend.userAliases.length > 0) ? (backend.userAliases.length + " Mapped") : "",
+                                badge: (function() {
+                                    var aCount = (backend && backend.userAliases) ? backend.userAliases.length : 0;
+                                    var sCount = (backend && backend.systemUsersCount) ? backend.systemUsersCount : 0;
+                                    if (aCount > 0 && sCount > 0) return aCount + " Mapped • " + sCount + " Bots";
+                                    if (aCount > 0) return aCount + " Mapped";
+                                    if (sCount > 0) return sCount + " Bots Excluded";
+                                    return "";
+                                })(),
                                 badgeColor: "#a371f7"
                             },
                             {
@@ -5132,6 +5139,532 @@ Item {
                 }
             }
 
+            // ==========================================
+            // System Users & Bots Card (Hall of Fame Exclusion)
+            // ==========================================
+            Rectangle {
+                visible: root.activeTab === "aliases"
+                Layout.fillWidth: true
+                implicitHeight: systemUsersMainCol.implicitHeight + 36
+                color: "#161b22"
+                radius: 8
+                border.color: "#30363d"
+                border.width: 1
+
+                property string sysSearchQuery: ""
+                property string sysFilterType: "all" // "all", "custom", "builtin"
+                property var autoDetectSysSuggestions: []
+                property bool isDetectingSys: false
+
+                function runAutoDetectSys() {
+                    if (!backend) return;
+                    isDetectingSys = true;
+                    var res = backend.get_potential_system_users() || [];
+                    autoDetectSysSuggestions = res;
+                    isDetectingSys = false;
+                    if (res.length > 0) {
+                        root.bannerMsg = "Found " + res.length + " potential system / automation accounts. Review below to exclude.";
+                        root.bannerType = "info";
+                    } else {
+                        root.bannerMsg = "Auto-detect complete: No new bot or service accounts detected.";
+                        root.bannerType = "info";
+                    }
+                }
+
+                ColumnLayout {
+                    id: systemUsersMainCol
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 16
+
+                    // Card Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text { text: "🤖"; font.pixelSize: 24 }
+
+                        ColumnLayout {
+                            spacing: 3
+                            Layout.fillWidth: true
+
+                            RowLayout {
+                                spacing: 8
+                                Text {
+                                    text: "System Users & Automation Bots"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 16
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+
+                                Rectangle {
+                                    implicitHeight: 20
+                                    implicitWidth: sysCountBadge.implicitWidth + 12
+                                    radius: 10
+                                    color: "#f0883e22"
+                                    border.color: "#f0883e"
+                                    border.width: 1
+                                    Text {
+                                        id: sysCountBadge
+                                        anchors.centerIn: parent
+                                        text: (backend && backend.systemUsersCount ? backend.systemUsersCount : 0) + " Custom Excluded"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: "#f0883e"
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Exclude automated service accounts, build bots, and CI agents. Any commits, PRs, work items, or builds by these accounts are excluded from the Hall of Fame, leaderboards, streaks, and MVP points."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Button {
+                            text: systemUsersMainCol.parent.isDetectingSys ? "Scanning..." : "⚡ Auto-Detect Bots"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f0883e"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 30
+                                implicitWidth: 145
+                                radius: 6
+                                color: parent.hovered ? "#2d2218" : "#1f1a14"
+                                border.color: "#f0883e"
+                                border.width: 1
+                            }
+                            onClicked: systemUsersMainCol.parent.runAutoDetectSys()
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                    // Auto-Detect Suggestions Bar
+                    Rectangle {
+                        visible: systemUsersMainCol.parent.autoDetectSysSuggestions && systemUsersMainCol.parent.autoDetectSysSuggestions.length > 0
+                        Layout.fillWidth: true
+                        implicitHeight: sysSuggCol.implicitHeight + 20
+                        radius: 6
+                        color: "#161f2e"
+                        border.color: "#388bfd"
+                        border.width: 1
+
+                        ColumnLayout {
+                            id: sysSuggCol
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Text { text: "💡"; font.pixelSize: 14 }
+                                Text {
+                                    text: "Detected " + systemUsersMainCol.parent.autoDetectSysSuggestions.length + " candidate system/bot account(s):"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Bold
+                                    color: "#58a6ff"
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: "Dismiss"
+                                    font.pixelSize: 11
+                                    color: "#8b949e"
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: systemUsersMainCol.parent.autoDetectSysSuggestions = []
+                                    }
+                                }
+                            }
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Repeater {
+                                    model: systemUsersMainCol.parent.autoDetectSysSuggestions
+                                    delegate: Rectangle {
+                                        implicitHeight: 28
+                                        implicitWidth: pillRow.implicitWidth + 16
+                                        radius: 14
+                                        color: "#0d1b2e"
+                                        border.color: "#388bfd"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: pillRow
+                                            anchors.centerIn: parent
+                                            spacing: 6
+                                            Text {
+                                                text: "🤖 " + modelData.name + " (" + (modelData.reason || (modelData.sources ? modelData.sources.join(", ") : "Detected account")) + ")"
+                                                font.pixelSize: 11
+                                                font.family: "Segoe UI, sans-serif"
+                                                color: "#f0f6fc"
+                                            }
+                                            Text {
+                                                text: "+ Exclude"
+                                                font.pixelSize: 11
+                                                font.weight: Font.Bold
+                                                color: "#f0883e"
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (backend) {
+                                                    backend.add_system_user(modelData.name, modelData.reason || "Auto-detected bot account");
+                                                    var cur = systemUsersMainCol.parent.autoDetectSysSuggestions.slice();
+                                                    cur.splice(index, 1);
+                                                    systemUsersMainCol.parent.autoDetectSysSuggestions = cur;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Add New System User Row
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: addSysRow.implicitHeight + 16
+                        radius: 6
+                        color: "#0d1117"
+                        border.color: "#30363d"
+                        border.width: 1
+
+                        RowLayout {
+                            id: addSysRow
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 8
+
+                            Text { text: "➕"; font.pixelSize: 14 }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 260
+                                implicitHeight: 32
+                                radius: 4
+                                color: "#161b22"
+                                border.color: sysNameInput.activeFocus ? "#f0883e" : "#30363d"
+                                border.width: 1
+
+                                TextInput {
+                                    id: sysNameInput
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    color: "#f0f6fc"
+                                    selectByMouse: true
+
+                                    Text {
+                                        text: "Enter account / bot name or email (e.g. tfs_build_agent, release-pipeline)"
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        color: "#6e7681"
+                                        visible: !sysNameInput.text && !sysNameInput.activeFocus
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 200
+                                implicitHeight: 32
+                                radius: 4
+                                color: "#161b22"
+                                border.color: sysNoteInput.activeFocus ? "#f0883e" : "#30363d"
+                                border.width: 1
+
+                                TextInput {
+                                    id: sysNoteInput
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    color: "#f0f6fc"
+                                    selectByMouse: true
+
+                                    Text {
+                                        text: "Optional description (e.g. CI Agent)"
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        color: "#6e7681"
+                                        visible: !sysNoteInput.text && !sysNoteInput.activeFocus
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "Exclude from Hall of Fame"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                enabled: sysNameInput.text.trim().length > 0
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.enabled ? "#ffffff" : "#6e7681"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 32
+                                    implicitWidth: 185
+                                    radius: 6
+                                    color: parent.enabled ? (parent.hovered ? "#bd5c00" : "#d96500") : "#21262d"
+                                    border.color: parent.enabled ? "#f0883e" : "#30363d"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    var n = sysNameInput.text.trim();
+                                    var note = sysNoteInput.text.trim();
+                                    if (n && backend) {
+                                        backend.add_system_user(n, note);
+                                        sysNameInput.text = "";
+                                        sysNoteInput.text = "";
+                                        root.bannerMsg = "Excluded '" + n + "' from Hall of Fame rankings.";
+                                        root.bannerType = "success";
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Filter / Search Toolbar for System Users List
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: 260
+                            implicitHeight: 28
+                            radius: 4
+                            color: "#0d1117"
+                            border.color: sysFilterInput.activeFocus ? "#58a6ff" : "#30363d"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 4
+                                Text { text: "🔍"; font.pixelSize: 10 }
+                                TextInput {
+                                    id: sysFilterInput
+                                    Layout.fillWidth: true
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    color: "#c9d1d9"
+                                    selectByMouse: true
+                                    onTextChanged: systemUsersMainCol.parent.sysSearchQuery = text
+
+                                    Text {
+                                        text: "Filter system accounts..."
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#6e7681"
+                                        visible: !sysFilterInput.text && !sysFilterInput.activeFocus
+                                    }
+                                }
+                            }
+                        }
+
+                        Row {
+                            spacing: 6
+                            Repeater {
+                                model: [
+                                    { id: "all", label: "All Accounts" },
+                                    { id: "custom", label: "Custom Excluded" },
+                                    { id: "builtin", label: "Built-in Defaults" }
+                                ]
+                                delegate: Rectangle {
+                                    property bool isSelected: systemUsersMainCol.parent.sysFilterType === modelData.id
+                                    implicitHeight: 26
+                                    implicitWidth: sysPillTxt.implicitWidth + 16
+                                    radius: 13
+                                    color: isSelected ? Qt.rgba(240/255, 136/255, 62/255, 0.2) : (pMa.containsMouse ? "#21262d" : "#0d1117")
+                                    border.color: isSelected ? "#f0883e" : "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        id: sysPillTxt
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: parent.isSelected ? Font.Bold : Font.Normal
+                                        color: parent.isSelected ? "#f0883e" : "#8b949e"
+                                    }
+                                    MouseArea {
+                                        id: pMa
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: systemUsersMainCol.parent.sysFilterType = modelData.id
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    // Configured System Users List
+                    ColumnLayout {
+                        id: sysListCol
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        property var filteredSysUsers: {
+                            var all = (backend && backend.systemUsers) ? backend.systemUsers : [];
+                            var q = systemUsersMainCol.parent.sysSearchQuery.trim().toLowerCase();
+                            var fType = systemUsersMainCol.parent.sysFilterType;
+                            return all.filter(function(item) {
+                                if (!item || !item.name) return false;
+                                if (fType === "custom" && item.is_builtin) return false;
+                                if (fType === "builtin" && !item.is_builtin) return false;
+                                if (q !== "") {
+                                    var nMatch = item.name.toLowerCase().indexOf(q) !== -1;
+                                    var noteMatch = item.note && item.note.toLowerCase().indexOf(q) !== -1;
+                                    return nMatch || noteMatch;
+                                }
+                                return true;
+                            });
+                        }
+
+                        Repeater {
+                            model: sysListCol.filteredSysUsers
+                            delegate: Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 44
+                                radius: 6
+                                color: "#0d1117"
+                                border.color: modelData.is_builtin ? "#21262d" : "#44351a"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 10
+
+                                    Text {
+                                        text: modelData.is_builtin ? "⚙️" : "🤖"
+                                        font.pixelSize: 16
+                                    }
+
+                                    Text {
+                                        text: modelData.name
+                                        font.family: "Consolas, Segoe UI, monospace"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: modelData.is_builtin ? "#8b949e" : "#f0f6fc"
+                                    }
+
+                                    Rectangle {
+                                        implicitHeight: 18
+                                        implicitWidth: badgeT.implicitWidth + 10
+                                        radius: 9
+                                        color: modelData.is_builtin ? "#21262d" : "#f0883e22"
+                                        border.color: modelData.is_builtin ? "#30363d" : "#f0883e"
+                                        border.width: 1
+                                        Text {
+                                            id: badgeT
+                                            anchors.centerIn: parent
+                                            text: modelData.is_builtin ? "Built-in" : "Custom Excluded"
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: modelData.is_builtin ? "#8b949e" : "#f0883e"
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.note || ""
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#6e7681"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Button {
+                                        visible: !modelData.is_builtin
+                                        text: "🗑️ Remove"
+                                        font.pixelSize: 11
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font: parent.font
+                                            color: parent.hovered ? "#f85149" : "#8b949e"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        background: Rectangle {
+                                            implicitHeight: 26
+                                            implicitWidth: 78
+                                            radius: 4
+                                            color: parent.hovered ? "#281515" : "transparent"
+                                            border.color: parent.hovered ? "#f85149" : "#30363d"
+                                            border.width: 1
+                                        }
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.remove_system_user(modelData.name);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Empty State if no filtered system users
+                        Rectangle {
+                            visible: sysListCol.filteredSysUsers.length === 0
+                            Layout.fillWidth: true
+                            implicitHeight: 60
+                            radius: 6
+                            color: "#0d1117"
+                            border.color: "#21262d"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "No system accounts matching current filter."
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+                        }
+                    }
+                }
+            }
+
             // About Application & Version Information Card
             Rectangle {
                 visible: root.activeTab === "general"
@@ -5569,9 +6102,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsClosed > 0) root.scorePrsClosed -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsClosed > 0) root.scorePrsClosed -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scorePrsClosed + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsClosed < 100) root.scorePrsClosed += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsClosed < 100) root.scorePrsClosed += 1 } }
                                     }
                                 }
 
@@ -5587,9 +6120,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsCreated > 0) root.scorePrsCreated -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsCreated > 0) root.scorePrsCreated -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scorePrsCreated + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsCreated < 100) root.scorePrsCreated += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsCreated < 100) root.scorePrsCreated += 1 } }
                                     }
                                 }
 
@@ -5605,9 +6138,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsApproved > 0) root.scorePrsApproved -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsApproved > 0) root.scorePrsApproved -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scorePrsApproved + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsApproved < 100) root.scorePrsApproved += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsApproved < 100) root.scorePrsApproved += 1 } }
                                     }
                                 }
 
@@ -5623,9 +6156,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsReviewed > 0) root.scorePrsReviewed -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsReviewed > 0) root.scorePrsReviewed -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scorePrsReviewed + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsReviewed < 100) root.scorePrsReviewed += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scorePrsReviewed < 100) root.scorePrsReviewed += 1 } }
                                     }
                                 }
 
@@ -5641,9 +6174,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreCommitsCount > 0) root.scoreCommitsCount -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreCommitsCount > 0) root.scoreCommitsCount -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreCommitsCount + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreCommitsCount < 100) root.scoreCommitsCount += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreCommitsCount < 100) root.scoreCommitsCount += 1 } }
                                     }
                                 }
 
@@ -5659,9 +6192,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBranchesClosed > 0) root.scoreBranchesClosed -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBranchesClosed > 0) root.scoreBranchesClosed -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreBranchesClosed + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBranchesClosed < 100) root.scoreBranchesClosed += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBranchesClosed < 100) root.scoreBranchesClosed += 1 } }
                                     }
                                 }
 
@@ -5677,9 +6210,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTagsPushed > 0) root.scoreTagsPushed -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTagsPushed > 0) root.scoreTagsPushed -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#58a6ff88"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTagsPushed + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTagsPushed < 100) root.scoreTagsPushed += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTagsPushed < 100) root.scoreTagsPushed += 1 } }
                                     }
                                 }
                             }
@@ -5729,9 +6262,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCompleted > 0) root.scoreTasksCompleted -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCompleted > 0) root.scoreTasksCompleted -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTasksCompleted + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCompleted < 100) root.scoreTasksCompleted += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCompleted < 100) root.scoreTasksCompleted += 1 } }
                                     }
                                 }
 
@@ -5747,9 +6280,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCreated > 0) root.scoreTasksCreated -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCreated > 0) root.scoreTasksCreated -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTasksCreated + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCreated < 100) root.scoreTasksCreated += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCreated < 100) root.scoreTasksCreated += 1 } }
                                     }
                                 }
 
@@ -5765,9 +6298,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBugsResolved > 0) root.scoreBugsResolved -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBugsResolved > 0) root.scoreBugsResolved -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreBugsResolved + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBugsResolved < 100) root.scoreBugsResolved += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBugsResolved < 100) root.scoreBugsResolved += 1 } }
                                     }
                                 }
 
@@ -5783,9 +6316,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStoriesCompleted > 0) root.scoreStoriesCompleted -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStoriesCompleted > 0) root.scoreStoriesCompleted -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreStoriesCompleted + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStoriesCompleted < 100) root.scoreStoriesCompleted += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStoriesCompleted < 100) root.scoreStoriesCompleted += 1 } }
                                     }
                                 }
 
@@ -5801,9 +6334,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksFastClosed > 0) root.scoreTasksFastClosed -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksFastClosed > 0) root.scoreTasksFastClosed -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTasksFastClosed + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksFastClosed < 100) root.scoreTasksFastClosed += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksFastClosed < 100) root.scoreTasksFastClosed += 1 } }
                                     }
                                 }
 
@@ -5819,9 +6352,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStructuredSyntaxCompleted > 0) root.scoreStructuredSyntaxCompleted -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStructuredSyntaxCompleted > 0) root.scoreStructuredSyntaxCompleted -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreStructuredSyntaxCompleted + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStructuredSyntaxCompleted < 100) root.scoreStructuredSyntaxCompleted += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStructuredSyntaxCompleted < 100) root.scoreStructuredSyntaxCompleted += 1 } }
                                     }
                                 }
 
@@ -5837,9 +6370,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTaskEvidencesCount > 0) root.scoreTaskEvidencesCount -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTaskEvidencesCount > 0) root.scoreTaskEvidencesCount -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTaskEvidencesCount + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTaskEvidencesCount < 100) root.scoreTaskEvidencesCount += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTaskEvidencesCount < 100) root.scoreTaskEvidencesCount += 1 } }
                                     }
                                 }
 
@@ -5855,9 +6388,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCleaned > 0) root.scoreTasksCleaned -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCleaned > 0) root.scoreTasksCleaned -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#3fb95088"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreTasksCleaned + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCleaned < 100) root.scoreTasksCleaned += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreTasksCleaned < 100) root.scoreTasksCleaned += 1 } }
                                     }
                                 }
                             }
@@ -5907,9 +6440,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildsSucceeded > 0) root.scoreBuildsSucceeded -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildsSucceeded > 0) root.scoreBuildsSucceeded -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#e3b34188"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreBuildsSucceeded + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildsSucceeded < 100) root.scoreBuildsSucceeded += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildsSucceeded < 100) root.scoreBuildsSucceeded += 1 } }
                                     }
                                 }
 
@@ -5925,9 +6458,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBadgeBonus > 0) root.scoreBadgeBonus -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBadgeBonus > 0) root.scoreBadgeBonus -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#e3b34188"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreBadgeBonus + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBadgeBonus < 100) root.scoreBadgeBonus += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBadgeBonus < 100) root.scoreBadgeBonus += 1 } }
                                     }
                                 }
 
@@ -5943,9 +6476,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStreakWeekBonus > 0) root.scoreStreakWeekBonus -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStreakWeekBonus > 0) root.scoreStreakWeekBonus -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#e3b34188"; border.width: 1; Text { anchors.centerIn: parent; text: "+" + root.scoreStreakWeekBonus + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#3fb950" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStreakWeekBonus < 100) root.scoreStreakWeekBonus += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStreakWeekBonus < 100) root.scoreStreakWeekBonus += 1 } }
                                     }
                                 }
                             }
@@ -5995,9 +6528,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreDelayWeekPenalty > 0) root.scoreDelayWeekPenalty -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreDelayWeekPenalty > 0) root.scoreDelayWeekPenalty -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#f8514988"; border.width: 1; Text { anchors.centerIn: parent; text: "−" + root.scoreDelayWeekPenalty + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#f85149" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreDelayWeekPenalty < 50) root.scoreDelayWeekPenalty += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreDelayWeekPenalty < 50) root.scoreDelayWeekPenalty += 1 } }
                                     }
                                 }
 
@@ -6013,9 +6546,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildFailedPenalty > 0) root.scoreBuildFailedPenalty -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildFailedPenalty > 0) root.scoreBuildFailedPenalty -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#f8514988"; border.width: 1; Text { anchors.centerIn: parent; text: "−" + root.scoreBuildFailedPenalty + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#f85149" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildFailedPenalty < 50) root.scoreBuildFailedPenalty += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreBuildFailedPenalty < 50) root.scoreBuildFailedPenalty += 1 } }
                                     }
                                 }
 
@@ -6031,9 +6564,9 @@ Item {
                                     }
                                     RowLayout {
                                         spacing: 4
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStaleTaskPenalty > 0) root.scoreStaleTaskPenalty -= 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStaleTaskPenalty > 0) root.scoreStaleTaskPenalty -= 1 } }
                                         Rectangle { width: 50; height: 26; radius: 4; color: "#161b22"; border.color: "#f8514988"; border.width: 1; Text { anchors.centerIn: parent; text: "−" + root.scoreStaleTaskPenalty + " pts"; font.family: "Consolas, monospace"; font.pixelSize: 11; font.weight: Font.Bold; color: "#f85149" } }
-                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" }; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStaleTaskPenalty < 50) root.scoreStaleTaskPenalty += 1 } }
+                                        Rectangle { width: 26; height: 26; radius: 4; color: "#21262d"; border.color: "#30363d"; border.width: 1; Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 14; font.weight: Font.Bold; color: "#c9d1d9" } MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: if (root.scoreStaleTaskPenalty < 50) root.scoreStaleTaskPenalty += 1 } }
                                     }
                                 }
                             }

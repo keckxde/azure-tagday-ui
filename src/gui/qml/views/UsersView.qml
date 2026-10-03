@@ -94,12 +94,14 @@ Item {
             }
 
             // Category filters
-            if (filter === "has_aliases") {
-                return !m.is_aliased && m.aliases && m.aliases.length > 0;
+            if (filter === "system_users") {
+                return !!m.is_system_user;
+            } else if (filter === "has_aliases") {
+                return !m.is_aliased && !m.is_system_user && m.aliases && m.aliases.length > 0;
             } else if (filter === "active_sprint") {
-                return !m.is_aliased && ((m.score && m.score > 0) || (m.last_active_date && m.last_active_date !== ""));
+                return !m.is_aliased && !m.is_system_user && ((m.score && m.score > 0) || (m.last_active_date && m.last_active_date !== ""));
             } else if (filter === "active_24h") {
-                if (m.is_aliased || !m.last_active_date) return false;
+                if (m.is_aliased || m.is_system_user || !m.last_active_date) return false;
                 var lastRel = m.last_activity ? m.last_activity.relative : "";
                 return lastRel.indexOf("m ago") !== -1 || lastRel.indexOf("h ago") !== -1 || lastRel.indexOf("s ago") !== -1 || lastRel.indexOf("Just now") !== -1;
             } else if (filter === "aliased") {
@@ -608,7 +610,8 @@ Item {
                                 { id: "active_24h", label: "🟢 Active Today" },
                                 { id: "active_sprint", label: "⚡ Active This Sprint" },
                                 { id: "has_aliases", label: "🔗 Has Aliases" },
-                                { id: "aliased", label: "🔗 Linked Aliases" }
+                                { id: "aliased", label: "🔗 Linked Aliases" },
+                                { id: "system_users", label: "🤖 System Users" }
                             ]
 
                             Rectangle {
@@ -889,6 +892,27 @@ Item {
                                                     font.pixelSize: 10
                                                     font.weight: Font.Bold
                                                     color: "#d2a8ff"
+                                                }
+                                            }
+
+                                            // System User Excluded Pill
+                                            Rectangle {
+                                                visible: !!modelData.is_system_user
+                                                implicitWidth: systemUserBadgeText.implicitWidth + 10
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.2)
+                                                border.color: "#f85149"
+                                                border.width: 1
+
+                                                Text {
+                                                    id: systemUserBadgeText
+                                                    anchors.centerIn: parent
+                                                    text: "🤖 System User"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#ff7b72"
                                                 }
                                             }
                                         }
@@ -1446,25 +1470,82 @@ Item {
                                                     color: "#d2a8ff"
                                                 }
                                             }
+
+                                            Rectangle {
+                                                visible: !!(root.selectedUser && root.selectedUser.is_system_user)
+                                                implicitWidth: heroSystemUserTag.implicitWidth + 10
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.2)
+                                                border.color: "#f85149"
+                                                border.width: 1
+
+                                                Text {
+                                                    id: heroSystemUserTag
+                                                    anchors.centerIn: parent
+                                                    text: "🤖 System User (Excluded)"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#ff7b72"
+                                                }
+                                            }
                                         }
 
                                         Text {
                                             text: (root.selectedUser && root.selectedUser.is_aliased)
                                                 ? ("🔗 Linked alias of @" + (root.selectedUser.aliased_to || "primary profile"))
-                                                : ((root.selectedUser && root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor")
+                                                : ((root.selectedUser && root.selectedUser.is_system_user)
+                                                    ? "🤖 System / Service Account (Out of scope for Hall of Fame)"
+                                                    : ((root.selectedUser && root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor"))
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
-                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : "#58a6ff"
+                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#a371f7" : ((root.selectedUser && root.selectedUser.is_system_user) ? "#ff7b72" : "#58a6ff")
                                         }
 
                                         Text {
                                             text: (root.selectedUser && root.selectedUser.is_aliased)
                                                 ? "Statistics aggregated into primary profile • Excluded from rankings"
-                                                : ("👑 " + ((root.selectedUser && root.selectedUser.score) ? root.selectedUser.score : 0) + " pts • Rank #" + ((root.selectedUser && root.selectedUser.rank) ? root.selectedUser.rank : "—"))
+                                                : ((root.selectedUser && root.selectedUser.is_system_user)
+                                                    ? "Excluded from MVP rankings, badges, streaks, and motivation stats"
+                                                    : ("👑 " + ((root.selectedUser && root.selectedUser.score) ? root.selectedUser.score : 0) + " pts • Rank #" + ((root.selectedUser && root.selectedUser.rank) ? root.selectedUser.rank : "—")))
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 11
                                             font.weight: Font.Bold
-                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#8b949e" : "#e3b341"
+                                            color: (root.selectedUser && root.selectedUser.is_aliased) ? "#8b949e" : ((root.selectedUser && root.selectedUser.is_system_user) ? "#8b949e" : "#e3b341")
+                                        }
+
+                                        // Quick System User Toggle Button
+                                        Rectangle {
+                                            visible: !!(root.selectedUser && !root.selectedUser.is_aliased)
+                                            implicitWidth: toggleSysBtnText.implicitWidth + 20
+                                            implicitHeight: 22
+                                            radius: 11
+                                            color: toggleSysMa.containsMouse ? (root.selectedUser && root.selectedUser.is_system_user ? "#238636" : "#da3633") : (root.selectedUser && root.selectedUser.is_system_user ? Qt.rgba(46/255, 160/255, 67/255, 0.2) : Qt.rgba(248/255, 81/255, 73/255, 0.15))
+                                            border.color: root.selectedUser && root.selectedUser.is_system_user ? "#3fb950" : "#f85149"
+                                            border.width: 1
+
+                                            Text {
+                                                id: toggleSysBtnText
+                                                anchors.centerIn: parent
+                                                text: (root.selectedUser && root.selectedUser.is_system_user) ? "✅ Include in Hall of Fame" : "🤖 Exclude from Hall of Fame"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: toggleSysMa.containsMouse ? "#ffffff" : ((root.selectedUser && root.selectedUser.is_system_user) ? "#3fb950" : "#ff7b72")
+                                            }
+
+                                            MouseArea {
+                                                id: toggleSysMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (root.selectedUser && root.selectedUser.name) {
+                                                        backend.toggle_system_user(root.selectedUser.name);
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

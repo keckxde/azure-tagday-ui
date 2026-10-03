@@ -757,14 +757,96 @@ def _clean_user_name(user_obj_or_str):
     return str(user_obj_or_str).strip()
 
 
-def _is_valid_member(name):
-    """Filters out empty or system placeholder names."""
+DEFAULT_SYSTEM_USERS = [
+    "unassigned",
+    "undefined",
+    "none",
+    "unknown",
+    "system",
+    "[deleted]",
+    "github-actions[bot]",
+    "tfs build service",
+    "azure pipelines",
+    "dependabot[bot]",
+]
+
+
+def normalize_system_users(system_users_config):
+    """
+    Normalizes configured system users into:
+    - system_users_set: set of lowercase names/identifiers to exclude from Hall of Fame.
+    - system_users_list: list of dicts [{"name": str, "is_builtin": bool, "note": str}] for UI display.
+    """
+    system_users_set = {u.lower() for u in DEFAULT_SYSTEM_USERS}
+    system_users_list = []
+    for u in DEFAULT_SYSTEM_USERS:
+        system_users_list.append({"name": u, "is_builtin": True, "note": "Built-in system account"})
+
+    if not system_users_config:
+        return system_users_set, system_users_list
+
+    items = []
+    if isinstance(system_users_config, (list, tuple, set)):
+        for entry in system_users_config:
+            if isinstance(entry, dict):
+                items.append((entry.get("name", ""), entry.get("note", "")))
+            elif isinstance(entry, str):
+                items.append((entry, ""))
+    elif isinstance(system_users_config, dict):
+        for k, v in system_users_config.items():
+            items.append((k, str(v) if not isinstance(v, bool) else ""))
+    elif isinstance(system_users_config, str):
+        for part in system_users_config.split(","):
+            items.append((part.strip(), ""))
+
+    for name, note in items:
+        name_clean = str(name).strip()
+        if not name_clean:
+            continue
+        low = name_clean.lower()
+        system_users_set.add(low)
+        if "<" in name_clean and ">" in name_clean:
+            email_match = re.search(r"<([^>]+)>", name_clean)
+            if email_match:
+                system_users_set.add(email_match.group(1).lower().strip())
+            name_part = name_clean.split("<")[0].strip().lower()
+            if name_part:
+                system_users_set.add(name_part)
+
+        if not any(item["name"].lower() == low for item in system_users_list):
+            system_users_list.append({"name": name_clean, "is_builtin": False, "note": note or "Custom system user"})
+
+    return system_users_set, system_users_list
+
+
+def _is_valid_member(name, system_users_set=None):
+    """Filters out empty or system placeholder names and configured system users."""
     if not name:
         return False
-    low = name.lower()
-    if low in ("unassigned", "undefined", "none", "unknown", "system", "[deleted]", "github-actions[bot]", "tfs build service"):
+    clean = _clean_user_name(name) if isinstance(name, dict) else str(name).strip()
+    if not clean:
         return False
+    low = clean.lower()
+
+    if system_users_set is not None:
+        if low in system_users_set:
+            return False
+        if "<" in clean and ">" in clean:
+            email_match = re.search(r"<([^>]+)>", clean)
+            if email_match and email_match.group(1).lower().strip() in system_users_set:
+                return False
+            name_part = clean.split("<")[0].strip().lower()
+            if name_part in system_users_set:
+                return False
+    else:
+        if low in ("unassigned", "undefined", "none", "unknown", "system", "[deleted]", "github-actions[bot]", "tfs build service", "azure pipelines", "dependabot[bot]"):
+            return False
+        if "<" in clean and ">" in clean:
+            name_part = clean.split("<")[0].strip().lower()
+            if name_part in ("unassigned", "undefined", "none", "unknown", "system", "[deleted]", "github-actions[bot]", "tfs build service", "azure pipelines", "dependabot[bot]"):
+                return False
     return True
+
 
 
 def normalize_user_aliases(aliases_config):
@@ -870,7 +952,7 @@ def format_relative_time(dt_or_str, now=None):
     return dt.strftime("%b %d, %Y")
 
 
-def detect_potential_user_aliases(cache_db, existing_aliases=None):
+def detect_potential_user_aliases(cache_db, existing_aliases=None, system_users=None):
     """
     Analyzes Git commits, PRs, Work Items, and TFS metadata in the cache database
     to automatically identify potential user alias candidates (e.g. Git author email/username
@@ -882,9 +964,13 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
     if not cache_db:
         return []
 
+    system_users_set, _ = normalize_system_users(system_users)
     existing_lookup, _ = normalize_user_aliases(existing_aliases)
     canonical_candidates = set()
     raw_candidates = {}
+
+    def _is_valid(n):
+        return _is_valid_member(n, system_users_set)
 
     try:
         with cache_db._connection() as conn:
@@ -892,7 +978,7 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
             wi_rows = conn.execute("SELECT assigned_to, raw_json FROM work_items WHERE deleted = 0").fetchall()
             for r in wi_rows:
                 a_name = _clean_user_name(r["assigned_to"])
-                if _is_valid_member(a_name):
+                if _is_valid(a_name):
                     if " " in a_name and len(a_name.split()) >= 2:
                         canonical_candidates.add(a_name)
                     raw_candidates.setdefault(a_name, {"sources": set(), "activity_count": 0, "emails": set()})
@@ -905,7 +991,7 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
                 for n_k, e_k in (("author_name", "author_email"), ("committer_name", "committer_email")):
                     c_name = _clean_user_name(cr[n_k])
                     c_email = str(cr[e_k] or "").strip()
-                    if _is_valid_member(c_name):
+                    if _is_valid(c_name):
                         if " " in c_name and len(c_name.split()) >= 2:
                             canonical_candidates.add(c_name)
                         raw_candidates.setdefault(c_name, {"sources": set(), "activity_count": 0, "emails": set()})
@@ -915,7 +1001,7 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
                             raw_candidates[c_name]["emails"].add(c_email.lower())
                     if c_email and "@" in c_email:
                         email_user = c_email.split("@")[0].strip()
-                        if _is_valid_member(email_user):
+                        if _is_valid(email_user):
                             raw_candidates.setdefault(email_user, {"sources": set(), "activity_count": 0, "emails": set()})
                             raw_candidates[email_user]["sources"].add("Git Email")
                             raw_candidates[email_user]["activity_count"] += 1
@@ -926,7 +1012,7 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
             for pr_r in pr_rows:
                 for u_k in ("created_by", "closed_by"):
                     u_name = _clean_user_name(pr_r[u_k])
-                    if _is_valid_member(u_name):
+                    if _is_valid(u_name):
                         if " " in u_name and len(u_name.split()) >= 2:
                             canonical_candidates.add(u_name)
                         raw_candidates.setdefault(u_name, {"sources": set(), "activity_count": 0, "emails": set()})
@@ -1012,7 +1098,90 @@ def detect_potential_user_aliases(cache_db, existing_aliases=None):
     return sorted(suggestions, key=lambda s: (conf_order.get(s["confidence"], 3), -s["activity_count"], s["canonical"]))
 
 
-def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None, user_aliases=None, score_config=None):
+def detect_potential_system_users(cache_db, existing_system_users=None):
+    """
+    Analyzes Git commits, PRs, Work Items, and builds in the cache database
+    to automatically identify potential bot, CI, automation, or service accounts
+    that should be excluded from the Hall of Fame.
+
+    Returns:
+        list of dict: [{"name": str, "activity_count": int, "sources": list, "reason": str, "confidence": str}]
+    """
+    if not cache_db:
+        return []
+
+    system_users_set, _ = normalize_system_users(existing_system_users)
+    detected = {}
+
+    SYSTEM_PATTERNS = [
+        (re.compile(r"(\bbot\b|\[bot\]|_bot|-bot)", re.I), "Identified as bot account"),
+        (re.compile(r"(\bservice\b|\bsvc\b|\bsvc_|svc-)", re.I), "Service account naming pattern"),
+        (re.compile(r"(\bagent\b|\bpipeline\b|\bci\b|\bcd\b|\bbuild\b|\brelease\b)", re.I), "CI/CD or build pipeline agent"),
+        (re.compile(r"(\badmin\b|\badministrator\b|\broot\b|\bsystem\b)", re.I), "System administrator identity"),
+        (re.compile(r"(\bautomation\b|\bdaemon\b|\bsync\b|\bwebhook\b)", re.I), "Automated integration service"),
+        (re.compile(r"(\bdevops\b|\btfs\b|\bazure\b|\bgithub\b)", re.I), "Platform automation account"),
+    ]
+
+    def _check_name(name, src):
+        if not name:
+            return
+        c_name = _clean_user_name(name)
+        if not c_name:
+            return
+        low = c_name.lower()
+        if low in system_users_set:
+            return
+
+        for pattern, reason in SYSTEM_PATTERNS:
+            if pattern.search(low):
+                if c_name not in detected:
+                    detected[c_name] = {
+                        "name": c_name,
+                        "activity_count": 0,
+                        "sources": set(),
+                        "reason": reason,
+                        "confidence": "high" if ("[bot]" in low or "service" in low or "pipeline" in low or "agent" in low) else "medium"
+                    }
+                detected[c_name]["activity_count"] += 1
+                detected[c_name]["sources"].add(src)
+                break
+
+    try:
+        with cache_db._connection() as conn:
+            # Check work items
+            wi_rows = conn.execute("SELECT assigned_to, created_by, changed_by, closed_by FROM work_items WHERE deleted = 0").fetchall()
+            for r in wi_rows:
+                for k, src in (("assigned_to", "Work Item Assignee"), ("created_by", "Work Item Creator"), ("changed_by", "Work Item Modifier"), ("closed_by", "Work Item Closer")):
+                    _check_name(r[k], src)
+
+            # Check commits
+            c_rows = conn.execute("SELECT author_name, author_email, committer_name, committer_email FROM commits LIMIT 10000").fetchall()
+            for cr in c_rows:
+                for n_k, src in (("author_name", "Git Commit Author"), ("committer_name", "Git Committer")):
+                    _check_name(cr[n_k], src)
+                for e_k in ("author_email", "committer_email"):
+                    email = str(cr[e_k] or "").strip()
+                    if email and "@" in email:
+                        prefix = email.split("@")[0]
+                        _check_name(prefix, "Git Commit Email")
+
+            # Check PRs
+            pr_rows = conn.execute("SELECT created_by, closed_by FROM pull_requests").fetchall()
+            for pr_r in pr_rows:
+                for u_k, src in (("created_by", "Pull Request Creator"), ("closed_by", "Pull Request Closer")):
+                    _check_name(pr_r[u_k], src)
+    except Exception as e:
+        logger.debug(f"Error scanning for potential system users: {e}")
+
+    results = []
+    for item in detected.values():
+        item["sources"] = sorted(list(item["sources"]))
+        results.append(item)
+
+    return sorted(results, key=lambda x: (0 if x["confidence"] == "high" else 1, -x["activity_count"], x["name"].lower()))
+
+
+def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint="", work_items=None, pull_requests=None, user_aliases=None, score_config=None, system_users=None):
     """
     Computes team activity, leaderboards, streaks, badges, user profiles, and team pulse stats.
 
@@ -1024,12 +1193,26 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         pull_requests (list): Optional pre-fetched pull requests list.
         user_aliases (dict/list): Optional user aliases mapping to combine identities.
         score_config (dict): Optional custom point weights dictionary.
+        system_users (list/dict): Optional list of system users / bots to exclude from Hall of Fame.
 
     Returns:
         dict: Full motivational analysis payload ready for QML UI consumption.
     """
     if not cache_db:
         return {}
+
+    # Normalize system users (excluded from Hall of Fame & motivation metrics)
+    if system_users is None:
+        try:
+            from utils import _load_active_user_settings
+            system_users = _load_active_user_settings().get("system_users")
+        except Exception:
+            system_users = None
+
+    system_users_set, system_users_list = normalize_system_users(system_users)
+
+    def _is_valid(name):
+        return _is_valid_member(name, system_users_set)
 
     # Normalize user aliases
     if user_aliases is None:
@@ -1293,7 +1476,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 if s_wid not in allowed_wi_ids and (str(s_wid).isdigit() and int(s_wid) not in allowed_wi_ids):
                     continue
             user = _clean_user_name(s.get("assigned_to"))
-            if _is_valid_member(user):
+            if _is_valid(user):
                 shifts_by_user.setdefault(user, []).append(s)
     except Exception as e:
         logger.debug(f"Error reading shifts: {e}")
@@ -1336,7 +1519,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     def _get_or_create_member(name):
         cname = resolve_canonical_user(name, alias_lookup)
         cname = _clean_user_name(cname)
-        if not _is_valid_member(cname):
+        if not _is_valid(cname):
             return None
         if cname not in members:
             # Generate initials
@@ -1637,7 +1820,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
         if wi_evidences > 0 and wi_in_timeframe:
             evidence_owner = assigned_name or closed_by or created_by
-            if _is_valid_member(evidence_owner):
+            if _is_valid(evidence_owner):
                 m_ev = _get_or_create_member(evidence_owner)
                 if m_ev:
                     m_ev["task_evidences_count"] += wi_evidences
@@ -1647,7 +1830,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             effective_close_raw = closed_date_raw or changed_date_raw
             effective_close_str = closed_date_str or changed_date_str
             effective_closer = closed_by or assigned_name or changed_by
-            if effective_close_str and _is_valid_member(effective_closer):
+            if effective_close_str and _is_valid(effective_closer):
                 dt = parse_iso_datetime(effective_close_str)
                 if dt:
                     y, w, _ = dt.isocalendar()
@@ -1658,7 +1841,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
         if created_date_str:
             effective_creator = created_by or assigned_name
-            if _is_valid_member(effective_creator):
+            if _is_valid(effective_creator):
                 dt = parse_iso_datetime(created_date_str)
                 if dt:
                     y, w, _ = dt.isocalendar()
@@ -1672,7 +1855,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             created_dt = parse_iso_datetime(created_date_raw) if created_date_raw else None
             age_days = max(0, (now - created_dt).days) if created_dt else 0
 
-            if _is_valid_member(assigned_name):
+            if _is_valid(assigned_name):
                 m_as = _get_or_create_member(assigned_name)
                 if m_as:
                     m_as["open_tasks_assigned"] += 1
@@ -1719,7 +1902,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         activated_date_raw = fields.get("Microsoft.VSTS.Common.ActivatedDate") or ""
         activated_date_str = str(activated_date_raw)[:10] if activated_date_raw else ""
         if activated_date_str and (filter_start_str <= activated_date_str < filter_end_str or timeframe == "all_time"):
-            if _is_valid_member(activated_by):
+            if _is_valid(activated_by):
                 m_act = _get_or_create_member(activated_by)
                 if m_act:
                     m_act["state_changes_count"] += 1
@@ -1740,7 +1923,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
             if is_completed_in_timeframe:
                 effective_closer = closed_by or assigned_name or changed_by
-                if _is_valid_member(effective_closer):
+                if _is_valid(effective_closer):
                     m = _get_or_create_member(effective_closer)
                     if m:
                         m["tasks_completed"] += 1
@@ -1774,7 +1957,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         if created_date_str and filter_start_str and filter_end_str:
             if filter_start_str <= created_date_str < filter_end_str or timeframe == "all_time":
                 effective_creator = created_by or assigned_name
-                if _is_valid_member(effective_creator):
+                if _is_valid(effective_creator):
                     m = _get_or_create_member(effective_creator)
                     if m:
                         m["tasks_created"] += 1
@@ -1788,7 +1971,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         is_pushback = bool(ev.get("is_pushback", 0))
 
         if ev_date_str and (filter_start_str <= ev_date_str < filter_end_str or timeframe == "all_time"):
-            if _is_valid_member(changer):
+            if _is_valid(changer):
                 m = _get_or_create_member(changer)
                 if m:
                     m["state_changes_count"] += 1
@@ -1880,18 +2063,18 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             if dt:
                 y, w, _ = dt.isocalendar()
                 pr_sprint = f"week-{str(y)[-2:]}{w:02d}"
-                if _is_valid_member(cb):
+                if _is_valid(cb):
                     m = _get_or_create_member(cb)
                     if m:
                         m["weekly_activity_history"][pr_sprint] = m["weekly_activity_history"].get(pr_sprint, 0) + 1
-                if _is_valid_member(clb) and clb != cb:
+                if _is_valid(clb) and clb != cb:
                     m = _get_or_create_member(clb)
                     if m:
                         m["weekly_activity_history"][pr_sprint] = m["weekly_activity_history"].get(pr_sprint, 0) + 1
 
         # Check PR creation timeframe (Feature branch started)
         if c_date_str and (filter_start_str <= c_date_str < filter_end_str or timeframe == "all_time"):
-            if _is_valid_member(cb):
+            if _is_valid(cb):
                 m = _get_or_create_member(cb)
                 if m:
                     m["prs_created"] += 1
@@ -1927,10 +2110,10 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             elif isinstance(rev, str):
                 vote = 10
 
-            if vote > 0 and _is_valid_member(rev_name):
+            if vote > 0 and _is_valid(rev_name):
                 approver_names.append(rev_name)
 
-            if _is_valid_member(rev_name) and rev_name != cb:
+            if _is_valid(rev_name) and rev_name != cb:
                 rev_date_raw = cl_date_raw or c_date_raw
                 rev_date_str = str(rev_date_raw)[:10] if rev_date_raw else ""
 
@@ -1969,13 +2152,13 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         # Check PR closed timeframe (Feature branch closed/merged)
         if is_completed and cl_date_str and (filter_start_str <= cl_date_str < filter_end_str or timeframe == "all_time"):
             closer = clb
-            if not _is_valid_member(closer):
+            if not _is_valid(closer):
                 if approver_names:
                     closer = approver_names[0]
-                elif _is_valid_member(cb):
+                elif _is_valid(cb):
                     closer = cb
 
-            if _is_valid_member(closer):
+            if _is_valid(closer):
                 m = _get_or_create_member(closer)
                 if m:
                     m["prs_closed"] += 1
@@ -2000,11 +2183,11 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     if dt_c and dt_cl and dt_cl >= dt_c:
                         diff_hours = (dt_cl - dt_c).total_seconds() / 3600.0
                         if diff_hours <= 24.0:
-                            if _is_valid_member(cb):
+                            if _is_valid(cb):
                                 m_cb = _get_or_create_member(cb)
                                 if m_cb:
                                     m_cb["prs_fast_merged"] += 1
-                        if _is_valid_member(closer):
+                        if _is_valid(closer):
                             m_cl = _get_or_create_member(closer)
                             if m_cl:
                                 m_cl["_pr_durations"].append(diff_hours)
@@ -2025,7 +2208,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             committer = _clean_user_name(c.get("committer_name") or c.get("author_name") or c.get("committer_email") or c.get("author_email"))
 
             # Track weekly activity for streaks
-            if c_date_str and _is_valid_member(committer):
+            if c_date_str and _is_valid(committer):
                 dt = parse_iso_datetime(c_date_raw or c_date_str)
                 if dt:
                     y, w, _ = dt.isocalendar()
@@ -2036,7 +2219,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
             # Timeframe evaluation
             if c_date_str and (filter_start_str <= c_date_str < filter_end_str or timeframe == "all_time"):
-                if _is_valid_member(committer):
+                if _is_valid(committer):
                     m = _get_or_create_member(committer)
                     if m:
                         m["commits_count"] += 1
@@ -2057,7 +2240,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         b_date_raw = br.get("commit_date", "")
         b_date = b_date_raw[:10]
         committer = _clean_user_name(br.get("committer"))
-        if b_date and _is_valid_member(committer):
+        if b_date and _is_valid(committer):
             dt = parse_iso_datetime(b_date_raw or b_date)
             if dt:
                 y, w, _ = dt.isocalendar()
@@ -2067,7 +2250,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                     m["weekly_activity_history"][br_sprint] = m["weekly_activity_history"].get(br_sprint, 0) + 1
 
         if b_date and (filter_start_str <= b_date < filter_end_str or timeframe == "all_time"):
-            if _is_valid_member(committer):
+            if _is_valid(committer):
                 m = _get_or_create_member(committer)
                 if m:
                     m["commits_count"] += 1
@@ -2079,7 +2262,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         t_date = t_date_raw[:10]
         committer = _clean_user_name(tag.get("committer"))
         if t_date and (filter_start_str <= t_date < filter_end_str or timeframe == "all_time"):
-            if _is_valid_member(committer):
+            if _is_valid(committer):
                 m = _get_or_create_member(committer)
                 if m:
                     m["tags_pushed"] += 1
@@ -2095,7 +2278,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         if b_date and filter_start_str <= b_date < filter_end_str:
             is_succ = b["result"] == "succeeded"
             is_fail = b["result"] in ("failed", "partiallysucceeded")
-            if _is_valid_member(requester):
+            if _is_valid(requester):
                 m = _get_or_create_member(requester)
                 if m:
                     m["builds_total"] += 1
@@ -3024,6 +3207,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         "all_badges": list(BADGE_DEFINITIONS.values()),
         "score_config": active_score_config,
         "score_presets": SCORE_PRESETS,
+        "system_users": system_users_list,
+        "system_users_count": len([u for u in system_users_list if not u.get("is_builtin", False)]),
     }
 
 

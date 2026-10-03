@@ -248,6 +248,7 @@ class DevOpsBackend(QObject):
     areaPathSettingsChanged = Signal()
     userAliasesChanged = Signal()
     userProfilesChanged = Signal()
+    systemUsersChanged = Signal()
     rightSidebarWidthChanged = Signal(int)
 
     @staticmethod
@@ -2664,7 +2665,9 @@ class DevOpsBackend(QObject):
         team_motivation_data = {}
         try:
             import team_motivation
-            user_aliases = _load_user_settings().get("user_aliases")
+            user_settings = _load_user_settings()
+            user_aliases = user_settings.get("user_aliases")
+            system_users = user_settings.get("system_users")
             team_motivation_data = team_motivation.compute_team_motivation_data(
                 self._cache_db,
                 timeframe=self._team_motivation_timeframe,
@@ -2672,7 +2675,8 @@ class DevOpsBackend(QObject):
                 work_items=sorted_wis,
                 pull_requests=sorted_prs,
                 user_aliases=user_aliases,
-                score_config=self._team_motivation_score_config
+                score_config=self._team_motivation_score_config,
+                system_users=system_users
             )
         except Exception as e:
             logger.debug(f"Could not compute initial team motivation data: {e}")
@@ -4355,7 +4359,9 @@ class DevOpsBackend(QObject):
             return
         try:
             import team_motivation
-            user_aliases = _load_user_settings().get("user_aliases")
+            user_settings = _load_user_settings()
+            user_aliases = user_settings.get("user_aliases")
+            system_users = user_settings.get("system_users")
             self._team_motivation_data = team_motivation.compute_team_motivation_data(
                 self._cache_db,
                 timeframe=self._team_motivation_timeframe,
@@ -4363,7 +4369,8 @@ class DevOpsBackend(QObject):
                 work_items=self._work_items,
                 pull_requests=self._pull_requests,
                 user_aliases=user_aliases,
-                score_config=self._team_motivation_score_config
+                score_config=self._team_motivation_score_config,
+                system_users=system_users
             )
             self.teamMotivationChanged.emit()
             self.userProfilesChanged.emit()
@@ -4563,18 +4570,212 @@ class DevOpsBackend(QObject):
         try:
             import team_motivation
             cfg = _load_user_settings()
-            return team_motivation.detect_potential_user_aliases(self._cache_db, cfg.get("user_aliases"))
+            return team_motivation.detect_potential_user_aliases(self._cache_db, cfg.get("user_aliases"), cfg.get("system_users"))
         except Exception as e:
             logger.error(f"Error auto-detecting user aliases: {e}")
             return []
+
+    # ------------------------------------------------------------------
+    # System Users & Automation Accounts (Hall of Fame Exclusion)
+    # ------------------------------------------------------------------
+
+    @Property(list, notify=systemUsersChanged)
+    def systemUsers(self):
+        """Returns list of configured and built-in system users: [{"name": "...", "is_builtin": bool, "note": "..."}]"""
+        cfg = _load_user_settings()
+        raw = cfg.get("system_users")
+        try:
+            import team_motivation
+            _, sys_list = team_motivation.normalize_system_users(raw)
+            return sorted(sys_list, key=lambda x: (1 if x.get("is_builtin") else 0, x.get("name", "").lower()))
+        except Exception:
+            return []
+
+    @Property(int, notify=systemUsersChanged)
+    def systemUsersCount(self):
+        """Returns count of custom configured system users."""
+        users = self.systemUsers
+        return len([u for u in users if not u.get("is_builtin", False)])
+
+    @Slot(result=list)
+    def get_system_users(self):
+        """Returns list of configured system users."""
+        return self.systemUsers
+
+    @Slot(str, result=bool)
+    def is_system_user(self, user_name):
+        """Checks if a user identity is currently marked as a system user."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        import team_motivation
+        cfg = _load_user_settings()
+        sys_set, _ = team_motivation.normalize_system_users(cfg.get("system_users"))
+        return not team_motivation._is_valid_member(clean, sys_set)
+
+    @Slot(str, result=bool)
+    @Slot(str, str, result=bool)
+    def add_system_user(self, user_name, note=""):
+        """Adds a user name/pattern to configured system users (excluded from Hall of Fame)."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("system_users", [])
+            _, sys_list = team_motivation.normalize_system_users(raw)
+
+            custom_entries = [u for u in sys_list if not u.get("is_builtin")]
+            if any(u.get("name", "").lower() == clean.lower() for u in custom_entries):
+                return True
+
+            custom_entries.append({"name": clean, "note": note or "Custom system user"})
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Added '%s' as System User (excluded from Hall of Fame)", clean)
+            self.logMessage.emit(f"🤖 User '{clean}' excluded from Hall of Fame")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding system user: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def remove_system_user(self, user_name):
+        """Removes a user from configured custom system users."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("system_users", [])
+            _, sys_list = team_motivation.normalize_system_users(raw)
+            custom_entries = [u for u in sys_list if not u.get("is_builtin") and u.get("name", "").lower() != clean.lower()]
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Removed '%s' from custom System Users", clean)
+            self.logMessage.emit(f"✅ User '{clean}' restored to active Hall of Fame members")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing system user: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def toggle_system_user(self, user_name):
+        """Toggles system user status for a user."""
+        if self.is_system_user(user_name):
+            return self.remove_system_user(user_name)
+        else:
+            return self.add_system_user(user_name)
+
+    @Slot(result=list)
+    def get_potential_system_users(self):
+        """Scans database to discover potential bot and system accounts."""
+        if not self._cache_db:
+            return []
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            return team_motivation.detect_potential_system_users(self._cache_db, cfg.get("system_users"))
+        except Exception as e:
+            logger.error(f"Error auto-detecting system users: {e}")
+            return []
+
+    @Slot(str, result=bool)
+    def save_system_users(self, system_users_json):
+        """Saves custom system users list from JSON."""
+        try:
+            data = json.loads(system_users_json) if isinstance(system_users_json, str) else system_users_json
+            import team_motivation
+            _, sys_list = team_motivation.normalize_system_users(data)
+            custom_entries = [u for u in sys_list if not u.get("is_builtin")]
+            cfg = _load_user_settings()
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving system users: {e}")
+            return False
+
 
     @Slot(result=list)
     def get_all_user_profiles(self):
         """Returns all aggregated individual user profiles sorted by last activity and score."""
         if not self._team_motivation_data:
             self.recompute_team_motivation()
-        members = self._team_motivation_data.get("all_user_profiles") or self._team_motivation_data.get("members", [])
-        return sorted(members, key=lambda m: (m.get("is_aliased", False), -(m.get("score", 0)), m.get("name", "").lower()))
+        members = [dict(m) for m in (self._team_motivation_data.get("all_user_profiles") or self._team_motivation_data.get("members", []))]
+
+        for m in members:
+            m["is_system_user"] = False
+
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            _, sys_list = team_motivation.normalize_system_users(cfg.get("system_users"))
+            existing_names = {m.get("name", "").lower() for m in members}
+
+            for su in sys_list:
+                su_name = su.get("name", "")
+                if su_name and su_name.lower() not in existing_names:
+                    parts = su_name.split()
+                    initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "🤖"
+                    members.append({
+                        "name": su_name,
+                        "initials": initials,
+                        "aliases": [],
+                        "is_aliased": False,
+                        "is_system_user": True,
+                        "is_builtin_system_user": bool(su.get("is_builtin")),
+                        "note": su.get("note", "System user"),
+                        "score": 0,
+                        "rank": None,
+                        "has_activity": False,
+                        "recent_achievements": ["🤖 Excluded from Hall of Fame"],
+                        "recent_activities": [],
+                        "assigned_work_items": [],
+                        "recent_prs": [],
+                        "recent_commits": [],
+                        "prs_created": 0,
+                        "prs_closed": 0,
+                        "tasks_completed": 0,
+                        "bugs_resolved": 0,
+                        "commits_count": 0,
+                        "builds_total": 0,
+                        "tags_pushed": 0,
+                        "current_streak_weeks": 0,
+                        "best_streak_weeks": 0,
+                        "badges": [],
+                        "time_stats": {"persona": "System / Bot Account"},
+                    })
+        except Exception as e:
+            logger.debug(f"Error enriching user profiles with system users: {e}")
+
+        return sorted(members, key=lambda m: (m.get("is_system_user", False), m.get("is_aliased", False), -(m.get("score", 0)), m.get("name", "").lower()))
 
     @Slot(str, result=dict)
     def get_user_profile(self, user_name_or_alias):

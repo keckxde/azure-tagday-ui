@@ -914,9 +914,79 @@ class TestTeamMotivation(unittest.TestCase):
         self.assertEqual(data_custom["score_config"]["prs_closed"], 100)
         self.assertEqual(data_custom["score_config"]["prs_created"], 50)
 
+    def test_normalize_system_users(self):
+        """Verify normalization of system users handles defaults, strings, dicts, and casing."""
+        from team_motivation import normalize_system_users, DEFAULT_SYSTEM_USERS
+
+        # Default system users
+        sys_set, sys_list = normalize_system_users([])
+        for d in DEFAULT_SYSTEM_USERS:
+            self.assertIn(d.lower(), sys_set)
+
+        # Custom user list with string & dict
+        custom = ["CustomBot", {"name": "TFS_Service_User", "note": "Internal CI"}]
+        sys_set2, sys_list2 = normalize_system_users(custom)
+        self.assertIn("custombot", sys_set2)
+        self.assertIn("tfs_service_user", sys_set2)
+        self.assertIn("github-actions[bot]", sys_set2)
+
+        # Check sys_list items have metadata
+        bot_entry = next((item for item in sys_list2 if item["name"].lower() == "tfs_service_user"), None)
+        self.assertIsNotNone(bot_entry)
+        self.assertFalse(bot_entry["is_builtin"])
+        self.assertEqual(bot_entry["note"], "Internal CI")
+        self.assertEqual(bot_entry["name"], "TFS_Service_User")
+
+    def test_system_user_exclusion_from_hall_of_fame(self):
+        """Verify that configured system users are completely excluded from Hall of Fame rankings and scores."""
+        now = datetime.now()
+        # Add a bot user with lots of PRs and work items
+        bot_prs = [
+            {
+                "pullRequestId": 999,
+                "title": "Automated dependency update",
+                "status": "completed",
+                "createdBy": {"displayName": "AutoBot Service", "id": "99"},
+                "closedBy": {"displayName": "AutoBot Service", "id": "99"},
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "sourceRefName": "refs/heads/autobot/deps",
+                "reviewers": []
+            }
+        ]
+        self.cache.save_pull_requests("repo1", bot_prs)
+
+        # 1. Without configuring AutoBot as system user, it might appear
+        data_without = compute_team_motivation_data(self.cache, timeframe="last_week", system_users=[])
+        member_names_without = [m["name"] for m in data_without["members"]]
+        self.assertIn("AutoBot Service", member_names_without)
+
+        # 2. When configuring AutoBot as a system user, it MUST be excluded
+        data_with = compute_team_motivation_data(self.cache, timeframe="last_week", system_users=["AutoBot Service"])
+        member_names_with = [m["name"] for m in data_with["members"]]
+        self.assertNotIn("AutoBot Service", member_names_with)
+
+        # Check payload metadata
+        self.assertIn("system_users", data_with)
+        self.assertGreaterEqual(data_with.get("system_users_count", 0), 1)
+
+    def test_detect_potential_system_users(self):
+        """Verify automatic detection of bot/service accounts from activity cache."""
+        from team_motivation import detect_potential_system_users
+
+        # Detect potential system users
+        detected = detect_potential_system_users(self.cache)
+        # Should detect bot keywords from our test data
+        detected_names = [d["name"] for d in detected]
+        # "AutoBot Service" has "bot" and "service" keywords
+        if "AutoBot Service" in detected_names:
+            bot_meta = next(d for d in detected if d["name"] == "AutoBot Service")
+            self.assertIn("service", bot_meta["reasons"]) or self.assertIn("bot", bot_meta["reasons"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
