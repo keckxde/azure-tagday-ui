@@ -1701,6 +1701,32 @@ class DevOpsBackend(QObject):
     def tagDayData(self):
         return self._tagday_data
 
+    @Property(list, notify=tagDayDataChanged)
+    def unmergedBranches(self):
+        """Returns all unmerged branches across all repositories with repository metadata."""
+        if not self._tagday_data:
+            return []
+        all_branches = []
+        for repo in self._tagday_data.get("repos_summary", []):
+            rname = repo.get("name", "")
+            r_url = repo.get("web_url", "")
+            r_cat = repo.get("category", "OTHERS")
+            r_def_branch = repo.get("default_branch", "main")
+            for b in repo.get("unmerged_branches", []):
+                branch_copy = dict(b)
+                branch_copy["repo_name"] = rname
+                branch_copy["repo_url"] = r_url
+                branch_copy["repo_category"] = r_cat
+                branch_copy["default_branch"] = r_def_branch
+                if r_url:
+                    b_name = b.get("branch_name", "")
+                    clean_b_name = b_name.replace("refs/heads/", "")
+                    branch_copy["branch_url"] = f"{r_url}?version=GB{clean_b_name}"
+                else:
+                    branch_copy["branch_url"] = ""
+                all_branches.append(branch_copy)
+        return all_branches
+
     @Property(dict, notify=storageDataChanged)
     def storageData(self):
         return self._storage_data

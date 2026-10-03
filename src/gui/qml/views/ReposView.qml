@@ -19,13 +19,15 @@ Item {
     property int contentMargins: 18
 
     // ==========================================
-    // Pull Requests Right Sidebar State & Properties
+    // Sidebar State & Properties (PRs & Unmerged Branches)
     // ==========================================
     property bool isPrSidebarOpen: true
+    property int sidebarTab: 0 // 0: Pull Requests, 1: Unmerged Branches
     property real prSidebarWidth: (backend && backend.rightSidebarWidth) ? Math.max(320, Math.min(800, backend.rightSidebarWidth)) : 440
     property real minPrSidebarWidth: 320
     property real maxPrSidebarWidth: 800
 
+    // Pull Requests Sidebar State
     property string prSearchQuery: ""
     property string prSelectedRepo: "ALL"
     property string prSelectedStatus: "ALL" // "ALL", "ACTIVE", "COMPLETED", "ABANDONED"
@@ -36,9 +38,21 @@ Item {
     property int prTotalPages: 1
     property int prTotalMatchingCount: 0
 
-    // Public methods to control PR sidebar from outside or within
+    // Unmerged Branches Sidebar State
+    property string branchSearchQuery: ""
+    property string branchSelectedRepo: "ALL"
+    property int branchSortMode: 0 // 0: Ahead Desc, 1: Date Desc, 2: Branch A-Z, 3: Repo A-Z
+    property int branchCurrentPage: 1
+    property int branchPageSize: 20
+    property int branchTotalPages: 1
+    property int branchTotalMatchingCount: 0
+    property var filteredBranchesList: []
+    property var pagedBranchesList: []
+
+    // Public methods to control PR & Branches sidebar from outside or within
     function openPrSidebar(repoFilter, statusFilter) {
         root.isPrSidebarOpen = true;
+        root.sidebarTab = 0;
         if (statusFilter && typeof statusFilter === "boolean") {
             // Called with (statusName, isStatus=true)
             root.prSelectedStatus = repoFilter ? repoFilter.toUpperCase() : "ALL";
@@ -58,14 +72,42 @@ Item {
         root.updateFilteredPrs();
     }
 
+    function openBranchesSidebar(repoFilter) {
+        root.isPrSidebarOpen = true;
+        root.sidebarTab = 1;
+        root.branchSelectedRepo = repoFilter || "ALL";
+        root.branchSearchQuery = "";
+        root.branchCurrentPage = 1;
+        root.updateFilteredBranches();
+    }
+
     function closePrSidebar() {
         root.isPrSidebarOpen = false;
     }
 
     function togglePrSidebar() {
-        root.isPrSidebarOpen = !root.isPrSidebarOpen;
-        if (root.isPrSidebarOpen) {
+        if (!root.isPrSidebarOpen) {
+            root.isPrSidebarOpen = true;
+            root.sidebarTab = 0;
             root.updateFilteredPrs();
+        } else if (root.sidebarTab !== 0) {
+            root.sidebarTab = 0;
+            root.updateFilteredPrs();
+        } else {
+            root.isPrSidebarOpen = false;
+        }
+    }
+
+    function toggleBranchesSidebar() {
+        if (!root.isPrSidebarOpen) {
+            root.isPrSidebarOpen = true;
+            root.sidebarTab = 1;
+            root.updateFilteredBranches();
+        } else if (root.sidebarTab !== 1) {
+            root.sidebarTab = 1;
+            root.updateFilteredBranches();
+        } else {
+            root.isPrSidebarOpen = false;
         }
     }
 
@@ -89,6 +131,10 @@ Item {
 
     readonly property int totalPrsCount: {
         return (backend && backend.pullRequests) ? backend.pullRequests.length : 0;
+    }
+
+    readonly property int totalBranchesCount: {
+        return (backend && backend.unmergedBranches) ? backend.unmergedBranches.length : 0;
     }
 
     readonly property int activePrsCount: {
@@ -339,6 +385,131 @@ Item {
     }
 
     // ==========================================
+    // Filtered & Paged Unmerged Branches Computation
+    // ==========================================
+    function updateFilteredBranches() {
+        if (!backend || !backend.unmergedBranches) {
+            root.filteredBranchesList = [];
+            root.pagedBranchesList = [];
+            root.branchTotalMatchingCount = 0;
+            root.branchTotalPages = 1;
+            return;
+        }
+
+        var list = backend.unmergedBranches || [];
+        var query = root.branchSearchQuery.trim().toLowerCase();
+        var repoFilter = root.branchSelectedRepo;
+        var result = [];
+
+        for (var i = 0; i < list.length; i++) {
+            var b = list[i];
+
+            if (repoFilter !== "ALL" && b.repo_name !== repoFilter) {
+                continue;
+            }
+
+            if (query !== "") {
+                var bName = (b.branch_name || "").toLowerCase();
+                var committer = (b.committer || "").toLowerCase();
+                var comment = (b.comment || "").toLowerCase();
+                var shortHash = (b.short_hash || "").toLowerCase();
+                var repoName = (b.repo_name || "").toLowerCase();
+                var prepPrId = (b.prepared_pr_id || "").toLowerCase();
+                var prepPrTitle = (b.prepared_pr_title || "").toLowerCase();
+                if (bName.indexOf(query) === -1 &&
+                    committer.indexOf(query) === -1 &&
+                    comment.indexOf(query) === -1 &&
+                    shortHash.indexOf(query) === -1 &&
+                    repoName.indexOf(query) === -1 &&
+                    prepPrId.indexOf(query) === -1 &&
+                    prepPrTitle.indexOf(query) === -1) {
+                    continue;
+                }
+            }
+
+            result.push(b);
+        }
+
+        // Apply Sorting
+        if (root.branchSortMode === 0) {
+            // Ahead Descending
+            result.sort(function(a, b) {
+                var aDiff = (b.ahead || 0) - (a.ahead || 0);
+                if (aDiff !== 0) return aDiff;
+                var tA = a.commit_date || "";
+                var tB = b.commit_date || "";
+                if (tA !== tB) return tA > tB ? -1 : 1;
+                return (a.branch_name || "").localeCompare(b.branch_name || "");
+            });
+        } else if (root.branchSortMode === 1) {
+            // Commit Date Descending (Newest first)
+            result.sort(function(a, b) {
+                var tA = a.commit_date || "";
+                var tB = b.commit_date || "";
+                if (tA !== tB) return tA > tB ? -1 : 1;
+                return (b.ahead || 0) - (a.ahead || 0);
+            });
+        } else if (root.branchSortMode === 2) {
+            // Branch Name A-Z
+            result.sort(function(a, b) {
+                return (a.branch_name || "").localeCompare(b.branch_name || "");
+            });
+        } else if (root.branchSortMode === 3) {
+            // Repository A-Z
+            result.sort(function(a, b) {
+                var rA = (a.repo_name || "").toLowerCase();
+                var rB = (b.repo_name || "").toLowerCase();
+                if (rA !== rB) return rA < rB ? -1 : 1;
+                return (a.branch_name || "").localeCompare(b.branch_name || "");
+            });
+        }
+
+        root.filteredBranchesList = result;
+        root.branchTotalMatchingCount = result.length;
+        root.branchTotalPages = Math.max(1, Math.ceil(result.length / root.branchPageSize));
+        if (root.branchCurrentPage > root.branchTotalPages) {
+            root.branchCurrentPage = 1;
+        }
+
+        var start = (root.branchCurrentPage - 1) * root.branchPageSize;
+        root.pagedBranchesList = result.slice(start, start + root.branchPageSize);
+    }
+
+    onBranchSearchQueryChanged: {
+        root.branchCurrentPage = 1;
+        root.updateFilteredBranches();
+    }
+    onBranchSelectedRepoChanged: {
+        root.branchCurrentPage = 1;
+        root.updateFilteredBranches();
+    }
+    onBranchSortModeChanged: {
+        root.updateFilteredBranches();
+    }
+    onBranchPageSizeChanged: {
+        root.branchTotalPages = Math.max(1, Math.ceil(root.branchTotalMatchingCount / root.branchPageSize));
+        root.branchCurrentPage = 1;
+        root.updateFilteredBranches();
+    }
+    onBranchCurrentPageChanged: {
+        var start = (root.branchCurrentPage - 1) * root.branchPageSize;
+        root.pagedBranchesList = root.filteredBranchesList.slice(start, start + root.branchPageSize);
+    }
+
+    // Filtered repositories list for typing / choosing in the Unmerged Branches repo selector
+    readonly property var branchRepoFilteredList: {
+        var set = {};
+        if (backend && backend.unmergedBranches) {
+            for (var i = 0; i < backend.unmergedBranches.length; i++) {
+                var rn = backend.unmergedBranches[i].repo_name;
+                if (rn) set[rn] = true;
+            }
+        }
+        var arr = Object.keys(set).sort();
+        return ["ALL"].concat(arr);
+    }
+
+    // ==========================================
     // Main Container Split: Repos Table + PR Sidebar
     // ==========================================
     RowLayout {
@@ -390,13 +561,13 @@ Item {
                     // Pull Requests Sidebar Toggle Button
                     Button {
                         id: togglePrSidebarBtn
-                        text: "🔀 Pull Requests (" + root.totalPrsCount + ")"
+                        text: "🔀 PRs (" + root.totalPrsCount + ")"
                         checkable: true
-                        checked: root.isPrSidebarOpen
+                        checked: root.isPrSidebarOpen && root.sidebarTab === 0
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         ToolTip.visible: hovered
-                        ToolTip.text: root.isPrSidebarOpen ? "Hide Pull Requests right sidebar" : "Open Pull Requests right sidebar with search & filters"
+                        ToolTip.text: (root.isPrSidebarOpen && root.sidebarTab === 0) ? "Hide Pull Requests sidebar" : "Open Pull Requests sidebar with search & filters"
                         contentItem: RowLayout {
                             anchors.centerIn: parent
                             spacing: 5
@@ -405,7 +576,7 @@ Item {
                                 font.pixelSize: 11
                             }
                             Text {
-                                text: "Pull Requests (" + root.totalPrsCount + ")"
+                                text: "PRs (" + root.totalPrsCount + ")"
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -430,13 +601,65 @@ Item {
                         }
                         background: Rectangle {
                             implicitHeight: 32
-                            implicitWidth: 160
+                            implicitWidth: 140
                             radius: 6
                             color: togglePrSidebarBtn.checked ? "#1f6feb" : (togglePrSidebarBtn.hovered ? "#21262d" : "#161b22")
                             border.color: togglePrSidebarBtn.checked ? "#58a6ff" : (root.activePrsCount > 0 ? "#388bfd" : "#30363d")
                             border.width: 1
                         }
                         onClicked: root.togglePrSidebar()
+                    }
+
+                    // Unmerged Branches Sidebar Toggle Button
+                    Button {
+                        id: toggleBranchesSidebarBtn
+                        text: "🌿 Branches (" + root.totalBranchesCount + ")"
+                        checkable: true
+                        checked: root.isPrSidebarOpen && root.sidebarTab === 1
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        ToolTip.visible: hovered
+                        ToolTip.text: (root.isPrSidebarOpen && root.sidebarTab === 1) ? "Hide Unmerged Branches sidebar" : "Open Unmerged Branches sidebar"
+                        contentItem: RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Text {
+                                text: "🌿"
+                                font.pixelSize: 11
+                            }
+                            Text {
+                                text: "Branches (" + root.totalBranchesCount + ")"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: toggleBranchesSidebarBtn.checked ? "#ffffff" : (root.unmergedBranchesCount > 0 ? "#bc8cff" : "#c9d1d9")
+                            }
+                            Rectangle {
+                                visible: root.unmergedBranchesCount > 0
+                                height: 16
+                                width: unmergedBrPillText.implicitWidth + 8
+                                radius: 8
+                                color: toggleBranchesSidebarBtn.checked ? "#a371f7" : "#8957e5"
+                                Text {
+                                    id: unmergedBrPillText
+                                    anchors.centerIn: parent
+                                    text: root.unmergedBranchesCount + " ahead"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 9
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                }
+                            }
+                        }
+                        background: Rectangle {
+                            implicitHeight: 32
+                            implicitWidth: 155
+                            radius: 6
+                            color: toggleBranchesSidebarBtn.checked ? "#6e40c9" : (toggleBranchesSidebarBtn.hovered ? "#21262d" : "#161b22")
+                            border.color: toggleBranchesSidebarBtn.checked ? "#bc8cff" : (root.unmergedBranchesCount > 0 ? "#8957e5" : "#30363d")
+                            border.width: 1
+                        }
+                        onClicked: root.toggleBranchesSidebar()
                     }
 
                     Button {
@@ -952,32 +1175,44 @@ Item {
                                         }
                                     }
 
-                                    // Badge 2: Unmerged Branches
+                                    // Badge 2: Unmerged Branches (Click to view in Unmerged Branches sidebar)
                                     Rectangle {
                                         visible: !!(model.unmerged_branches_count > 0)
                                         height: 26
                                         radius: 4
-                                        color: "#1e172a"
-                                        border.color: "#8957e5"
+                                        color: unmergedBrMa.containsMouse ? "#2d1b4e" : "#1e172a"
+                                        border.color: unmergedBrMa.containsMouse ? "#bc8cff" : "#8957e5"
                                         border.width: 1
                                         implicitWidth: brRow.implicitWidth + 16
 
                                         Row {
-                                            id: brRow
-                                            anchors.centerIn: parent
-                                            spacing: 4
-                                            Text {
-                                                text: "🌿"
-                                                font.pixelSize: 10
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                            Text {
-                                                text: model.unmerged_branches_count + " branch" + (model.unmerged_branches_count > 1 ? "es" : "") + " ahead"
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
-                                                font.weight: Font.DemiBold
-                                                color: "#bc8cff"
-                                                anchors.verticalCenter: parent.verticalCenter
+                                             id: brRow
+                                             anchors.centerIn: parent
+                                             spacing: 4
+                                             Text {
+                                                 text: "🌿"
+                                                 font.pixelSize: 10
+                                                 anchors.verticalCenter: parent.verticalCenter
+                                             }
+                                             Text {
+                                                 text: model.unmerged_branches_count + " branch" + (model.unmerged_branches_count > 1 ? "es" : "") + " ahead"
+                                                 font.family: "Segoe UI, sans-serif"
+                                                 font.pixelSize: 11
+                                                 font.weight: Font.DemiBold
+                                                 color: "#bc8cff"
+                                                 anchors.verticalCenter: parent.verticalCenter
+                                             }
+                                        }
+
+                                        MouseArea {
+                                            id: unmergedBrMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open Unmerged Branches Sidebar for " + model.name
+                                            onClicked: {
+                                                root.openBranchesSidebar(model.name);
                                             }
                                         }
                                     }
@@ -1402,21 +1637,138 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 12
-                anchors.topMargin: 14
-                anchors.bottomMargin: 14
-                spacing: 12
+                anchors.topMargin: 12
+                anchors.bottomMargin: 12
+                spacing: 10
 
                 // ==========================================
-                // Sidebar Header Row
+                // Top Tab Bar: Switch between PRs & Unmerged Branches
                 // ==========================================
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: 8
+                    height: 38
+                    color: "#0d1117"
+                    radius: 6
+                    border.color: "#30363d"
+                    border.width: 1
 
-                    Text {
-                        text: "🔀"
-                        font.pixelSize: 18
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        spacing: 4
+
+                        // Tab 0: Pull Requests
+                        Button {
+                            id: tabPrBtn
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            checkable: true
+                            checked: root.sidebarTab === 0
+                            font.pixelSize: 11
+                            font.weight: checked ? Font.DemiBold : Font.Normal
+                            contentItem: RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 5
+                                Text {
+                                    text: "🔀"
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: "Pull Requests (" + root.totalPrsCount + ")"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: tabPrBtn.checked ? Font.DemiBold : Font.Normal
+                                    color: tabPrBtn.checked ? "#ffffff" : "#8b949e"
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: tabPrBtn.checked ? "#1f6feb" : (tabPrBtn.hovered ? "#21262d" : "transparent")
+                                border.color: tabPrBtn.checked ? "#388bfd" : "transparent"
+                            }
+                            onClicked: {
+                                root.sidebarTab = 0;
+                                root.updateFilteredPrs();
+                            }
+                        }
+
+                        // Tab 1: Unmerged Branches
+                        Button {
+                            id: tabBranchesBtn
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            checkable: true
+                            checked: root.sidebarTab === 1
+                            font.pixelSize: 11
+                            font.weight: checked ? Font.DemiBold : Font.Normal
+                            contentItem: RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 5
+                                Text {
+                                    text: "🌿"
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: "Branches (" + root.totalBranchesCount + ")"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.weight: tabBranchesBtn.checked ? Font.DemiBold : Font.Normal
+                                    color: tabBranchesBtn.checked ? "#ffffff" : "#8b949e"
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: tabBranchesBtn.checked ? "#6e40c9" : (tabBranchesBtn.hovered ? "#21262d" : "transparent")
+                                border.color: tabBranchesBtn.checked ? "#bc8cff" : "transparent"
+                            }
+                            onClicked: {
+                                root.sidebarTab = 1;
+                                root.updateFilteredBranches();
+                            }
+                        }
+
+                        // Close Sidebar Button
+                        Button {
+                            Layout.preferredWidth: 28
+                            Layout.fillHeight: true
+                            font.pixelSize: 12
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Close sidebar"
+                            contentItem: Text {
+                                text: "✕"
+                                font: parent.font
+                                color: parent.hovered ? "#f85149" : "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: parent.hovered ? "#30363d" : "transparent"
+                            }
+                            onClicked: root.closePrSidebar()
+                        }
                     }
+                }
+
+                // ==========================================
+                // TAB 0 CONTENT: PULL REQUESTS VIEW
+                // ==========================================
+                ColumnLayout {
+                    id: prsContentLayout
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.sidebarTab === 0
+                    spacing: 12
+
+                    // Sidebar Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "🔀"
+                            font.pixelSize: 18
+                        }
 
                     ColumnLayout {
                         spacing: 1
@@ -2162,6 +2514,645 @@ Item {
                         }
                     }
                 }
+
+                // ==========================================
+                // TAB 1 CONTENT: UNMERGED BRANCHES VIEW
+                // ==========================================
+                ColumnLayout {
+                    id: branchesContentLayout
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.sidebarTab === 1
+                    spacing: 12
+
+                    // Unmerged Branches Header Row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "🌿"
+                            font.pixelSize: 18
+                        }
+
+                        ColumnLayout {
+                            spacing: 1
+                            Text {
+                                text: "Unmerged Branches"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                                color: "#f0f6fc"
+                            }
+                            Text {
+                                text: {
+                                    var prefix = (root.branchSelectedRepo !== "ALL") ? ("📁 " + root.branchSelectedRepo) : "All Repositories";
+                                    return prefix + " (" + root.branchTotalMatchingCount + " of " + root.totalBranchesCount + ")";
+                                }
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: root.branchSelectedRepo !== "ALL" ? "#bc8cff" : "#8b949e"
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: root.prSidebarWidth - 180
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Reset repo filter chip if a repo is currently selected
+                        Rectangle {
+                            visible: root.branchSelectedRepo !== "ALL"
+                            implicitHeight: 24
+                            implicitWidth: clearBranchRepoText.implicitWidth + 14
+                            radius: 4
+                            color: clearBranchRepoMa.containsMouse ? "#30363d" : "#21262d"
+                            border.color: "#8957e5"
+
+                            Text {
+                                id: clearBranchRepoText
+                                anchors.centerIn: parent
+                                text: "✕ All Repos"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: "#bc8cff"
+                            }
+
+                            MouseArea {
+                                id: clearBranchRepoMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.text: "Clear repository filter to show branches from all repositories"
+                                onClicked: {
+                                    root.branchSelectedRepo = "ALL";
+                                }
+                            }
+                        }
+                    }
+
+                    // Search and Filters for Branches
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            // Search bar
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 30
+                                color: "#0d1117"
+                                radius: 6
+                                border.color: branchSearchInput.activeFocus ? "#bc8cff" : "#30363d"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+
+                                    Text {
+                                        text: "🔍"
+                                        font.pixelSize: 11
+                                    }
+
+                                    TextInput {
+                                        id: branchSearchInput
+                                        Layout.fillWidth: true
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        color: "#f0f6fc"
+                                        selectByMouse: true
+                                        clip: true
+                                        text: root.branchSearchQuery
+                                        onTextChanged: {
+                                            root.branchSearchQuery = text;
+                                        }
+
+                                        Text {
+                                            anchors.fill: parent
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Filter branch, author, commit, PR..."
+                                            font: parent.font
+                                            color: "#484f58"
+                                            visible: !parent.text && !parent.activeFocus
+                                        }
+                                    }
+
+                                    Text {
+                                        visible: !!branchSearchInput.text
+                                        text: "✕"
+                                        font.pixelSize: 11
+                                        color: "#8b949e"
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: branchSearchInput.text = ""
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Repository Filter Dropdown
+                            ComboBox {
+                                id: branchRepoCombo
+                                implicitHeight: 30
+                                implicitWidth: 140
+                                model: root.branchRepoFilteredList
+                                currentIndex: {
+                                    var idx = root.branchRepoFilteredList.indexOf(root.branchSelectedRepo);
+                                    return idx >= 0 ? idx : 0;
+                                }
+                                onActivated: function(index) {
+                                    root.branchSelectedRepo = root.branchRepoFilteredList[index];
+                                }
+                                font.pixelSize: 11
+                                contentItem: Text {
+                                    text: parent.displayText
+                                    font: parent.font
+                                    color: "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    leftPadding: 8
+                                }
+                                background: Rectangle {
+                                    color: "#0d1117"
+                                    radius: 6
+                                    border.color: "#30363d"
+                                }
+                            }
+                        }
+
+                        // Sorting Row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Text {
+                                text: "Sort:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+
+                            ComboBox {
+                                id: branchSortCombo
+                                Layout.fillWidth: true
+                                implicitHeight: 26
+                                model: ["Ahead: High to Low", "Commit Date: Newest First", "Branch Name: A-Z", "Repo Name: A-Z"]
+                                currentIndex: root.branchSortMode
+                                onActivated: function(index) {
+                                    root.branchSortMode = index;
+                                }
+                                font.pixelSize: 10
+                                contentItem: Text {
+                                    text: parent.displayText
+                                    font: parent.font
+                                    color: "#c9d1d9"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    leftPadding: 6
+                                }
+                                background: Rectangle {
+                                    color: "#0d1117"
+                                    radius: 4
+                                    border.color: "#30363d"
+                                }
+                            }
+                        }
+                    }
+
+                    // Unmerged Branches ListView
+                    ListView {
+                        id: branchListView
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 8
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: root.pagedBranchesList
+
+                        ScrollBar.vertical: ScrollBar {
+                            id: branchListVBar
+                            policy: ScrollBar.AsNeeded
+                            active: true
+                            contentItem: Rectangle {
+                                implicitWidth: 6
+                                radius: 3
+                                color: branchListVBar.pressed ? "#bc8cff" : (branchListVBar.hovered ? "#8b949e" : "#30363d")
+                            }
+                        }
+
+                        // Empty State
+                        Item {
+                            anchors.fill: parent
+                            visible: root.pagedBranchesList.length === 0
+
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: 8
+
+                                Text {
+                                    text: "🌿"
+                                    font.pixelSize: 32
+                                    Layout.alignment: Qt.AlignHCenter
+                                }
+
+                                Text {
+                                    text: root.branchSearchQuery ? "No branches match your search or filter" : "No unmerged branches found"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: "#8b949e"
+                                    Layout.alignment: Qt.AlignHCenter
+                                }
+
+                                Text {
+                                    text: "All repositories are in sync with main/master"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    color: "#484f58"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    visible: !root.branchSearchQuery
+                                }
+                            }
+                        }
+
+                        // Branch Card Delegate
+                        delegate: Rectangle {
+                            id: brCardRoot
+                            width: branchListView.width - (branchListVBar.visible ? 10 : 0)
+                            implicitHeight: brCardLayout.implicitHeight + 16
+                            color: brCardMa.containsMouse ? "#161b22" : "#0d1117"
+                            radius: 6
+                            border.color: brCardMa.containsMouse ? "#8957e5" : "#30363d"
+                            border.width: 1
+
+                            MouseArea {
+                                id: brCardMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.ArrowCursor
+                            }
+
+                            ColumnLayout {
+                                id: brCardLayout
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 6
+
+                                // Row 1: Branch Name + Badges
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Text {
+                                        text: "🌿"
+                                        font.pixelSize: 12
+                                    }
+
+                                    Text {
+                                        text: modelData.branch_name || ""
+                                        font.family: "Consolas, Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: modelData.is_abandoned ? "#8b949e" : "#f0f6fc"
+                                        elide: Text.ElideMiddle
+                                        Layout.fillWidth: true
+                                    }
+
+                                    // Ahead Badge
+                                    Rectangle {
+                                        height: 18
+                                        radius: 3
+                                        color: "#281b0f"
+                                        border.color: "#d29922"
+                                        border.width: 1
+                                        implicitWidth: aheadTxt.implicitWidth + 8
+
+                                        Text {
+                                            id: aheadTxt
+                                            anchors.centerIn: parent
+                                            text: "+" + (modelData.ahead || 0) + " ahead"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: "#f0883e"
+                                        }
+                                    }
+
+                                    // Behind Badge
+                                    Rectangle {
+                                        visible: (modelData.behind || 0) > 0
+                                        height: 18
+                                        radius: 3
+                                        color: "#21262d"
+                                        border.color: "#6e7681"
+                                        border.width: 1
+                                        implicitWidth: behindTxt.implicitWidth + 8
+
+                                        Text {
+                                            id: behindTxt
+                                            anchors.centerIn: parent
+                                            text: "-" + (modelData.behind || 0) + " behind"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    // Abandoned Badge
+                                    Rectangle {
+                                        visible: !!modelData.is_abandoned
+                                        height: 18
+                                        radius: 3
+                                        color: "#381113"
+                                        border.color: "#da3633"
+                                        border.width: 1
+                                        implicitWidth: abTxt.implicitWidth + 8
+
+                                        Text {
+                                            id: abTxt
+                                            anchors.centerIn: parent
+                                            text: "ABANDONED"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: "#f85149"
+                                        }
+                                    }
+                                }
+
+                                // Row 2: Repo Chip, Author, Date, Short Hash
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    // Repo Chip
+                                    Rectangle {
+                                        height: 18
+                                        radius: 3
+                                        color: brRepoMa.containsMouse ? "#30363d" : "#21262d"
+                                        border.color: "#30363d"
+                                        implicitWidth: brRepoTxt.implicitWidth + 8
+
+                                        Text {
+                                            id: brRepoTxt
+                                            anchors.centerIn: parent
+                                            text: "📁 " + (modelData.repo_name || "")
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: "#58a6ff"
+                                        }
+
+                                        MouseArea {
+                                            id: brRepoMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Filter to repository " + modelData.repo_name
+                                            onClicked: {
+                                                root.branchSelectedRepo = modelData.repo_name;
+                                            }
+                                        }
+                                    }
+
+                                    // Committer Author
+                                    Text {
+                                        visible: !!modelData.committer
+                                        text: "👤 " + modelData.committer
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        color: "#c9d1d9"
+                                        elide: Text.ElideRight
+                                        Layout.maximumWidth: 130
+                                    }
+
+                                    // Commit Date
+                                    Text {
+                                        visible: !!modelData.commit_date
+                                        text: "📅 " + (modelData.commit_date ? modelData.commit_date.substring(0, 10) : "")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    // Short Hash
+                                    Text {
+                                        visible: !!modelData.short_hash
+                                        text: "#" + modelData.short_hash
+                                        font.family: "Consolas, monospace"
+                                        font.pixelSize: 11
+                                        color: "#8b949e"
+                                    }
+                                }
+
+                                // Row 3: Prepared PR (if available)
+                                Rectangle {
+                                    visible: !!modelData.prepared_pr_id
+                                    Layout.fillWidth: true
+                                    height: 22
+                                    radius: 3
+                                    color: prepPrMa.containsMouse ? "#1c3554" : "#142233"
+                                    border.color: "#388bfd"
+                                    border.width: 1
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 6
+                                        anchors.rightMargin: 6
+                                        spacing: 6
+
+                                        Text {
+                                            text: "🔀 Prepared PR #" + modelData.prepared_pr_id + ": " + (modelData.prepared_pr_title || "")
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: "#79c0ff"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: (modelData.prepared_pr_status || "").toUpperCase()
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: modelData.prepared_pr_status === "active" ? "#79c0ff" : "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: prepPrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        ToolTip.visible: containsMouse
+                                        ToolTip.text: "View Pull Request #" + modelData.prepared_pr_id + " in PR tab"
+                                        onClicked: {
+                                            root.openPrSidebar(modelData.repo_name, false);
+                                            root.prSearchQuery = modelData.prepared_pr_id;
+                                        }
+                                    }
+                                }
+
+                                // Row 4: Commit Message Comment
+                                Text {
+                                    visible: !!modelData.comment
+                                    text: "💬 " + (modelData.comment ? modelData.comment.replace(/\r?\n/g, " ") : "")
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    font.italic: true
+                                    color: "#8b949e"
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                // Row 5: Action Buttons (Open in TFS, Copy Branch Name)
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Button {
+                                        text: "↗ Open in TFS"
+                                        font.pixelSize: 10
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font: parent.font
+                                            color: "#58a6ff"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        background: Rectangle {
+                                            implicitHeight: 22
+                                            implicitWidth: 85
+                                            radius: 3
+                                            color: parent.hovered ? "#1f6feb" : "#16243b"
+                                            border.color: "#388bfd"
+                                        }
+                                        onClicked: {
+                                            var url = modelData.branch_url || modelData.repo_url;
+                                            if (url) {
+                                                Qt.openUrlExternally(url);
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "📋 Copy Name"
+                                        font.pixelSize: 10
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font: parent.font
+                                            color: "#c9d1d9"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        background: Rectangle {
+                                            implicitHeight: 22
+                                            implicitWidth: 85
+                                            radius: 3
+                                            color: parent.hovered ? "#30363d" : "#21262d"
+                                            border.color: "#30363d"
+                                        }
+                                        onClicked: {
+                                            if (backend && modelData.branch_name) {
+                                                backend.copyToClipboard(modelData.branch_name);
+                                            }
+                                        }
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+                                }
+                            }
+                        }
+                    }
+
+                    // Unmerged Branches Pagination Footer
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 38
+                        color: "#0d1117"
+                        radius: 6
+                        border.color: "#30363d"
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            Text {
+                                text: "Page " + root.branchCurrentPage + " of " + root.branchTotalPages + " (" + root.branchTotalMatchingCount + " branches)"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 11
+                                color: "#8b949e"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Button {
+                                text: "‹"
+                                enabled: root.branchCurrentPage > 1
+                                font.pixelSize: 13
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.enabled ? "#f0f6fc" : "#484f58"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 24
+                                    implicitWidth: 26
+                                    radius: 3
+                                    color: parent.enabled ? (parent.hovered ? "#30363d" : "#21262d") : "#161b22"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: {
+                                    if (root.branchCurrentPage > 1) {
+                                        root.branchCurrentPage--;
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "›"
+                                enabled: root.branchCurrentPage < root.branchTotalPages
+                                font.pixelSize: 13
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.enabled ? "#f0f6fc" : "#484f58"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 24
+                                    implicitWidth: 26
+                                    radius: 3
+                                    color: parent.enabled ? (parent.hovered ? "#30363d" : "#21262d") : "#161b22"
+                                    border.color: "#30363d"
+                                }
+                                onClicked: {
+                                    if (root.branchCurrentPage < root.branchTotalPages) {
+                                        root.branchCurrentPage++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2241,6 +3232,9 @@ Item {
         function onPrRepositoriesChanged() {
             root.updateFilteredPrs();
         }
+        function onTagDayDataChanged() {
+            root.updateFilteredBranches();
+        }
         function onRightSidebarWidthChanged(w) {
             root.prSidebarWidth = Math.max(root.minPrSidebarWidth, Math.min(root.maxPrSidebarWidth, w));
         }
@@ -2257,6 +3251,7 @@ Item {
     Component.onCompleted: {
         root.updateFilteredModel();
         root.updateFilteredPrs();
+        root.updateFilteredBranches();
     }
 
     RepoCategoriesDialog {

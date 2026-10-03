@@ -80,12 +80,77 @@ Item {
         return badge;
     }
 
+    function extractIterationYYWW(iterStr) {
+        if (!iterStr) return "";
+        var str = iterStr.toString().trim();
+        if (str === "") return "";
+
+        // 1. 4-digit year (20YY) separated by delimiter: e.g. "2026_41", "2026-W41", "2026/41", "2026.41", "2026-05"
+        var mFullSep = str.match(/(?:^|[^\d])20([2-3]\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mFullSep) {
+            var yy1 = mFullSep[1];
+            var wNum1 = parseInt(mFullSep[2], 10);
+            if (wNum1 >= 1 && wNum1 <= 53) {
+                return yy1 + (wNum1 < 10 ? ("0" + wNum1) : ("" + wNum1));
+            }
+        }
+
+        // 2. 6-digit combined 20YYWW: e.g. "202641", "Sprint 202641"
+        var m6 = str.match(/(?:^|[^\d])20([2-3]\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)/i);
+        if (m6) {
+            return m6[1] + m6[2];
+        }
+
+        // 3. 2-digit year (YY) separated by delimiter: e.g. "26_41", "26-W41", "26.41", "Sprint 26_5", "26-05"
+        var mSep = str.match(/(?:^|[^\d])(2[4-9]|3\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mSep) {
+            var yy2 = mSep[1];
+            var wNum2 = parseInt(mSep[2], 10);
+            if (wNum2 >= 1 && wNum2 <= 53) {
+                return yy2 + (wNum2 < 10 ? ("0" + wNum2) : ("" + wNum2));
+            }
+        }
+
+        // 4. 4-digit combined YYWW: e.g. "Sprint 2641", "2641", "week-2641", "2641_Release"
+        var m4 = str.match(/(?:^|[^\d])(2[4-9]|3\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)/i);
+        if (m4) {
+            return m4[1] + m4[2];
+        }
+
+        // 5. Sprint <week> with year elsewhere in path: e.g. "2026\\Sprint 41"
+        var mSprintW = str.match(/(?:sprint|iteration)[\s_.-]*[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mSprintW) {
+            var wNum3 = parseInt(mSprintW[1], 10);
+            if (wNum3 >= 1 && wNum3 <= 53) {
+                var mYear = str.match(/(?:^|[^\d])(?:20)?(2[4-9]|3\d)(?=[^\d]|$)/);
+                if (mYear) {
+                    return mYear[1] + (wNum3 < 10 ? ("0" + wNum3) : ("" + wNum3));
+                }
+            }
+        }
+
+        return "";
+    }
+
     function formatCompactIteration(iterName, isPlanned, hasMilestone) {
         if (!iterName || iterName === "" || iterName === "CH_SAPH_KAWEST") {
             return hasMilestone ? "Backlog" : "—";
         }
-        var clean = iterName.replace(/^(sprint|iteration)[\s_-]*/i, "").trim();
-        if (clean === "") return "—";
+        var str = iterName.toString().trim();
+        if (str === "") return "—";
+
+        var yyww = extractIterationYYWW(str);
+        if (yyww !== "") {
+            return yyww;
+        }
+
+        // Fallback if no YYWW regex match found: clean leading path and sprint/iteration words
+        var parts = str.split(/[\\/]/);
+        var leaf = parts[parts.length - 1].trim();
+        var clean = leaf.replace(/^(sprint|iteration)[\s_-]*/i, "").trim();
+        if (clean === "" || clean === "CH_SAPH_KAWEST") {
+            return hasMilestone ? "Backlog" : "—";
+        }
         return clean;
     }
 
@@ -102,8 +167,10 @@ Item {
         } else if (col === "iteration") {
             var itA = (a.iteration_name || a.iteration_path || "").toLowerCase();
             var itB = (b.iteration_name || b.iteration_path || "").toLowerCase();
-            var numA = parseInt(itA.replace(/\D+/g, "")) || 0;
-            var numB = parseInt(itB.replace(/\D+/g, "")) || 0;
+            var yywwA = extractIterationYYWW(itA);
+            var yywwB = extractIterationYYWW(itB);
+            var numA = parseInt(yywwA || itA.replace(/\D+/g, ""), 10) || 0;
+            var numB = parseInt(yywwB || itB.replace(/\D+/g, ""), 10) || 0;
             if (numA && numB && numA !== numB) {
                 return factor * (numA - numB);
             }
@@ -2444,7 +2511,7 @@ Item {
                                     font.pixelSize: 10
                                 }
                                 Text {
-                                    text: root.formatCompactIteration(model.iteration_name, model.is_iteration_planned, model.has_milestone)
+                                    text: root.formatCompactIteration(model.iteration_name || model.iteration_path, model.is_iteration_planned, model.has_milestone)
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     font.weight: (model.is_iteration_planned || model.has_milestone) ? Font.DemiBold : Font.Normal

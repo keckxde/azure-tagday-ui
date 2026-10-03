@@ -2121,3 +2121,75 @@ def normalize_pr_status(status_val) -> str:
     return s or "unknown"
 
 
+def extract_iteration_yyww(iter_str: str) -> str:
+    """
+    Extracts the year and week number as a compact 4-digit 'YYWW' string
+    from an iteration path or iteration name (e.g. 'Sprint 2641', 'week-2641', '2026_41', '2026-W41').
+    Returns an empty string if no valid year/week pattern is found.
+    """
+    if not iter_str:
+        return ""
+    s = str(iter_str).strip()
+    if not s:
+        return ""
+
+    # 1. 4-digit year (20YY) separated by delimiter: e.g. "2026_41", "2026-W41", "2026/41", "2026.41", "2026-05"
+    m_full_sep = re.search(r'(?:^|[^\d])20([2-3]\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_full_sep:
+        yy = m_full_sep.group(1)
+        w_num = int(m_full_sep.group(2))
+        if 1 <= w_num <= 53:
+            return f"{yy}{w_num:02d}"
+
+    # 2. 6-digit combined 20YYWW: e.g. "202641", "Sprint 202641"
+    m6 = re.search(r'(?:^|[^\d])20([2-3]\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)', s, re.IGNORECASE)
+    if m6:
+        return f"{m6.group(1)}{m6.group(2)}"
+
+    # 3. 2-digit year (YY) separated by delimiter: e.g. "26_41", "26-W41", "26.41", "Sprint 26_5", "26-05"
+    m_sep = re.search(r'(?:^|[^\d])(2[4-9]|3\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_sep:
+        yy = m_sep.group(1)
+        w_num = int(m_sep.group(2))
+        if 1 <= w_num <= 53:
+            return f"{yy}{w_num:02d}"
+
+    # 4. 4-digit combined YYWW: e.g. "Sprint 2641", "2641", "week-2641", "2641_Release"
+    m4 = re.search(r'(?:^|[^\d])(2[4-9]|3\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)', s, re.IGNORECASE)
+    if m4:
+        return f"{m4.group(1)}{m4.group(2)}"
+
+    # 5. Sprint <week> with year elsewhere in path: e.g. "2026\\Sprint 41"
+    m_sprint_w = re.search(r'(?:sprint|iteration)[\s_.-]*[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_sprint_w:
+        w_num = int(m_sprint_w.group(1))
+        if 1 <= w_num <= 53:
+            m_year = re.search(r'(?:^|[^\d])(?:20)?(2[4-9]|3\d)(?=[^\d]|$)', s)
+            if m_year:
+                return f"{m_year.group(1)}{w_num:02d}"
+
+    return ""
+
+
+def format_compact_iteration(iter_name: str, is_planned: bool = False, has_milestone: bool = False) -> str:
+    """
+    Formats an iteration path or name into a compact string (preferably 'YYWW').
+    Falls back to 'Backlog' or '—' or cleaned leaf name.
+    """
+    if not iter_name or str(iter_name).strip() in ("", "CH_SAPH_KAWEST"):
+        return "Backlog" if has_milestone else "—"
+
+    s = str(iter_name).strip()
+    yyww = extract_iteration_yyww(s)
+    if yyww:
+        return yyww
+
+    parts = re.split(r'[\\/]', s)
+    leaf = parts[-1].strip()
+    clean = re.sub(r'^(sprint|iteration)[\s_-]*', '', leaf, flags=re.IGNORECASE).strip()
+    if not clean or clean == "CH_SAPH_KAWEST":
+        return "Backlog" if has_milestone else "—"
+    return clean
+
+
+
