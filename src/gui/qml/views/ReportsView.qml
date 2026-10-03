@@ -172,18 +172,18 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 20
-                spacing: 16
+                anchors.margins: 14
+                spacing: 12
 
         // Header and Tab Navigation
         RowLayout {
             Layout.fillWidth: true
-            spacing: 16
+            spacing: 12
 
             Text {
                 text: "Reports & Analytics"
                 font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 18
+                font.pixelSize: 17
                 font.weight: Font.Bold
                 color: "#f0f6fc"
             }
@@ -194,7 +194,7 @@ Item {
 
             // Subtab Switcher
             Row {
-                spacing: 6
+                spacing: 5
                 Repeater {
                     model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts"]
                     Button {
@@ -211,8 +211,8 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
-                            implicitHeight: 32
-                            implicitWidth: 135
+                            implicitHeight: 28
+                            implicitWidth: 125
                             radius: 6
                             color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
                             border.color: parent.checked ? "#388bfd" : "#30363d"
@@ -224,30 +224,6 @@ Item {
                             }
                         }
                     }
-                }
-            }
-
-            Button {
-                text: "↻ Refresh Reports"
-                font.pixelSize: 12
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: "#f0f6fc"
-                }
-                background: Rectangle {
-                    implicitHeight: 32
-                    implicitWidth: 130
-                    radius: 6
-                    color: parent.hovered ? "#30363d" : "#21262d"
-                    border.color: "#30363d"
-                }
-                onClicked: {
-                    if (backend) {
-                        backend.refresh_all_data();
-                        backend.load_interactive_reports();
-                    }
-                    root.refreshSprintReport();
                 }
             }
         }
