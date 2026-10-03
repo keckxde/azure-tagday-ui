@@ -3377,6 +3377,12 @@ class DevOpsBackend(QObject):
     @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, result="QVariantMap")
     @Slot(int, str, str, result="QVariantMap")
     @Slot(int, str, result="QVariantMap")
@@ -3384,7 +3390,7 @@ class DevOpsBackend(QObject):
     @Slot(result="QVariantMap")
     def getWorkloadMatrix(
         self,
-        horizon_weeks: int = 4,
+        horizon_weeks: int = 8,
         filter_level1: str = "ALL",
         filter_level2: str = "ALL",
         prio1_only: bool = False,
@@ -3394,11 +3400,13 @@ class DevOpsBackend(QObject):
         lookback_weeks: int = 0,
         filter_milestone: str = "ALL",
         overdue_only: bool = False,
+        waiting_tasks_only: bool = False,
     ):
         """
         Computes the interactive capacity and workload matrix for team members across
         the given horizon of weekly iterations (4, 8, or 12 weeks), filtered by
-        Level 1, Level 2, priority, grouping, completion status, search query, or milestone.
+        Level 1, Level 2, priority, grouping, completion status, search query, milestone,
+        or waiting on unfinished subtasks.
         lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
         # Current date and ISO week determination
@@ -3411,7 +3419,7 @@ class DevOpsBackend(QObject):
         curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
 
         if horizon_weeks <= 0:
-            horizon_weeks = 4
+            horizon_weeks = 8
         lookback_weeks = max(0, int(lookback_weeks or 0))
 
         # Anchor window: Default view (lookback_weeks=0) starts with the previous week (curr_w - 1)
@@ -3832,8 +3840,22 @@ class DevOpsBackend(QObject):
                 grouped = self._group_items_into_containers(
                     items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode,
                     milestones_by_date=milestones_by_date, all_milestones=all_milestones,
-                    children_by_parent=children_by_parent, cell_assignee=assignee, sprint_name=s_name
+                    children_by_parent=children_by_parent, cell_assignee=assignee, sprint_name=s_name,
+                    waiting_tasks_only=waiting_tasks_only
                 )
+
+                if waiting_tasks_only:
+                    cell_grouped_items = []
+                    for c in grouped:
+                        if c.get("id") != 0:
+                            cell_grouped_items.append(c)
+                        cell_grouped_items.extend(c.get("tasks", []))
+                    st_count = sum(1 for it in cell_grouped_items if it.get("is_story", False) or (it.get("type", "").lower() in ("requirement", "user story", "story", "product backlog item")))
+                    bg_count = sum(1 for it in cell_grouped_items if it.get("is_bug", False) or (it.get("type", "").lower() in ("bug", "defect", "problem")))
+                    tk_count = sum(1 for it in cell_grouped_items if it.get("is_task", False) or (it.get("type", "").lower() in ("task", "subtask")))
+                    cell_total = len(grouped)
+                else:
+                    cell_total = len(items)
 
                 tk_closed_percent = round((tk_closed / max(1, tk_count)) * 100) if tk_count > 0 else 0
 
@@ -3843,7 +3865,7 @@ class DevOpsBackend(QObject):
                     "is_current": col.get("is_current", False),
                     "is_past": col.get("is_past", False),
                     "is_future": col.get("is_future", False),
-                    "total_count": len(items),
+                    "total_count": cell_total,
                     "stories_count": st_count,
                     "bugs_count": bg_count,
                     "tasks_count": tk_count,
@@ -3945,7 +3967,7 @@ class DevOpsBackend(QObject):
             "suggested_lookback_offset": suggested_lookback_offset,
         }
 
-    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None, children_by_parent=None, cell_assignee=None, sprint_name=None):
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None, children_by_parent=None, cell_assignee=None, sprint_name=None, waiting_tasks_only=False):
         """
         Groups work items in a sprint cell by parent container.
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
@@ -3954,6 +3976,7 @@ class DevOpsBackend(QObject):
           especially the open subtasks keeping the group item from being closed.
         - If a user only contributed to a group item owned by someone else: Marked as is_external_parent / is_contributor_only,
           so the open parent item is not counted with the contributing user when their own tasks are closed.
+        - If waiting_tasks_only is True: Only containers waiting on unfinished subtasks (especially external tasks) are included.
         """
         story_types = {"requirement", "user story", "story", "product backlog item"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
@@ -4283,6 +4306,18 @@ class DevOpsBackend(QObject):
                 "progress_percent": pct_un,
                 "progress_pct": pct_un,
             })
+
+        if waiting_tasks_only:
+            def _is_waiting_container(c):
+                if c.get("is_done"):
+                    return False
+                ts = c.get("tasks", [])
+                has_open_tasks = any(not _is_item_done(t) for t in ts)
+                has_external_blockers = bool(c.get("has_blocking_external_tasks") or c.get("blocking_assignees")) or any(
+                    not _is_item_done(t) and (t.get("is_external_assignee") or t.get("assigned_to") != c.get("assigned_to")) for t in ts
+                )
+                return has_open_tasks or has_external_blockers
+            containers_list = [c for c in containers_list if _is_waiting_container(c)]
 
         return containers_list
 
@@ -7768,6 +7803,12 @@ class DevOpsBackend(QObject):
         closed_count = 0
         new_count = 0
         overdue_count = 0
+        stories_total = 0
+        stories_solved = 0
+        bugs_total = 0
+        bugs_solved = 0
+        tasks_total = 0
+        tasks_solved = 0
         by_type_map = {}
         by_sprint_map = {}
         by_milestone_map = {}
@@ -7781,12 +7822,27 @@ class DevOpsBackend(QObject):
             urgency = wi.get("urgency_status") or "none"
 
             s_lower = state.lower()
-            if s_lower in ("closed", "done", "resolved", "completed", "removed", "cut"):
+            is_closed = s_lower in ("closed", "done", "resolved", "completed", "removed", "cut")
+            if is_closed:
                 closed_count += 1
             elif s_lower in ("active", "in progress", "doing", "investigating"):
                 active_count += 1
             else:
                 new_count += 1
+
+            wtype_lower = wtype.lower()
+            if wtype_lower in ("requirement", "user story", "story", "product backlog item"):
+                stories_total += 1
+                if is_closed:
+                    stories_solved += 1
+            elif wtype_lower in ("bug", "defect", "problem"):
+                bugs_total += 1
+                if is_closed:
+                    bugs_solved += 1
+            elif wtype_lower in ("task", "subtask"):
+                tasks_total += 1
+                if is_closed:
+                    tasks_solved += 1
 
             if urgency == "overdue":
                 overdue_count += 1
@@ -7848,6 +7904,12 @@ class DevOpsBackend(QObject):
             "new_items": new_count,
             "overdue_items": overdue_count,
             "completion_rate": completion_pct,
+            "stories_total": stories_total,
+            "stories_solved": stories_solved,
+            "bugs_total": bugs_total,
+            "bugs_solved": bugs_solved,
+            "tasks_total": tasks_total,
+            "tasks_solved": tasks_solved,
             "by_type": [{"type": k, "count": v} for k, v in sorted(by_type_map.items(), key=lambda x: x[1], reverse=True)],
             "by_state": [{"state": k, "count": v} for k, v in sorted(by_state_map.items(), key=lambda x: x[1], reverse=True)],
             "by_milestone": [{"milestone": k, "count": v} for k, v in sorted(by_milestone_map.items(), key=lambda x: x[1], reverse=True)],

@@ -6,7 +6,7 @@ import "../components"
 Item {
     id: root
 
-    property int selectedHorizon: 4 // 4, 8, or 12 weeks
+    property int selectedHorizon: 8 // 4, 8, or 12 weeks (defaults to 8 sprints)
     property string searchQuery: ""
     property var matrixData: null
     property var selectedCell: null // { assignee: "...", sprint_name: "...", items: [...] }
@@ -17,6 +17,7 @@ Item {
     property bool prio1Only: false
     property bool groupedOnly: false
     property bool overdueOnly: false
+    property bool waitingOnTasksOnly: false // Filter for User Stories & Bugs waiting for someone to finish their task
     property real drawerWidth: 420
     property int historyOffset: 0  // 0 = current window, N = N sprints back into history
     property var level1List: ["ALL"]
@@ -142,6 +143,14 @@ Item {
                 if (!cIsOverdue && !cHasOverdueTask) continue;
             }
 
+            // Waiting on Tasks Filter (User Stories & Bugs waiting for someone to finish their task)
+            if (root.waitingOnTasksOnly) {
+                if (c.is_done) continue;
+                var hasOpenTasks = c.tasks && c.tasks.some(function(t) { return !t.is_done; });
+                var hasWaitingExternal = !!c.has_blocking_external_tasks || (c.blocking_assignees && c.blocking_assignees.length > 0) || (c.tasks && c.tasks.some(function(t) { return !t.is_done && (t.is_external_assignee || (t.assigned_to && t.assigned_to !== c.assigned_to)); }));
+                if (!hasOpenTasks && !hasWaitingExternal) continue;
+            }
+
             var openTasks = getFilteredTasks(c.tasks || []);
             // Keep container if it has open child tasks, or if the user owns the parent container and it is not done/closed
             if (root.hideClosedTasks) {
@@ -221,7 +230,8 @@ Item {
             root.searchQuery || "",
             root.historyOffset,
             root.filterMilestone || "ALL",
-            !!root.overdueOnly
+            !!root.overdueOnly,
+            !!root.waitingOnTasksOnly
         );
         matrixData = newData;
 
@@ -270,7 +280,7 @@ Item {
         }
     }
 
-    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.overdueOnly || root.searchQuery !== ""
+    property bool hasActiveHierarchyFilters: (root.filterLevel1 || "ALL") !== "ALL" || (root.filterLevel2 || "ALL") !== "ALL" || (root.filterMilestone || "ALL") !== "ALL" || root.prio1Only || root.groupedOnly || root.hideClosedTasks || root.overdueOnly || root.waitingOnTasksOnly || root.searchQuery !== ""
 
     function resetHierarchyFilters() {
         root.filterLevel1 = "ALL"
@@ -280,6 +290,7 @@ Item {
         root.groupedOnly = false
         root.hideClosedTasks = false
         root.overdueOnly = false
+        root.waitingOnTasksOnly = false
         root.searchQuery = ""
         if (typeof wlLevel1Combo !== "undefined" && wlLevel1Combo) { wlLevel1Combo.currentIndex = 0; wlLevel1Combo.editText = ""; }
         if (typeof wlLevel2Combo !== "undefined" && wlLevel2Combo) { wlLevel2Combo.currentIndex = 0; wlLevel2Combo.editText = ""; }
@@ -287,16 +298,17 @@ Item {
         refreshMatrix()
     }
 
-    onSelectedHorizonChanged: refreshMatrix()
-    onFilterLevel1Changed:    refreshMatrix()
-    onFilterLevel2Changed:    refreshMatrix()
-    onFilterMilestoneChanged: refreshMatrix()
-    onPrio1OnlyChanged:       refreshMatrix()
-    onGroupedOnlyChanged:     refreshMatrix()
-    onHideClosedTasksChanged: refreshMatrix()
-    onOverdueOnlyChanged:     refreshMatrix()
-    onSearchQueryChanged:     refreshMatrix()
-    onHistoryOffsetChanged:   refreshMatrix()
+    onSelectedHorizonChanged:  refreshMatrix()
+    onFilterLevel1Changed:     refreshMatrix()
+    onFilterLevel2Changed:     refreshMatrix()
+    onFilterMilestoneChanged:  refreshMatrix()
+    onPrio1OnlyChanged:        refreshMatrix()
+    onGroupedOnlyChanged:      refreshMatrix()
+    onHideClosedTasksChanged:  refreshMatrix()
+    onOverdueOnlyChanged:      refreshMatrix()
+    onWaitingOnTasksOnlyChanged: refreshMatrix()
+    onSearchQueryChanged:      refreshMatrix()
+    onHistoryOffsetChanged:    refreshMatrix()
 
     Connections {
         target: backend
@@ -1081,6 +1093,34 @@ Item {
                     border.color: parent.checked ? "#f85149" : "#30363d"
                 }
                 onClicked: { root.overdueOnly = !root.overdueOnly }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // ⏳ Waiting on Tasks Only Toggle
+            Button {
+                text: root.waitingOnTasksOnly ? "⏳ Waiting on Tasks Only" : "⏳ Waiting on Tasks"
+                checkable: true
+                checked: root.waitingOnTasksOnly
+                font.pixelSize: 11
+                font.weight: checked ? Font.Bold : Font.DemiBold
+                ToolTip.visible: hovered
+                ToolTip.text: root.waitingOnTasksOnly ? "Showing User Stories and Bugs waiting for someone to finish tasks.\nClick to show all." : "Click to filter to User Stories and Bugs waiting for someone to finish their subtasks."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#f0883e" : "#8b949e")
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 28
+                    implicitWidth: 145
+                    radius: 6
+                    color: parent.checked ? "#3d2800" : (parent.hovered ? "#21262d" : "#161b22")
+                    border.color: parent.checked ? "#d29922" : "#30363d"
+                }
+                onClicked: { root.waitingOnTasksOnly = !root.waitingOnTasksOnly }
             }
 
             Rectangle { width: 1; height: 18; color: "#30363d" }

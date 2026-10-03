@@ -625,6 +625,121 @@ class TestSprintWorkloadAndDeadlines(unittest.TestCase):
         # Due dates/overdue from Epic (2001) and Feature (2002) should NOT be counted
         self.assertEqual(matrix["total_overdue"], 0)
 
+    def test_workload_default_8_sprints_and_waiting_filter(self):
+        """Test that getWorkloadMatrix defaults to 8 sprints and correctly filters items waiting on tasks."""
+        from gui.backend import DevOpsBackend
+
+        backend = DevOpsBackend.__new__(DevOpsBackend)
+        backend._work_items = []
+        backend._bug_hierarchy_mode = "like_user_story"
+        backend._cache_db = None
+        backend.get_milestones = lambda: []
+
+        today_obj = date.today()
+        curr_y, curr_w, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+
+        # Test default horizon
+        matrix_default = backend.getWorkloadMatrix()
+        self.assertEqual(matrix_default["horizon_weeks"], 8)
+        self.assertEqual(len(matrix_default["sprint_columns"]), 8)
+
+        # Populate work items:
+        # Story 3001 owned by Alice with child Task 3002 (Active, assigned to Bob) -> WAITING ON TASK / OTHER PERSON
+        # Story 3003 owned by Charlie with child Task 3004 (Closed, assigned to Charlie) -> NOT WAITING (completed)
+        # Bug 3005 owned by Dave with child Task 3006 (Active, assigned to Dave) -> WAITING ON TASK
+        # Story 3007 owned by Eve with no tasks (Done) -> NOT WAITING
+        backend._work_items = [
+            {
+                "id": 3001,
+                "title": "Story Waiting on Bob's Task",
+                "type": "User Story",
+                "state": "Active",
+                "assigned_to": "Alice",
+                "sprint_week_name": curr_sprint,
+                "is_done": False,
+            },
+            {
+                "id": 3002,
+                "title": "Bob's Backend Subtask",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Bob",
+                "parent_id": 3001,
+                "sprint_week_name": curr_sprint,
+                "is_done": False,
+            },
+            {
+                "id": 3003,
+                "title": "Charlie Completed Story",
+                "type": "User Story",
+                "state": "Done",
+                "assigned_to": "Charlie",
+                "sprint_week_name": curr_sprint,
+                "is_done": True,
+            },
+            {
+                "id": 3004,
+                "title": "Charlie Completed Subtask",
+                "type": "Task",
+                "state": "Closed",
+                "assigned_to": "Charlie",
+                "parent_id": 3003,
+                "sprint_week_name": curr_sprint,
+                "is_done": True,
+            },
+            {
+                "id": 3005,
+                "title": "Dave Open Bug",
+                "type": "Bug",
+                "state": "Active",
+                "assigned_to": "Dave",
+                "sprint_week_name": curr_sprint,
+                "is_done": False,
+            },
+            {
+                "id": 3006,
+                "title": "Dave Open Subtask",
+                "type": "Task",
+                "state": "Active",
+                "assigned_to": "Dave",
+                "parent_id": 3005,
+                "sprint_week_name": curr_sprint,
+                "is_done": False,
+            },
+            {
+                "id": 3007,
+                "title": "Eve Standalone Story",
+                "type": "User Story",
+                "state": "Closed",
+                "assigned_to": "Eve",
+                "sprint_week_name": curr_sprint,
+                "is_done": True,
+            },
+        ]
+
+        # Test waiting_tasks_only filter = False
+        matrix_all = backend.getWorkloadMatrix(waiting_tasks_only=False)
+        self.assertGreaterEqual(matrix_all["total_items"], 4)
+
+        # Test waiting_tasks_only filter = True
+        matrix_waiting = backend.getWorkloadMatrix(waiting_tasks_only=True)
+        # In the matrix waiting filter, Alice's story (3001) and Dave's bug (3005) are included with their tasks
+        alice_row = next((r for r in matrix_waiting["assignee_rows"] if r["assignee"] == "Alice"), None)
+        self.assertIsNotNone(alice_row)
+        alice_curr_cell = next((c for c in alice_row["cells"] if c["sprint_name"] == curr_sprint), None)
+        self.assertIsNotNone(alice_curr_cell)
+        self.assertGreater(len(alice_curr_cell["grouped_containers"]), 0)
+        self.assertEqual(alice_curr_cell["grouped_containers"][0]["id"], 3001)
+        self.assertTrue(alice_curr_cell["grouped_containers"][0]["has_blocking_external_tasks"])
+        self.assertIn("Bob", alice_curr_cell["grouped_containers"][0]["blocking_assignees"])
+
+        # Charlie's story (3003) should not be in waiting containers because tasks are all closed
+        charlie_row = next((r for r in matrix_waiting["assignee_rows"] if r["assignee"] == "Charlie"), None)
+        if charlie_row:
+            charlie_cell = next((c for c in charlie_row["cells"] if c["sprint_name"] == curr_sprint), None)
+            self.assertEqual(len(charlie_cell["grouped_containers"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -542,6 +542,99 @@ Rectangle {
                                     }
                                 }
                             }
+
+                            // Work Items by Type Breakdown (User Stories, Bugs, Tasks)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                // User Stories
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 52
+                                    radius: 6
+                                    color: "#161b22"
+                                    border.color: "#30363d"
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        RowLayout {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 4
+                                            Text { text: "📘"; font.pixelSize: 11 }
+                                            Text {
+                                                text: {
+                                                    var solved = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.stories_solved || 0) : 0;
+                                                    var total = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.stories_total || 0) : 0;
+                                                    return solved + " / " + total;
+                                                }
+                                                font.pixelSize: 13
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
+                                        }
+                                        Text { text: "User Stories"; font.pixelSize: 9; color: "#8b949e"; Layout.alignment: Qt.AlignHCenter }
+                                    }
+                                }
+
+                                // Bugs
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 52
+                                    radius: 6
+                                    color: "#161b22"
+                                    border.color: "#30363d"
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        RowLayout {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 4
+                                            Text { text: "🐛"; font.pixelSize: 11 }
+                                            Text {
+                                                text: {
+                                                    var solved = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.bugs_solved || 0) : 0;
+                                                    var total = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.bugs_total || 0) : 0;
+                                                    return solved + " / " + total;
+                                                }
+                                                font.pixelSize: 13
+                                                font.weight: Font.Bold
+                                                color: "#f85149"
+                                            }
+                                        }
+                                        Text { text: "Bugs"; font.pixelSize: 9; color: "#8b949e"; Layout.alignment: Qt.AlignHCenter }
+                                    }
+                                }
+
+                                // Tasks
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 52
+                                    radius: 6
+                                    color: "#161b22"
+                                    border.color: "#30363d"
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        RowLayout {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 4
+                                            Text { text: "📋"; font.pixelSize: 11 }
+                                            Text {
+                                                text: {
+                                                    var solved = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.tasks_solved || 0) : 0;
+                                                    var total = rightSidebarRoot.sidebarData ? (rightSidebarRoot.sidebarData.tasks_total || 0) : 0;
+                                                    return solved + " / " + total;
+                                                }
+                                                font.pixelSize: 13
+                                                font.weight: Font.Bold
+                                                color: "#3fb950"
+                                            }
+                                        }
+                                        Text { text: "Tasks"; font.pixelSize: 9; color: "#8b949e"; Layout.alignment: Qt.AlignHCenter }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2211,6 +2304,7 @@ Rectangle {
 
                         delegate: Rectangle {
                             id: cellCardDelegate
+                            property bool isTasksExpanded: false
                             Layout.fillWidth: true
                             implicitHeight: cellContainerCol.implicitHeight + 18
                             radius: 8
@@ -2726,6 +2820,56 @@ Rectangle {
                                     }
                                 }
 
+                                // Tasks Summary & Expand/Collapse Header Bar
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 28
+                                    radius: 6
+                                    color: cellTasksToggleMa.containsMouse ? "#21262d" : "#161b22"
+                                    border.color: cellTasksToggleMa.containsMouse ? "#58a6ff" : "#30363d"
+                                    border.width: 1
+                                    visible: (modelData.total_tasks_count || 0) > 0 || (modelData.tasks && modelData.tasks.length > 0)
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        spacing: 8
+
+                                        Text {
+                                            text: cellCardDelegate.isTasksExpanded ? "▼" : "▶"
+                                            font.pixelSize: 10
+                                            color: "#58a6ff"
+                                        }
+
+                                        Text {
+                                            text: "Tasks (" + (modelData.tasks_closed_count || 0) + " / " + (modelData.total_tasks_count || (modelData.tasks ? modelData.tasks.length : 0)) + " done)"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: ((modelData.tasks_closed_count || 0) === (modelData.total_tasks_count || 0) && (modelData.total_tasks_count || 0) > 0) ? "#3fb950" : "#c9d1d9"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: cellCardDelegate.isTasksExpanded ? "Hide individual tasks" : "Show individual tasks"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: cellTasksToggleMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            cellCardDelegate.isTasksExpanded = !cellCardDelegate.isTasksExpanded;
+                                        }
+                                    }
+                                }
+
                                 // Tasks Progress Bar
                                 ColumnLayout {
                                     Layout.fillWidth: true
@@ -2829,7 +2973,7 @@ Rectangle {
                                     }
                                 }
 
-                                // Recessed Child Tasks Area
+                                // Recessed Child Tasks Area (Collapsed by default)
                                 Rectangle {
                                     Layout.fillWidth: true
                                     implicitHeight: cellChildTasksCol.implicitHeight + 14
@@ -2837,7 +2981,7 @@ Rectangle {
                                     color: "#161b22"
                                     border.color: "#21262d"
                                     border.width: 1
-                                    visible: (modelData.tasks && modelData.tasks.length > 0) || modelData.id === 0
+                                    visible: cellCardDelegate.isTasksExpanded && ((modelData.tasks && modelData.tasks.length > 0) || modelData.id === 0)
 
                                     ColumnLayout {
                                         id: cellChildTasksCol
