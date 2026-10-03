@@ -107,8 +107,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "PR Pioneer (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Created 1+ PR", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "PR Pioneer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Created 3+ PRs", "threshold": 3, "points": 12},
-            "gold":   {"tier": "gold",   "name": "PR Pioneer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Created 6+ PRs", "threshold": 6, "points": 25}
+            "silver": {"tier": "silver", "name": "PR Pioneer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Created 5+ PRs", "threshold": 5, "points": 15},
+            "gold":   {"tier": "gold",   "name": "PR Pioneer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Created 10+ PRs", "threshold": 10, "points": 30}
         }
     },
     "the_closer": {
@@ -125,8 +125,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "The Closer (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Merged 1+ PR", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "The Closer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Merged 3+ PRs", "threshold": 3, "points": 15},
-            "gold":   {"tier": "gold",   "name": "The Closer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Merged 6+ PRs", "threshold": 6, "points": 30}
+            "silver": {"tier": "silver", "name": "The Closer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Merged 5+ PRs", "threshold": 5, "points": 18},
+            "gold":   {"tier": "gold",   "name": "The Closer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Merged 10+ PRs", "threshold": 10, "points": 35}
         }
     },
     "eagle_eye": {
@@ -143,8 +143,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Eagle Eye (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Reviewed 1+ peer PR", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Eagle Eye (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Reviewed 3+ peer PRs", "threshold": 3, "points": 14},
-            "gold":   {"tier": "gold",   "name": "Eagle Eye (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Reviewed 8+ peer PRs & approved", "threshold": 8, "points": 28}
+            "silver": {"tier": "silver", "name": "Eagle Eye (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Reviewed 6+ peer PRs", "threshold": 6, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Eagle Eye (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Reviewed 12+ peer PRs & approved 5+", "threshold": 12, "points": 35}
         }
     },
     "speed_demon": {
@@ -161,8 +161,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Speed Demon (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Merged PR within 24 hours", "threshold": 1, "points": 8},
-            "silver": {"tier": "silver", "name": "Speed Demon (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Merged 2+ PRs within 24 hours", "threshold": 2, "points": 18},
-            "gold":   {"tier": "gold",   "name": "Speed Demon (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Merged 4+ PRs within 12 hours", "threshold": 4, "points": 35}
+            "silver": {"tier": "silver", "name": "Speed Demon (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Merged 4+ PRs within 24 hours", "threshold": 4, "points": 20},
+            "gold":   {"tier": "gold",   "name": "Speed Demon (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Merged 8+ PRs within 12 hours", "threshold": 8, "points": 40}
         }
     },
 
@@ -181,8 +181,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Task Crusher (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Completed 1+ work item", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Task Crusher (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Completed 5+ work items", "threshold": 5, "points": 15},
-            "gold":   {"tier": "gold",   "name": "Task Crusher (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Completed 10+ work items", "threshold": 10, "points": 30}
+            "silver": {"tier": "silver", "name": "Task Crusher (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Completed 8+ work items", "threshold": 8, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Task Crusher (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Completed 16+ work items", "threshold": 16, "points": 35}
         }
     },
     "bug_slayer": {
@@ -199,8 +199,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Bug Slayer (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Resolved 1+ bug", "threshold": 1, "points": 8},
-            "silver": {"tier": "silver", "name": "Bug Slayer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Resolved 3+ bugs", "threshold": 3, "points": 20},
-            "gold":   {"tier": "gold",   "name": "Bug Slayer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Resolved 6+ bugs", "threshold": 6, "points": 40}
+            "silver": {"tier": "silver", "name": "Bug Slayer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Resolved 5+ bugs", "threshold": 5, "points": 22},
+            "gold":   {"tier": "gold",   "name": "Bug Slayer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Resolved 10+ bugs", "threshold": 10, "points": 45}
         }
     },
     "task_architect": {
@@ -217,8 +217,8 @@ BADGE_DEFINITIONS = {
         "tier": "bronze",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Task Architect (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Created 2+ tasks", "threshold": 2, "points": 5},
-            "silver": {"tier": "silver", "name": "Task Architect (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Created 5+ tasks", "threshold": 5, "points": 14},
-            "gold":   {"tier": "gold",   "name": "Task Architect (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Created 10+ tasks", "threshold": 10, "points": 28}
+            "silver": {"tier": "silver", "name": "Task Architect (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Created 8+ tasks", "threshold": 8, "points": 16},
+            "gold":   {"tier": "gold",   "name": "Task Architect (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Created 16+ tasks", "threshold": 16, "points": 32}
         }
     },
     "sprint_sniper": {
@@ -235,8 +235,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Sprint Sniper (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ task on-time with 0 delays", "threshold": 1, "points": 8},
-            "silver": {"tier": "silver", "name": "Sprint Sniper (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ tasks on-time with 0 delays", "threshold": 3, "points": 20},
-            "gold":   {"tier": "gold",   "name": "Sprint Sniper (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ tasks on-time with 0 delays", "threshold": 6, "points": 40}
+            "silver": {"tier": "silver", "name": "Sprint Sniper (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ tasks on-time with 0 delays", "threshold": 5, "points": 22},
+            "gold":   {"tier": "gold",   "name": "Sprint Sniper (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ tasks on-time with 0 delays", "threshold": 10, "points": 45}
         }
     },
     "speedy_task_closer": {
@@ -253,8 +253,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Lightning Finisher (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ task closed < 24h", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "Lightning Finisher (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ tasks closed < 24h", "threshold": 3, "points": 18},
-            "gold":   {"tier": "gold",   "name": "Lightning Finisher (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ tasks closed < 12h", "threshold": 6, "points": 35}
+            "silver": {"tier": "silver", "name": "Lightning Finisher (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "4+ tasks closed < 24h", "threshold": 4, "points": 20},
+            "gold":   {"tier": "gold",   "name": "Lightning Finisher (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ tasks closed < 12h", "threshold": 10, "points": 40}
         }
     },
 
@@ -273,8 +273,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Code Machine (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Pushed 2+ commits", "threshold": 2, "points": 5},
-            "silver": {"tier": "silver", "name": "Code Machine (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Pushed 6+ commits", "threshold": 6, "points": 15},
-            "gold":   {"tier": "gold",   "name": "Code Machine (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Pushed 15+ commits", "threshold": 15, "points": 32}
+            "silver": {"tier": "silver", "name": "Code Machine (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Pushed 10+ commits", "threshold": 10, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Code Machine (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Pushed 25+ commits", "threshold": 25, "points": 38}
         }
     },
     "branch_architect": {
@@ -291,8 +291,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Feature Pioneer (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Started 1+ feature branch", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Feature Pioneer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Started 3+ feature branches", "threshold": 3, "points": 14},
-            "gold":   {"tier": "gold",   "name": "Feature Pioneer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Started 6+ feature branches", "threshold": 6, "points": 28}
+            "silver": {"tier": "silver", "name": "Feature Pioneer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Started 5+ feature branches", "threshold": 5, "points": 16},
+            "gold":   {"tier": "gold",   "name": "Feature Pioneer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Started 10+ feature branches", "threshold": 10, "points": 32}
         }
     },
     "syntax_master": {
@@ -309,8 +309,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Syntax Master (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ item with structured [<Type>_<nr>]", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "Syntax Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ items with structured [<Type>_<nr>]", "threshold": 3, "points": 18},
-            "gold":   {"tier": "gold",   "name": "Syntax Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ items with structured [<Type>_<nr>]", "threshold": 6, "points": 35}
+            "silver": {"tier": "silver", "name": "Syntax Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ items with structured [<Type>_<nr>]", "threshold": 5, "points": 20},
+            "gold":   {"tier": "gold",   "name": "Syntax Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ items with structured [<Type>_<nr>]", "threshold": 10, "points": 40}
         }
     },
 
@@ -329,8 +329,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "CI Champion (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ successful build (0 failed)", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "CI Champion (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "2+ successful builds (0 failed)", "threshold": 2, "points": 16},
-            "gold":   {"tier": "gold",   "name": "CI Champion (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "5+ successful builds (0 failed)", "threshold": 5, "points": 35}
+            "silver": {"tier": "silver", "name": "CI Champion (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ successful builds (0 failed)", "threshold": 5, "points": 20},
+            "gold":   {"tier": "gold",   "name": "CI Champion (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "12+ successful builds (0 failed)", "threshold": 12, "points": 40}
         }
     },
     "tag_hero": {
@@ -347,8 +347,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Release Hero (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Authored 1+ release tag", "threshold": 1, "points": 10},
-            "silver": {"tier": "silver", "name": "Release Hero (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Authored 2+ release tags", "threshold": 2, "points": 24},
-            "gold":   {"tier": "gold",   "name": "Release Hero (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Authored 4+ release tags", "threshold": 4, "points": 45}
+            "silver": {"tier": "silver", "name": "Release Hero (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Authored 3+ release tags", "threshold": 3, "points": 28},
+            "gold":   {"tier": "gold",   "name": "Release Hero (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Authored 6+ release tags", "threshold": 6, "points": 55}
         }
     },
 
@@ -367,8 +367,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "The Cleaner (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Groomed 1+ work item state", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "The Cleaner (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Groomed 3+ work item states", "threshold": 3, "points": 15},
-            "gold":   {"tier": "gold",   "name": "The Cleaner (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Groomed 8+ work item states", "threshold": 8, "points": 30}
+            "silver": {"tier": "silver", "name": "The Cleaner (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Groomed 6+ work item states", "threshold": 6, "points": 18},
+            "gold":   {"tier": "gold",   "name": "The Cleaner (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Groomed 14+ work item states", "threshold": 14, "points": 35}
         }
     },
     "the_decliner": {
@@ -385,8 +385,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Gatekeeper (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ quality pushback", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "Gatekeeper (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "2+ quality pushbacks", "threshold": 2, "points": 16},
-            "gold":   {"tier": "gold",   "name": "Gatekeeper (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "5+ quality pushbacks", "threshold": 5, "points": 35}
+            "silver": {"tier": "silver", "name": "Gatekeeper (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "4+ quality pushbacks", "threshold": 4, "points": 20},
+            "gold":   {"tier": "gold",   "name": "Gatekeeper (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "8+ quality pushbacks", "threshold": 8, "points": 40}
         }
     },
     "state_mover": {
@@ -403,8 +403,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "State Driver (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "2+ state transitions", "threshold": 2, "points": 5},
-            "silver": {"tier": "silver", "name": "State Driver (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ state transitions", "threshold": 5, "points": 14},
-            "gold":   {"tier": "gold",   "name": "State Driver (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ state transitions", "threshold": 10, "points": 30}
+            "silver": {"tier": "silver", "name": "State Driver (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "8+ state transitions", "threshold": 8, "points": 18},
+            "gold":   {"tier": "gold",   "name": "State Driver (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "16+ state transitions", "threshold": 16, "points": 35}
         }
     },
     "evidence_master": {
@@ -421,8 +421,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Proof Master (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "2+ task evidence links", "threshold": 2, "points": 5},
-            "silver": {"tier": "silver", "name": "Proof Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ task evidence links", "threshold": 5, "points": 15},
-            "gold":   {"tier": "gold",   "name": "Proof Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ task evidence links", "threshold": 10, "points": 30}
+            "silver": {"tier": "silver", "name": "Proof Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "8+ task evidence links", "threshold": 8, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Proof Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "16+ task evidence links", "threshold": 16, "points": 35}
         }
     },
     "stale_sheriff": {
@@ -439,8 +439,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Stale Sheriff (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "0 stale tasks (1+ assigned)", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "Stale Sheriff (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "0 stale tasks (3+ assigned)", "threshold": 3, "points": 16},
-            "gold":   {"tier": "gold",   "name": "Stale Sheriff (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "0 stale tasks (5+ assigned)", "threshold": 5, "points": 35}
+            "silver": {"tier": "silver", "name": "Stale Sheriff (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "0 stale tasks (5+ assigned)", "threshold": 5, "points": 20},
+            "gold":   {"tier": "gold",   "name": "Stale Sheriff (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "0 stale tasks (10+ assigned)", "threshold": 10, "points": 40}
         }
     },
     "relic_keeper": {
@@ -457,8 +457,8 @@ BADGE_DEFINITIONS = {
         "tier": "bronze",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Archaeologist (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "Managing open task >= 30 days", "threshold": 30, "points": 5},
-            "silver": {"tier": "silver", "name": "Archaeologist (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Managing open task >= 60 days", "threshold": 60, "points": 12},
-            "gold":   {"tier": "gold",   "name": "Archaeologist (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Managing open task >= 90 days", "threshold": 90, "points": 25}
+            "silver": {"tier": "silver", "name": "Archaeologist (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "Managing open task >= 90 days", "threshold": 90, "points": 15},
+            "gold":   {"tier": "gold",   "name": "Archaeologist (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "Managing open task >= 180 days", "threshold": 180, "points": 30}
         }
     },
 
@@ -477,8 +477,8 @@ BADGE_DEFINITIONS = {
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Night Owl (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ night action (21h-5h)", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Night Owl (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ night actions (21h-5h)", "threshold": 3, "points": 12},
-            "gold":   {"tier": "gold",   "name": "Night Owl (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ night actions (21h-5h)", "threshold": 6, "points": 25}
+            "silver": {"tier": "silver", "name": "Night Owl (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ night actions (21h-5h)", "threshold": 5, "points": 15},
+            "gold":   {"tier": "gold",   "name": "Night Owl (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ night actions (21h-5h)", "threshold": 10, "points": 30}
         }
     },
     "early_bird": {
@@ -495,8 +495,8 @@ BADGE_DEFINITIONS = {
         "tier": "bronze",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Early Bird (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ early action (5h-9h)", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Early Bird (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ early actions (5h-9h)", "threshold": 3, "points": 12},
-            "gold":   {"tier": "gold",   "name": "Early Bird (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ early actions (5h-9h)", "threshold": 6, "points": 25}
+            "silver": {"tier": "silver", "name": "Early Bird (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ early actions (5h-9h)", "threshold": 5, "points": 15},
+            "gold":   {"tier": "gold",   "name": "Early Bird (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ early actions (5h-9h)", "threshold": 10, "points": 30}
         }
     },
     "weekend_warrior": {
@@ -513,8 +513,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Week-ender (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ weekend action", "threshold": 1, "points": 6},
-            "silver": {"tier": "silver", "name": "Week-ender (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ weekend actions", "threshold": 3, "points": 15},
-            "gold":   {"tier": "gold",   "name": "Week-ender (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ weekend actions", "threshold": 6, "points": 30}
+            "silver": {"tier": "silver", "name": "Week-ender (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "5+ weekend actions", "threshold": 5, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Week-ender (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "10+ weekend actions", "threshold": 10, "points": 35}
         }
     },
     "zen_balancer": {
@@ -527,12 +527,12 @@ BADGE_DEFINITIONS = {
         "category_icon": "⏰",
         "color": "#3fb950",
         "bg_color": "#102a18",
-        "description": "Disciplined focus: delivers 85%+ work during daytime with 0 weekend overtime.",
+        "description": "Disciplined focus: delivers 88%+ work during daytime with 0 weekend overtime.",
         "tier": "silver",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Zen Balancer (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "75%+ daytime actions, 0 weekend", "threshold": 75, "points": 6},
-            "silver": {"tier": "silver", "name": "Zen Balancer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "85%+ daytime actions, 0 weekend (min 3 actions)", "threshold": 85, "points": 15},
-            "gold":   {"tier": "gold",   "name": "Zen Balancer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "95%+ daytime actions, 0 weekend (min 6 actions)", "threshold": 95, "points": 30}
+            "silver": {"tier": "silver", "name": "Zen Balancer (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "88%+ daytime actions, 0 weekend (min 6 actions)", "threshold": 88, "points": 18},
+            "gold":   {"tier": "gold",   "name": "Zen Balancer (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "95%+ daytime actions, 0 weekend (min 12 actions)", "threshold": 95, "points": 35}
         }
     },
     "friday_hero": {
@@ -549,8 +549,8 @@ BADGE_DEFINITIONS = {
         "tier": "bronze",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Friday Hero (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "1+ Friday PM delivery", "threshold": 1, "points": 5},
-            "silver": {"tier": "silver", "name": "Friday Hero (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "2+ Friday PM deliveries", "threshold": 2, "points": 14},
-            "gold":   {"tier": "gold",   "name": "Friday Hero (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "4+ Friday PM deliveries", "threshold": 4, "points": 28}
+            "silver": {"tier": "silver", "name": "Friday Hero (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "3+ Friday PM deliveries", "threshold": 3, "points": 16},
+            "gold":   {"tier": "gold",   "name": "Friday Hero (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "6+ Friday PM deliveries", "threshold": 6, "points": 32}
         }
     },
 
@@ -569,8 +569,8 @@ BADGE_DEFINITIONS = {
         "tier": "gold",
         "tiers": {
             "bronze": {"tier": "bronze", "name": "Streak Master (Bronze)", "icon": "🥉", "color": "#cd7f32", "bg_color": "#2c1a0e", "criteria": "2+ consecutive active weeks", "threshold": 2, "points": 10},
-            "silver": {"tier": "silver", "name": "Streak Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "4+ consecutive active weeks", "threshold": 4, "points": 25},
-            "gold":   {"tier": "gold",   "name": "Streak Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "8+ consecutive active weeks", "threshold": 8, "points": 50}
+            "silver": {"tier": "silver", "name": "Streak Master (Silver)", "icon": "🥈", "color": "#c0c0c0", "bg_color": "#21262d", "criteria": "6+ consecutive active weeks", "threshold": 6, "points": 30},
+            "gold":   {"tier": "gold",   "name": "Streak Master (Gold)",   "icon": "🥇", "color": "#ffd700", "bg_color": "#3b2d00", "criteria": "12+ consecutive active weeks", "threshold": 12, "points": 60}
         }
     },
     "sprint_mvp": {
@@ -1536,6 +1536,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "last_activity": None,
                 "recent_activities": [],
                 "assigned_work_items": [],
+                "assigned_bugs": [],
+                "assigned_user_stories": [],
                 "recent_prs": [],
                 "recent_commits": [],
                 "_last_activity_dt": None,
@@ -1755,6 +1757,97 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             except Exception:
                 pass
 
+    # Helper for sprint number and label extraction
+    def _extract_sprint_info(iter_path):
+        if not iter_path or not isinstance(iter_path, str):
+            return 999999, "Backlog"
+        clean = iter_path.strip()
+        year, week, sname = parse_sprint_week(clean)
+        if year and week:
+            return year * 100 + week, sname
+        m_num = re.search(r'\b(?:sprint|iteration|kw|w)[-_ ]?(\d+)\b', clean, re.IGNORECASE)
+        if m_num:
+            num = int(m_num.group(1))
+            norm = clean.replace("\\", "/").strip("/")
+            leaf = norm.split("/")[-1] if norm else f"Sprint {num}"
+            return 100000 + num, leaf
+        norm = clean.replace("\\", "/").strip("/")
+        leaf = norm.split("/")[-1] if norm else "Backlog"
+        if "backlog" in leaf.lower():
+            return 999999, leaf
+        return 900000, leaf
+
+    # Pre-index all work items and parent-child relationships
+    wi_lookup = {}
+    children_by_parent = {}
+
+    for wi in all_wis:
+        if wi.get("deleted") or wi.get("is_deleted"):
+            continue
+        raw = {}
+        if wi.get("raw_json"):
+            try:
+                raw = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+            except Exception:
+                pass
+        fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+        wid = wi.get("id")
+        if not wid:
+            continue
+        
+        wi_type = str(wi.get("type") or fields.get("System.WorkItemType") or "").strip()
+        wi_title = str(wi.get("title") or fields.get("System.Title") or "")
+        state = str(wi.get("state") or fields.get("System.State") or "").capitalize()
+        assigned_name = _clean_user_name(wi.get("assigned_to") or fields.get("System.AssignedTo"))
+        iter_path = str(wi.get("iteration_path") or fields.get("System.IterationPath") or "")
+        sprint_num, sprint_display = _extract_sprint_info(iter_path)
+
+        parent_id = None
+        p_val = fields.get("System.Parent") or wi.get("parent_id")
+        if p_val is not None:
+            try:
+                parent_id = int(str(p_val).lstrip("#"))
+            except (ValueError, TypeError):
+                parent_id = None
+        elif raw and isinstance(raw, dict) and "relations" in raw:
+            for rel in raw.get("relations") or []:
+                rel_name = rel.get("rel") or ""
+                if "Hierarchy-Reverse" in rel_name or rel_name == "Parent" or (rel.get("attributes") or {}).get("name") == "Parent":
+                    url = rel.get("url", "")
+                    if url:
+                        try:
+                            parent_id = int(url.rstrip("/").split("/")[-1])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+
+        wi_lookup[wid] = {
+            "id": wid,
+            "title": wi_title or f"#{wid}",
+            "type": wi_type or "Task",
+            "state": state or "Active",
+            "assigned_to": assigned_name or "",
+            "iteration_path": iter_path,
+            "sprint": sprint_display,
+            "sprint_num": sprint_num,
+            "parent_id": parent_id,
+        }
+        if parent_id is not None:
+            children_by_parent.setdefault(parent_id, []).append(wid)
+
+        if raw and isinstance(raw, dict) and "relations" in raw:
+            for rel in raw.get("relations") or []:
+                rel_name = rel.get("rel") or ""
+                if "Hierarchy-Forward" in rel_name or rel_name == "Child" or (rel.get("attributes") or {}).get("name") == "Child":
+                    url = rel.get("url", "")
+                    if url:
+                        try:
+                            c_wid = int(url.rstrip("/").split("/")[-1])
+                            if c_wid not in children_by_parent.setdefault(wid, []):
+                                children_by_parent[wid].append(c_wid)
+                        except (ValueError, TypeError):
+                            pass
+
     # 1. Process Work Items
     for wi in all_wis:
         if wi.get("deleted") or wi.get("is_deleted"):
@@ -1859,15 +1952,103 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 m_as = _get_or_create_member(assigned_name)
                 if m_as:
                     m_as["open_tasks_assigned"] += 1
-                    if len(m_as["assigned_work_items"]) < 25:
-                        m_as["assigned_work_items"].append({
-                            "id": wid,
-                            "title": wi_title or f"#{wid}",
-                            "type": wi_type.capitalize() or "Task",
-                            "state": state or "Active",
-                            "changed_date": changed_date_str or "",
-                            "days_old": age_days,
-                        })
+                    s_num, s_disp = _extract_sprint_info(wi.get("iteration_path") or fields.get("System.IterationPath") or "")
+                    
+                    # Build subtasks list for this work item
+                    subtasks_list = []
+                    for c_wid in children_by_parent.get(wid, []):
+                        c_info = wi_lookup.get(c_wid)
+                        if c_info:
+                            subtasks_list.append({
+                                "id": c_info["id"],
+                                "title": c_info["title"],
+                                "type": c_info["type"],
+                                "state": c_info["state"],
+                                "assigned_to": c_info["assigned_to"],
+                                "iteration_path": c_info["iteration_path"],
+                                "sprint": c_info["sprint"],
+                                "sprint_num": c_info["sprint_num"],
+                            })
+                    subtasks_list.sort(key=lambda s: (s.get("sprint_num", 999999), s.get("id", 0)))
+
+                    item_payload = {
+                        "id": wid,
+                        "title": wi_title or f"#{wid}",
+                        "type": wi_type.capitalize() or "Task",
+                        "state": state or "Active",
+                        "assigned_to": assigned_name,
+                        "iteration_path": str(wi.get("iteration_path") or fields.get("System.IterationPath") or ""),
+                        "sprint": s_disp,
+                        "sprint_num": s_num,
+                        "changed_date": changed_date_str or "",
+                        "days_old": age_days,
+                        "subtasks": subtasks_list,
+                        "subtasks_count": len(subtasks_list),
+                    }
+
+                    if len(m_as["assigned_work_items"]) < 50:
+                        m_as["assigned_work_items"].append(item_payload)
+
+                    wi_t_lower = wi_type.lower()
+                    is_bug_type = any(b in wi_t_lower for b in ("bug", "defect", "problem", "issue"))
+                    is_story_type = any(s in wi_t_lower for s in ("story", "pbi", "backlog", "requirement", "feature"))
+
+                    if is_bug_type:
+                        if not any(b["id"] == wid for b in m_as["assigned_bugs"]):
+                            m_as["assigned_bugs"].append(item_payload)
+                    elif is_story_type:
+                        if not any(s["id"] == wid for s in m_as["assigned_user_stories"]):
+                            m_as["assigned_user_stories"].append(item_payload)
+                    else:
+                        # Work item is a Task / Subtask / Other
+                        # Check if parent is a Bug or Story
+                        parent_id = wi_lookup.get(wid, {}).get("parent_id")
+                        if parent_id and parent_id in wi_lookup:
+                            p_info = wi_lookup[parent_id]
+                            p_type_lower = p_info["type"].lower()
+                            p_is_bug = any(b in p_type_lower for b in ("bug", "defect", "problem", "issue"))
+                            
+                            p_subtasks = []
+                            for c_wid in children_by_parent.get(parent_id, []):
+                                c_info = wi_lookup.get(c_wid)
+                                if c_info:
+                                    p_subtasks.append({
+                                        "id": c_info["id"],
+                                        "title": c_info["title"],
+                                        "type": c_info["type"],
+                                        "state": c_info["state"],
+                                        "assigned_to": c_info["assigned_to"],
+                                        "iteration_path": c_info["iteration_path"],
+                                        "sprint": c_info["sprint"],
+                                        "sprint_num": c_info["sprint_num"],
+                                    })
+                            p_subtasks.sort(key=lambda s: (s.get("sprint_num", 999999), s.get("id", 0)))
+                            
+                            p_payload = {
+                                "id": p_info["id"],
+                                "title": p_info["title"],
+                                "type": p_info["type"],
+                                "state": p_info["state"],
+                                "assigned_to": p_info["assigned_to"],
+                                "iteration_path": p_info["iteration_path"],
+                                "sprint": p_info["sprint"],
+                                "sprint_num": p_info["sprint_num"],
+                                "changed_date": "",
+                                "days_old": 0,
+                                "subtasks": p_subtasks,
+                                "subtasks_count": len(p_subtasks),
+                            }
+                            if p_is_bug:
+                                if not any(b["id"] == parent_id for b in m_as["assigned_bugs"]):
+                                    m_as["assigned_bugs"].append(p_payload)
+                            else:
+                                if not any(s["id"] == parent_id for s in m_as["assigned_user_stories"]):
+                                    m_as["assigned_user_stories"].append(p_payload)
+                        else:
+                            # Standalone Task -> place under assigned_user_stories so it is visible
+                            if not any(s["id"] == wid for s in m_as["assigned_user_stories"]):
+                                m_as["assigned_user_stories"].append(item_payload)
+
                     if age_days > m_as["oldest_open_task_days"]:
                         m_as["oldest_open_task_days"] = age_days
                         m_as["oldest_open_task"] = {
@@ -2552,195 +2733,196 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         badges = []
         if has_current_activity:
             # 1. PRs & Reviews
-            if m["prs_created"] >= 6:
+            if m["prs_created"] >= 10:
                 badges.append(_build_awarded_badge("pr_dynamo", "gold", times=m["prs_created"], metric_label=f"{m['prs_created']} PRs"))
-            elif m["prs_created"] >= 3:
+            elif m["prs_created"] >= 5:
                 badges.append(_build_awarded_badge("pr_dynamo", "silver", times=m["prs_created"], metric_label=f"{m['prs_created']} PRs"))
             elif m["prs_created"] >= 1:
                 badges.append(_build_awarded_badge("pr_dynamo", "bronze", times=m["prs_created"], metric_label=f"{m['prs_created']} PR"))
 
-            if m["prs_closed"] >= 6:
+            if m["prs_closed"] >= 10:
                 badges.append(_build_awarded_badge("the_closer", "gold", times=m["prs_closed"], metric_label=f"{m['prs_closed']} PRs merged"))
-            elif m["prs_closed"] >= 3:
+            elif m["prs_closed"] >= 5:
                 badges.append(_build_awarded_badge("the_closer", "silver", times=m["prs_closed"], metric_label=f"{m['prs_closed']} PRs merged"))
             elif m["prs_closed"] >= 1:
                 badges.append(_build_awarded_badge("the_closer", "bronze", times=m["prs_closed"], metric_label=f"{m['prs_closed']} PR merged"))
 
-            if m["prs_reviewed"] >= 8 and m["prs_approved"] >= 4:
+            if m["prs_reviewed"] >= 12 and m["prs_approved"] >= 5:
                 badges.append(_build_awarded_badge("eagle_eye", "gold", times=m["prs_reviewed"], metric_label=f"{m['prs_reviewed']} reviews"))
-            elif m["prs_reviewed"] >= 3:
+            elif m["prs_reviewed"] >= 6:
                 badges.append(_build_awarded_badge("eagle_eye", "silver", times=m["prs_reviewed"], metric_label=f"{m['prs_reviewed']} reviews"))
             elif m["prs_reviewed"] >= 1:
                 badges.append(_build_awarded_badge("eagle_eye", "bronze", times=m["prs_reviewed"], metric_label=f"{m['prs_reviewed']} review"))
 
-            if m["prs_fast_merged"] >= 4:
+            if m["prs_fast_merged"] >= 8:
                 badges.append(_build_awarded_badge("speed_demon", "gold", times=m["prs_fast_merged"], metric_label=f"{m['prs_fast_merged']} fast PRs (<12h)"))
-            elif m["prs_fast_merged"] >= 2:
+            elif m["prs_fast_merged"] >= 4:
                 badges.append(_build_awarded_badge("speed_demon", "silver", times=m["prs_fast_merged"], metric_label=f"{m['prs_fast_merged']} fast PRs (<24h)"))
             elif m["prs_fast_merged"] >= 1:
                 badges.append(_build_awarded_badge("speed_demon", "bronze", times=m["prs_fast_merged"], metric_label=f"{m['prs_fast_merged']} fast PR (<24h)"))
 
             # 2. Work Items
-            if m["tasks_completed"] >= 10:
+            if m["tasks_completed"] >= 16:
                 badges.append(_build_awarded_badge("task_crusher", "gold", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} items"))
-            elif m["tasks_completed"] >= 5:
+            elif m["tasks_completed"] >= 8:
                 badges.append(_build_awarded_badge("task_crusher", "silver", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} items"))
             elif m["tasks_completed"] >= 1:
                 badges.append(_build_awarded_badge("task_crusher", "bronze", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} item"))
 
-            if m["bugs_resolved"] >= 6:
+            if m["bugs_resolved"] >= 10:
                 badges.append(_build_awarded_badge("bug_slayer", "gold", times=m["bugs_resolved"], metric_label=f"{m['bugs_resolved']} bugs"))
-            elif m["bugs_resolved"] >= 3:
+            elif m["bugs_resolved"] >= 5:
                 badges.append(_build_awarded_badge("bug_slayer", "silver", times=m["bugs_resolved"], metric_label=f"{m['bugs_resolved']} bugs"))
             elif m["bugs_resolved"] >= 1:
                 badges.append(_build_awarded_badge("bug_slayer", "bronze", times=m["bugs_resolved"], metric_label=f"{m['bugs_resolved']} bug"))
 
-            if m["tasks_created"] >= 10:
+            if m["tasks_created"] >= 16:
                 badges.append(_build_awarded_badge("task_architect", "gold", times=m["tasks_created"], metric_label=f"{m['tasks_created']} created"))
-            elif m["tasks_created"] >= 5:
+            elif m["tasks_created"] >= 8:
                 badges.append(_build_awarded_badge("task_architect", "silver", times=m["tasks_created"], metric_label=f"{m['tasks_created']} created"))
             elif m["tasks_created"] >= 2:
                 badges.append(_build_awarded_badge("task_architect", "bronze", times=m["tasks_created"], metric_label=f"{m['tasks_created']} created"))
 
-            if m["tasks_completed"] >= 6 and m["total_delay_weeks"] == 0:
+            if m["tasks_completed"] >= 10 and m["total_delay_weeks"] == 0:
                 badges.append(_build_awarded_badge("sprint_sniper", "gold", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} on-time"))
-            elif m["tasks_completed"] >= 3 and m["total_delay_weeks"] == 0:
+            elif m["tasks_completed"] >= 5 and m["total_delay_weeks"] == 0:
                 badges.append(_build_awarded_badge("sprint_sniper", "silver", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} on-time"))
             elif m["tasks_completed"] >= 1 and m["total_delay_weeks"] == 0:
                 badges.append(_build_awarded_badge("sprint_sniper", "bronze", times=m["tasks_completed"], metric_label=f"{m['tasks_completed']} on-time"))
 
-            if m["tasks_fast_closed"] >= 6:
+            if m["tasks_fast_closed"] >= 10:
                 badges.append(_build_awarded_badge("speedy_task_closer", "gold", times=m["tasks_fast_closed"], metric_label=f"{m['tasks_fast_closed']} fast closes (<12h)"))
-            elif m["tasks_fast_closed"] >= 2 or (m["tasks_completed"] >= 2 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
+            elif m["tasks_fast_closed"] >= 4 or (m["tasks_completed"] >= 4 and m["avg_task_turnaround_hours"] > 0 and m["avg_task_turnaround_hours"] <= 24.0):
                 badges.append(_build_awarded_badge("speedy_task_closer", "silver", times=m["tasks_fast_closed"] or m["tasks_completed"], metric_label=f"{m['tasks_fast_closed'] or m['tasks_completed']} fast closes (<24h)"))
             elif m["tasks_fast_closed"] >= 1:
                 badges.append(_build_awarded_badge("speedy_task_closer", "bronze", times=m["tasks_fast_closed"], metric_label=f"{m['tasks_fast_closed']} fast close (<24h)"))
 
             # 3. Code & Branching
-            if m["commits_count"] >= 15:
+            if m["commits_count"] >= 25:
                 badges.append(_build_awarded_badge("commit_machine", "gold", times=m["commits_count"], metric_label=f"{m['commits_count']} commits"))
-            elif m["commits_count"] >= 6:
+            elif m["commits_count"] >= 10:
                 badges.append(_build_awarded_badge("commit_machine", "silver", times=m["commits_count"], metric_label=f"{m['commits_count']} commits"))
             elif m["commits_count"] >= 2:
                 badges.append(_build_awarded_badge("commit_machine", "bronze", times=m["commits_count"], metric_label=f"{m['commits_count']} commits"))
 
-            if m["branches_started"] >= 6:
+            if m["branches_started"] >= 10:
                 badges.append(_build_awarded_badge("branch_architect", "gold", times=m["branches_started"], metric_label=f"{m['branches_started']} branches"))
-            elif m["branches_started"] >= 3:
+            elif m["branches_started"] >= 5:
                 badges.append(_build_awarded_badge("branch_architect", "silver", times=m["branches_started"], metric_label=f"{m['branches_started']} branches"))
             elif m["branches_started"] >= 1:
                 badges.append(_build_awarded_badge("branch_architect", "bronze", times=m["branches_started"], metric_label=f"{m['branches_started']} branch"))
 
-            if m["structured_syntax_completed"] >= 6:
+            if m["structured_syntax_completed"] >= 10:
                 badges.append(_build_awarded_badge("syntax_master", "gold", times=m["structured_syntax_completed"], metric_label=f"{m['structured_syntax_completed']} items"))
-            elif m["structured_syntax_completed"] >= 3:
+            elif m["structured_syntax_completed"] >= 5:
                 badges.append(_build_awarded_badge("syntax_master", "silver", times=m["structured_syntax_completed"], metric_label=f"{m['structured_syntax_completed']} items"))
             elif m["structured_syntax_completed"] >= 1:
                 badges.append(_build_awarded_badge("syntax_master", "bronze", times=m["structured_syntax_completed"], metric_label=f"{m['structured_syntax_completed']} item"))
 
             # 4. CI/CD & Releases
-            if m["builds_succeeded"] >= 5 and m["builds_failed"] == 0:
+            if m["builds_succeeded"] >= 12 and m["builds_failed"] == 0:
                 badges.append(_build_awarded_badge("ci_hero", "gold", times=m["builds_succeeded"], metric_label=f"{m['builds_succeeded']} builds"))
-            elif m["builds_succeeded"] >= 2 and m["builds_failed"] == 0:
+            elif m["builds_succeeded"] >= 5 and m["builds_failed"] == 0:
                 badges.append(_build_awarded_badge("ci_hero", "silver", times=m["builds_succeeded"], metric_label=f"{m['builds_succeeded']} builds"))
             elif m["builds_succeeded"] >= 1 and m["builds_failed"] == 0:
                 badges.append(_build_awarded_badge("ci_hero", "bronze", times=m["builds_succeeded"], metric_label=f"{m['builds_succeeded']} build"))
 
-            if m["tags_pushed"] >= 4:
+            if m["tags_pushed"] >= 6:
                 badges.append(_build_awarded_badge("tag_hero", "gold", times=m["tags_pushed"], metric_label=f"{m['tags_pushed']} tags"))
-            elif m["tags_pushed"] >= 2:
+            elif m["tags_pushed"] >= 3:
                 badges.append(_build_awarded_badge("tag_hero", "silver", times=m["tags_pushed"], metric_label=f"{m['tags_pushed']} tags"))
             elif m["tags_pushed"] >= 1:
                 badges.append(_build_awarded_badge("tag_hero", "bronze", times=m["tags_pushed"], metric_label=f"{m['tags_pushed']} tag"))
 
             # 5. Quality & Grooming
-            if m["tasks_cleaned"] >= 8 or m["state_changes_count"] >= 10:
+            if m["tasks_cleaned"] >= 14 or m["state_changes_count"] >= 18:
                 badges.append(_build_awarded_badge("the_cleaner", "gold", times=m["tasks_cleaned"], metric_label=f"{m['tasks_cleaned']} groomed"))
                 m["is_cleaner"] = True
-            elif m["tasks_cleaned"] >= 3 or m["state_changes_count"] >= 4:
+            elif m["tasks_cleaned"] >= 6 or m["state_changes_count"] >= 8:
                 badges.append(_build_awarded_badge("the_cleaner", "silver", times=m["tasks_cleaned"], metric_label=f"{m['tasks_cleaned']} groomed"))
                 m["is_cleaner"] = True
             elif m["tasks_cleaned"] >= 1 or m["state_changes_count"] >= 1:
                 badges.append(_build_awarded_badge("the_cleaner", "bronze", times=m["tasks_cleaned"], metric_label=f"{m['tasks_cleaned']} groomed"))
+                m["is_cleaner"] = True
 
-            if m["pushbacks_count"] >= 5:
+            if m["pushbacks_count"] >= 8:
                 badges.append(_build_awarded_badge("the_decliner", "gold", times=m["pushbacks_count"], metric_label=f"{m['pushbacks_count']} pushbacks"))
                 m["is_decliner"] = True
-            elif m["pushbacks_count"] >= 2:
+            elif m["pushbacks_count"] >= 4:
                 badges.append(_build_awarded_badge("the_decliner", "silver", times=m["pushbacks_count"], metric_label=f"{m['pushbacks_count']} pushbacks"))
                 m["is_decliner"] = True
             elif m["pushbacks_count"] >= 1:
                 badges.append(_build_awarded_badge("the_decliner", "bronze", times=m["pushbacks_count"], metric_label=f"{m['pushbacks_count']} pushback"))
                 m["is_decliner"] = True
 
-            if m["state_changes_count"] >= 10:
+            if m["state_changes_count"] >= 16:
                 badges.append(_build_awarded_badge("state_mover", "gold", times=m["state_changes_count"], metric_label=f"{m['state_changes_count']} transitions"))
-            elif m["state_changes_count"] >= 5:
+            elif m["state_changes_count"] >= 8:
                 badges.append(_build_awarded_badge("state_mover", "silver", times=m["state_changes_count"], metric_label=f"{m['state_changes_count']} transitions"))
             elif m["state_changes_count"] >= 2:
                 badges.append(_build_awarded_badge("state_mover", "bronze", times=m["state_changes_count"], metric_label=f"{m['state_changes_count']} transitions"))
 
-            if m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 5:
+            if m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 10:
                 badges.append(_build_awarded_badge("stale_sheriff", "gold", times=m["open_tasks_assigned"], metric_label=f"{m['open_tasks_assigned']} active items"))
-            elif m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 3:
+            elif m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 5:
                 badges.append(_build_awarded_badge("stale_sheriff", "silver", times=m["open_tasks_assigned"], metric_label=f"{m['open_tasks_assigned']} active items"))
             elif m["stale_tasks_count"] == 0 and m["open_tasks_assigned"] >= 1:
                 badges.append(_build_awarded_badge("stale_sheriff", "bronze", times=m["open_tasks_assigned"], metric_label=f"{m['open_tasks_assigned']} active items"))
 
-            if m["task_evidences_count"] >= 10:
+            if m["task_evidences_count"] >= 16:
                 badges.append(_build_awarded_badge("evidence_master", "gold", times=m["task_evidences_count"], metric_label=f"{m['task_evidences_count']} links"))
-            elif m["task_evidences_count"] >= 5:
+            elif m["task_evidences_count"] >= 8:
                 badges.append(_build_awarded_badge("evidence_master", "silver", times=m["task_evidences_count"], metric_label=f"{m['task_evidences_count']} links"))
             elif m["task_evidences_count"] >= 2:
                 badges.append(_build_awarded_badge("evidence_master", "bronze", times=m["task_evidences_count"], metric_label=f"{m['task_evidences_count']} links"))
 
-            if m["oldest_open_task_days"] >= 90:
+            if m["oldest_open_task_days"] >= 180:
                 badges.append(_build_awarded_badge("relic_keeper", "gold", times=m["oldest_open_task_days"], metric_label=f"{m['oldest_open_task_days']}d idle"))
-            elif m["oldest_open_task_days"] >= 60:
+            elif m["oldest_open_task_days"] >= 90:
                 badges.append(_build_awarded_badge("relic_keeper", "silver", times=m["oldest_open_task_days"], metric_label=f"{m['oldest_open_task_days']}d idle"))
             elif m["oldest_open_task_days"] >= 30:
                 badges.append(_build_awarded_badge("relic_keeper", "bronze", times=m["oldest_open_task_days"], metric_label=f"{m['oldest_open_task_days']}d idle"))
 
             # 6. Working Habits & Rhythm
-            if m["night_activities"] >= 6:
+            if m["night_activities"] >= 10:
                 badges.append(_build_awarded_badge("night_owl", "gold", times=m["night_activities"], metric_label=f"{m['night_activities']} acts"))
-            elif m["night_activities"] >= 3:
+            elif m["night_activities"] >= 5:
                 badges.append(_build_awarded_badge("night_owl", "silver", times=m["night_activities"], metric_label=f"{m['night_activities']} acts"))
             elif m["night_activities"] >= 1:
                 badges.append(_build_awarded_badge("night_owl", "bronze", times=m["night_activities"], metric_label=f"{m['night_activities']} act"))
 
-            if m["early_bird_activities"] >= 6:
+            if m["early_bird_activities"] >= 10:
                 badges.append(_build_awarded_badge("early_bird", "gold", times=m["early_bird_activities"], metric_label=f"{m['early_bird_activities']} acts"))
-            elif m["early_bird_activities"] >= 3:
+            elif m["early_bird_activities"] >= 5:
                 badges.append(_build_awarded_badge("early_bird", "silver", times=m["early_bird_activities"], metric_label=f"{m['early_bird_activities']} acts"))
             elif m["early_bird_activities"] >= 1:
                 badges.append(_build_awarded_badge("early_bird", "bronze", times=m["early_bird_activities"], metric_label=f"{m['early_bird_activities']} act"))
 
-            if m["weekend_activities"] >= 6:
+            if m["weekend_activities"] >= 10:
                 badges.append(_build_awarded_badge("weekend_warrior", "gold", times=m["weekend_activities"], metric_label=f"{m['weekend_activities']} acts"))
-            elif m["weekend_activities"] >= 3:
+            elif m["weekend_activities"] >= 5:
                 badges.append(_build_awarded_badge("weekend_warrior", "silver", times=m["weekend_activities"], metric_label=f"{m['weekend_activities']} acts"))
             elif m["weekend_activities"] >= 1:
                 badges.append(_build_awarded_badge("weekend_warrior", "bronze", times=m["weekend_activities"], metric_label=f"{m['weekend_activities']} act"))
 
-            if tot_act >= 6 and (m["daytime_activities"] / tot_act) >= 0.95 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
+            if tot_act >= 12 and (m["daytime_activities"] / tot_act) >= 0.95 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
                 badges.append(_build_awarded_badge("zen_balancer", "gold", times=m["daytime_activities"], metric_label=f"{m['daytime_activities']} day acts"))
-            elif tot_act >= 3 and (m["daytime_activities"] / tot_act) >= 0.85 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
+            elif tot_act >= 6 and (m["daytime_activities"] / tot_act) >= 0.88 and m["weekend_activities"] == 0 and m["night_activities"] == 0:
                 badges.append(_build_awarded_badge("zen_balancer", "silver", times=m["daytime_activities"], metric_label=f"{m['daytime_activities']} day acts"))
             elif tot_act >= 2 and (m["daytime_activities"] / tot_act) >= 0.75 and m["weekend_activities"] == 0:
                 badges.append(_build_awarded_badge("zen_balancer", "bronze", times=m["daytime_activities"], metric_label=f"{m['daytime_activities']} day acts"))
 
-            if m["friday_afternoon_activities"] >= 4:
+            if m["friday_afternoon_activities"] >= 6:
                 badges.append(_build_awarded_badge("friday_hero", "gold", times=m["friday_afternoon_activities"], metric_label=f"{m['friday_afternoon_activities']} deliveries"))
-            elif m["friday_afternoon_activities"] >= 2:
+            elif m["friday_afternoon_activities"] >= 3:
                 badges.append(_build_awarded_badge("friday_hero", "silver", times=m["friday_afternoon_activities"], metric_label=f"{m['friday_afternoon_activities']} deliveries"))
             elif m["friday_afternoon_activities"] >= 1:
                 badges.append(_build_awarded_badge("friday_hero", "bronze", times=m["friday_afternoon_activities"], metric_label=f"{m['friday_afternoon_activities']} delivery"))
 
             # 7. Streaks
-            if m["current_streak_weeks"] >= 8:
+            if m["current_streak_weeks"] >= 12:
                 badges.append(_build_awarded_badge("streak_master", "gold", times=m["current_streak_weeks"], metric_label=f"{m['current_streak_weeks']} wks"))
-            elif m["current_streak_weeks"] >= 4:
+            elif m["current_streak_weeks"] >= 6:
                 badges.append(_build_awarded_badge("streak_master", "silver", times=m["current_streak_weeks"], metric_label=f"{m['current_streak_weeks']} wks"))
             elif m["current_streak_weeks"] >= 2:
                 badges.append(_build_awarded_badge("streak_master", "bronze", times=m["current_streak_weeks"], metric_label=f"{m['current_streak_weeks']} wks"))
@@ -3076,6 +3258,14 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             if not m.get("last_activity"):
                 m["last_activity"] = m["recent_activities"][0]
                 m["last_active_date"] = m["last_activity"].get("timestamp", "")
+
+        # Sort assigned items by sprint number, then by ID
+        if m.get("assigned_bugs"):
+            m["assigned_bugs"].sort(key=lambda x: (x.get("sprint_num", 999999), x.get("id", 0)))
+        if m.get("assigned_user_stories"):
+            m["assigned_user_stories"].sort(key=lambda x: (x.get("sprint_num", 999999), x.get("id", 0)))
+        if m.get("assigned_work_items"):
+            m["assigned_work_items"].sort(key=lambda x: (x.get("sprint_num", 999999), x.get("id", 0)))
 
         # Format recent highlights
         if m.get("is_aliased"):

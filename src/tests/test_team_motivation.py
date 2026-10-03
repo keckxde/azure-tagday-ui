@@ -1033,6 +1033,114 @@ class TestTeamMotivation(unittest.TestCase):
         has_expected_title = any("888" in t for t in titles)
         self.assertTrue(has_expected_title)
 
+    def test_assigned_bugs_and_user_stories_with_subtasks_and_sprint_sorting(self):
+        """
+        Verify that assigned open bugs and user stories are properly categorized,
+        include child subtasks, display the sprint name, and are sorted by sprint number ascending.
+        """
+        # Save User Stories in different sprints (unsorted insertion)
+        # Story 1 in week-2635
+        self.cache.save_work_item(
+            701, "Story in sprint 35", "User Story", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Story in sprint 35",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2635"
+                }
+            }
+        )
+
+        # Story 2 in week-2630 (earlier sprint)
+        self.cache.save_work_item(
+            702, "Story in sprint 30", "User Story", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Story in sprint 30",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2630"
+                }
+            }
+        )
+
+        # Child Subtask under Story 702
+        self.cache.save_work_item(
+            703, "Subtask of Story 702", "Task", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Subtask of Story 702",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.Parent": 702,
+                    "System.IterationPath": "Project\\TeamA\\week-2630"
+                }
+            }
+        )
+
+        # Bug 1 in week-2633
+        self.cache.save_work_item(
+            704, "Bug in sprint 33", "Bug", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Bug in sprint 33",
+                    "System.WorkItemType": "Bug",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2633"
+                }
+            }
+        )
+
+        # Child Subtask under Bug 704
+        self.cache.save_work_item(
+            705, "Investigate bug crash log", "Task", "In Progress", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Investigate bug crash log",
+                    "System.WorkItemType": "Task",
+                    "System.State": "In Progress",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.Parent": 704,
+                    "System.IterationPath": "Project\\TeamA\\week-2633"
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["all_user_profiles"]}
+        self.assertIn("Gina Developer", members)
+        gina = members["Gina Developer"]
+
+        # Check assigned bugs
+        self.assertEqual(len(gina["assigned_bugs"]), 1)
+        bug = gina["assigned_bugs"][0]
+        self.assertEqual(bug["id"], 704)
+        self.assertEqual(bug["sprint"], "week-2633")
+        self.assertEqual(len(bug["subtasks"]), 1)
+        self.assertEqual(bug["subtasks"][0]["id"], 705)
+        self.assertEqual(bug["subtasks"][0]["title"], "Investigate bug crash log")
+
+        # Check assigned user stories & sprint ordering
+        self.assertEqual(len(gina["assigned_user_stories"]), 2)
+        # 702 (week-2630) must be first before 701 (week-2635)
+        self.assertEqual(gina["assigned_user_stories"][0]["id"], 702)
+        self.assertEqual(gina["assigned_user_stories"][0]["sprint"], "week-2630")
+        self.assertEqual(len(gina["assigned_user_stories"][0]["subtasks"]), 1)
+        self.assertEqual(gina["assigned_user_stories"][0]["subtasks"][0]["id"], 703)
+
+        self.assertEqual(gina["assigned_user_stories"][1]["id"], 701)
+        self.assertEqual(gina["assigned_user_stories"][1]["sprint"], "week-2635")
+
 
 if __name__ == "__main__":
     unittest.main()

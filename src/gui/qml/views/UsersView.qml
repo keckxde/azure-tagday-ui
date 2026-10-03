@@ -20,6 +20,8 @@ Item {
     property bool isAliasesCollapsed: false
     property bool isLastActivityCollapsed: false
     property bool isTimelineCollapsed: false
+    property bool isBugsCollapsed: false
+    property bool isStoriesCollapsed: false
     property bool isTasksCollapsed: false
     property bool isBadgesCollapsed: false
     property real inspectorWidth: (backend && backend.rightSidebarWidth) ? backend.rightSidebarWidth : 420
@@ -32,11 +34,13 @@ Item {
     }
 
     function toggleAllInspectorGroups() {
-        var allCollapsed = isAliasesCollapsed && isLastActivityCollapsed && isTimelineCollapsed && isTasksCollapsed && isBadgesCollapsed;
+        var allCollapsed = isAliasesCollapsed && isLastActivityCollapsed && isTimelineCollapsed && isBugsCollapsed && isStoriesCollapsed && isBadgesCollapsed;
         var newState = !allCollapsed;
         isAliasesCollapsed = newState;
         isLastActivityCollapsed = newState;
         isTimelineCollapsed = newState;
+        isBugsCollapsed = newState;
+        isStoriesCollapsed = newState;
         isTasksCollapsed = newState;
         isBadgesCollapsed = newState;
     }
@@ -2252,26 +2256,26 @@ Item {
                             }
                         }
 
-                        // Section 4: Assigned Work Items (Collapsible)
+                        // Section 4A: Assigned Bugs (Collapsible)
                         Rectangle {
-                            visible: !!(root.selectedUser && root.selectedUser.assigned_work_items && root.selectedUser.assigned_work_items.length > 0)
+                            visible: !!(root.selectedUser && root.selectedUser.assigned_bugs && root.selectedUser.assigned_bugs.length > 0)
                             Layout.fillWidth: true
-                            implicitHeight: wiCol.implicitHeight + 20
+                            implicitHeight: bugsCol.implicitHeight + 20
                             radius: 8
                             color: "#0d1117"
                             border.color: "#30363d"
 
                             ColumnLayout {
-                                id: wiCol
+                                id: bugsCol
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: root.isTasksCollapsed ? 0 : 8
+                                spacing: root.isBugsCollapsed ? 0 : 8
 
-                                // Section 4 Header (Clickable)
+                                // Section 4A Header (Clickable)
                                 Rectangle {
                                     Layout.fillWidth: true
                                     implicitHeight: 24
-                                    color: tasksHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    color: bugsHdrMa.containsMouse ? "#161b22" : "transparent"
                                     radius: 4
 
                                     RowLayout {
@@ -2281,136 +2285,242 @@ Item {
                                         spacing: 6
 
                                         Text {
-                                            text: root.isTasksCollapsed ? "▶" : "▼"
+                                            text: root.isBugsCollapsed ? "▶" : "▼"
                                             font.pixelSize: 10
                                             color: "#8b949e"
                                         }
 
                                         Text {
-                                            text: "📋 Active Assigned Tasks"
+                                            text: "🐛 Assigned Bugs"
                                             font.family: "Segoe UI, sans-serif"
                                             font.pixelSize: 12
                                             font.weight: Font.Bold
-                                            color: "#f0f6fc"
+                                            color: "#f85149"
                                         }
 
                                         Item { Layout.fillWidth: true }
 
                                         Text {
-                                            text: ((root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items.length : 0) + " tasks"
+                                            text: ((root.selectedUser && root.selectedUser.assigned_bugs) ? root.selectedUser.assigned_bugs.length : 0) + " bugs"
                                             font.pixelSize: 10
                                             color: "#8b949e"
                                         }
                                     }
 
                                     MouseArea {
-                                        id: tasksHdrMa
+                                        id: bugsHdrMa
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.isTasksCollapsed = !root.isTasksCollapsed
+                                        onClicked: root.isBugsCollapsed = !root.isBugsCollapsed
                                     }
                                 }
 
-                                // Section 4 Body
+                                // Section 4A Body (List of Bugs sorted by Sprint)
                                 ColumnLayout {
-                                    visible: !root.isTasksCollapsed
+                                    visible: !root.isBugsCollapsed
                                     Layout.fillWidth: true
                                     spacing: 6
 
                                     Repeater {
-                                        model: (root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items : []
+                                        model: (root.selectedUser && root.selectedUser.assigned_bugs) ? root.selectedUser.assigned_bugs : []
 
                                         Rectangle {
                                             Layout.fillWidth: true
-                                            implicitHeight: 34
+                                            implicitHeight: bugEntryCol.implicitHeight + 12
                                             radius: 4
-                                            color: taskRowMa.containsMouse ? "#1c2128" : "#161b22"
-                                            border.color: taskRowMa.containsMouse ? "#388bfd" : "#21262d"
+                                            color: bugRowMa.containsMouse ? "#1c2128" : "#161b22"
+                                            border.color: bugRowMa.containsMouse ? "#f85149" : "#21262d"
 
-                                            RowLayout {
+                                            ColumnLayout {
+                                                id: bugEntryCol
                                                 anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                spacing: 6
+                                                anchors.margins: 6
+                                                spacing: 4
 
-                                                Text {
-                                                    text: "#" + modelData.id
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 10
-                                                    font.weight: Font.Bold
-                                                    color: "#58a6ff"
-                                                }
-
-                                                Text {
-                                                    text: modelData.title
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 10
-                                                    color: "#c9d1d9"
+                                                // Main Bug Row
+                                                RowLayout {
                                                     Layout.fillWidth: true
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    text: modelData.state
-                                                    font.pixelSize: 9
-                                                    font.weight: Font.DemiBold
-                                                    color: "#3fb950"
-                                                }
-
-                                                // Quick TFS Sprint Board button
-                                                Rectangle {
-                                                    implicitHeight: 20
-                                                    implicitWidth: 54
-                                                    radius: 3
-                                                    color: tBoardMa.containsMouse ? "#238636" : "#21262d"
-                                                    border.color: "#30363d"
-                                                    border.width: 1
+                                                    spacing: 6
 
                                                     Text {
-                                                        anchors.centerIn: parent
-                                                        text: "📋 Board"
-                                                        font.pixelSize: 9
-                                                        color: tBoardMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                        text: "#" + modelData.id
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.Bold
+                                                        color: "#f85149"
                                                     }
 
-                                                    MouseArea {
-                                                        id: tBoardMa
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: {
-                                                            if (backend) {
-                                                                backend.open_sprint_in_browser(modelData.id);
+                                                    Text {
+                                                        text: modelData.title
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.DemiBold
+                                                        color: "#f0f6fc"
+                                                        Layout.fillWidth: true
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    // Sprint Badge
+                                                    Rectangle {
+                                                        visible: !!modelData.sprint
+                                                        implicitHeight: 18
+                                                        implicitWidth: bugSprintTxt.implicitWidth + 8
+                                                        radius: 3
+                                                        color: "#162032"
+                                                        border.color: "#1f4b8c"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            id: bugSprintTxt
+                                                            anchors.centerIn: parent
+                                                            text: "📅 " + (modelData.sprint || "")
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 8
+                                                            font.weight: Font.Medium
+                                                            color: "#79c0ff"
+                                                        }
+                                                    }
+
+                                                    // State Badge
+                                                    Text {
+                                                        text: modelData.state
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: modelData.state === "Active" || modelData.state === "In Progress" ? "#3fb950" : (modelData.state === "New" || modelData.state === "Proposed" ? "#d29922" : "#8b949e")
+                                                    }
+
+                                                    // Quick TFS Sprint Board button
+                                                    Rectangle {
+                                                        implicitHeight: 20
+                                                        implicitWidth: 54
+                                                        radius: 3
+                                                        color: bBoardMa.containsMouse ? "#238636" : "#21262d"
+                                                        border.color: "#30363d"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "📋 Board"
+                                                            font.pixelSize: 9
+                                                            color: bBoardMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: bBoardMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend) {
+                                                                    backend.open_sprint_in_browser(modelData.id);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // Quick TFS Work Item button
+                                                    Rectangle {
+                                                        implicitHeight: 20
+                                                        implicitWidth: 46
+                                                        radius: 3
+                                                        color: bItemMa.containsMouse ? "#1f6feb" : "#21262d"
+                                                        border.color: "#30363d"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "🔗 TFS"
+                                                            font.pixelSize: 9
+                                                            color: bItemMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: bItemMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend) {
+                                                                    backend.open_work_item_in_browser(modelData.id);
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
 
-                                                // Quick TFS Work Item button
-                                                Rectangle {
-                                                    implicitHeight: 20
-                                                    implicitWidth: 46
-                                                    radius: 3
-                                                    color: tItemMa.containsMouse ? "#1f6feb" : "#21262d"
-                                                    border.color: "#30363d"
-                                                    border.width: 1
+                                                // Subtasks List (if any)
+                                                ColumnLayout {
+                                                    visible: !!(modelData.subtasks && modelData.subtasks.length > 0)
+                                                    Layout.fillWidth: true
+                                                    Layout.leftMargin: 12
+                                                    spacing: 3
 
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: "🔗 TFS"
-                                                        font.pixelSize: 9
-                                                        color: tItemMa.containsMouse ? "#ffffff" : "#8b949e"
-                                                    }
+                                                    Repeater {
+                                                        model: modelData.subtasks || []
 
-                                                    MouseArea {
-                                                        id: tItemMa
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: {
-                                                            if (backend) {
-                                                                backend.open_work_item_in_browser(modelData.id);
+                                                        Rectangle {
+                                                            Layout.fillWidth: true
+                                                            implicitHeight: 22
+                                                            radius: 3
+                                                            color: subBugMa.containsMouse ? "#161b22" : "#0d1117"
+                                                            border.color: subBugMa.containsMouse ? "#388bfd" : "#21262d"
+
+                                                            RowLayout {
+                                                                anchors.fill: parent
+                                                                anchors.leftMargin: 6
+                                                                anchors.rightMargin: 6
+                                                                spacing: 5
+
+                                                                Text {
+                                                                    text: "↳ #" + modelData.id
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 9
+                                                                    font.weight: Font.Bold
+                                                                    color: "#58a6ff"
+                                                                }
+
+                                                                Text {
+                                                                    text: modelData.title
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 9
+                                                                    color: "#8b949e"
+                                                                    Layout.fillWidth: true
+                                                                    elide: Text.ElideRight
+                                                                }
+
+                                                                Text {
+                                                                    visible: !!modelData.assigned_to
+                                                                    text: "👤 " + modelData.assigned_to
+                                                                    font.pixelSize: 8
+                                                                    color: "#6e7681"
+                                                                }
+
+                                                                Text {
+                                                                    visible: !!modelData.sprint
+                                                                    text: "📅 " + modelData.sprint
+                                                                    font.pixelSize: 8
+                                                                    color: "#79c0ff"
+                                                                }
+
+                                                                Text {
+                                                                    text: modelData.state
+                                                                    font.pixelSize: 8
+                                                                    font.weight: Font.DemiBold
+                                                                    color: modelData.state === "Closed" || modelData.state === "Done" ? "#3fb950" : "#d29922"
+                                                                }
+                                                            }
+
+                                                            MouseArea {
+                                                                id: subBugMa
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: {
+                                                                    if (backend) {
+                                                                        backend.open_work_item_in_browser(modelData.id);
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -2418,7 +2528,295 @@ Item {
                                             }
 
                                             MouseArea {
-                                                id: taskRowMa
+                                                id: bugRowMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (backend) {
+                                                        backend.open_work_item_in_browser(modelData.id);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 4B: Assigned User Stories (Collapsible)
+                        Rectangle {
+                            visible: !!(root.selectedUser && root.selectedUser.assigned_user_stories && root.selectedUser.assigned_user_stories.length > 0)
+                            Layout.fillWidth: true
+                            implicitHeight: storiesCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
+
+                            ColumnLayout {
+                                id: storiesCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: root.isStoriesCollapsed ? 0 : 8
+
+                                // Section 4B Header (Clickable)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 24
+                                    color: storiesHdrMa.containsMouse ? "#161b22" : "transparent"
+                                    radius: 4
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+
+                                        Text {
+                                            text: root.isStoriesCollapsed ? "▶" : "▼"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+
+                                        Text {
+                                            text: "📖 Assigned User Stories"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#a371f7"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: ((root.selectedUser && root.selectedUser.assigned_user_stories) ? root.selectedUser.assigned_user_stories.length : 0) + " stories"
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: storiesHdrMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.isStoriesCollapsed = !root.isStoriesCollapsed
+                                    }
+                                }
+
+                                // Section 4B Body (List of Stories sorted by Sprint)
+                                ColumnLayout {
+                                    visible: !root.isStoriesCollapsed
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Repeater {
+                                        model: (root.selectedUser && root.selectedUser.assigned_user_stories) ? root.selectedUser.assigned_user_stories : []
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: storyEntryCol.implicitHeight + 12
+                                            radius: 4
+                                            color: storyRowMa.containsMouse ? "#1c2128" : "#161b22"
+                                            border.color: storyRowMa.containsMouse ? "#a371f7" : "#21262d"
+
+                                            ColumnLayout {
+                                                id: storyEntryCol
+                                                anchors.fill: parent
+                                                anchors.margins: 6
+                                                spacing: 4
+
+                                                // Main Story Row
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 6
+
+                                                    Text {
+                                                        text: "#" + modelData.id
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.Bold
+                                                        color: "#a371f7"
+                                                    }
+
+                                                    Text {
+                                                        text: modelData.title
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.DemiBold
+                                                        color: "#f0f6fc"
+                                                        Layout.fillWidth: true
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    // Sprint Badge
+                                                    Rectangle {
+                                                        visible: !!modelData.sprint
+                                                        implicitHeight: 18
+                                                        implicitWidth: storySprintTxt.implicitWidth + 8
+                                                        radius: 3
+                                                        color: "#162032"
+                                                        border.color: "#1f4b8c"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            id: storySprintTxt
+                                                            anchors.centerIn: parent
+                                                            text: "📅 " + (modelData.sprint || "")
+                                                            font.family: "Segoe UI, sans-serif"
+                                                            font.pixelSize: 8
+                                                            font.weight: Font.Medium
+                                                            color: "#79c0ff"
+                                                        }
+                                                    }
+
+                                                    // State Badge
+                                                    Text {
+                                                        text: modelData.state
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.DemiBold
+                                                        color: modelData.state === "Active" || modelData.state === "In Progress" ? "#3fb950" : (modelData.state === "New" || modelData.state === "Proposed" ? "#d29922" : "#8b949e")
+                                                    }
+
+                                                    // Quick TFS Sprint Board button
+                                                    Rectangle {
+                                                        implicitHeight: 20
+                                                        implicitWidth: 54
+                                                        radius: 3
+                                                        color: sBoardMa.containsMouse ? "#238636" : "#21262d"
+                                                        border.color: "#30363d"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "📋 Board"
+                                                            font.pixelSize: 9
+                                                            color: sBoardMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: sBoardMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend) {
+                                                                    backend.open_sprint_in_browser(modelData.id);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // Quick TFS Work Item button
+                                                    Rectangle {
+                                                        implicitHeight: 20
+                                                        implicitWidth: 46
+                                                        radius: 3
+                                                        color: sItemMa.containsMouse ? "#1f6feb" : "#21262d"
+                                                        border.color: "#30363d"
+                                                        border.width: 1
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "🔗 TFS"
+                                                            font.pixelSize: 9
+                                                            color: sItemMa.containsMouse ? "#ffffff" : "#8b949e"
+                                                        }
+
+                                                        MouseArea {
+                                                            id: sItemMa
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                if (backend) {
+                                                                    backend.open_work_item_in_browser(modelData.id);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                // Subtasks List (if any)
+                                                ColumnLayout {
+                                                    visible: !!(modelData.subtasks && modelData.subtasks.length > 0)
+                                                    Layout.fillWidth: true
+                                                    Layout.leftMargin: 12
+                                                    spacing: 3
+
+                                                    Repeater {
+                                                        model: modelData.subtasks || []
+
+                                                        Rectangle {
+                                                            Layout.fillWidth: true
+                                                            implicitHeight: 22
+                                                            radius: 3
+                                                            color: subStoryMa.containsMouse ? "#161b22" : "#0d1117"
+                                                            border.color: subStoryMa.containsMouse ? "#388bfd" : "#21262d"
+
+                                                            RowLayout {
+                                                                anchors.fill: parent
+                                                                anchors.leftMargin: 6
+                                                                anchors.rightMargin: 6
+                                                                spacing: 5
+
+                                                                Text {
+                                                                    text: "↳ #" + modelData.id
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 9
+                                                                    font.weight: Font.Bold
+                                                                    color: "#58a6ff"
+                                                                }
+
+                                                                Text {
+                                                                    text: modelData.title
+                                                                    font.family: "Segoe UI, sans-serif"
+                                                                    font.pixelSize: 9
+                                                                    color: "#8b949e"
+                                                                    Layout.fillWidth: true
+                                                                    elide: Text.ElideRight
+                                                                }
+
+                                                                Text {
+                                                                    visible: !!modelData.assigned_to
+                                                                    text: "👤 " + modelData.assigned_to
+                                                                    font.pixelSize: 8
+                                                                    color: "#6e7681"
+                                                                }
+
+                                                                Text {
+                                                                    visible: !!modelData.sprint
+                                                                    text: "📅 " + modelData.sprint
+                                                                    font.pixelSize: 8
+                                                                    color: "#79c0ff"
+                                                                }
+
+                                                                Text {
+                                                                    text: modelData.state
+                                                                    font.pixelSize: 8
+                                                                    font.weight: Font.DemiBold
+                                                                    color: modelData.state === "Closed" || modelData.state === "Done" ? "#3fb950" : "#d29922"
+                                                                }
+                                                            }
+
+                                                            MouseArea {
+                                                                id: subStoryMa
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: {
+                                                                    if (backend) {
+                                                                        backend.open_work_item_in_browser(modelData.id);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: storyRowMa
                                                 anchors.fill: parent
                                                 hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor

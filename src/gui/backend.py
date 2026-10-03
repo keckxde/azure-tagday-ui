@@ -2003,15 +2003,19 @@ class DevOpsBackend(QObject):
         # Check Area Path settings for filtering work items
         area_filter_enabled = False
         area_rules = []
-        if self._cache_db:
+        if self._cache_db and hasattr(self._cache_db, "get_area_path_settings"):
             try:
                 area_cfg = self._cache_db.get_area_path_settings()
-                area_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
-                area_rules = area_cfg.get("rules", [])
-                self._area_path_filter_enabled = area_filter_enabled
-                self._area_path_rules = area_rules
-                self._default_area_path = area_cfg.get("default_area", "")
-                self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+                if isinstance(area_cfg, dict):
+                    area_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
+                    area_rules = area_cfg.get("rules", []) if isinstance(area_cfg.get("rules"), list) else []
+                    self._area_path_filter_enabled = area_filter_enabled
+                    self._area_path_rules = area_rules
+                    self._default_area_path = area_cfg.get("default_area", "")
+                    self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+                else:
+                    area_filter_enabled = False
+                    area_rules = []
             except Exception:
                 area_filter_enabled = bool(getattr(self, "_area_path_filter_enabled", False))
                 area_rules = getattr(self, "_area_path_rules", [])
@@ -4801,6 +4805,8 @@ class DevOpsBackend(QObject):
                         "recent_achievements": ["🤖 Excluded from Hall of Fame"],
                         "recent_activities": [],
                         "assigned_work_items": [],
+                        "assigned_bugs": [],
+                        "assigned_user_stories": [],
                         "recent_prs": [],
                         "recent_commits": [],
                         "prs_created": 0,
