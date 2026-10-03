@@ -17,6 +17,7 @@ Item {
     property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
     property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
     property string filterMilestone: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
+    property string filterAreaPath: "ALL"    // "ALL" or specific Area Path
     property string filterTagCategory: "ALL" // "ALL" or specific category name
     property string filterTag: "ALL"         // "ALL", "TAGGED", "UNTAGGED", or specific tag name
     property int currentPage: 1
@@ -25,31 +26,192 @@ Item {
     property int totalMatchingCount: 0
     property var matchedItemsList: []
 
-    property int overdueItemsCount: {
-        if (!backend || !backend.workItems) return 0;
-        var count = 0;
-        var all = backend.workItems;
-        for (var i = 0; i < all.length; i++) {
-            if (!all[i].deleted && all[i].urgency_status === "overdue") {
-                count++;
-            }
+    // Sorting & Grouping Controls
+    property string sortColumn: "id"         // "id", "state", "iteration", "deadline"
+    property string sortDirection: "desc"    // "asc", "desc"
+    property bool groupByStoryBug: true      // Group tasks under parent User Story / Bug
+
+    function toggleSort(col) {
+        if (root.sortColumn === col) {
+            root.sortDirection = (root.sortDirection === "asc" ? "desc" : "asc");
+        } else {
+            root.sortColumn = col;
+            root.sortDirection = (col === "id" ? "desc" : "asc");
         }
-        return count;
+        root.currentPage = 1;
+        root.updateFilteredModel();
     }
 
-    property int taggedItemsCount: {
-        if (!backend || !backend.workItems) return 0;
-        var count = 0;
-        var all = backend.workItems;
-        for (var i = 0; i < all.length; i++) {
-            if (!all[i].deleted && ((all[i].tag_list && all[i].tag_list.length > 0) || (all[i].tags && all[i].tags.trim() !== ""))) {
-                count++;
-            }
+    function typeIcon(t) {
+        switch((t || "").toLowerCase()) {
+            case "bug":         return "🐛"
+            case "feature":     return "🎯"
+            case "epic":        return "👑"
+            case "user story":  return "📖"
+            case "requirement": return "📜"
+            case "task":        return "📋"
+            case "test case":   return "🧪"
+            case "test plan":   return "🧪"
+            case "test suite":  return "🧪"
+            default:            return "📌"
         }
-        return count;
     }
 
-    property int uniqueTagsCount: backend && backend.workItemTags ? backend.workItemTags.length : 0
+    function formatCompactDeadline(badge, status, daysDiff, deadlineStr) {
+        if (!badge || badge === "—" || badge === "") {
+            return "";
+        }
+        var bLower = badge.toLowerCase();
+        if (status === "overdue" || bLower.indexOf("overdue") !== -1) {
+            var match = badge.match(/^(\d+[dwmyh])/i);
+            if (match) return match[1];
+            if (daysDiff !== undefined && daysDiff !== null && daysDiff < 0) {
+                return Math.abs(daysDiff) + "d";
+            }
+            return badge.replace(/\s*overdue\s*/i, "").trim() || "Overdue";
+        }
+        if (bLower.indexOf("today") !== -1) return "Today";
+        if (bLower.indexOf("tomorrow") !== -1) return "1d";
+        if (bLower.indexOf("left") !== -1) {
+            var leftMatch = badge.match(/^(\d+[dwmyh])/i);
+            if (leftMatch) return leftMatch[1];
+        }
+        if (bLower.indexOf("completed") !== -1 || bLower.indexOf("done") !== -1) return "Done";
+        return badge;
+    }
+
+    function extractIterationYYWW(iterStr) {
+        if (!iterStr) return "";
+        var str = iterStr.toString().trim();
+        if (str === "") return "";
+
+        // 1. 4-digit year (20YY) separated by delimiter: e.g. "2026_41", "2026-W41", "2026/41", "2026.41", "2026-05"
+        var mFullSep = str.match(/(?:^|[^\d])20([2-3]\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mFullSep) {
+            var yy1 = mFullSep[1];
+            var wNum1 = parseInt(mFullSep[2], 10);
+            if (wNum1 >= 1 && wNum1 <= 53) {
+                return yy1 + (wNum1 < 10 ? ("0" + wNum1) : ("" + wNum1));
+            }
+        }
+
+        // 2. 6-digit combined 20YYWW: e.g. "202641", "Sprint 202641"
+        var m6 = str.match(/(?:^|[^\d])20([2-3]\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)/i);
+        if (m6) {
+            return m6[1] + m6[2];
+        }
+
+        // 3. 2-digit year (YY) separated by delimiter: e.g. "26_41", "26-W41", "26.41", "Sprint 26_5", "26-05"
+        var mSep = str.match(/(?:^|[^\d])(2[4-9]|3\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mSep) {
+            var yy2 = mSep[1];
+            var wNum2 = parseInt(mSep[2], 10);
+            if (wNum2 >= 1 && wNum2 <= 53) {
+                return yy2 + (wNum2 < 10 ? ("0" + wNum2) : ("" + wNum2));
+            }
+        }
+
+        // 4. 4-digit combined YYWW: e.g. "Sprint 2641", "2641", "week-2641", "2641_Release"
+        var m4 = str.match(/(?:^|[^\d])(2[4-9]|3\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)/i);
+        if (m4) {
+            return m4[1] + m4[2];
+        }
+
+        // 5. Sprint <week> with year elsewhere in path: e.g. "2026\\Sprint 41"
+        var mSprintW = str.match(/(?:sprint|iteration)[\s_.-]*[wW]?(\d{1,2})(?=[^\d]|$)/i);
+        if (mSprintW) {
+            var wNum3 = parseInt(mSprintW[1], 10);
+            if (wNum3 >= 1 && wNum3 <= 53) {
+                var mYear = str.match(/(?:^|[^\d])(?:20)?(2[4-9]|3\d)(?=[^\d]|$)/);
+                if (mYear) {
+                    return mYear[1] + (wNum3 < 10 ? ("0" + wNum3) : ("" + wNum3));
+                }
+            }
+        }
+
+        return "";
+    }
+
+    function formatCompactIteration(iterName, isPlanned, hasMilestone) {
+        if (!iterName || iterName === "" || iterName === "CH_SAPH_KAWEST") {
+            return hasMilestone ? "Backlog" : "—";
+        }
+        var str = iterName.toString().trim();
+        if (str === "") return "—";
+
+        var yyww = extractIterationYYWW(str);
+        if (yyww !== "") {
+            return yyww;
+        }
+
+        // Fallback if no YYWW regex match found: clean leading path and sprint/iteration words
+        var parts = str.split(/[\\/]/);
+        var leaf = parts[parts.length - 1].trim();
+        var clean = leaf.replace(/^(sprint|iteration)[\s_-]*/i, "").trim();
+        if (clean === "" || clean === "CH_SAPH_KAWEST") {
+            return hasMilestone ? "Backlog" : "—";
+        }
+        return clean;
+    }
+
+    function compareItems(a, b, col, dir) {
+        var factor = (dir === "desc" ? -1 : 1);
+        if (col === "id") {
+            return factor * ((a.id || 0) - (b.id || 0));
+        } else if (col === "state") {
+            var sA = (a.state || "").toLowerCase();
+            var sB = (b.state || "").toLowerCase();
+            if (sA < sB) return -1 * factor;
+            if (sA > sB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        } else if (col === "iteration") {
+            var itA = (a.iteration_name || a.iteration_path || "").toLowerCase();
+            var itB = (b.iteration_name || b.iteration_path || "").toLowerCase();
+            var yywwA = extractIterationYYWW(itA);
+            var yywwB = extractIterationYYWW(itB);
+            var numA = parseInt(yywwA || itA.replace(/\D+/g, ""), 10) || 0;
+            var numB = parseInt(yywwB || itB.replace(/\D+/g, ""), 10) || 0;
+            if (numA && numB && numA !== numB) {
+                return factor * (numA - numB);
+            }
+            if (itA < itB) return -1 * factor;
+            if (itA > itB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        } else if (col === "deadline") {
+            var dA = a.target_date || a.deadline_str || "";
+            var dB = b.target_date || b.deadline_str || "";
+            if (!dA && !dB) return (b.id || 0) - (a.id || 0);
+            if (!dA) return 1;
+            if (!dB) return -1;
+            if (dA < dB) return -1 * factor;
+            if (dA > dB) return 1 * factor;
+            return (b.id || 0) - (a.id || 0);
+        }
+        return (b.id || 0) - (a.id || 0);
+    }
+
+    property int overdueItemsCount: (backend && backend.overdueWorkItemsCount !== undefined) ? backend.overdueWorkItemsCount : 0
+    property int taggedItemsCount: (backend && backend.taggedWorkItemsCount !== undefined) ? backend.taggedWorkItemsCount : 0
+    property int uniqueTagsCount: (backend && backend.uniqueWorkItemTagsCount !== undefined) ? backend.uniqueWorkItemTagsCount : 0
+
+    // Local JS Cache to prevent expensive C++/Python-to-QML bridge roundtrips during filtering & pagination
+    property var cachedAllItems: []
+    property var cachedAllMap: ({})
+
+    function reloadBackendWorkItems() {
+        if (!backend || !backend.workItems) {
+            root.cachedAllItems = [];
+            root.cachedAllMap = {};
+            return;
+        }
+        var raw = backend.workItems || [];
+        root.cachedAllItems = raw;
+        var m = {};
+        for (var i = 0; i < raw.length; i++) {
+            m[raw[i].id] = raw[i];
+        }
+        root.cachedAllMap = m;
+    }
 
     // -- Filter lists, updated dynamically from database cache --
     property var typesList: []
@@ -59,6 +221,7 @@ Item {
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
     property var milestonesList: ["ALL"]
+    property var areaPathsList: ["ALL"]
     property var tagCategoryList: ["ALL"]   // populated from backend.get_tag_category_names()
     property var tagsByCategoryData: ({})   // populated from backend.get_tags_by_category() JSON
     property var tagsList: ["ALL"]
@@ -128,6 +291,12 @@ Item {
         milestonesList = ["ALL", "PLANNED", "UNPLANNED"].concat(ms)
     }
 
+    function refreshAreaPathsList() {
+        if (!backend) return
+        var ap = backend.workItemAreaPaths || []
+        areaPathsList = ["ALL"].concat(ap)
+    }
+
     function refreshTagsList() {
         if (!backend) return
         // Refresh the category → tags mapping
@@ -161,6 +330,7 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        root.filterAreaPath = "ALL"
         root.filterTagCategory = "ALL"
         root.filterTag = "ALL"
         if (typeof level1Combo !== "undefined" && level1Combo) {
@@ -175,6 +345,10 @@ Item {
             wiMilestoneCombo.currentIndex = 0
             wiMilestoneCombo.editText = ""
         }
+        if (typeof wiAreaPathCombo !== "undefined" && wiAreaPathCombo) {
+            wiAreaPathCombo.currentIndex = 0
+            wiAreaPathCombo.editText = ""
+        }
         if (typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo) {
             wiTagCategoryCombo.currentIndex = 0
         }
@@ -186,8 +360,8 @@ Item {
         root.updateFilteredModel()
     }
 
-    property bool isFiltersCollapsed: false
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
+    property bool isFiltersCollapsed: true
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterAreaPath !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -205,16 +379,21 @@ Item {
 
     // ========================
     // Color helpers
-    // ========================
     function typeColor(t) {
         switch((t || "").toLowerCase()) {
-            case "bug":         return "#da3633"
+            case "bug":
+            case "defect":
+            case "problem":     return "#da3633"
             case "feature":     return "#388bfd"
             case "epic":        return "#8250df"
-            case "requirement": return "#1a7f37"
+            case "user story":
+            case "story":
+            case "product backlog item":
+            case "pbi":         return "#a371f7"
+            case "requirement": return "#a371f7"
             case "task":        return "#d29922"
-            case "test case":   return "#0969da"
-            case "test plan":   return "#0969da"
+            case "test case":
+            case "test plan":
             case "test suite":  return "#0969da"
             default:            return "#6e7681"
         }
@@ -352,6 +531,54 @@ Item {
                 }
             }
 
+            // Clickable Area Path Filter Pill in Top Header
+            Rectangle {
+                visible: !!((backend && backend.areaPathFilterEnabled) || (root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""))
+                implicitHeight: 24
+                implicitWidth: areaTopText.implicitWidth + 16
+                radius: 12
+                color: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") ? "#1f334d" : (areaTopMa.containsMouse ? "#1c2b20" : "#122319")
+                border.color: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") ? "#58a6ff" : "#238636"
+                border.width: 1
+
+                MouseArea {
+                    id: areaTopMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                        ? ("Active Area Path Filter: " + root.filterAreaPath + "\nClick to reset area filter.")
+                        : ("📁 Project Area Filter active (" + (backend ? backend.areaPathRules.length : 0) + " rules" + ((backend && backend.workItemsFilteredByAreaPathCount > 0) ? (" • " + backend.workItemsFilteredByAreaPathCount + " excluded") : "") + ")\nClick to filter by specific Area Path.")
+                    onClicked: {
+                        if (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") {
+                            root.filterAreaPath = "ALL";
+                            if (typeof wiAreaPathCombo !== "undefined" && wiAreaPathCombo) {
+                                wiAreaPathCombo.currentIndex = 0;
+                                wiAreaPathCombo.editText = "";
+                            }
+                            root.currentPage = 1;
+                            root.updateFilteredModel();
+                        }
+                    }
+                }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Text {
+                        id: areaTopText
+                        text: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                            ? ("📁 Area: " + root.filterAreaPath)
+                            : ("📁 Area Filter (" + (backend ? backend.areaPathRules.length : 0) + " rules)")
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 11
+                        font.weight: (root.filterAreaPath !== "ALL") ? Font.Bold : Font.Normal
+                        color: (root.filterAreaPath !== "ALL") ? "#58a6ff" : "#3fb950"
+                    }
+                }
+            }
+
             Item { Layout.fillWidth: true }
 
             SearchBar {
@@ -387,14 +614,43 @@ Item {
                 onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
             }
 
-            // Export to Excel Button
+            // Group by Story / Req / Bug Toggle Button
+            Button {
+                id: toggleGroupingBtn
+                text: root.groupByStoryBug ? "📑 Grouped (Story/Req/Bug)" : "📄 Flat View"
+                font.weight: Font.DemiBold
+                font.pixelSize: 11
+                ToolTip.visible: hovered
+                ToolTip.text: root.groupByStoryBug ? "Currently grouping Tasks under their parent User Story, Requirement, or Bug.\nClick to view flat table list." : "Currently showing flat table list.\nClick to group Tasks under their parent User Story, Requirement, or Bug."
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: root.groupByStoryBug ? "#58a6ff" : "#f0f6fc"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    implicitHeight: 34
+                    implicitWidth: 155
+                    radius: 6
+                    color: parent.hovered ? "#30363d" : (root.groupByStoryBug ? "#1f334d" : "#21262d")
+                    border.color: root.groupByStoryBug ? "#388bfd" : "#30363d"
+                }
+                onClicked: {
+                    root.groupByStoryBug = !root.groupByStoryBug;
+                    root.currentPage = 1;
+                    root.updateFilteredModel();
+                }
+            }
+
+            // Export to CSV Button
             Button {
                 id: exportExcelBtn
-                text: "📊 Export to Excel"
+                text: "📊 Export to CSV"
                 enabled: backend ? !backend.isBusy && root.totalMatchingCount > 0 : false
                 font.weight: Font.DemiBold
                 ToolTip.visible: hovered
-                ToolTip.text: "Export the current (" + root.totalMatchingCount + ") matching work items to an Excel (.xlsx) spreadsheet"
+                ToolTip.text: "Export the current (" + root.totalMatchingCount + ") matching work items to a CSV spreadsheet (.csv)"
                 contentItem: Text {
                     text: parent.text
                     font: parent.font
@@ -419,58 +675,9 @@ Item {
                     }
                 }
             }
-
-            Button {
-                text: "↻ Refresh"
-                enabled: backend ? !backend.isBusy : false
-                font.weight: Font.DemiBold
-                ToolTip.visible: hovered
-                ToolTip.text: "Reload work items cache directly from local database"
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: "#f0f6fc"
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 34
-                    implicitWidth: 85
-                    radius: 6
-                    color: parent.hovered ? "#30363d" : "#21262d"
-                    border.color: "#30363d"
-                }
-                onClicked: {
-                    if (backend)
-                        backend.refresh_all_data();
-                }
-            }
-
-            Button {
-                text: "⚡ Sync WIQL"
-                enabled: backend ? !backend.isBusy : false
-                font.weight: Font.DemiBold
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: "#ffffff"
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 34
-                    implicitWidth: 110
-                    radius: 6
-                    color: parent.enabled ? (parent.hovered ? "#388bfd" : "#1f6feb") : "#30363d"
-                }
-                onClicked: {
-                    if (backend)
-                        backend.sync_work_items_async();
-                }
-            }
         }
 
-        // Excel Export Success Banner
+        // CSV Export Success Banner
         Rectangle {
             id: exportBanner
             Layout.fillWidth: true
@@ -492,7 +699,7 @@ Item {
 
                 Text { text: "✅"; font.pixelSize: 16 }
                 Text {
-                    text: "Exported " + exportBanner.itemCount + " work items to Excel: "
+                    text: "Exported " + exportBanner.itemCount + " work items to CSV: "
                     font.family: "Segoe UI, sans-serif"
                     font.pixelSize: 12
                     font.weight: Font.DemiBold
@@ -539,1031 +746,1149 @@ Item {
             }
         }
 
-        // ====================== Filter Section Container (Collapsible) ======================
-        ColumnLayout {
-            id: filtersSection
+        // ====================== Filters Group Box ======================
+        Rectangle {
+            id: filtersGroupBox
             Layout.fillWidth: true
-            spacing: 10
-            visible: !root.isFiltersCollapsed
+            implicitHeight: filtersGroupCol.implicitHeight + 20
+            radius: 8
+            color: "#161b22"
+            border.color: root.hasActiveFilters ? "#388bfd" : "#30363d"
+            border.width: 1
 
-            // ====================== State Filter Row ======================
-            RowLayout {
-                Layout.fillWidth: true
+            ColumnLayout {
+                id: filtersGroupCol
+                anchors.fill: parent
+                anchors.margins: 10
                 spacing: 8
 
-            Text {
-                text: "State:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 42
-            }
+                // Header / Expand-Collapse Toggle Bar
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    radius: 6
+                    color: groupHeaderMa.containsMouse ? "#21262d" : "#1c2128"
+                    border.color: groupHeaderMa.containsMouse ? "#388bfd" : "#30363d"
+                    border.width: 1
 
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
+                    MouseArea {
+                        id: groupHeaderMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.isFiltersCollapsed = !root.isFiltersCollapsed
+                    }
 
-                Repeater {
-                    model: root.statesList
-                    Button {
-                        text: {
-                            if (modelData === "ALL") return "All States"
-                            if (modelData === "DELETED") return "Deleted"
-                            if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "🔍 To Be Investigated"
-                            if (modelData === "ignored" || modelData === "IGNORED") return "🚫 Ignored"
-                            return modelData
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        Text {
+                            text: root.isFiltersCollapsed ? "▶" : "▼"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            font.weight: Font.Bold
+                            color: root.hasActiveFilters ? "#58a6ff" : "#8b949e"
                         }
-                        checkable: true
-                        checked: root.filterState === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+
+                        Text {
+                            text: "Filters"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            color: root.hasActiveFilters ? "#58a6ff" : "#f0f6fc"
                         }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: stateLabel.implicitWidth + 20
-                            radius: 13
-                            property color stateC: {
-                                if (modelData === "ALL") return "#1f6feb"
-                                if (modelData === "DELETED") return "#da3633"
-                                if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "#f0883e"
-                                if (modelData === "ignored" || modelData === "IGNORED") return "#6e7681"
-                                return root.stateColor(modelData, false)
-                            }
-                            color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(stateC, 1.3) : "#30363d"
+
+                        // Active filter badge if any active
+                        Rectangle {
+                            visible: root.hasActiveFilters
+                            implicitHeight: 20
+                            implicitWidth: activePillTxt.implicitWidth + 12
+                            radius: 10
+                            color: "#1f334d"
+                            border.color: "#388bfd"
+                            border.width: 1
                             Text {
-                                id: stateLabel
-                                text: parent.parent.text
-                                visible: false
+                                id: activePillTxt
+                                anchors.centerIn: parent
+                                text: "Active Filters"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                color: "#58a6ff"
                             }
                         }
-                        onClicked: {
-                            root.filterState = modelData
-                            root.currentPage = 1
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: root.isFiltersCollapsed ? "Click to expand all filters ▾" : "Click to collapse filters ▴"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 11
+                            color: "#8b949e"
+                        }
+
+                        Button {
+                            visible: root.hasActiveFilters
+                            text: "✖ Reset Filters"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "#f85149"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 22
+                                implicitWidth: 88
+                                radius: 4
+                                color: parent.hovered ? "#3c1e1e" : "#211515"
+                                border.color: "#da3633"
+                            }
+                            onClicked: root.resetAllFilters()
                         }
                     }
                 }
-            }
-        }
 
-        // ====================== Type Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+                // ================= Always-Visible Filter Row: Subsystem (L1 & L2) & Priority =================
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
 
-            Text {
-                text: "Type:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 54
-            }
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Repeater {
-                    model: root.typesList
-                    Button {
-                        text: modelData === "ALL" ? "All Types" : modelData
-                        checkable: true
-                        checked: root.filterType === modelData
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                    // Subsystem L1
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Sub-System (L1):"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
                         }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: typeLabel.implicitWidth + 20
-                            radius: 13
-                            property color typeC: modelData === "ALL" ? "#1f6feb" : root.typeColor(modelData)
-                            color: parent.checked ? typeC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(typeC, 1.3) : "#30363d"
+                        ComboBox {
+                            id: level1Combo
+                            implicitWidth: 190
+                            implicitHeight: 28
+                            font.pixelSize: 11
+                            editable: true
+                            model: root.level1List
+                            editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
+
+                            onEditTextChanged: {
+                                var val = editText ? editText.trim() : "";
+                                root.filterLevel1 = (val === "" ? "ALL" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            onActivated: function(index) {
+                                var val = root.level1List[index] || "ALL";
+                                root.filterLevel1 = val;
+                                editText = (val === "ALL" ? "" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            background: Rectangle {
+                                color: "#161b22"
+                                radius: 6
+                                border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
+                            }
+
+                            contentItem: TextField {
+                                leftPadding: 8
+                                rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
+                                text: level1Combo.editText
+                                placeholderText: "Type or select L1..."
+                                placeholderTextColor: "#484f58"
+                                font: level1Combo.font
+                                color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                background: Item {}
+                                onTextChanged: {
+                                    if (text !== level1Combo.editText) {
+                                        level1Combo.editText = text;
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
+                            text: "✖"
+                            font.pixelSize: 10
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                            onClicked: {
+                                root.filterLevel1 = "ALL";
+                                level1Combo.currentIndex = 0;
+                                level1Combo.editText = "";
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+                    }
+
+                    Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                    // Subsystem / Component L2
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Component (L2):"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+                        ComboBox {
+                            id: level2Combo
+                            implicitWidth: 190
+                            implicitHeight: 28
+                            font.pixelSize: 11
+                            editable: true
+                            model: root.level2List
+                            editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
+
+                            onEditTextChanged: {
+                                var val = editText ? editText.trim() : "";
+                                root.filterLevel2 = (val === "" ? "ALL" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            onActivated: function(index) {
+                                var val = root.level2List[index] || "ALL";
+                                root.filterLevel2 = val;
+                                editText = (val === "ALL" ? "" : val);
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+
+                            background: Rectangle {
+                                color: "#161b22"
+                                radius: 6
+                                border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
+                            }
+
+                            contentItem: TextField {
+                                leftPadding: 8
+                                rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
+                                text: level2Combo.editText
+                                placeholderText: "Type or select L2..."
+                                placeholderTextColor: "#484f58"
+                                font: level2Combo.font
+                                color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                verticalAlignment: Text.AlignVCenter
+                                background: Item {}
+                                onTextChanged: {
+                                    if (text !== level2Combo.editText) {
+                                        level2Combo.editText = text;
+                                    }
+                                }
+                            }
+                        }
+
+                        Button {
+                            visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
+                            text: "✖"
+                            font.pixelSize: 10
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                            onClicked: {
+                                root.filterLevel2 = "ALL";
+                                level2Combo.currentIndex = 0;
+                                level2Combo.editText = "";
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+                    }
+
+                    Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                    // Priority Filter
+                    RowLayout {
+                        spacing: 6
+                        Text {
+                            text: "Priority:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                        }
+                        Repeater {
+                            model: root.priorityOptions
+                            Button {
+                                text: modelData.label
+                                checkable: true
+                                checked: root.filterPriority === modelData.value
+                                font.pixelSize: 11
+                                font.weight: checked ? Font.DemiBold : Font.Normal
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: parent.checked ? (modelData.value === "PRIO1" ? "#f0883e" : "#ffffff") : "#8b949e"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 26
+                                    implicitWidth: pLabel.implicitWidth + 18
+                                    radius: 13
+                                    color: parent.checked ? (modelData.value === "PRIO1" ? "#3d2800" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                                    border.color: parent.checked ? (modelData.value === "PRIO1" ? "#d29922" : "#388bfd") : "#30363d"
+                                    Text { id: pLabel; text: parent.parent.text; visible: false }
+                                }
+                                onClicked: {
+                                    root.filterPriority = modelData.value
+                                    root.currentPage = 1
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // ================= Expandable Filters Section (Visible when !isFiltersCollapsed) =================
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: !root.isFiltersCollapsed
+
+                    // ====================== State Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "State:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.statesList
+                                Button {
+                                    text: {
+                                        if (modelData === "ALL") return "All States"
+                                        if (modelData === "DELETED") return "Deleted"
+                                        if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "🔍 To Be Investigated"
+                                        if (modelData === "ignored" || modelData === "IGNORED") return "🚫 Ignored"
+                                        return modelData
+                                    }
+                                    checkable: true
+                                    checked: root.filterState === modelData
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: stateLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color stateC: {
+                                            if (modelData === "ALL") return "#1f6feb"
+                                            if (modelData === "DELETED") return "#da3633"
+                                            if (modelData === "to be investigated" || modelData === "TO_BE_INVESTIGATED") return "#f0883e"
+                                            if (modelData === "ignored" || modelData === "IGNORED") return "#6e7681"
+                                            return root.stateColor(modelData, false)
+                                        }
+                                        color: parent.checked ? stateC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(stateC, 1.3) : "#30363d"
+                                        Text {
+                                            id: stateLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterState = modelData
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Type Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Type:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.typesList
+                                Button {
+                                    text: modelData === "ALL" ? "All Types" : modelData
+                                    checkable: true
+                                    checked: root.filterType === modelData
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: typeLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color typeC: modelData === "ALL" ? "#1f6feb" : root.typeColor(modelData)
+                                        color: parent.checked ? typeC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(typeC, 1.3) : "#30363d"
+                                        Text {
+                                            id: typeLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterType = modelData
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Deadline Urgency Filter Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Text {
+                            text: "Deadline:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#8b949e"
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 60
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Repeater {
+                                model: root.urgencyOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterUrgency === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: urgLabel.implicitWidth + 20
+                                        radius: 13
+                                        property color urgC: {
+                                            if (modelData.value === "OVERDUE") return "#f85149"
+                                            if (modelData.value === "DUE_THIS_WEEK") return "#d29922"
+                                            if (modelData.value === "DUE_NEXT_WEEK") return "#388bfd"
+                                            if (modelData.value === "FUTURE") return "#58a6ff"
+                                            return "#1f6feb"
+                                        }
+                                        color: parent.checked ? urgC : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? Qt.lighter(urgC, 1.3) : "#30363d"
+                                        Text {
+                                            id: urgLabel
+                                            text: parent.parent.text
+                                            visible: false
+                                        }
+                                    }
+                                    onClicked: {
+                                        root.filterUrgency = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ====================== Additional Filters Row (Modified, User, Iteration) ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        // Modified Date Filter
+                        RowLayout {
+                            spacing: 6
                             Text {
-                                id: typeLabel
-                                text: parent.parent.text
-                                visible: false
+                                text: "Modified:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            Repeater {
+                                model: root.modifiedOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterModified === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: modLabel.implicitWidth + 18
+                                        radius: 13
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                        Text { id: modLabel; text: parent.parent.text; visible: false }
+                                    }
+                                    onClicked: {
+                                        root.filterModified = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
                             }
                         }
-                        onClicked: {
-                            root.filterType = modelData
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-        }
 
-        // ====================== Deadline Urgency Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            Text {
-                text: "Deadline:"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                color: "#8b949e"
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: 54
-            }
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Repeater {
-                    model: root.urgencyOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterUrgency === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: urgLabel.implicitWidth + 20
-                            radius: 13
-                            property color urgC: {
-                                if (modelData.value === "OVERDUE") return "#f85149"
-                                if (modelData.value === "DUE_THIS_WEEK") return "#d29922"
-                                if (modelData.value === "DUE_NEXT_WEEK") return "#388bfd"
-                                if (modelData.value === "FUTURE") return "#58a6ff"
-                                return "#1f6feb"
-                            }
-                            color: parent.checked ? urgC : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? Qt.lighter(urgC, 1.3) : "#30363d"
+                        // Assignee / User Filter
+                        RowLayout {
+                            spacing: 6
                             Text {
-                                id: urgLabel
-                                text: parent.parent.text
-                                visible: false
+                                text: "User:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            ComboBox {
+                                id: assigneeCombo
+                                implicitWidth: 170
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.assigneesList
+                                currentIndex: {
+                                    var idx = root.assigneesList.indexOf(root.filterAssignee)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: {
+                                    if (currentIndex === 0 || currentText === "ALL") return "All Users"
+                                    if (currentIndex === 1 || currentText === "UNASSIGNED") return "Unassigned"
+                                    return currentText
+                                }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: assigneeCombo.hovered || assigneeCombo.activeFocus ? "#58a6ff" : (root.filterAssignee !== "ALL" ? "#1f6feb" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8
+                                    rightPadding: 24
+                                    text: assigneeCombo.displayText
+                                    font: assigneeCombo.font
+                                    color: root.filterAssignee !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    var val = root.assigneesList[index] || "ALL"
+                                    root.filterAssignee = val
+                                    root.currentPage = 1
+                                }
                             }
                         }
-                        onClicked: {
-                            root.filterUrgency = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-        }
 
-        // ====================== Additional Filters Row (Modified, User, Iteration) ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            // Modified Date Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Modified:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                        // Iteration Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Iteration:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                Repeater {
-                    model: root.modifiedOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterModified === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: modLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#388bfd" : "#30363d"
-                            Text { id: modLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterModified = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
+                            Row {
+                                spacing: 4
+                                Button {
+                                    text: "All"
+                                    checkable: true
+                                    checked: root.filterIteration === "ALL"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 38; radius: 13
+                                        color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#388bfd" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "ALL"
+                                        root.currentPage = 1
+                                    }
+                                }
 
-            Rectangle { width: 1; height: 18; color: "#30363d" }
+                                Button {
+                                    text: "🎯 Planned"
+                                    checkable: true
+                                    checked: root.filterIteration === "PLANNED"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#58a6ff"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 80; radius: 13
+                                        color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#1f6feb" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "PLANNED"
+                                        root.currentPage = 1
+                                    }
+                                }
 
-            // Assignee / User Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "User:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                                Button {
+                                    text: "📋 Backlog"
+                                    checkable: true
+                                    checked: root.filterIteration === "UNPLANNED"
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text; font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26; implicitWidth: 78; radius: 13
+                                        color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? "#8b949e" : "#30363d"
+                                    }
+                                    onClicked: {
+                                        root.filterIteration = "UNPLANNED"
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
 
-                ComboBox {
-                    id: assigneeCombo
-                    implicitWidth: 170
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.assigneesList
-                    currentIndex: {
-                        var idx = root.assigneesList.indexOf(root.filterAssignee)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: {
-                        if (currentIndex === 0 || currentText === "ALL") return "All Users"
-                        if (currentIndex === 1 || currentText === "UNASSIGNED") return "Unassigned"
-                        return currentText
-                    }
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: assigneeCombo.hovered || assigneeCombo.activeFocus ? "#58a6ff" : (root.filterAssignee !== "ALL" ? "#1f6feb" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: 24
-                        text: assigneeCombo.displayText
-                        font: assigneeCombo.font
-                        color: root.filterAssignee !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    onActivated: function(index) {
-                        var val = root.assigneesList[index] || "ALL"
-                        root.filterAssignee = val
-                        root.currentPage = 1
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Iteration Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Iteration:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                Row {
-                    spacing: 4
-                    Button {
-                        text: "All"
-                        checkable: true
-                        checked: root.filterIteration === "ALL"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 38; radius: 13
-                            color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#388bfd" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "ALL"
-                            root.currentPage = 1
-                        }
-                    }
-
-                    Button {
-                        text: "🎯 Planned"
-                        checkable: true
-                        checked: root.filterIteration === "PLANNED"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#58a6ff"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 80; radius: 13
-                            color: parent.checked ? "#0d2344" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#1f6feb" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "PLANNED"
-                            root.currentPage = 1
-                        }
-                    }
-
-                    Button {
-                        text: "📋 Backlog"
-                        checkable: true
-                        checked: root.filterIteration === "UNPLANNED"
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text; font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26; implicitWidth: 78; radius: 13
-                            color: parent.checked ? "#30363d" : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? "#8b949e" : "#30363d"
-                        }
-                        onClicked: {
-                            root.filterIteration = "UNPLANNED"
-                            root.currentPage = 1
-                        }
-                    }
-                }
-
-                ComboBox {
-                    id: iterationCombo
-                    implicitWidth: 175
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.iterationsList
-                    currentIndex: {
-                        var idx = root.iterationsList.indexOf(root.filterIteration)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: {
-                        if (currentIndex === 0 || currentText === "ALL") return "Specific Sprint..."
-                        if (currentIndex === 1 || currentText === "PLANNED") return "🎯 Planned (Any)"
-                        if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 Unplanned (Backlog)"
-                        return "🎯 " + currentText
-                    }
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: iterationCombo.hovered || iterationCombo.activeFocus ? "#58a6ff" : ((root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#1f6feb" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: 24
-                        text: iterationCombo.displayText
-                        font: iterationCombo.font
-                        color: (root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    onActivated: function(index) {
-                        var val = root.iterationsList[index] || "ALL"
-                        root.filterIteration = val
-                        root.currentPage = 1
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            // Clear / Reset filters button
-            Button {
-                visible: root.hasActiveFilters
-                text: "✖ Reset Filters"
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-                contentItem: Text {
-                    text: parent.text; font: parent.font
-                    color: "#f85149"
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 26; implicitWidth: 96; radius: 6
-                    color: parent.hovered ? "#3c1e1e" : "#211515"
-                    border.color: "#da3633"
-                }
-                onClicked: root.resetAllFilters()
-            }
-        }
-
-        // ====================== Backlog Hierarchy (L1 Sub-Systems / L2 Components) & Milestone Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            // Level 1: Sub-Systems (Epics)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Sub-System (L1):"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: level1Combo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.level1List
-                    editText: root.filterLevel1 === "ALL" ? "" : root.filterLevel1
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterLevel1 = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    onActivated: function(index) {
-                        var val = root.level1List[index] || "ALL";
-                        root.filterLevel1 = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: level1Combo.hovered || level1Combo.activeFocus ? "#58a6ff" : (root.filterLevel1 !== "ALL" ? "#8250df" : "#30363d")
-                    }
-
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterLevel1 !== "ALL") ? 32 : 24
-                        text: level1Combo.editText
-                        placeholderText: "Type or select L1..."
-                        placeholderTextColor: "#484f58"
-                        font: level1Combo.font
-                        color: root.filterLevel1 !== "ALL" ? "#bc8cff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== level1Combo.editText) {
-                                level1Combo.editText = text;
+                            ComboBox {
+                                id: iterationCombo
+                                implicitWidth: 175
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.iterationsList
+                                currentIndex: {
+                                    var idx = root.iterationsList.indexOf(root.filterIteration)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: {
+                                    if (currentIndex === 0 || currentText === "ALL") return "Specific Sprint..."
+                                    if (currentIndex === 1 || currentText === "PLANNED") return "🎯 Planned (Any)"
+                                    if (currentIndex === 2 || currentText === "UNPLANNED") return "📋 Unplanned (Backlog)"
+                                    return "🎯 " + currentText
+                                }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: iterationCombo.hovered || iterationCombo.activeFocus ? "#58a6ff" : ((root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#1f6feb" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8
+                                    rightPadding: 24
+                                    text: iterationCombo.displayText
+                                    font: iterationCombo.font
+                                    color: (root.filterIteration !== "ALL" && root.filterIteration !== "PLANNED" && root.filterIteration !== "UNPLANNED") ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    var val = root.iterationsList[index] || "ALL"
+                                    root.filterIteration = val
+                                    root.currentPage = 1
+                                }
                             }
                         }
-                    }
-                }
 
-                // Clear L1 filter button
-                Button {
-                    visible: root.filterLevel1 !== "ALL" && root.filterLevel1 !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterLevel1 = "ALL";
-                        level1Combo.currentIndex = 0;
-                        level1Combo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Level 2: Components (Features)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Component (L2):"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: level2Combo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.level2List
-                    editText: root.filterLevel2 === "ALL" ? "" : root.filterLevel2
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterLevel2 = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
+                        Item { Layout.fillWidth: true }
                     }
 
-                    onActivated: function(index) {
-                        var val = root.level2List[index] || "ALL";
-                        root.filterLevel2 = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                    // ====================== Milestone, Area Path, Tag & PBS Grouping Row ======================
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: level2Combo.hovered || level2Combo.activeFocus ? "#58a6ff" : (root.filterLevel2 !== "ALL" ? "#388bfd" : "#30363d")
-                    }
+                        // Milestone Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Milestone:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterLevel2 !== "ALL") ? 32 : 24
-                        text: level2Combo.editText
-                        placeholderText: "Type or select L2..."
-                        placeholderTextColor: "#484f58"
-                        font: level2Combo.font
-                        color: root.filterLevel2 !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== level2Combo.editText) {
-                                level2Combo.editText = text;
+                            ComboBox {
+                                id: wiMilestoneCombo
+                                implicitWidth: 180
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.milestonesList
+                                editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterMilestone = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                onActivated: function(index) {
+                                    var val = root.milestonesList[index] || "ALL";
+                                    root.filterMilestone = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiMilestoneCombo.hovered || wiMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
+                                }
+
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
+                                    text: wiMilestoneCombo.editText
+                                    placeholderText: "Type or select milestone..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiMilestoneCombo.font
+                                    color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiMilestoneCombo.editText) {
+                                            wiMilestoneCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterMilestone = "ALL";
+                                    wiMilestoneCombo.currentIndex = 0;
+                                    wiMilestoneCombo.editText = "";
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
                             }
                         }
-                    }
-                }
 
-                // Clear L2 filter button
-                Button {
-                    visible: root.filterLevel2 !== "ALL" && root.filterLevel2 !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterLevel2 = "ALL";
-                        level2Combo.currentIndex = 0;
-                        level2Combo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
 
-            Rectangle { width: 1; height: 18; color: "#30363d" }
+                        // Area Path Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "Area Path:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
 
-            // Milestone Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Milestone:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
+                            ComboBox {
+                                id: wiAreaPathCombo
+                                implicitWidth: 180
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.areaPathsList
+                                editText: root.filterAreaPath === "ALL" ? "" : root.filterAreaPath
 
-                ComboBox {
-                    id: wiMilestoneCombo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.milestonesList
-                    editText: root.filterMilestone === "ALL" ? "" : root.filterMilestone
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterAreaPath = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
 
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterMilestone = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                                onActivated: function(index) {
+                                    var val = root.areaPathsList[index] || "ALL";
+                                    root.filterAreaPath = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
 
-                    onActivated: function(index) {
-                        var val = root.milestonesList[index] || "ALL";
-                        root.filterMilestone = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiAreaPathCombo.hovered || wiAreaPathCombo.activeFocus ? "#58a6ff" : (root.filterAreaPath !== "ALL" ? "#3fb950" : "#30363d")
+                                }
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiMilestoneCombo.hovered || wiMilestoneCombo.activeFocus ? "#58a6ff" : (root.filterMilestone !== "ALL" ? "#d29922" : "#30363d")
-                    }
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterAreaPath !== "ALL") ? 32 : 24
+                                    text: wiAreaPathCombo.editText
+                                    placeholderText: "Type or select Area..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiAreaPathCombo.font
+                                    color: root.filterAreaPath !== "ALL" ? "#3fb950" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiAreaPathCombo.editText) {
+                                            wiAreaPathCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
 
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterMilestone !== "ALL") ? 32 : 24
-                        text: wiMilestoneCombo.editText
-                        placeholderText: "Type or select milestone..."
-                        placeholderTextColor: "#484f58"
-                        font: wiMilestoneCombo.font
-                        color: root.filterMilestone !== "ALL" ? "#f0883e" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== wiMilestoneCombo.editText) {
-                                wiMilestoneCombo.editText = text;
+                            Button {
+                                visible: root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterAreaPath = "ALL";
+                                    wiAreaPathCombo.currentIndex = 0;
+                                    wiAreaPathCombo.editText = "";
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
                             }
                         }
+
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                        // Tag Category + Tag Filter
+                        RowLayout {
+                            spacing: 6
+
+                            Text {
+                                text: "Cat:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            ComboBox {
+                                id: wiTagCategoryCombo
+                                implicitWidth: 130
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                model: root.tagCategoryList
+                                currentIndex: {
+                                    var idx = root.tagCategoryList.indexOf(root.filterTagCategory)
+                                    return idx >= 0 ? idx : 0
+                                }
+                                displayText: currentIndex === 0 ? "All Categories" : currentText
+
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiTagCategoryCombo.hovered || wiTagCategoryCombo.activeFocus ? "#58a6ff" : (root.filterTagCategory !== "ALL" ? "#a371f7" : "#30363d")
+                                }
+                                contentItem: Text {
+                                    leftPadding: 8; rightPadding: 24
+                                    text: wiTagCategoryCombo.displayText
+                                    font: wiTagCategoryCombo.font
+                                    color: root.filterTagCategory !== "ALL" ? "#a371f7" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                onActivated: function(index) {
+                                    root.filterTagCategory = root.tagCategoryList[index] || "ALL"
+                                    root.filterTag = "ALL"
+                                    if (wiTagCombo) { wiTagCombo.currentIndex = 0; wiTagCombo.editText = "" }
+                                    root.refreshTagsList()
+                                    root.currentPage = 1
+                                    root.updateFilteredModel()
+                                }
+                            }
+
+                            Text {
+                                text: "Tag:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+
+                            ComboBox {
+                                id: wiTagCombo
+                                implicitWidth: 160
+                                implicitHeight: 28
+                                font.pixelSize: 11
+                                editable: true
+                                model: root.tagsList
+                                editText: root.filterTag === "ALL" ? "" : root.filterTag
+
+                                onEditTextChanged: {
+                                    var val = editText ? editText.trim() : "";
+                                    root.filterTag = (val === "" ? "ALL" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                onActivated: function(index) {
+                                    var val = root.tagsList[index] || "ALL";
+                                    root.filterTag = val;
+                                    editText = (val === "ALL" ? "" : val);
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+
+                                background: Rectangle {
+                                    color: "#161b22"
+                                    radius: 6
+                                    border.color: wiTagCombo.hovered || wiTagCombo.activeFocus ? "#58a6ff" : (root.filterTag !== "ALL" ? "#58a6ff" : "#30363d")
+                                }
+
+                                contentItem: TextField {
+                                    leftPadding: 8
+                                    rightPadding: (root.filterTag !== "ALL") ? 32 : 24
+                                    text: wiTagCombo.editText
+                                    placeholderText: root.filterTagCategory !== "ALL" ? ("Tag in '" + root.filterTagCategory + "'...") : "Type or select tag..."
+                                    placeholderTextColor: "#484f58"
+                                    font: wiTagCombo.font
+                                    color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
+                                    verticalAlignment: Text.AlignVCenter
+                                    background: Item {}
+                                    onTextChanged: {
+                                        if (text !== wiTagCombo.editText) {
+                                            wiTagCombo.editText = text;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                visible: root.filterTag !== "ALL" || root.filterTagCategory !== "ALL"
+                                text: "✖"
+                                font.pixelSize: 10
+                                contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                                onClicked: {
+                                    root.filterTagCategory = "ALL";
+                                    root.filterTag = "ALL";
+                                    wiTagCategoryCombo.currentIndex = 0;
+                                    wiTagCombo.currentIndex = 0;
+                                    wiTagCombo.editText = "";
+                                    root.refreshTagsList();
+                                    root.currentPage = 1;
+                                    root.updateFilteredModel();
+                                }
+                            }
+                        }
+
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                        // 🚨 Overdue Deadlines Only Toggle
+                        Button {
+                            text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
+                            checkable: true
+                            checked: root.filterUrgency === "OVERDUE"
+                            font.pixelSize: 11
+                            font.weight: checked ? Font.Bold : Font.DemiBold
+                            ToolTip.visible: hovered
+                            ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 28
+                                implicitWidth: 110
+                                radius: 6
+                                color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
+                                border.color: parent.checked ? "#f85149" : "#30363d"
+                            }
+                            onClicked: {
+                                root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
+                                root.currentPage = 1;
+                                root.updateFilteredModel();
+                            }
+                        }
+
+                        Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                        // PBS Grouping Filter
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: "PBS:"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#8b949e"
+                            }
+                            Repeater {
+                                model: root.groupingOptions
+                                Button {
+                                    text: modelData.label
+                                    checkable: true
+                                    checked: root.filterGrouping === modelData.value
+                                    font.pixelSize: 11
+                                    font.weight: checked ? Font.DemiBold : Font.Normal
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: parent.checked ? "#ffffff" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 26
+                                        implicitWidth: gLabel.implicitWidth + 18
+                                        radius: 13
+                                        color: parent.checked ? (modelData.value === "UNGROUPED" ? "#3c1e1e" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
+                                        border.color: parent.checked ? (modelData.value === "UNGROUPED" ? "#da3633" : "#388bfd") : "#30363d"
+                                        Text { id: gLabel; text: parent.parent.text; visible: false }
+                                    }
+                                    onClicked: {
+                                        root.filterGrouping = modelData.value
+                                        root.currentPage = 1
+                                    }
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
                     }
                 }
 
-                // Clear Milestone filter button
-                Button {
-                    visible: root.filterMilestone !== "ALL" && root.filterMilestone !== ""
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterMilestone = "ALL";
-                        wiMilestoneCombo.currentIndex = 0;
-                        wiMilestoneCombo.editText = "";
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // Tag Category + Tag Two-Step Filter
-            RowLayout {
-                spacing: 6
-
-                Text {
-                    text: "Cat:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                    ToolTip.visible: catLabelMa.containsMouse
-                    ToolTip.text: "Select a tag category first, then pick a specific tag"
-                    MouseArea { id: catLabelMa; anchors.fill: parent; hoverEnabled: true }
-                }
-
-                // Category combo
-                ComboBox {
-                    id: wiTagCategoryCombo
-                    implicitWidth: 150
+                // ================= Collapsed Active Filter Summary Bar =================
+                Rectangle {
+                    Layout.fillWidth: true
                     implicitHeight: 28
-                    font.pixelSize: 11
-                    model: root.tagCategoryList
-                    currentIndex: {
-                        var idx = root.tagCategoryList.indexOf(root.filterTagCategory)
-                        return idx >= 0 ? idx : 0
-                    }
-                    displayText: currentIndex === 0 ? "All Categories" : currentText
+                    radius: 4
+                    color: "#16202c"
+                    border.color: "#388bfd"
+                    border.width: 1
+                    visible: root.isFiltersCollapsed && root.hasActiveFilters
 
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiTagCategoryCombo.hovered || wiTagCategoryCombo.activeFocus ? "#58a6ff" : (root.filterTagCategory !== "ALL" ? "#a371f7" : "#30363d")
-                    }
-                    contentItem: Text {
-                        leftPadding: 8; rightPadding: 24
-                        text: wiTagCategoryCombo.displayText
-                        font: wiTagCategoryCombo.font
-                        color: root.filterTagCategory !== "ALL" ? "#a371f7" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    delegate: ItemDelegate {
-                        width: wiTagCategoryCombo.width
-                        contentItem: Text {
-                            text: modelData === "ALL" ? "All Categories" : modelData
-                            font: wiTagCategoryCombo.font
-                            color: "#f0f6fc"
-                            verticalAlignment: Text.AlignVCenter
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 8
+
+                        Text {
+                            text: "🔍 Other Active Filters:"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            color: "#58a6ff"
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: {
+                                var parts = [];
+                                if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
+                                if (root.filterState !== "ALL") {
+                                    var stDesc = root.filterState;
+                                    if (stDesc === "to be investigated") stDesc = "To Be Investigated";
+                                    else if (stDesc === "ignored") stDesc = "Ignored";
+                                    else if (stDesc === "DELETED") stDesc = "Deleted";
+                                    parts.push("State: " + stDesc);
+                                }
+                                if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
+                                if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
+                                if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
+                                if (root.filterUrgency !== "ALL") parts.push("Deadline: " + root.filterUrgency);
+                                if (root.filterMilestone !== "ALL") parts.push("Milestone: " + root.filterMilestone);
+                                if (root.filterAreaPath !== "ALL") parts.push("Area: " + root.filterAreaPath);
+                                if (root.filterTagCategory !== "ALL") parts.push("Cat: " + root.filterTagCategory);
+                                if (root.filterTag !== "ALL") parts.push("Tag: " + root.filterTag);
+                                if (root.filterGrouping !== "ALL") parts.push("PBS: " + root.filterGrouping);
+                                return parts.length > 0 ? parts.join("  •  ") : "L1/L2 or Priority filter active above";
+                            }
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 10
+                            color: "#8b949e"
                             elide: Text.ElideRight
                         }
-                        background: Rectangle {
-                            color: highlighted ? "#21262d" : "#161b22"
-                        }
-                        highlighted: wiTagCategoryCombo.highlightedIndex === index
-                    }
-                    popup: Popup {
-                        y: wiTagCategoryCombo.height + 2
-                        width: wiTagCategoryCombo.width
-                        implicitHeight: contentItem.implicitHeight
-                        padding: 1
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: wiTagCategoryCombo.delegateModel
-                            ScrollIndicator.vertical: ScrollIndicator {}
-                        }
-                        background: Rectangle { color: "#161b22"; border.color: "#30363d"; radius: 6 }
-                    }
-                    onActivated: function(index) {
-                        root.filterTagCategory = root.tagCategoryList[index] || "ALL"
-                        // Reset tag selection when category changes
-                        root.filterTag = "ALL"
-                        if (wiTagCombo) { wiTagCombo.currentIndex = 0; wiTagCombo.editText = "" }
-                        root.refreshTagsList()
-                        root.currentPage = 1
-                        root.updateFilteredModel()
-                    }
-                }
 
-                Text {
-                    text: "Tag:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-
-                ComboBox {
-                    id: wiTagCombo
-                    implicitWidth: 190
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    editable: true
-                    model: root.tagsList
-                    editText: root.filterTag === "ALL" ? "" : root.filterTag
-
-                    onEditTextChanged: {
-                        var val = editText ? editText.trim() : "";
-                        root.filterTag = (val === "" ? "ALL" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    onActivated: function(index) {
-                        var val = root.tagsList[index] || "ALL";
-                        root.filterTag = val;
-                        editText = (val === "ALL" ? "" : val);
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-
-                    background: Rectangle {
-                        color: "#161b22"
-                        radius: 6
-                        border.color: wiTagCombo.hovered || wiTagCombo.activeFocus ? "#58a6ff" : (root.filterTag !== "ALL" ? "#58a6ff" : "#30363d")
-                    }
-
-                    contentItem: TextField {
-                        leftPadding: 8
-                        rightPadding: (root.filterTag !== "ALL") ? 32 : 24
-                        text: wiTagCombo.editText
-                        placeholderText: root.filterTagCategory !== "ALL" ? ("Tag in '" + root.filterTagCategory + "'...") : "Type or select tag..."
-                        placeholderTextColor: "#484f58"
-                        font: wiTagCombo.font
-                        color: root.filterTag !== "ALL" ? "#58a6ff" : "#f0f6fc"
-                        verticalAlignment: Text.AlignVCenter
-                        background: Item {}
-                        onTextChanged: {
-                            if (text !== wiTagCombo.editText) {
-                                wiTagCombo.editText = text;
-                            }
+                        Button {
+                            text: "Expand All"
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                            contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { implicitHeight: 20; implicitWidth: 68; radius: 4; color: parent.hovered ? "#21262d" : "transparent"; border.color: "#388bfd" }
+                            onClicked: root.isFiltersCollapsed = false
                         }
                     }
-                }
-
-                // Clear Tag filter button (resets both category and tag)
-                Button {
-                    visible: root.filterTag !== "ALL" || root.filterTagCategory !== "ALL"
-                    text: "✖"
-                    font.pixelSize: 10
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
-                    onClicked: {
-                        root.filterTagCategory = "ALL";
-                        root.filterTag = "ALL";
-                        wiTagCategoryCombo.currentIndex = 0;
-                        wiTagCombo.currentIndex = 0;
-                        wiTagCombo.editText = "";
-                        root.refreshTagsList();
-                        root.currentPage = 1;
-                        root.updateFilteredModel();
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // 🚨 Overdue Deadlines Only Toggle (positioned right next to Tag)
-            Button {
-                text: root.filterUrgency === "OVERDUE" ? "🚨 Overdue Only" : "🚨 Overdue"
-                checkable: true
-                checked: root.filterUrgency === "OVERDUE"
-                font.pixelSize: 11
-                font.weight: checked ? Font.Bold : Font.DemiBold
-                ToolTip.visible: hovered
-                ToolTip.text: root.filterUrgency === "OVERDUE" ? "Showing overdue deadline items only. Click to show all." : "Click to filter to overdue deadline items only."
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: parent.checked ? "#ffffff" : (parent.hovered ? "#ff7b72" : "#8b949e")
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 28
-                    implicitWidth: 115
-                    radius: 6
-                    color: parent.checked ? "#da3633" : (parent.hovered ? "#21262d" : "#161b22")
-                    border.color: parent.checked ? "#f85149" : "#30363d"
-                }
-                onClicked: {
-                    root.filterUrgency = (root.filterUrgency === "OVERDUE" ? "ALL" : "OVERDUE");
-                    root.currentPage = 1;
-                    root.updateFilteredModel();
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-        }
-
-        // ====================== Priority & PBS Grouping Filter Row ======================
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            // Priority Focus Filter (OI, MP, SCEN, SPEC, PA, CS, DOC)
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "Priority:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-                Repeater {
-                    model: root.priorityOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterPriority === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? (modelData.value === "PRIO1" ? "#f0883e" : "#ffffff") : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: pLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? (modelData.value === "PRIO1" ? "#3d2800" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? (modelData.value === "PRIO1" ? "#d29922" : "#388bfd") : "#30363d"
-                            Text { id: pLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterPriority = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-
-            Rectangle { width: 1; height: 18; color: "#30363d" }
-
-            // PBS Grouping Filter
-            RowLayout {
-                spacing: 6
-                Text {
-                    text: "PBS:"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#8b949e"
-                }
-                Repeater {
-                    model: root.groupingOptions
-                    Button {
-                        text: modelData.label
-                        checkable: true
-                        checked: root.filterGrouping === modelData.value
-                        font.pixelSize: 11
-                        font.weight: checked ? Font.DemiBold : Font.Normal
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.checked ? "#ffffff" : "#8b949e"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: gLabel.implicitWidth + 18
-                            radius: 13
-                            color: parent.checked ? (modelData.value === "UNGROUPED" ? "#3c1e1e" : "#1f6feb") : (parent.hovered ? "#21262d" : "#161b22")
-                            border.color: parent.checked ? (modelData.value === "UNGROUPED" ? "#da3633" : "#388bfd") : "#30363d"
-                            Text { id: gLabel; text: parent.parent.text; visible: false }
-                        }
-                        onClicked: {
-                            root.filterGrouping = modelData.value
-                            root.currentPage = 1
-                        }
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-        }
-        } // End of filtersSection
-
-        // ====================== Active Filter Bar (Shown when collapsed & filters active) ======================
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 34
-            radius: 6
-            color: "#16202c"
-            border.color: "#388bfd"
-            border.width: 1
-            visible: root.isFiltersCollapsed && root.hasActiveFilters
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
-
-                Text {
-                    text: "🔍 Active Filters Applied"
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    color: "#58a6ff"
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: {
-                        var parts = [];
-                        if (root.searchQuery !== "") parts.push("Search: \"" + root.searchQuery + "\"");
-                        if (root.filterState !== "ALL") {
-                            var stDesc = root.filterState;
-                            if (stDesc === "to be investigated") stDesc = "To Be Investigated";
-                            else if (stDesc === "ignored") stDesc = "Ignored";
-                            else if (stDesc === "DELETED") stDesc = "Deleted";
-                            parts.push("State: " + stDesc);
-                        }
-                        if (root.filterType !== "ALL") parts.push("Type: " + root.filterType);
-                        if (root.filterAssignee !== "ALL") parts.push("User: " + root.filterAssignee);
-                        if (root.filterIteration !== "ALL") parts.push("Sprint: " + root.filterIteration);
-                        if (root.filterUrgency !== "ALL") parts.push("Deadline: " + root.filterUrgency);
-                        if (root.filterLevel1 !== "ALL") parts.push("L1: " + root.filterLevel1);
-                        if (root.filterLevel2 !== "ALL") parts.push("L2: " + root.filterLevel2);
-                        if (root.filterMilestone !== "ALL") parts.push("Milestone: " + root.filterMilestone);
-                        if (root.filterTagCategory !== "ALL") parts.push("Cat: " + root.filterTagCategory);
-                        if (root.filterTag !== "ALL") parts.push("Tag: " + root.filterTag);
-                        if (root.filterPriority !== "ALL") parts.push("Prio: " + root.filterPriority);
-                        if (root.filterGrouping !== "ALL") parts.push("PBS: " + root.filterGrouping);
-                        return parts.join("  •  ");
-                    }
-                    font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 11
-                    color: "#8b949e"
-                    elide: Text.ElideRight
-                }
-
-                Button {
-                    text: "Show Filters"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#58a6ff"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitHeight: 22; implicitWidth: 84; radius: 4; color: parent.hovered ? "#21262d" : "transparent"; border.color: "#388bfd" }
-                    onClicked: root.isFiltersCollapsed = false
-                }
-
-                Button {
-                    text: "Reset All"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    contentItem: Text { text: parent.text; font: parent.font; color: "#f85149"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { implicitHeight: 22; implicitWidth: 72; radius: 4; color: parent.hovered ? "#3c1e1e" : "transparent"; border.color: "#da3633" }
-                    onClicked: root.resetAllFilters()
                 }
             }
         }
@@ -1583,14 +1908,173 @@ Item {
                 anchors.rightMargin: 24
                 spacing: 12
 
-                Text { text: "ID";          Layout.preferredWidth: 64;  Layout.minimumWidth: 64;  Layout.maximumWidth: 64;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TYPE";        Layout.preferredWidth: 92;  Layout.minimumWidth: 92;  Layout.maximumWidth: 92;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "TITLE";       Layout.fillWidth: true;     Layout.minimumWidth: 140; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "STATE";       Layout.preferredWidth: 88;  Layout.minimumWidth: 88;  Layout.maximumWidth: 88;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ITERATION";   Layout.preferredWidth: 125; Layout.minimumWidth: 125; Layout.maximumWidth: 125; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "DEADLINE";    Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "ASSIGNED TO"; Layout.preferredWidth: 115; Layout.minimumWidth: 115; Layout.maximumWidth: 115; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                Text { text: "REFS";        Layout.preferredWidth: 75;  Layout.minimumWidth: 75;  Layout.maximumWidth: 75;  font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                // ID (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 64
+                    Layout.minimumWidth: 64
+                    Layout.maximumWidth: 64
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "ID"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "id" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "id" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "id" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "id"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("id")
+                    }
+                }
+
+                // TYPE (Compact Icon Column Header)
+                Text {
+                    text: "TYP"
+                    Layout.preferredWidth: 32
+                    Layout.minimumWidth: 32
+                    Layout.maximumWidth: 32
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                // TITLE
+                Text {
+                    text: "TITLE"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 140
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                // STATE (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 84
+                    Layout.minimumWidth: 84
+                    Layout.maximumWidth: 84
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "STATE"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "state" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "state" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "state" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "state"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("state")
+                    }
+                }
+
+                // ITERATION (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 80
+                    Layout.minimumWidth: 80
+                    Layout.maximumWidth: 80
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "SPRINT"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "iteration" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "iteration" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "iteration" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "iteration"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("iteration")
+                    }
+                }
+
+                // DEADLINE (Sortable)
+                Rectangle {
+                    Layout.preferredWidth: 78
+                    Layout.minimumWidth: 78
+                    Layout.maximumWidth: 78
+                    height: parent.height
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 3
+                        Text {
+                            text: "DUE"
+                            font.pixelSize: 11
+                            font.weight: root.sortColumn === "deadline" ? Font.Bold : Font.DemiBold
+                            color: root.sortColumn === "deadline" ? "#58a6ff" : "#8b949e"
+                        }
+                        Text {
+                            text: root.sortColumn === "deadline" ? (root.sortDirection === "asc" ? "▲" : "▼") : ""
+                            font.pixelSize: 10
+                            color: "#58a6ff"
+                            visible: root.sortColumn === "deadline"
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleSort("deadline")
+                    }
+                }
+
+                // ASSIGNED TO
+                Text {
+                    text: "ASSIGNED TO"
+                    Layout.preferredWidth: 115
+                    Layout.minimumWidth: 115
+                    Layout.maximumWidth: 115
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                // REFS
+                Text {
+                    text: "REFS"
+                    Layout.preferredWidth: 55
+                    Layout.minimumWidth: 55
+                    Layout.maximumWidth: 55
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
             }
         }
 
@@ -1617,14 +2101,25 @@ Item {
             }
 
             delegate: Item {
+                id: wiDelegateRoot
                 width: wiListView.width - 14
-                height: expanded ? expandedHeight + 52 : 52
+                height: expanded ? expandedHeight + 56 : 56
 
                 property bool expanded: false
+                property var wiTagList: {
+                    if (typeof model === "undefined" || !model) return [];
+                    if (model.tag_list && model.tag_list.length > 0) return model.tag_list;
+                    if (model.tags && model.tags.trim() !== "") {
+                        return model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                    }
+                    return [];
+                }
+                property var wiLinkedPrs: (typeof model !== "undefined" && model && model.linked_prs) ? model.linked_prs : []
+                property var wiLinkedRepos: (typeof model !== "undefined" && model && model.linked_repos) ? model.linked_repos : []
                 property int expandedHeight: {
                     if (typeof model === "undefined" || !model) return 120;
-                    var prs = model.linked_prs || [];
-                    var repos = model.linked_repos || [];
+                    var prs = wiLinkedPrs;
+                    var repos = wiLinkedRepos;
                     return Math.max(120, 115 + prs.length * 22 + repos.length * 18 + 36);
                 }
 
@@ -1662,7 +2157,7 @@ Item {
                         anchors.top: parent.top
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        height: 52
+                        height: 56
                         hoverEnabled: true
                         cursorShape: (model.tfs_url || "") !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
                         ToolTip.visible: containsMouse && (model.tfs_url || "") !== ""
@@ -1678,249 +2173,310 @@ Item {
                     RowLayout {
                         id: mainRow
                         z: 1
-                        height: 52
+                        height: 56
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.leftMargin: 16
                         anchors.rightMargin: 24
                         spacing: 12
 
-                        // ID
-                        Text {
-                            text: "#" + model.id
+                        // ID (with child connector if child task)
+                        RowLayout {
                             Layout.preferredWidth: 64
                             Layout.minimumWidth: 64
                             Layout.maximumWidth: 64
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 13
-                            font.weight: Font.Bold
-                            color: model.deleted ? "#f85149" : "#58a6ff"
+                            spacing: 3
+                            Text {
+                                text: "↳"
+                                font.pixelSize: 13
+                                font.weight: Font.Bold
+                                color: "#58a6ff"
+                                visible: !!model.is_child_task
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "#" + model.id
+                                font.family: "Consolas, monospace"
+                                font.pixelSize: model.is_child_task ? 12 : 13
+                                font.weight: Font.Bold
+                                color: model.deleted ? "#f85149" : (model.is_child_task ? "#79c0ff" : "#58a6ff")
+                                elide: Text.ElideRight
+                            }
                         }
 
-                        // Type badge
+                        // Type Icon Pill
                         Rectangle {
-                            Layout.preferredWidth: 92
-                            Layout.minimumWidth: 92
-                            Layout.maximumWidth: 92
-                            height: 22
-                            radius: 11
+                            Layout.preferredWidth: 32
+                            Layout.minimumWidth: 32
+                            Layout.maximumWidth: 32
+                            height: 24
+                            radius: 12
                             property color typeC: root.typeColor(model.type)
                             color: Qt.rgba(typeC.r, typeC.g, typeC.b, 0.15)
                             border.color: Qt.rgba(typeC.r, typeC.g, typeC.b, 0.5)
                             Text {
                                 anchors.centerIn: parent
-                                text: model.type || "Task"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: root.typeColor(model.type)
-                                elide: Text.ElideRight
+                                text: root.typeIcon(model.type)
+                                font.pixelSize: 12
+                            }
+                            ToolTip.visible: typeMa.containsMouse
+                            ToolTip.text: model.type || "Work Item"
+                            MouseArea {
+                                id: typeMa
+                                anchors.fill: parent
+                                hoverEnabled: true
                             }
                         }
 
-                        // Title, Hierarchy Path & Badges
-                        RowLayout {
+                        // Title cell: 2 lines (Line 1: Badges, Line 2: Title text trimmed to 80 chars)
+                        ColumnLayout {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 140
+                            spacing: 3
                             clip: true
-                            spacing: 6
 
-                            // Milestone Strategic Badge (Direct or Inherited)
-                            Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: Math.min(milestoneBadgeLayout.implicitWidth + 10, 160)
-                                Layout.maximumWidth: 160
-                                radius: 4
-                                visible: !!model.has_milestone
-                                color: model.milestone_bg || (model.milestone_color ? Qt.rgba(Qt.color(model.milestone_color).r, Qt.color(model.milestone_color).g, Qt.color(model.milestone_color).b, 0.2) : "#3d2800")
-                                border.color: model.milestone_color || "#d29922"
-                                border.width: 1
+                            // Line 1: Badges
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 5
+                                clip: true
 
-                                RowLayout {
-                                    id: milestoneBadgeLayout
-                                    anchors.centerIn: parent
-                                    spacing: 3
-
-                                    Text {
-                                        text: (model.is_milestone_inherited ? "↳ " : "") + (model.milestone_icon ? model.milestone_icon : "🚩")
-                                        font.pixelSize: 9
-                                    }
-                                    Text {
-                                        Layout.maximumWidth: 130
-                                        text: model.effective_milestone_name || model.milestone_name || "Milestone"
-                                        font.pixelSize: 9
-                                        font.weight: Font.Bold
-                                        color: model.milestone_color || "#f0883e"
-                                        elide: Text.ElideRight
-                                    }
-                                }
-
-                                ToolTip.visible: milestoneMouse.containsMouse
-                                ToolTip.text: model.is_milestone_inherited ?
-                                    ("Inherited Milestone: " + (model.effective_milestone_name || model.milestone_name) + " (from parent story/epic)") :
-                                    ("Target Milestone: " + (model.effective_milestone_name || model.milestone_name) + (model.milestone_category ? " [" + model.milestone_category + "]" : ""))
-
-                                MouseArea {
-                                    id: milestoneMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                }
-                            }
-
-                            // Prio 1 Strategic Focus Badge
-                            Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: prioBadgeText.implicitWidth + 8
-                                Layout.maximumWidth: 80
-                                radius: 4
-                                visible: !!model.is_prio1
-                                color: "#3d2800"
-                                border.color: "#d29922"
-                                border.width: 1
-
-                                Text {
-                                    id: prioBadgeText
-                                    anchors.centerIn: parent
-                                    text: model.prio_badge || "⭐ Prio 1"
-                                    font.pixelSize: 9
-                                    font.weight: Font.Bold
-                                    color: "#f0883e"
-                                }
-                            }
-
-                            // Hierarchy (L1 / L2 PBS) Breadcrumb Chip
-                            Rectangle {
-                                implicitHeight: 18
-                                implicitWidth: Math.min(hBadgeText.implicitWidth + 8, 180)
-                                Layout.maximumWidth: 180
-                                radius: 4
-                                visible: (model.level1_display || "") !== "" && model.level1_display !== "Ungrouped Sub-System"
-                                color: "#161b22"
-                                border.color: model.is_grouped ? "#30363d" : "#da3633"
-                                border.width: 1
-
-                                Text {
-                                    id: hBadgeText
-                                    anchors.centerIn: parent
-                                    width: Math.min(implicitWidth, 170)
-                                    text: (model.level1_display || "") + ((model.level2_display && model.level2_display !== "Ungrouped Component") ? (" › " + model.level2_display) : "")
-                                    font.pixelSize: 9
-                                    color: model.is_grouped ? "#8b949e" : "#f85149"
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            // Tag Badges in Main Row (First 2-3 tags)
-                            Repeater {
-                                model: {
-                                    var list = [];
-                                    if (typeof model !== "undefined" && model) {
-                                        if (model.tag_list && model.tag_list.length > 0) {
-                                            list = model.tag_list;
-                                        } else if (model.tags && model.tags.trim() !== "") {
-                                            list = model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
-                                        }
-                                    }
-                                    return list.slice(0, 3);
-                                }
-
+                                // Child Tasks Count Badge (for parent story/bug)
                                 Rectangle {
                                     implicitHeight: 18
-                                    implicitWidth: Math.min(rowTagLayout.implicitWidth + 8, 110)
-                                    Layout.maximumWidth: 110
+                                    implicitWidth: childTaskCountText.implicitWidth + 10
                                     radius: 4
-                                    property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
-                                    color: rowTagMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#241700" : "#16202c")
-                                    border.color: isTarget ? "#d29922" : "#388bfd"
+                                    visible: !model.is_child_task && (model.child_task_count || 0) > 0
+                                    color: (model.child_tasks_done === model.child_task_count) ? "#1f3322" : "#1f2a3d"
+                                    border.color: (model.child_tasks_done === model.child_task_count) ? "#238636" : "#388bfd"
+                                    border.width: 1
+                                    RowLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 3
+                                        Text {
+                                            text: (model.child_tasks_done === model.child_task_count) ? "✓" : "📋"
+                                            font.pixelSize: 9
+                                        }
+                                        Text {
+                                            id: childTaskCountText
+                                            text: (model.child_tasks_done || 0) + "/" + (model.child_task_count || 0) + " tasks"
+                                            font.pixelSize: 9
+                                            font.weight: Font.DemiBold
+                                            color: (model.child_tasks_done === model.child_task_count) ? "#7ee787" : "#58a6ff"
+                                        }
+                                    }
+                                    ToolTip.visible: childTasksMa.containsMouse
+                                    ToolTip.text: (model.child_tasks_done || 0) + " of " + (model.child_task_count || 0) + " tasks completed"
+                                    MouseArea {
+                                        id: childTasksMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                    }
+                                }
+
+                                // Milestone Strategic Badge (Direct or Inherited)
+                                Rectangle {
+                                    implicitHeight: 18
+                                    implicitWidth: Math.min(milestoneBadgeLayout.implicitWidth + 10, 160)
+                                    Layout.maximumWidth: 160
+                                    radius: 4
+                                    visible: !!model.has_milestone
+                                    color: model.milestone_bg || (model.milestone_color ? Qt.rgba(Qt.color(model.milestone_color).r, Qt.color(model.milestone_color).g, Qt.color(model.milestone_color).b, 0.2) : "#3d2800")
+                                    border.color: model.milestone_color || "#d29922"
                                     border.width: 1
 
                                     RowLayout {
-                                        id: rowTagLayout
+                                        id: milestoneBadgeLayout
                                         anchors.centerIn: parent
-                                        spacing: 2
-                                        Text { text: isTarget ? "🎯" : "🏷️"; font.pixelSize: 8 }
+                                        spacing: 3
+
                                         Text {
-                                            id: rowTagText
-                                            Layout.maximumWidth: 85
-                                            text: modelData
+                                            text: (model.is_milestone_inherited ? "↳ " : "") + (model.milestone_icon ? model.milestone_icon : "🚩")
                                             font.pixelSize: 9
-                                            font.weight: isTarget ? Font.Bold : Font.Normal
-                                            color: isTarget ? "#f0883e" : "#58a6ff"
+                                        }
+                                        Text {
+                                            Layout.maximumWidth: 130
+                                            text: model.effective_milestone_name || model.milestone_name || "Milestone"
+                                            font.pixelSize: 9
+                                            font.weight: Font.Bold
+                                            color: model.milestone_color || "#f0883e"
                                             elide: Text.ElideRight
                                         }
                                     }
 
-                                    ToolTip.visible: rowTagMa.containsMouse
-                                    ToolTip.text: isTarget ? ("Target Milestone: " + modelData) : ("Tag: " + modelData)
+                                    ToolTip.visible: milestoneMouse.containsMouse
+                                    ToolTip.text: model.is_milestone_inherited ?
+                                        ("Inherited Milestone: " + (model.effective_milestone_name || model.milestone_name) + " (from parent story/epic)") :
+                                        ("Target Milestone: " + (model.effective_milestone_name || model.milestone_name) + (model.milestone_category ? " [" + model.milestone_category + "]" : ""))
 
                                     MouseArea {
-                                        id: rowTagMa
+                                        id: milestoneMouse
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            root.filterTag = modelData;
-                                            root.currentPage = 1;
-                                            root.updateFilteredModel();
+                                    }
+                                }
+
+                                // Prio 1 Strategic Focus Badge
+                                Rectangle {
+                                    implicitHeight: 18
+                                    implicitWidth: prioBadgeText.implicitWidth + 8
+                                    Layout.maximumWidth: 80
+                                    radius: 4
+                                    visible: !!model.is_prio1
+                                    color: "#3d2800"
+                                    border.color: "#d29922"
+                                    border.width: 1
+
+                                    Text {
+                                        id: prioBadgeText
+                                        anchors.centerIn: parent
+                                        text: model.prio_badge || "⭐ Prio 1"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: "#f0883e"
+                                    }
+                                }
+
+                                // Hierarchy (L1 / L2 PBS) Breadcrumb Chip
+                                Rectangle {
+                                    implicitHeight: 18
+                                    implicitWidth: Math.min(hBadgeText.implicitWidth + 8, 180)
+                                    Layout.maximumWidth: 180
+                                    radius: 4
+                                    visible: (model.level1_display || "") !== "" && model.level1_display !== "Ungrouped Sub-System"
+                                    color: "#161b22"
+                                    border.color: model.is_grouped ? "#30363d" : "#da3633"
+                                    border.width: 1
+
+                                    Text {
+                                        id: hBadgeText
+                                        anchors.centerIn: parent
+                                        width: Math.min(implicitWidth, 170)
+                                        text: (model.level1_display || "") + ((model.level2_display && model.level2_display !== "Ungrouped Component") ? (" › " + model.level2_display) : "")
+                                        font.pixelSize: 9
+                                        color: model.is_grouped ? "#8b949e" : "#f85149"
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                // Tag Badges in Main Row (First 2-3 tags)
+                                Repeater {
+                                    model: wiDelegateRoot.wiTagList ? wiDelegateRoot.wiTagList.slice(0, 3) : []
+
+                                    Rectangle {
+                                        implicitHeight: 18
+                                        implicitWidth: Math.min(rowTagLayout.implicitWidth + 8, 110)
+                                        Layout.maximumWidth: 110
+                                        radius: 4
+                                        property bool isTarget: modelData.toLowerCase().indexOf("target:") === 0
+                                        color: rowTagMa.containsMouse ? (isTarget ? "#3d2800" : "#1f334d") : (isTarget ? "#241700" : "#16202c")
+                                        border.color: isTarget ? "#d29922" : "#388bfd"
+                                        border.width: 1
+
+                                        RowLayout {
+                                            id: rowTagLayout
+                                            anchors.centerIn: parent
+                                            spacing: 2
+                                            Text { text: isTarget ? "🎯" : "🏷️"; font.pixelSize: 8 }
+                                            Text {
+                                                id: rowTagText
+                                                Layout.maximumWidth: 85
+                                                text: modelData
+                                                font.pixelSize: 9
+                                                font.weight: isTarget ? Font.Bold : Font.Normal
+                                                color: isTarget ? "#f0883e" : "#58a6ff"
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+
+                                        ToolTip.visible: rowTagMa.containsMouse
+                                        ToolTip.text: isTarget ? ("Target Milestone: " + modelData) : ("Tag: " + modelData)
+
+                                        MouseArea {
+                                            id: rowTagMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                root.filterTag = modelData;
+                                                root.currentPage = 1;
+                                                root.updateFilteredModel();
+                                            }
                                         }
                                     }
                                 }
+
+                                // Extra Tags "+N" Counter Chip if > 3 tags
+                                Rectangle {
+                                    property int totalTags: {
+                                        if (typeof model === "undefined" || !model) return 0;
+                                        if (model.tag_list && model.tag_list.length > 0) return model.tag_list.length;
+                                        if (model.tags && model.tags.trim() !== "") return model.tags.split(";").filter(function(t){ return t.trim().length > 0; }).length;
+                                        return 0;
+                                    }
+                                    visible: totalTags > 3
+                                    implicitHeight: 18
+                                    implicitWidth: extraTagText.implicitWidth + 8
+                                    radius: 4
+                                    color: "#21262d"
+                                    border.color: "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        id: extraTagText
+                                        anchors.centerIn: parent
+                                        text: "+" + (parent.totalTags - 3)
+                                        font.pixelSize: 9
+                                        color: "#8b949e"
+                                    }
+
+                                    ToolTip.visible: extraTagMa.containsMouse
+                                    ToolTip.text: "Tags: " + (model.tags || "") + "\nClick to expand details"
+
+                                    MouseArea {
+                                        id: extraTagMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: expanded = !expanded
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
                             }
 
-                            // Extra Tags "+N" Counter Chip if > 3 tags
-                            Rectangle {
-                                property int totalTags: {
-                                    if (typeof model === "undefined" || !model) return 0;
-                                    if (model.tag_list && model.tag_list.length > 0) return model.tag_list.length;
-                                    if (model.tags && model.tags.trim() !== "") return model.tags.split(";").filter(function(t){ return t.trim().length > 0; }).length;
-                                    return 0;
-                                }
-                                visible: totalTags > 3
-                                implicitHeight: 18
-                                implicitWidth: extraTagText.implicitWidth + 8
-                                radius: 4
-                                color: "#21262d"
-                                border.color: "#30363d"
-                                border.width: 1
-
-                                Text {
-                                    id: extraTagText
-                                    anchors.centerIn: parent
-                                    text: "+" + (parent.totalTags - 3)
-                                    font.pixelSize: 9
-                                    color: "#8b949e"
-                                }
-
-                                ToolTip.visible: extraTagMa.containsMouse
-                                ToolTip.text: "Tags: " + (model.tags || "") + "\nClick to expand details"
-
-                                MouseArea {
-                                    id: extraTagMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: expanded = !expanded
-                                }
-                            }
-
+                            // Line 2: Title Text (Trimmed to 80 chars with '...' if longer)
                             Text {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 80
-                                text: model.title
+                                text: {
+                                    var raw = model.title || "";
+                                    if (raw.length > 80) {
+                                        return raw.substring(0, 80) + "...";
+                                    }
+                                    return raw;
+                                }
                                 font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 13
+                                font.pixelSize: 12
                                 font.weight: Font.Normal
-                                color: model.deleted ? "#8b949e" : "#f0f6fc"
+                                color: model.deleted ? "#8b949e" : (model.is_child_task ? "#c9d1d9" : "#f0f6fc")
                                 font.strikeout: model.deleted
                                 elide: Text.ElideRight
+                                ToolTip.visible: titleTextMa.containsMouse && (model.title || "").length > 80
+                                ToolTip.text: model.title || ""
+                                MouseArea {
+                                    id: titleTextMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                }
                             }
                         }
 
                         // State badge
                         Rectangle {
-                            Layout.preferredWidth: 88
-                            Layout.minimumWidth: 88
-                            Layout.maximumWidth: 88
+                            Layout.preferredWidth: 84
+                            Layout.minimumWidth: 84
+                            Layout.maximumWidth: 84
                             height: 22
                             radius: 11
                             property color stateC: root.stateColor(model.state)
@@ -1939,31 +2495,23 @@ Item {
 
                         // Iteration Pill
                         Rectangle {
-                            Layout.preferredWidth: 125
-                            Layout.minimumWidth: 125
-                            Layout.maximumWidth: 125
+                            Layout.preferredWidth: 80
+                            Layout.minimumWidth: 80
+                            Layout.maximumWidth: 80
                             height: 24
                             radius: 12
                             color: iterMa.containsMouse ? (model.is_iteration_planned ? "#163c75" : (model.has_milestone ? "#3d2800" : "#21262d")) : (model.is_iteration_planned ? "#0d2344" : (model.has_milestone ? "#241700" : "#161b22"))
                             border.color: iterMa.containsMouse ? "#58a6ff" : (model.is_iteration_planned ? "#1f6feb" : (model.has_milestone ? "#d29922" : "#30363d"))
                             border.width: 1
                             RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 4
-                                Text { text: model.is_iteration_planned ? "🎯" : "📋"; font.pixelSize: 10 }
+                                anchors.centerIn: parent
+                                spacing: 3
                                 Text {
-                                    Layout.fillWidth: true
-                                    text: {
-                                        if (model.is_iteration_planned) {
-                                            return model.iteration_name || "Planned"
-                                        } else if (model.has_milestone) {
-                                            return "Backlog"
-                                        } else {
-                                            return (model.iteration_name && model.iteration_name !== "CH_SAPH_KAWEST") ? model.iteration_name : "Unplanned"
-                                        }
-                                    }
+                                    text: model.is_iteration_planned ? "🎯" : (model.has_milestone ? "🚩" : "📋")
+                                    font.pixelSize: 10
+                                }
+                                Text {
+                                    text: root.formatCompactIteration(model.iteration_name || model.iteration_path, model.is_iteration_planned, model.has_milestone)
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     font.weight: (model.is_iteration_planned || model.has_milestone) ? Font.DemiBold : Font.Normal
@@ -1986,9 +2534,9 @@ Item {
 
                         // Deadline Pill
                         Rectangle {
-                            Layout.preferredWidth: 115
-                            Layout.minimumWidth: 115
-                            Layout.maximumWidth: 115
+                            Layout.preferredWidth: 78
+                            Layout.minimumWidth: 78
+                            Layout.maximumWidth: 78
                             height: 22
                             radius: 11
                             property bool hasDeadline: (model.deadline_str || "") !== ""
@@ -1996,49 +2544,90 @@ Item {
                             color: deadMa.containsMouse ? (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.25) : "#21262d") : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.15) : "#161b22")
                             border.color: deadMa.containsMouse ? "#58a6ff" : (hasDeadline ? Qt.rgba(uColor.r, uColor.g, uColor.b, 0.5) : "#30363d")
                             border.width: 1
-                            RowLayout { anchors.centerIn: parent; spacing: 4
-                                Text { text: parent.parent.hasDeadline ? (model.urgency_badge || model.deadline_str || "—") : "➕ Set Date"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; color: parent.parent.hasDeadline ? parent.parent.uColor : "#8b949e"; elide: Text.ElideRight }
+                            Text {
+                                anchors.centerIn: parent
+                                text: parent.hasDeadline ? (root.formatCompactDeadline(model.urgency_badge, model.urgency_status, model.days_diff, model.deadline_str) || "—") : "➕"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 10
+                                font.weight: parent.hasDeadline ? Font.DemiBold : Font.Normal
+                                color: parent.hasDeadline ? parent.uColor : "#8b949e"
+                                elide: Text.ElideRight
                             }
-                            MouseArea { id: deadMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, ""); }
+                            MouseArea {
+                                id: deadMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                ToolTip.visible: containsMouse
+                                ToolTip.text: parent.hasDeadline ? ("Deadline: " + model.deadline_str + (model.urgency_badge ? (" (" + model.urgency_badge + ")") : "")) : "Click to set deadline"
+                                onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, "");
+                            }
                         }
 
-                        // Assigned To
-                        Text {
-                            text: model.assigned_to || "Unassigned"
+                        // Assigned To (Interactive chip that opens Right Sidebar)
+                        Rectangle {
                             Layout.preferredWidth: 115
                             Layout.minimumWidth: 115
                             Layout.maximumWidth: 115
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#8b949e"
-                            elide: Text.ElideRight
+                            height: 22
+                            radius: 4
+                            color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#21262d" : "transparent"
+                            border.color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#58a6ff" : "transparent"
+                            border.width: 1
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 4
+                                anchors.right: parent.right
+                                text: model.assigned_to || "Unassigned"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#58a6ff" : "#8b949e"
+                                elide: Text.ElideRight
+                            }
+
+                            MouseArea {
+                                id: assignedMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: (model.assigned_to && model.assigned_to !== "Unassigned") ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                ToolTip.visible: containsMouse && model.assigned_to && model.assigned_to !== "Unassigned"
+                                ToolTip.text: "Click to open " + model.assigned_to + " workload details in Right Sidebar"
+                                onClicked: {
+                                    if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend && model.assigned_to && model.assigned_to !== "Unassigned") {
+                                        var details = backend.get_member_workload_details(model.assigned_to);
+                                        window.openRightSidebar("workload_member", model.assigned_to, "Member Workload Breakdown", details);
+                                    }
+                                }
+                            }
                         }
 
                         // References pill
                         Item {
-                            Layout.preferredWidth: 75
-                            Layout.minimumWidth: 75
-                            Layout.maximumWidth: 75
+                            Layout.preferredWidth: 55
+                            Layout.minimumWidth: 55
+                            Layout.maximumWidth: 55
                             height: 22
                             Row {
-                                spacing: 5
+                                spacing: 3
                                 anchors.verticalCenter: parent.verticalCenter
                                 Rectangle {
-                                    width: prRefText.implicitWidth + 12
+                                    width: prRefText.implicitWidth + 8
                                     height: 20
                                     radius: 10
                                     color: (model.linked_pr_count || 0) > 0 ? "#1f6feb" : "#21262d"
                                     visible: (model.linked_pr_count || 0) > 0
-                                    Text { id: prRefText; anchors.centerIn: parent; text: "PR: " + (model.linked_pr_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    Text { id: prRefText; anchors.centerIn: parent; text: "PR " + (model.linked_pr_count || 0); font.pixelSize: 9; font.weight: Font.DemiBold; color: "#ffffff" }
                                     MouseArea { id: prRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
                                 Rectangle {
-                                    width: repoRefText.implicitWidth + 12
+                                    width: repoRefText.implicitWidth + 8
                                     height: 20
                                     radius: 10
                                     color: (model.linked_repo_count || 0) > 0 ? "#238636" : "#21262d"
                                     visible: (model.linked_repo_count || 0) > 0
-                                    Text { id: repoRefText; anchors.centerIn: parent; text: "Repo: " + (model.linked_repo_count || 0); font.pixelSize: 10; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    Text { id: repoRefText; anchors.centerIn: parent; text: "R " + (model.linked_repo_count || 0); font.pixelSize: 9; font.weight: Font.DemiBold; color: "#ffffff" }
                                     MouseArea { id: repoRefMa; anchors.fill: parent; hoverEnabled: true; onClicked: expanded = !expanded }
                                 }
                                 Text {
@@ -2060,7 +2649,7 @@ Item {
                         anchors.right: parent.right
                         anchors.margins: 10
                         anchors.topMargin: 0
-                        height: parent.height - 52 - 6
+                        height: parent.height - 56 - 6
                         visible: expanded
                         color: "#131920"
                         radius: 4
@@ -2117,6 +2706,18 @@ Item {
                                             font.pixelSize: 11
                                             font.weight: Font.DemiBold
                                             color: "#58a6ff"
+                                        }
+                                    }
+
+                                    Row {
+                                        spacing: 5
+                                        visible: (model.area_path || "") !== ""
+                                        Text { text: "📁 Area:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: model.area_path
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: "#3fb950"
                                         }
                                     }
 
@@ -2191,6 +2792,46 @@ Item {
                                             onClicked: {
                                                 if (window && typeof window.navigateToWorkloadSprint === "function") {
                                                     window.navigateToWorkloadSprint(model.assigned_to, model.sprint_week_name || model.iteration_name);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Open Member Workload Breakdown in Right Sidebar
+                                    Rectangle {
+                                        height: 22
+                                        implicitWidth: wiSidebarBtnRow.implicitWidth + 14
+                                        radius: 11
+                                        visible: (model.assigned_to || "") !== "" && model.assigned_to !== "Unassigned"
+                                        color: wiSidebarMa.containsMouse ? "#1f6feb" : "#21262d"
+                                        border.color: wiSidebarMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Row {
+                                            id: wiSidebarBtnRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "📊"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: "Sidebar Workload"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: wiSidebarMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: wiSidebarMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open " + model.assigned_to + " Workload Breakdown in Right Sidebar"
+                                            onClicked: {
+                                                if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend && model.assigned_to && model.assigned_to !== "Unassigned") {
+                                                    var details = backend.get_member_workload_details(model.assigned_to);
+                                                    window.openRightSidebar("workload_member", model.assigned_to, "Member Workload Breakdown", details);
                                                 }
                                             }
                                         }
@@ -2305,15 +2946,7 @@ Item {
                                         spacing: 5
 
                                         Repeater {
-                                            model: {
-                                                if (typeof model === "undefined" || !model) return [];
-                                                if (model.tag_list && model.tag_list.length > 0) {
-                                                    return model.tag_list;
-                                                } else if (model.tags && model.tags.trim() !== "") {
-                                                    return model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
-                                                }
-                                                return [];
-                                            }
+                                            model: wiDelegateRoot.wiTagList || []
 
                                             Rectangle {
                                                 implicitHeight: 20
@@ -2376,12 +3009,11 @@ Item {
                                         }
 
                                         Text {
-                                            visible: (typeof model !== "undefined" && model) ? ((!model.tag_list || model.tag_list.length === 0) && (!model.tags || model.tags.trim() === "")) : false
+                                            visible: !wiDelegateRoot.wiTagList || wiDelegateRoot.wiTagList.length === 0
                                             text: "No tags assigned"
                                             font.pixelSize: 11
                                             font.italic: true
                                             color: "#484f58"
-                                            anchors.verticalCenter: parent.verticalCenter
                                         }
                                     }
                                 }
@@ -2391,7 +3023,7 @@ Item {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                visible: (typeof model !== "undefined" && model && model.linked_pr_count) ? (model.linked_pr_count > 0) : false
+                                visible: wiDelegateRoot.wiLinkedPrs && wiDelegateRoot.wiLinkedPrs.length > 0
 
                                 Text {
                                     text: "🔀 Referenced Pull Requests"
@@ -2402,7 +3034,7 @@ Item {
                                 }
 
                                 Repeater {
-                                    model: (typeof model !== "undefined" && model && model.linked_prs) ? model.linked_prs : []
+                                    model: wiDelegateRoot.wiLinkedPrs || []
                                     Rectangle {
                                         Layout.fillWidth: true
                                         height: 20
@@ -2461,7 +3093,7 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 6
-                                visible: (typeof model !== "undefined" && model && model.linked_repo_count) ? (model.linked_repo_count > 0) : false
+                                visible: wiDelegateRoot.wiLinkedRepos && wiDelegateRoot.wiLinkedRepos.length > 0
 
                                 Text {
                                     text: "📦 Repositories:"
@@ -2475,7 +3107,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 4
                                     Repeater {
-                                        model: (typeof model !== "undefined" && model && model.linked_repos) ? model.linked_repos : []
+                                        model: wiDelegateRoot.wiLinkedRepos || []
                                         Rectangle {
                                             implicitHeight: 18
                                             implicitWidth: repoTagText.implicitWidth + 8
@@ -2568,204 +3200,319 @@ Item {
     // ========================
     // Filtering & paging
     // ========================
+    Timer {
+        id: filterDebounceTimer
+        interval: 8
+        repeat: false
+        onTriggered: root._applyFilteredModelInternal()
+    }
+
     function updateFilteredModel() {
+        filterDebounceTimer.restart()
+    }
+
+    function _applyFilteredModelInternal() {
         filteredWorkItems.clear()
-        if (!backend || !backend.workItems) return
-        var list = backend.workItems || []
-        var q = (root.searchQuery || "").toLowerCase()
+        if (!root.cachedAllItems || root.cachedAllItems.length === 0) {
+            root.reloadBackendWorkItems()
+        }
+        var list = root.cachedAllItems || []
+        if (list.length === 0) return
+
+        var q = (root.searchQuery || "").toLowerCase().trim()
         var st = root.filterState
         var ft = root.filterType
+        var fAssignee = (root.filterAssignee || "").toLowerCase()
+        var fIteration = (root.filterIteration || "").toLowerCase()
+        var fUrgency = root.filterUrgency
+        var fPriority = root.filterPriority
+        var fGrouping = root.filterGrouping
+        var fMilestone = (root.filterMilestone || "").toLowerCase().trim()
+        var fTag = (root.filterTag || "").toLowerCase().trim()
+        var fArea = (root.filterAreaPath || "").toLowerCase().trim().replace(/\//g, "\\")
+        var fModDays = root.filterModified !== "ALL" ? parseInt(root.filterModified) : NaN
 
         var matched = []
         for (var i = 0; i < list.length; i++) {
             var item = list[i]
-            var matchesQuery = !q || (item._search_text ? (item._search_text.indexOf(q) !== -1) : (
-                (item.id || 0).toString().indexOf(q) !== -1 ||
-                (item.title || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.assigned_to || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.type || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.state || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.iteration_name || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.iteration_path || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.level1_display || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.level2_display || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.prio_tag || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.tags || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.effective_milestone_name || "").toLowerCase().indexOf(q) !== -1 ||
-                (item.milestone_category || "").toLowerCase().indexOf(q) !== -1
-            ))
 
-            var matchesState = true
-            var stLower = (st || "").toLowerCase()
+            // Fast search query check
+            if (q !== "") {
+                var sText = item._search_text
+                if (sText) {
+                    if (sText.indexOf(q) === -1) continue
+                } else {
+                    var strId = (item.id || 0).toString()
+                    var strTitle = (item.title || "").toLowerCase()
+                    var strAssigned = (item.assigned_to || "").toLowerCase()
+                    var strType = (item.type || "").toLowerCase()
+                    var strState = (item.state || "").toLowerCase()
+                    var strIter = (item.iteration_name || "").toLowerCase()
+                    var strTags = (item.tags || "").toLowerCase()
+                    if (strId.indexOf(q) === -1 &&
+                        strTitle.indexOf(q) === -1 &&
+                        strAssigned.indexOf(q) === -1 &&
+                        strType.indexOf(q) === -1 &&
+                        strState.indexOf(q) === -1 &&
+                        strIter.indexOf(q) === -1 &&
+                        strTags.indexOf(q) === -1) {
+                        continue
+                    }
+                }
+            }
+
+            // State filter
+            var isDel = !!item.deleted
+            var stLower = (item.state || "").toLowerCase()
             if (st === "ALL") {
-                matchesState = !item.deleted
-            } else if (st === "DELETED" || stLower === "deleted") {
-                matchesState = item.deleted
-            } else if (st === "to be investigated" || st === "TO_BE_INVESTIGATED" || stLower === "to be investigated" || stLower === "to_be_investigated") {
-                matchesState = !item.deleted && (item.is_to_be_investigated || (item.category || "").toLowerCase() === "to be investigated")
-            } else if (st === "ignored" || st === "IGNORED" || stLower === "ignored") {
-                matchesState = !item.deleted && (item.is_ignored || (item.category || "").toLowerCase() === "ignored")
+                if (isDel) continue
+            } else if (st === "DELETED" || st === "deleted") {
+                if (!isDel) continue
+            } else if (st === "to be investigated" || st === "TO_BE_INVESTIGATED") {
+                if (isDel || (!item.is_to_be_investigated && (item.category || "").toLowerCase() !== "to be investigated")) continue
+            } else if (st === "ignored" || st === "IGNORED") {
+                if (isDel || (!item.is_ignored && (item.category || "").toLowerCase() !== "ignored")) continue
             } else {
-                matchesState = !item.deleted && ((item.state || "").toLowerCase() === stLower)
+                if (isDel || stLower !== st.toLowerCase()) continue
             }
 
-            var matchesType = (ft === "ALL") || (item.type === ft)
+            // Type filter
+            if (ft !== "ALL" && item.type !== ft) continue
 
-            var matchesModified = true
-            if (root.filterModified !== "ALL") {
-                var days = parseInt(root.filterModified)
-                if (!isNaN(days)) {
-                    matchesModified = root.isWithinDays(item.changed_date, days)
+            // Modified filter
+            if (!isNaN(fModDays)) {
+                if (!root.isWithinDays(item.changed_date, fModDays)) continue
+            }
+
+            // Assignee filter
+            if (root.filterAssignee !== "ALL") {
+                if (root.filterAssignee === "UNASSIGNED") {
+                    if (item.assigned_to && item.assigned_to !== "Unassigned") continue
+                } else {
+                    if ((item.assigned_to || "").toLowerCase() !== fAssignee) continue
                 }
             }
 
-            var matchesAssignee = true
-            if (root.filterAssignee === "ALL") {
-                matchesAssignee = true
-            } else if (root.filterAssignee === "UNASSIGNED") {
-                matchesAssignee = !item.assigned_to || item.assigned_to === "Unassigned"
-            } else {
-                matchesAssignee = (item.assigned_to || "").toLowerCase() === root.filterAssignee.toLowerCase()
+            // Iteration filter
+            if (root.filterIteration !== "ALL") {
+                if (root.filterIteration === "PLANNED") {
+                    if (!item.is_iteration_planned) continue
+                } else if (root.filterIteration === "UNPLANNED") {
+                    if (item.is_iteration_planned) continue
+                } else {
+                    if ((item.iteration_name || "").toLowerCase() !== fIteration) continue
+                }
             }
 
-            var matchesIteration = true
-            if (root.filterIteration === "ALL") {
-                matchesIteration = true
-            } else if (root.filterIteration === "PLANNED") {
-                matchesIteration = !!item.is_iteration_planned
-            } else if (root.filterIteration === "UNPLANNED") {
-                matchesIteration = !item.is_iteration_planned
-            } else {
-                matchesIteration = (item.iteration_name || "").toLowerCase() === root.filterIteration.toLowerCase()
-            }
-
-            var matchesUrgency = true
-            if (root.filterUrgency !== "ALL") {
+            // Urgency / Deadline filter
+            if (fUrgency !== "ALL") {
                 var u_stat = (item.urgency_status || "").toUpperCase()
-                if (root.filterUrgency === "OVERDUE") {
-                    matchesUrgency = u_stat === "OVERDUE"
-                } else if (root.filterUrgency === "DUE_THIS_WEEK") {
-                    matchesUrgency = u_stat === "DUE_THIS_WEEK"
-                } else if (root.filterUrgency === "DUE_NEXT_WEEK") {
-                    matchesUrgency = u_stat === "DUE_NEXT_WEEK"
-                } else if (root.filterUrgency === "FUTURE") {
-                    matchesUrgency = u_stat === "FUTURE"
-                }
+                if (fUrgency === "OVERDUE" && u_stat !== "OVERDUE") continue
+                if (fUrgency === "DUE_THIS_WEEK" && u_stat !== "DUE_THIS_WEEK") continue
+                if (fUrgency === "DUE_NEXT_WEEK" && u_stat !== "DUE_NEXT_WEEK") continue
+                if (fUrgency === "FUTURE" && u_stat !== "FUTURE") continue
             }
 
-            var matchesLevel1 = true
+            // Level 1 filter
             if (root.filterLevel1 !== "ALL") {
                 var f1 = (root.filterLevel1 || "").toUpperCase()
                 if (f1 === "UNGROUPED" || f1 === "[ UNGROUPED ]" || f1.indexOf("WITHOUT") !== -1 || f1.indexOf("NO_PBS") !== -1 || f1.indexOf("NO PBS") !== -1 || f1.indexOf("!PBS") !== -1 || f1 === "NON_PBS") {
-                    matchesLevel1 = !item.level1_pbs || item.level1_pbs === "" || !item.level1_id
+                    if (item.level1_pbs && item.level1_pbs !== "" && item.level1_id) continue
                 } else {
                     var l1Target = root.filterLevel1.toLowerCase()
                     var l1Disp = (item.level1_display || "").toLowerCase()
                     var l1Title = (item.level1_title || "").toLowerCase()
                     var l1Pbs = (item.level1_pbs || "").toLowerCase()
                     var l1Name = (item.level1_name || "").toLowerCase()
-                    matchesLevel1 = (l1Disp.indexOf(l1Target) !== -1 || l1Title.indexOf(l1Target) !== -1 || l1Pbs.indexOf(l1Target) !== -1 || l1Name.indexOf(l1Target) !== -1)
+                    if (l1Disp.indexOf(l1Target) === -1 && l1Title.indexOf(l1Target) === -1 && l1Pbs.indexOf(l1Target) === -1 && l1Name.indexOf(l1Target) === -1) continue
                 }
             }
 
-            var matchesLevel2 = true
+            // Level 2 filter
             if (root.filterLevel2 !== "ALL") {
                 var f2 = (root.filterLevel2 || "").toUpperCase()
                 if (f2 === "UNGROUPED" || f2 === "[ UNGROUPED ]" || f2.indexOf("WITHOUT") !== -1 || f2.indexOf("NO_PBS") !== -1 || f2.indexOf("NO PBS") !== -1 || f2.indexOf("!PBS") !== -1 || f2 === "NON_PBS") {
-                    matchesLevel2 = !item.level2_pbs || item.level2_pbs === "" || !item.level2_id
+                    if (item.level2_pbs && item.level2_pbs !== "" && item.level2_id) continue
                 } else {
                     var l2Target = root.filterLevel2.toLowerCase()
                     var l2Disp = (item.level2_display || "").toLowerCase()
                     var l2Title = (item.level2_title || "").toLowerCase()
                     var l2Pbs = (item.level2_pbs || "").toLowerCase()
                     var l2Name = (item.level2_name || "").toLowerCase()
-                    matchesLevel2 = (l2Disp.indexOf(l2Target) !== -1 || l2Title.indexOf(l2Target) !== -1 || l2Pbs.indexOf(l2Target) !== -1 || l2Name.indexOf(l2Target) !== -1)
+                    if (l2Disp.indexOf(l2Target) === -1 && l2Title.indexOf(l2Target) === -1 && l2Pbs.indexOf(l2Target) === -1 && l2Name.indexOf(l2Target) === -1) continue
                 }
             }
 
-            var matchesPriority = true
-            if (root.filterPriority === "PRIO1") {
-                matchesPriority = !!item.is_prio1
-            } else if (root.filterPriority === "STANDARD") {
-                matchesPriority = !item.is_prio1
+            // Priority filter
+            if (fPriority === "PRIO1") {
+                if (!item.is_prio1) continue
+            } else if (fPriority === "STANDARD") {
+                if (item.is_prio1) continue
             }
 
-            var matchesGrouping = true
-            if (root.filterGrouping === "GROUPED") {
-                matchesGrouping = !!item.is_grouped
-            } else if (root.filterGrouping === "UNGROUPED") {
-                matchesGrouping = !item.is_grouped
+            // Grouping filter
+            if (fGrouping === "GROUPED") {
+                if (!item.is_grouped) continue
+            } else if (fGrouping === "UNGROUPED") {
+                if (item.is_grouped) continue
             }
 
-            var matchesMilestone = true
-            if (root.filterMilestone === "ALL") {
-                matchesMilestone = true
-            } else if (root.filterMilestone === "PLANNED" || root.filterMilestone === "WITH_MILESTONE") {
-                matchesMilestone = !!item.has_milestone
-            } else if (root.filterMilestone === "UNPLANNED" || root.filterMilestone === "NO_MILESTONE") {
-                matchesMilestone = !item.has_milestone
-            } else {
-                var targetM = root.filterMilestone.toLowerCase().trim()
-                var mName = (item.milestone_name || "").toLowerCase()
-                var effMName = (item.effective_milestone_name || "").toLowerCase()
-                var mCat = (item.milestone_category || "").toLowerCase()
-                var targetTags = (item.target_tags || []).map(function(t) { return (t || "").toLowerCase(); })
-                var rawTags = (item.tags || "").toLowerCase()
-                matchesMilestone = (
-                    mName === targetM ||
-                    effMName === targetM ||
-                    mName.indexOf(targetM) !== -1 ||
-                    effMName.indexOf(targetM) !== -1 ||
-                    mCat.indexOf(targetM) !== -1 ||
-                    targetTags.indexOf(targetM) !== -1 ||
-                    targetTags.some(function(t) { return t.indexOf(targetM) !== -1; }) ||
-                    rawTags.indexOf("target:" + targetM) !== -1
-                )
+            // Milestone filter
+            if (root.filterMilestone !== "ALL") {
+                if (root.filterMilestone === "PLANNED" || root.filterMilestone === "WITH_MILESTONE") {
+                    if (!item.has_milestone) continue
+                } else if (root.filterMilestone === "UNPLANNED" || root.filterMilestone === "NO_MILESTONE") {
+                    if (item.has_milestone) continue
+                } else {
+                    var mName = (item.milestone_name || "").toLowerCase()
+                    var effMName = (item.effective_milestone_name || "").toLowerCase()
+                    var mCat = (item.milestone_category || "").toLowerCase()
+                    var targetTags = (item.target_tags || []).map(function(t) { return (t || "").toLowerCase(); })
+                    var rawTags = (item.tags || "").toLowerCase()
+                    var mMatch = (
+                        mName === fMilestone ||
+                        effMName === fMilestone ||
+                        mName.indexOf(fMilestone) !== -1 ||
+                        effMName.indexOf(fMilestone) !== -1 ||
+                        mCat.indexOf(fMilestone) !== -1 ||
+                        targetTags.indexOf(fMilestone) !== -1 ||
+                        targetTags.some(function(t) { return t.indexOf(fMilestone) !== -1; }) ||
+                        rawTags.indexOf("target:" + fMilestone) !== -1
+                    )
+                    if (!mMatch) continue
+                }
             }
 
-            var matchesTag = true
-            if (root.filterTag === "ALL") {
-                matchesTag = true
-            } else if (root.filterTag === "TAGGED") {
-                matchesTag = (item.tag_list && item.tag_list.length > 0) || (item.tags && item.tags.trim() !== "")
-            } else if (root.filterTag === "UNTAGGED") {
-                matchesTag = (!item.tag_list || item.tag_list.length === 0) && (!item.tags || item.tags.trim() === "")
-            } else {
-                var targetTag = root.filterTag.toLowerCase().trim()
-                var rawT = (item.tags || "").toLowerCase()
-                var tList = (item.tag_list || []).map(function(x) { return (x || "").toLowerCase(); })
-                matchesTag = tList.indexOf(targetTag) !== -1 || tList.some(function(t) { return t.indexOf(targetTag) !== -1; }) || rawT.indexOf(targetTag) !== -1
+            // Tag filter
+            if (root.filterTag !== "ALL") {
+                if (root.filterTag === "TAGGED") {
+                    if ((!item.tag_list || item.tag_list.length === 0) && (!item.tags || item.tags.trim() === "")) continue
+                } else if (root.filterTag === "UNTAGGED") {
+                    if ((item.tag_list && item.tag_list.length > 0) || (item.tags && item.tags.trim() !== "")) continue
+                } else {
+                    var rawT = (item.tags || "").toLowerCase()
+                    var tList = (item.tag_list || []).map(function(x) { return (x || "").toLowerCase(); })
+                    var tMatch = tList.indexOf(fTag) !== -1 || tList.some(function(t) { return t.indexOf(fTag) !== -1; }) || rawT.indexOf(fTag) !== -1
+                    if (!tMatch) continue
+                }
             }
 
-            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone && matchesTag) {
-                matched.push(item)
+            // Area Path filter
+            if (fArea !== "" && root.filterAreaPath !== "ALL") {
+                var itemArea = (item.area_path || "").toLowerCase().trim().replace(/\//g, "\\")
+                if (itemArea !== fArea && itemArea.indexOf(fArea) === -1 && fArea.indexOf(itemArea) === -1) continue
+            }
+
+            matched.push(item)
+        }
+
+        var allMap = root.cachedAllMap || {}
+
+        var sortedItems = []
+        if (root.groupByStoryBug) {
+            // Group child tasks under their parent User Story or Bug
+            var matchedMap = {}
+            for (var m = 0; m < matched.length; m++) {
+                matchedMap[matched[m].id] = matched[m]
+            }
+
+            var parentItems = []
+            var parentChildrenMap = {}
+            var standaloneTasks = []
+
+            for (var n = 0; n < matched.length; n++) {
+                var it = matched[n]
+                var itType = (it.type || "").toLowerCase()
+                var isTask = (itType === "task" || it.level === 4)
+
+                if (isTask && it.parent_id && (matchedMap[it.parent_id] || allMap[it.parent_id])) {
+                    var pId = it.parent_id
+                    if (!parentChildrenMap[pId]) {
+                        parentChildrenMap[pId] = []
+                    }
+                    parentChildrenMap[pId].push(it)
+                } else if (isTask) {
+                    standaloneTasks.push(it)
+                } else {
+                    parentItems.push(it)
+                }
+            }
+
+            // Sort parent items using comparator
+            parentItems.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+
+            // Sort standalone tasks
+            standaloneTasks.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+
+            for (var p = 0; p < parentItems.length; p++) {
+                var parentItem = parentItems[p]
+                var children = parentChildrenMap[parentItem.id] || []
+
+                // Sort children by active sort column
+                children.sort(function(a, b) {
+                    return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+                })
+
+                var doneCount = 0
+                for (var c = 0; c < children.length; c++) {
+                    var chState = (children[c].state || "").toLowerCase()
+                    if (chState === "closed" || chState === "done" || chState === "resolved" || chState === "completed") {
+                        doneCount++
+                    }
+                }
+
+                var pClone = Object.assign({}, parentItem)
+                pClone.is_child_task = false
+                pClone.child_task_count = children.length
+                pClone.child_tasks_done = doneCount
+                sortedItems.push(pClone)
+
+                for (var cc = 0; cc < children.length; cc++) {
+                    var cClone = Object.assign({}, children[cc])
+                    cClone.is_child_task = true
+                    cClone.parent_title = parentItem.title || ""
+                    cClone.child_task_count = 0
+                    cClone.child_tasks_done = 0
+                    sortedItems.push(cClone)
+                }
+            }
+
+            // Append standalone tasks
+            for (var stIdx = 0; stIdx < standaloneTasks.length; stIdx++) {
+                var stClone = Object.assign({}, standaloneTasks[stIdx])
+                stClone.is_child_task = false
+                stClone.child_task_count = 0
+                stClone.child_tasks_done = 0
+                sortedItems.push(stClone)
+            }
+        } else {
+            // Flat list sorted by active sort column
+            matched.sort(function(a, b) {
+                return root.compareItems(a, b, root.sortColumn, root.sortDirection)
+            })
+            for (var f = 0; f < matched.length; f++) {
+                var fClone = Object.assign({}, matched[f])
+                fClone.is_child_task = false
+                fClone.child_task_count = 0
+                fClone.child_tasks_done = 0
+                sortedItems.push(fClone)
             }
         }
 
-        // Sort items complying with [<NR>] <Name> rule before all other items
-        matched.sort(function(a, b) {
-            var aGrouped = a.is_grouped ? 1 : 0
-            var bGrouped = b.is_grouped ? 1 : 0
-            if (aGrouped !== bGrouped) return bGrouped - aGrouped
-
-            var aPrio = a.is_prio1 ? 1 : 0
-            var bPrio = b.is_prio1 ? 1 : 0
-            if (aPrio !== bPrio) return bPrio - aPrio
-
-            return (b.id || 0) - (a.id || 0)
-        })
-
-        root.matchedItemsList = matched
-        root.totalMatchingCount = matched.length
-        root.totalPages = Math.ceil(matched.length / root.pageSize) || 1
+        root.matchedItemsList = sortedItems
+        root.totalMatchingCount = sortedItems.length
+        root.totalPages = Math.ceil(sortedItems.length / root.pageSize) || 1
         if (root.currentPage > root.totalPages) root.currentPage = root.totalPages
         if (root.currentPage < 1) root.currentPage = 1
 
         var startIdx = (root.currentPage - 1) * root.pageSize
-        var endIdx = Math.min(startIdx + root.pageSize, matched.length)
+        var endIdx = Math.min(startIdx + root.pageSize, sortedItems.length)
         for (var j = startIdx; j < endIdx; j++) {
-            var wi = matched[j]
+            var wi = sortedItems[j]
             var entry = {
                 id: wi.id || 0,
                 title: wi.title || "",
@@ -2816,6 +3563,10 @@ Item {
                 linked_repo_count: wi.linked_repo_count || 0,
                 linked_prs: wi.linked_prs || [],
                 linked_repos: wi.linked_repos || [],
+                is_child_task: !!wi.is_child_task,
+                child_task_count: wi.child_task_count || 0,
+                child_tasks_done: wi.child_tasks_done || 0,
+                parent_title: wi.parent_title || "",
             }
             filteredWorkItems.append(entry)
         }
@@ -2824,12 +3575,14 @@ Item {
     Connections {
         target: backend
         function onWorkItemsChanged() {
+            root.reloadBackendWorkItems()
             root.refreshTypesList()
             root.refreshStatesList()
             root.refreshAssigneesList()
             root.refreshIterationsList()
             root.refreshHierarchyLists()
             root.refreshMilestonesList()
+            root.refreshAreaPathsList()
             root.refreshTagsList()
             root.updateFilteredModel()
         }
@@ -2855,12 +3608,14 @@ Item {
     onFilterPriorityChanged:  updateFilteredModel()
     onFilterGroupingChanged:  updateFilteredModel()
     onFilterMilestoneChanged:    updateFilteredModel()
+    onFilterAreaPathChanged:     updateFilteredModel()
     onFilterTagCategoryChanged:  updateFilteredModel()
     onFilterTagChanged:          updateFilteredModel()
 
     DeadlineEditorDialog {
         id: deadlineDialog
         onDeadlineUpdated: function(id, newDate, result) {
+            root.reloadBackendWorkItems()
             root.updateFilteredModel()
         }
     }
@@ -2868,18 +3623,21 @@ Item {
     IterationPickerModal {
         id: iterationModal
         onIterationUpdated: function(id, newIteration, result) {
+            root.reloadBackendWorkItems()
             root.updateFilteredModel()
         }
     }
 
     Component.onCompleted: {
+        reloadBackendWorkItems()
         refreshTypesList()
         refreshStatesList()
         refreshAssigneesList()
         refreshIterationsList()
         refreshHierarchyLists()
         refreshMilestonesList()
+        refreshAreaPathsList()
         refreshTagsList()
-        updateFilteredModel()
+        _applyFilteredModelInternal()
     }
 }

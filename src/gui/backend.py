@@ -19,190 +19,27 @@ if py_dir not in sys.path:
 
 import utils
 import devops_helper
-from azure import AzureDevOpsCache
+from azure import AzureDevOpsCache, is_work_item_in_area_path
 from gui.workers import TaskWorker
 
 logger = logging.getLogger("gui.backend")
 
 
-class QtLogEmitter(QObject):
-    """Bridge for cross-thread signal emission of logging records to Qt main thread."""
-    recordReady = Signal(str, str, str, str)  # timestamp, level, logger_name, message
+from gui.services.logging_service import QtLogEmitter, QtLogHandler, ConsoleOutputTee
+from gui.services.settings_service import (
+    USER_SETTINGS_PATH,
+    get_user_settings_path,
+    load_user_settings,
+    save_user_settings,
+    DEFAULT_TAG_CATEGORIES,
+    classify_tag,
+    scale_for_font_mode,
+)
 
-
-class QtLogHandler(logging.Handler):
-    """
-    Custom logging handler that intercepts all Python logger messages
-    (INFO, WARNING, ERROR, CRITICAL) and forwards them safely to the Qt event loop.
-    """
-    def __init__(self, emitter):
-        super().__init__()
-        self.emitter = emitter
-        self._in_emit = False
-
-    def emit(self, record):
-        if self._in_emit:
-            return
-        if record.name.startswith("gui.qt_log"):
-            return
-        try:
-            from shiboken6 import isValid
-            if not isValid(self.emitter):
-                return
-        except Exception:
-            pass
-        try:
-            msg = self.format(record)
-            ts = datetime.now().strftime("%H:%M:%S")
-            lvl = record.levelname.upper()
-            if lvl in ("WARN", "WARNING"):
-                lvl = "WARNING"
-            elif lvl in ("ERROR", "CRITICAL"):
-                lvl = "ERROR"
-            else:
-                lvl = "INFO"
-            if self.emitter is not None:
-                self.emitter.recordReady.emit(ts, lvl, record.name, msg)
-        except Exception:
-            pass
-        finally:
-            self._in_emit = False
-
-
-class ConsoleOutputTee:
-    """
-    Captures console stdout prints and feeds them to the GUI Sync Log as INFO records,
-    while preserving standard console printing in the terminal.
-    """
-    def __init__(self, original_stream, callback):
-        self.original_stream = original_stream
-        self.callback = callback
-        self._buffer = ""
-
-    def write(self, text):
-        if self.original_stream:
-            try:
-                self.original_stream.write(text)
-            except Exception:
-                pass
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            line = line.strip("\r\n")
-            if line:
-                try:
-                    self.callback(line)
-                except Exception:
-                    pass
-
-    def flush(self):
-        if self.original_stream:
-            try:
-                self.original_stream.flush()
-            except Exception:
-                pass
-        if self._buffer.strip():
-            try:
-                self.callback(self._buffer.strip())
-            except Exception:
-                pass
-            self._buffer = ""
-
-
-def _get_user_settings_path():
-    if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(sys.executable)
-        return os.path.join(exe_dir, "config", "user_settings.yaml")
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.yaml"
-    )
-
-
-USER_SETTINGS_PATH = _get_user_settings_path()
-
-
-def _load_user_settings():
-    """Loads user configuration from YAML (with fallback to legacy JSON or .yml)."""
-    candidates = [
-        USER_SETTINGS_PATH,
-        os.path.join(os.path.dirname(USER_SETTINGS_PATH), "user_settings.yml"),
-        os.path.join(os.path.dirname(USER_SETTINGS_PATH), "user_settings.json"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.yml"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "user_settings.json"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "user_settings.yaml"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "user_settings.json"),
-    ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.yaml"))
-        candidates.append(os.path.join(sys._MEIPASS, "config", "user_settings.json"))
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            try:
-                if candidate.endswith(".json"):
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                else:
-                    import yaml
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = yaml.safe_load(f)
-                if isinstance(data, dict):
-                    return data
-            except Exception as e:
-                logger.warning(f"Failed to read user settings from {candidate}: {e}")
-    return {}
-
-
-def _save_user_settings(settings):
-    """Saves user configuration dictionary to top-level config/user_settings.yaml."""
-    try:
-        import yaml
-        os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)
-        with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as f:
-            yaml.safe_dump(settings, f, default_flow_style=False, sort_keys=False)
-    except Exception as e:
-        logger.error(f"Failed to save user settings to {USER_SETTINGS_PATH}: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Tag-category helpers (module level so they can be tested independently)
-# ---------------------------------------------------------------------------
-
-#: Default tag-category rules shipped with the application.
-#: Users can override / extend these in Settings → Tag Categories.
-DEFAULT_TAG_CATEGORIES = [
-    {"pattern": "Target:*",    "category": "Milestone"},
-    {"pattern": "Subsystem:*", "category": "PBS"},
-    {"pattern": "v*.*.*",      "category": "Software Revision"},
-    {"pattern": "OI",          "category": "Open Item"},
-    {"pattern": "MP",          "category": "Merkpunkt"},
-]
-
-
-def classify_tag(tag, tag_categories):
-    """
-    Returns the category name for *tag* by testing it against the ordered
-    *tag_categories* list (each entry is ``{"pattern": str, "category": str}``).
-
-    Matching is done with :func:`fnmatch.fnmatch` which supports ``*`` and ``?``
-    wildcards.  The first matching rule wins.  If no rule matches, ``"Other"``
-    is returned.
-
-    Args:
-        tag (str): The raw tag string from a work item.
-        tag_categories (list): Ordered list of ``{pattern, category}`` dicts.
-
-    Returns:
-        str: Category name, or ``"Other"`` when no rule matches.
-    """
-    import fnmatch
-    for entry in (tag_categories or []):
-        pattern = (entry.get("pattern") or "").strip()
-        if not pattern:
-            continue
-        if fnmatch.fnmatch(tag, pattern):
-            return (entry.get("category") or "Other").strip() or "Other"
-    return "Other"
-
+# Compatibility aliases
+_get_user_settings_path = get_user_settings_path
+_load_user_settings = load_user_settings
+_save_user_settings = save_user_settings
 
 DEFAULT_SPRINT_URL_TEMPLATE = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
 
@@ -242,6 +79,14 @@ class DevOpsBackend(QObject):
     connectionLost = Signal(str)            # error description on repository server disconnect
     tagCreated = Signal(str, str, bool, str) # repo_name, tag_name, success, message
     reportsDirChanged = Signal()
+    teamMotivationChanged = Signal()
+    teamMotivationTimeframeChanged = Signal()
+    teamMotivationScoreConfigChanged = Signal()
+    areaPathSettingsChanged = Signal()
+    userAliasesChanged = Signal()
+    userProfilesChanged = Signal()
+    systemUsersChanged = Signal()
+    rightSidebarWidthChanged = Signal(int)
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -266,6 +111,7 @@ class DevOpsBackend(QObject):
         self._font_size_mode = user_cfg.get("font_size_mode", "medium")
         self._ui_scale = float(user_cfg.get("ui_scale", self._scale_for_font_mode(self._font_size_mode)))
         self._sidebar_collapsed = bool(user_cfg.get("sidebar_collapsed", False))
+        self._right_sidebar_width = int(user_cfg.get("right_sidebar_width", 440))
         self._bug_hierarchy_mode = user_cfg.get("bug_behavior", "like_user_story")
         self._tfs_team_name = user_cfg.get("tfs_team_name", "")
         self._sprint_url_template = user_cfg.get("sprint_url_template", "")
@@ -342,12 +188,42 @@ class DevOpsBackend(QObject):
         self._storage_data = {}
         self._last_week_activity = {}
         self._current_week_planned = {}
+        self._team_motivation_data = {}
+        self._team_motivation_timeframe = "current_week"
+        self._team_motivation_custom_sprint = ""
+        import team_motivation
+        self._team_motivation_score_config = user_cfg.get("team_motivation_score_config")
+        if not self._team_motivation_score_config or not isinstance(self._team_motivation_score_config, dict):
+            self._team_motivation_score_config = team_motivation.get_default_score_config()
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
-        self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
+        self._reports_dir = user_cfg.get("reports_dir", "")
         if self._reports_dir:
             devops_helper.BASE_FOLDER = self._reports_dir
         self._info_handler = None
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
+
+        # Area Path settings & Work item filtering
+        self._area_path_filter_enabled = False
+        self._default_area_path = ""
+        self._area_path_rules = []
+        self._all_discovered_area_paths = []
+        self._work_items_filtered_by_area_path_count = 0
+        self._work_items_total_before_area_filter = 0
+
+        # Work items metadata caches (pre-computed in Python for instant UI loading)
+        self._cached_types = None
+        self._cached_states = None
+        self._cached_assignees = None
+        self._cached_iterations = None
+        self._cached_l1 = None
+        self._cached_l2 = None
+        self._cached_area_paths = None
+        self._cached_tags = None
+        self._cached_target_tags = None
+        self._cached_tag_counts = None
+        self._cached_overdue_count = 0
+        self._cached_tagged_count = 0
+        self._cached_unique_tags_count = 0
 
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
@@ -388,6 +264,18 @@ class DevOpsBackend(QObject):
             logger.error(f"Error initializing SQLite cache: {e}")
             self._db_path = ""
             self._cache_db = None
+
+    def set_cache_db(self, cache_db):
+        """Sets the cache database instance (used for dependency injection and testing)."""
+        self._cache_db = cache_db
+        if cache_db:
+            self._load_project_config_from_db(cache_db)
+
+    def _load_all_data_sync(self):
+        """Synchronously computes and loads all cache data on the current thread."""
+        if self._cache_db:
+            data = self._compute_all_cache_data()
+            self._apply_computed_cache_data(data)
 
     def _load_project_config_from_db(self, cache_db):
         """Loads and applies configuration keys stored in the database's project_config table."""
@@ -453,6 +341,26 @@ class DevOpsBackend(QObject):
                     pass
             if "FILTER_VERSION_TAGS_FORMAT" in db_cfg:
                 devops_helper.FILTER_VERSION_TAGS_FORMAT = str(db_cfg["FILTER_VERSION_TAGS_FORMAT"]).lower() == "true"
+            if "MOTIVATION_SCORE_CONFIG" in db_cfg:
+                try:
+                    sc_db = json.loads(db_cfg["MOTIVATION_SCORE_CONFIG"]) if isinstance(db_cfg["MOTIVATION_SCORE_CONFIG"], str) else db_cfg["MOTIVATION_SCORE_CONFIG"]
+                    if isinstance(sc_db, dict):
+                        self._team_motivation_score_config = sc_db
+                        self.teamMotivationScoreConfigChanged.emit()
+                except Exception:
+                    pass
+            
+            # Load Area Path settings
+            try:
+                area_cfg = cache_db.get_area_path_settings()
+                self._area_path_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
+                self._default_area_path = area_cfg.get("default_area", "")
+                self._area_path_rules = area_cfg.get("rules", [])
+                self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+                self.areaPathSettingsChanged.emit()
+            except Exception as ap_err:
+                logger.debug("Could not load area path settings in _load_project_config_from_db: %s", ap_err)
+
             self.changeFiltersChanged.emit()
         except Exception as e:
             logger.warning(f"Error reading project config from database: {e}")
@@ -559,6 +467,362 @@ class DevOpsBackend(QObject):
             self.sprintUrlTemplateChanged.emit()
             self.settingsChanged.emit()
 
+    # ==========================================
+    # Area Path Settings & Work Item Filter
+    # ==========================================
+    @Property(bool, notify=areaPathSettingsChanged)
+    def areaPathFilterEnabled(self):
+        """Returns True if work items are automatically filtered by project Area Path settings."""
+        return self._area_path_filter_enabled
+
+    @Property(str, notify=areaPathSettingsChanged)
+    def defaultAreaPath(self):
+        """Returns the default project or team Area Path."""
+        return self._default_area_path or ""
+
+    @Slot(str, result=bool)
+    def setDefaultAreaPath(self, path):
+        """Sets or updates the default Area Path."""
+        self._default_area_path = (path or "").strip().replace("/", "\\")
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(default_area=self._default_area_path)
+            except Exception as e:
+                logger.error("Error setting default area path: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(result=bool)
+    def deleteDefaultAreaPath(self):
+        """Deletes/clears the default Area Path, allowing filtering solely on configured sub-areas."""
+        old_def = self._default_area_path
+        self._default_area_path = ""
+        # Also remove the default area rule from rules list if present
+        if old_def:
+            clean_def = old_def.strip().replace("/", "\\").lower()
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or "").strip().replace("/", "\\").lower() != clean_def
+            ]
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(
+                    default_area="",
+                    rules=self._area_path_rules
+                )
+            except Exception as e:
+                logger.error("Error deleting default area path: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        self.logMessage.emit("🗑️ Deleted Default Area Path. Filter now applies strictly to configured Sub-Areas.")
+        return True
+
+    @Slot(result=bool)
+    def delete_default_area_path(self):
+        """Alias for deleteDefaultAreaPath."""
+        return self.deleteDefaultAreaPath()
+
+    @Slot(result=bool)
+    def clear_default_area_path(self):
+        """Alias for deleteDefaultAreaPath."""
+        return self.deleteDefaultAreaPath()
+
+    @Property('QVariantList', notify=areaPathSettingsChanged)
+    def areaPathRules(self):
+        """Returns the list of active Area Path rules: [{'path': str, 'include_children': bool}]."""
+        return self._area_path_rules
+
+    @Property('QVariantList', notify=areaPathSettingsChanged)
+    def allDiscoveredAreaPaths(self):
+        """Returns all discovered Area Paths in the project."""
+        return self._all_discovered_area_paths
+
+    @Property(int, notify=statsChanged)
+    def workItemsFilteredByAreaPathCount(self):
+        """Returns count of work items excluded because they were outside active Area Path rules."""
+        return self._work_items_filtered_by_area_path_count
+
+    @Property(int, notify=statsChanged)
+    def workItemsTotalBeforeAreaFilterCount(self):
+        """Returns total count of work items before Area Path filter was applied."""
+        return self._work_items_total_before_area_filter
+
+    @Slot(bool)
+    def setAreaPathFilterEnabled(self, enabled):
+        """Toggles the Area Path filter on or off."""
+        self._area_path_filter_enabled = bool(enabled)
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(enabled=self._area_path_filter_enabled)
+            except Exception as e:
+                logger.error("Error updating area_path_filter_enabled in DB: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+
+    @Slot(str, bool, result=bool)
+    def addAreaPathRule(self, path, include_children=True):
+        """Adds or updates an Area Path rule."""
+        clean_path = (path or "").strip().replace("/", "\\")
+        if not clean_path:
+            return False
+        for r in self._area_path_rules:
+            if str(r.get("path") or r.get("value") or "").strip().lower() == clean_path.lower():
+                r["include_children"] = bool(include_children)
+                r["includeChildren"] = bool(include_children)
+                r["path"] = clean_path
+                r["value"] = clean_path
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+        self._area_path_rules.append({
+            "path": clean_path,
+            "value": clean_path,
+            "include_children": bool(include_children),
+            "includeChildren": bool(include_children)
+        })
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+            except Exception as e:
+                logger.error("Error saving area path rules: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(int, result=bool)
+    @Slot(str, result=bool)
+    def removeAreaPathRule(self, index_or_path):
+        """Removes an Area Path rule by index or path string."""
+        if isinstance(index_or_path, int):
+            if 0 <= index_or_path < len(self._area_path_rules):
+                self._area_path_rules.pop(index_or_path)
+                if self._cache_db:
+                    try:
+                        self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                    except Exception as e:
+                        logger.error("Error saving area path rules after remove: %s", e)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+            return False
+        else:
+            clean = str(index_or_path or "").strip().replace("/", "\\").lower()
+            orig_len = len(self._area_path_rules)
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or (r if isinstance(r, str) else "")).strip().replace("/", "\\").lower() != clean
+            ]
+            if len(self._area_path_rules) != orig_len:
+                if self._cache_db:
+                    try:
+                        self._cache_db.set_area_path_settings(rules=self._area_path_rules)
+                    except Exception as e:
+                        logger.error("Error saving area path rules after remove: %s", e)
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                return True
+            return False
+
+    @Slot(str, bool, result=bool)
+    def saveAreaPathRules(self, rules_json, enabled=True):
+        """Saves full Area Path filter rules from JSON string."""
+        try:
+            parsed = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+            norm_rules = []
+            if isinstance(parsed, list):
+                for r in parsed:
+                    if isinstance(r, dict):
+                        val = str(r.get("path") or r.get("value") or "").strip().replace("/", "\\")
+                        if val:
+                            norm_rules.append({
+                                "path": val,
+                                "value": val,
+                                "include_children": bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True)),
+                                "includeChildren": bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                            })
+                    elif isinstance(r, str) and r.strip():
+                        val = r.strip().replace("/", "\\")
+                        norm_rules.append({
+                            "path": val,
+                            "value": val,
+                            "include_children": True,
+                            "includeChildren": True
+                        })
+            self._area_path_rules = norm_rules
+            self._area_path_filter_enabled = bool(enabled)
+            if self._cache_db:
+                self._cache_db.set_area_path_settings(
+                    enabled=self._area_path_filter_enabled,
+                    rules=self._area_path_rules
+                )
+            self.areaPathSettingsChanged.emit()
+            self.refresh_all_data()
+            return True
+        except Exception as e:
+            logger.error("Error saving area path rules: %s", e)
+            return False
+
+    @Slot(result='QVariantMap')
+    def fetch_area_paths_from_tfs(self):
+        """Queries TFS/Azure DevOps live for project area path settings and classification nodes."""
+        try:
+            proj = getattr(devops_helper, "AZURE_PROJECT_ID", "") or self.projectName
+            if not proj or proj == "N/A":
+                self.logMessage.emit("⚠️ Cannot fetch Area Paths: No active project configured.")
+                return {"success": False, "error": "No project configured"}
+
+            url = devops_helper.AZURE_BASE_URL or ""
+            pat = devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+            if not url or not pat:
+                self.logMessage.emit("⚠️ Cannot fetch Area Paths: Missing TFS URL or Token.")
+                return {"success": False, "error": "Missing TFS URL or Token"}
+
+            from azure.azure_info_handler import AzureInfoHandler
+            handler = AzureInfoHandler(url, pat)
+            team = self._tfs_team_name
+            self.logMessage.emit(f"🌿 Fetching Area Path settings from TFS for project '{proj}'...")
+            area_settings = handler.get_project_area_path_settings(project_id=proj, team_name=team)
+            if area_settings:
+                had_perm_err = bool(area_settings.get("had_permission_error", False))
+                disc = area_settings.get("all_areas", [])
+                rules = area_settings.get("rules", [])
+
+                # If we retrieved new areas or had no prior rules, adopt the retrieved settings
+                if rules and (len(rules) > 1 or rules[0].get("path") != proj or not self._area_path_rules):
+                    self._default_area_path = area_settings.get("default_area", "")
+                    self._area_path_rules = rules
+                    self._all_discovered_area_paths = disc
+                elif disc and len(disc) > 1:
+                    self._all_discovered_area_paths = disc
+
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(
+                        enabled=self._area_path_filter_enabled,
+                        default_area=self._default_area_path,
+                        rules=self._area_path_rules,
+                        all_areas=self._all_discovered_area_paths
+                    )
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+
+                if had_perm_err:
+                    perm_msg = "ℹ️ Note: PAT lacks full permissions for project classification nodes / teamsettings (HTTP 401/403). Fallback Area Path was set; you can configure custom Area Path rules manually below."
+                    self.logMessage.emit(perm_msg)
+                    return {
+                        "success": True,
+                        "is_permission_warning": True,
+                        "message": perm_msg,
+                        "default_area": self._default_area_path,
+                        "rules_count": len(self._area_path_rules)
+                    }
+
+                msg = f"✓ Discovered {len(self._all_discovered_area_paths)} Area Path(s) with {len(self._area_path_rules)} active rule(s)."
+                self.logMessage.emit(msg)
+                return {"success": True, "message": msg, "default_area": self._default_area_path, "rules_count": len(self._area_path_rules)}
+            else:
+                return {"success": False, "error": "No Area Path settings returned"}
+        except Exception as e:
+            err_str = str(e)
+            is_unauth = "401" in err_str or "403" in err_str or "authentication" in err_str.lower() or "unauthorized" in err_str.lower() or "forbidden" in err_str.lower() or "permission" in err_str.lower()
+            logger.warning("Error fetching Area Paths from TFS: %s", e)
+            if is_unauth:
+                friendly_msg = (
+                    "Your Personal Access Token (PAT) lacks permissions to read project team settings or classification nodes (HTTP 401/403). "
+                    "You can still define and manage your Area Path filter rules manually below, or upgrade your PAT with 'Project and Team (Read)' permissions."
+                )
+                self.logMessage.emit(f"⚠️ {friendly_msg}")
+                return {"success": False, "is_permission_error": True, "error": friendly_msg}
+            self.logMessage.emit(f"⚠️ Error fetching Area Paths: {e}")
+            return {"success": False, "error": str(e)}
+
+    @Slot(result=bool)
+    def reset_area_path_settings(self):
+        """Resets Area Path filter settings to project root defaults."""
+        proj = self.projectName if self.projectName != "N/A" else "Project"
+        self._default_area_path = proj
+        self._area_path_rules = [{"path": proj, "value": proj, "include_children": True, "includeChildren": True}]
+        self._area_path_filter_enabled = False
+        if self._cache_db:
+            self._cache_db.set_area_path_settings(
+                enabled=False,
+                default_area=proj,
+                rules=self._area_path_rules
+            )
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(str, result=bool)
+    def delete_area_path_rule(self, area_path):
+        """Deletes a specific Area Path rule by its path string."""
+        try:
+            target = (area_path or "").strip().replace("/", "\\").lower()
+            if not target:
+                return False
+            initial_count = len(self._area_path_rules)
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or "").strip().replace("/", "\\").lower() != target
+            ]
+            if len(self._area_path_rules) != initial_count:
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(
+                        enabled=self._area_path_filter_enabled,
+                        rules=self._area_path_rules
+                    )
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                self.logMessage.emit(f"🗑️ Deleted Area Path filter rule: {area_path}")
+                return True
+            return False
+        except Exception as e:
+            logger.error("Error deleting area path rule: %s", e)
+            return False
+
+    @Slot(result=bool)
+    def clear_area_path_rules(self):
+        """Clears all configured Area Path filter rules."""
+        try:
+            self._area_path_rules = []
+            if self._cache_db:
+                self._cache_db.set_area_path_settings(
+                    enabled=self._area_path_filter_enabled,
+                    rules=[]
+                )
+            self.areaPathSettingsChanged.emit()
+            self.refresh_all_data()
+            self.logMessage.emit("🗑️ Cleared all Area Path filter rules.")
+            return True
+        except Exception as e:
+            logger.error("Error clearing area path rules: %s", e)
+            return False
+
+    @Slot(str, result='QVariantMap')
+    def test_area_path_match(self, test_path):
+        """Tests if a sample Area Path string matches the active Area Path filter rules."""
+        clean = (test_path or "").strip().replace("/", "\\")
+        if not clean:
+            return {"matched": False, "rule": "", "matching_rule": None}
+        matched = is_work_item_in_area_path(clean, self._area_path_rules)
+        matching_rule = ""
+        matching_rule_obj = None
+        if matched and self._area_path_rules:
+            for r in self._area_path_rules:
+                rp = str(r.get("path") or r.get("value") or (r if isinstance(r, str) else "")).strip().replace("/", "\\")
+                inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True)) if isinstance(r, dict) else True
+                if clean.lower() == rp.lower():
+                    matching_rule = f"{rp} (exact match)"
+                    matching_rule_obj = r if isinstance(r, dict) else {"path": rp, "value": rp, "include_children": inc, "includeChildren": inc}
+                    break
+                elif inc and clean.lower().startswith(rp.lower() + "\\"):
+                    matching_rule = f"{rp} (sub-area match)"
+                    matching_rule_obj = r if isinstance(r, dict) else {"path": rp, "value": rp, "include_children": inc, "includeChildren": inc}
+                    break
+        return {"matched": matched, "rule": matching_rule, "matching_rule": matching_rule_obj}
+
     @Property(str, notify=settingsChanged)
     def tfsPat(self):
         return devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
@@ -619,6 +883,28 @@ class DevOpsBackend(QObject):
     @Slot()
     def toggleSidebar(self):
         self.setSidebarCollapsed(not self._sidebar_collapsed)
+
+    @Property(int, notify=rightSidebarWidthChanged)
+    def rightSidebarWidth(self):
+        return self._right_sidebar_width
+
+    @Slot(int)
+    def setRightSidebarWidth(self, width):
+        try:
+            val = max(280, min(1400, int(width)))
+        except (ValueError, TypeError):
+            val = 440
+        if self._right_sidebar_width != val:
+            self._right_sidebar_width = val
+            cfg = _load_user_settings()
+            cfg["right_sidebar_width"] = self._right_sidebar_width
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("RIGHT_SIDEBAR_WIDTH", str(self._right_sidebar_width))
+                except Exception:
+                    pass
+            self.rightSidebarWidthChanged.emit(self._right_sidebar_width)
 
     @Property(bool, notify=autoSyncChanged)
     def autoSyncEnabled(self):
@@ -808,9 +1094,51 @@ class DevOpsBackend(QObject):
     def currentWeekPlanned(self):
         return self._current_week_planned
 
+    @Property(dict, notify=teamMotivationChanged)
+    def teamMotivationData(self):
+        return self._team_motivation_data
+
+    @Property(str, notify=teamMotivationTimeframeChanged)
+    def teamMotivationTimeframe(self):
+        return self._team_motivation_timeframe
+
+    @Property(str, notify=teamMotivationTimeframeChanged)
+    def teamMotivationCustomSprint(self):
+        return self._team_motivation_custom_sprint
+
+    @Property(dict, notify=teamMotivationScoreConfigChanged)
+    def teamMotivationScoreConfig(self):
+        return self._team_motivation_score_config or {}
+
+    @Property(dict, notify=teamMotivationScoreConfigChanged)
+    def teamMotivationScorePresets(self):
+        import team_motivation
+        return team_motivation.get_score_presets()
+
     @Property(list, notify=repositoriesChanged)
     def repositories(self):
         return self._repositories
+
+    @Property(int, notify=workItemsChanged)
+    def overdueWorkItemsCount(self):
+        """Returns the pre-computed count of non-deleted overdue work items."""
+        if self._cached_overdue_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_overdue_count or 0
+
+    @Property(int, notify=workItemsChanged)
+    def taggedWorkItemsCount(self):
+        """Returns the pre-computed count of non-deleted tagged work items."""
+        if self._cached_tagged_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tagged_count or 0
+
+    @Property(int, notify=workItemsChanged)
+    def uniqueWorkItemTagsCount(self):
+        """Returns the pre-computed count of unique tags across work items."""
+        if self._cached_unique_tags_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_unique_tags_count or 0
 
     @Property(list, notify=workItemsChanged)
     def workItems(self):
@@ -819,108 +1147,189 @@ class DevOpsBackend(QObject):
     @Property(list, notify=workItemsChanged)
     def workItemTypes(self):
         """Returns the sorted unique list of work item types currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            t = wi.get("type") or ""
-            if t:
-                seen.add(t)
-        return sorted(seen)
+        if self._cached_types is None:
+            self._invalidate_work_items_cache()
+        return self._cached_types or []
 
     @Property(list, notify=workItemsChanged)
     def workItemStates(self):
         """Returns the sorted unique list of work item states currently in cache."""
-        preferred_order = ["Active", "In Progress", "In Planning", "Proposed", "New", "Resolved", "Closed", "Done"]
-        seen = set()
-        for wi in self._work_items:
-            s = wi.get("state") or ""
-            if s and s != "Deleted":
-                seen.add(s)
-        ordered = [s for s in preferred_order if s in seen]
-        others = sorted([s for s in seen if s not in preferred_order])
-        return ordered + others
+        if self._cached_states is None:
+            self._invalidate_work_items_cache()
+        return self._cached_states or []
 
     @Property(list, notify=workItemsChanged)
     def workItemAssignees(self):
         """Returns the sorted unique list of assignees currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            a = wi.get("assigned_to") or ""
-            if a and a != "Unassigned":
-                seen.add(a)
-        return sorted(seen)
+        if self._cached_assignees is None:
+            self._invalidate_work_items_cache()
+        return self._cached_assignees or []
 
     @Property(list, notify=workItemsChanged)
     def workItemIterations(self):
         """Returns the sorted unique list of planned iteration names currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            if wi.get("is_iteration_planned") and wi.get("iteration_name"):
-                seen.add(wi.get("iteration_name"))
-        return sorted(seen)
+        if self._cached_iterations is None:
+            self._invalidate_work_items_cache()
+        return self._cached_iterations or []
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel1List(self):
         """Returns the sorted unique list of Level 1 (Epic / Sub-System) display names, with [<NR>] <Name> complying items first."""
-        seen = set()
-        for wi in self._work_items:
-            disp = wi.get("level1_display") or ""
-            if disp and disp != "Ungrouped Sub-System":
-                seen.add(disp)
-        
-        def sort_key(s):
-            tag, name, sk = utils.parse_pbs_tag(str(s).strip())
-            if tag:
-                return (0, sk, name.lower())
-            return (1, (0,), str(s).lower())
-
-        return sorted(seen, key=sort_key)
+        if self._cached_l1 is None:
+            self._invalidate_work_items_cache()
+        return self._cached_l1 or []
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel2List(self):
         """Returns the sorted unique list of Level 2 (Feature / Major Component) display names, with [<NR>] <Name> complying items first."""
-        seen = set()
+        if self._cached_l2 is None:
+            self._invalidate_work_items_cache()
+        return self._cached_l2 or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemAreaPaths(self):
+        """Returns the sorted unique list of Area Paths currently present on work items in cache."""
+        if self._cached_area_paths is None:
+            self._invalidate_work_items_cache()
+        return self._cached_area_paths or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemTags(self):
+        """Returns the sorted unique list of all tags currently present on work items in cache."""
+        if self._cached_tags is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tags or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemTargetTags(self):
+        """Returns the sorted unique list of Target:<Name> milestone tags present on work items."""
+        if self._cached_target_tags is None:
+            self._invalidate_work_items_cache()
+        return self._cached_target_tags or []
+
+    @Property(dict, notify=workItemsChanged)
+    def workItemTagCounts(self):
+        """Returns a dict mapping tag name -> count of work items having that tag."""
+        if self._cached_tag_counts is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tag_counts or {}
+
+    def _invalidate_work_items_cache(self):
+        """Pre-computes and caches all unique filter lists, search indices, and count summaries in a single fast pass."""
+        types_seen = set()
+        states_seen = set()
+        assignees_seen = set()
+        iterations_seen = set()
+        l1_seen = set()
+        l2_seen = set()
+        area_seen = set()
+        tags_seen = set()
+        target_tags_seen = set()
+        tag_counts = {}
+        overdue_count = 0
+        tagged_count = 0
+
         for wi in self._work_items:
-            disp = wi.get("level2_display") or ""
-            if disp and disp != "Ungrouped Component":
-                seen.add(disp)
-        
-        def sort_key(s):
+            is_del = bool(wi.get("deleted"))
+
+            # Types
+            t = wi.get("type") or ""
+            if t:
+                types_seen.add(t)
+
+            # States
+            s = wi.get("state") or ""
+            if s and s != "Deleted":
+                states_seen.add(s)
+
+            # Assignees
+            a = wi.get("assigned_to") or ""
+            if a and a != "Unassigned":
+                assignees_seen.add(a)
+
+            # Iterations
+            if wi.get("is_iteration_planned") and wi.get("iteration_name"):
+                iterations_seen.add(wi.get("iteration_name"))
+
+            # Level 1 / Level 2
+            l1 = wi.get("level1_display") or ""
+            if l1 and l1 != "Ungrouped Sub-System":
+                l1_seen.add(l1)
+            l2 = wi.get("level2_display") or ""
+            if l2 and l2 != "Ungrouped Component":
+                l2_seen.add(l2)
+
+            # Area Paths
+            ap = (wi.get("area_path") or "").strip()
+            if ap:
+                area_seen.add(ap)
+
+            # Tags
+            t_list = wi.get("tag_list") or []
+            if not is_del and (t_list or (wi.get("tags") and str(wi.get("tags")).strip())):
+                tagged_count += 1
+
+            for tag in t_list:
+                if tag:
+                    tags_seen.add(tag)
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+            for tt in wi.get("target_tags") or []:
+                if tt:
+                    target_tags_seen.add(tt)
+
+            # Overdue
+            if not is_del and wi.get("urgency_status") == "overdue":
+                overdue_count += 1
+
+            # Pre-compute _search_text on each item if missing or empty
+            if "_search_text" not in wi:
+                tokens = [
+                    str(wi.get("id") or ""),
+                    wi.get("title") or "",
+                    wi.get("assigned_to") or "",
+                    wi.get("type") or "",
+                    wi.get("state") or "",
+                    wi.get("iteration_name") or "",
+                    wi.get("iteration_path") or "",
+                    wi.get("level1_display") or "",
+                    wi.get("level2_display") or "",
+                    wi.get("prio_tag") or "",
+                    wi.get("tags") or "",
+                    wi.get("milestone_name") or "",
+                    wi.get("effective_milestone_name") or "",
+                    wi.get("milestone_category") or "",
+                    wi.get("area_path") or "",
+                ]
+                wi["_search_text"] = " ".join(t.lower() for t in tokens if t)
+
+        for r in getattr(self, "_area_path_rules", []):
+            p = str(r.get("path") or r.get("value") or "").strip()
+            if p:
+                area_seen.add(p)
+
+        preferred_order = ["Active", "In Progress", "In Planning", "Proposed", "New", "Resolved", "Closed", "Done"]
+        ordered_states = [s for s in preferred_order if s in states_seen] + sorted([s for s in states_seen if s not in preferred_order])
+
+        def sort_pbs_key(s):
             tag, name, sk = utils.parse_pbs_tag(str(s).strip())
             if tag:
                 return (0, sk, name.lower())
             return (1, (0,), str(s).lower())
 
-        return sorted(seen, key=sort_key)
-
-    @Property(list, notify=workItemsChanged)
-    def workItemTags(self):
-        """Returns the sorted unique list of all tags currently present on work items in cache."""
-        seen = set()
-        for wi in self._work_items:
-            for t in wi.get("tag_list") or []:
-                if t:
-                    seen.add(t)
-        return sorted(seen, key=lambda s: s.lower())
-
-    @Property(list, notify=workItemsChanged)
-    def workItemTargetTags(self):
-        """Returns the sorted unique list of Target:<Name> milestone tags present on work items."""
-        seen = set()
-        for wi in self._work_items:
-            for t in wi.get("target_tags") or []:
-                if t:
-                    seen.add(t)
-        return sorted(seen, key=lambda s: s.lower())
-
-    @Property(dict, notify=workItemsChanged)
-    def workItemTagCounts(self):
-        """Returns a dict mapping tag name -> count of work items having that tag."""
-        counts = {}
-        for wi in self._work_items:
-            for t in wi.get("tag_list") or []:
-                if t:
-                    counts[t] = counts.get(t, 0) + 1
-        return counts
+        self._cached_types = sorted(types_seen)
+        self._cached_states = ordered_states
+        self._cached_assignees = sorted(assignees_seen)
+        self._cached_iterations = sorted(iterations_seen)
+        self._cached_l1 = sorted(l1_seen, key=sort_pbs_key)
+        self._cached_l2 = sorted(l2_seen, key=sort_pbs_key)
+        self._cached_area_paths = sorted(area_seen, key=lambda s: s.lower())
+        self._cached_tags = sorted(tags_seen, key=lambda s: s.lower())
+        self._cached_target_tags = sorted(target_tags_seen, key=lambda s: s.lower())
+        self._cached_tag_counts = tag_counts
+        self._cached_overdue_count = overdue_count
+        self._cached_tagged_count = tagged_count
+        self._cached_unique_tags_count = len(tags_seen)
 
     @Slot(result=list)
     def get_work_item_tags_summary(self):
@@ -1070,6 +1479,24 @@ class DevOpsBackend(QObject):
             return (y or 0, w or 0)
         return sorted(seen, key=sort_key, reverse=True)
 
+    @Property(str, constant=True)
+    def currentSprintName(self):
+        """Returns the current ISO week sprint name in week-YYWW format (e.g. week-2640)."""
+        today = date.today()
+        cur_y, cur_w, _ = today.isocalendar()
+        return f"week-{str(cur_y)[-2:]}{cur_w:02d}"
+
+    def _get_default_sprint_name(self, sprint_name=""):
+        clean = (sprint_name or "").strip()
+        if clean and clean.lower() != "latest":
+            return clean
+        curr = self.currentSprintName
+        if self.availableSprintList:
+            if curr in self.availableSprintList:
+                return curr
+            return self.availableSprintList[0]
+        return curr
+
     @Property(list, notify=pullRequestsChanged)
     def pullRequests(self):
         return self._pull_requests
@@ -1106,6 +1533,20 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=tagDayDataChanged)
     def tagDayData(self):
         return self._tagday_data
+
+    @Property(list, notify=tagDayDataChanged)
+    def unmergedBranches(self):
+        """Returns all unmerged branches across all repositories with repository metadata."""
+        all_branches = []
+        if self._tagday_data and self._tagday_data.get("repos_summary"):
+            for repo in self._tagday_data.get("repos_summary", []):
+                for b in repo.get("unmerged_branches", []):
+                    all_branches.append(dict(b))
+        elif self._repositories:
+            for repo in self._repositories:
+                for b in repo.get("unmerged_branches", []):
+                    all_branches.append(dict(b))
+        return all_branches
 
     @Property(dict, notify=storageDataChanged)
     def storageData(self):
@@ -1400,6 +1841,45 @@ class DevOpsBackend(QObject):
 
             status_text = ", ".join(parts) if parts else "Up to date"
 
+            clean_repo_branches = []
+            if td_repo and td_repo.get("unmerged_branches"):
+                r_web_url = info.get("webUrl", "")
+                for b in td_repo.get("unmerged_branches", []):
+                    prep_pr_id = ""
+                    prep_pr_title = ""
+                    prep_pr_status = ""
+                    is_abandoned = b.get("is_abandoned", False)
+                    if b.get("prepared_pr"):
+                        prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
+                        prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                        prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                        if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                            is_abandoned = True
+
+                    b_name = b.get("branch_name", "")
+                    clean_b_name = b_name.replace("refs/heads/", "")
+                    branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
+
+                    clean_repo_branches.append({
+                        "branch_name": b_name,
+                        "repo_name": rname,
+                        "repo_url": r_web_url,
+                        "branch_url": branch_url,
+                        "repo_category": rcat,
+                        "default_branch": info.get("defaultBranch", "").replace("refs/heads/", "") or "main",
+                        "commit_id": b.get("commit_id", ""),
+                        "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
+                        "commit_date": b.get("commit_date", ""),
+                        "committer": b.get("committer", ""),
+                        "comment": b.get("comment", ""),
+                        "ahead": b.get("ahead", 0),
+                        "behind": b.get("behind", 0),
+                        "prepared_pr_id": prep_pr_id,
+                        "prepared_pr_title": prep_pr_title,
+                        "prepared_pr_status": prep_pr_status,
+                        "is_abandoned": is_abandoned,
+                    })
+
             repo_list.append({
                 "id": str(r_id),
                 "name": rname,
@@ -1419,6 +1899,7 @@ class DevOpsBackend(QObject):
                 "prs_after_tag_count": prs_after_tag_count,
                 "unmerged_branches_count": unmerged_branches_count,
                 "active_prs_count": active_prs_count,
+                "unmerged_branches": clean_repo_branches,
                 "pending_status_text": status_text,
                 "is_deleted": bool((rcat or "").strip().upper() == "DELETED" or r.get("is_deleted")),
             })
@@ -1513,6 +1994,32 @@ class DevOpsBackend(QObject):
 
         deadline_field_setting = self._custom_deadline_field or ""
 
+        # Check Area Path settings for filtering work items
+        area_filter_enabled = False
+        area_rules = []
+        if self._cache_db and hasattr(self._cache_db, "get_area_path_settings"):
+            try:
+                area_cfg = self._cache_db.get_area_path_settings()
+                if isinstance(area_cfg, dict):
+                    area_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
+                    area_rules = area_cfg.get("rules", []) if isinstance(area_cfg.get("rules"), list) else []
+                    self._area_path_filter_enabled = area_filter_enabled
+                    self._area_path_rules = area_rules
+                    self._default_area_path = area_cfg.get("default_area", "")
+                    self._all_discovered_area_paths = area_cfg.get("all_areas", [])
+                else:
+                    area_filter_enabled = False
+                    area_rules = []
+            except Exception:
+                area_filter_enabled = bool(getattr(self, "_area_path_filter_enabled", False))
+                area_rules = getattr(self, "_area_path_rules", [])
+        else:
+            area_filter_enabled = bool(getattr(self, "_area_path_filter_enabled", False))
+            area_rules = getattr(self, "_area_path_rules", [])
+
+        total_before_area_filter = len(raw_wis)
+        filtered_by_area_path_count = 0
+
         wi_list = []
         deleted_count = 0
         active_wi_count = 0
@@ -1520,9 +2027,37 @@ class DevOpsBackend(QObject):
 
         for wi in raw_wis:
             is_del = bool(wi.get("deleted"))
+            wi_id = wi.get("id")
+
+            # Extract fields and area path early for filtering
+            iter_path = wi.get("iteration_path") or ""
+            area_path = wi.get("area_path") or ""
+            raw_fields = wi.get("fields")
+            raw_data = wi.get("raw_dict")
+            if raw_fields is None or raw_data is None:
+                raw_s = wi.get("raw_json")
+                if raw_s and isinstance(raw_s, str):
+                    try:
+                        raw_data = json.loads(raw_s)
+                        raw_fields = raw_data.get("fields", {})
+                    except Exception:
+                        raw_fields = {}
+                        raw_data = {}
+                else:
+                    raw_fields = {}
+                    raw_data = {}
+
+            if not area_path:
+                area_path = raw_fields.get("System.AreaPath") or ""
+
+            # Check Area Path filter
+            if area_filter_enabled and area_rules:
+                if not is_work_item_in_area_path(area_path, area_rules):
+                    filtered_by_area_path_count += 1
+                    continue
+
             if is_del:
                 deleted_count += 1
-            wi_id = wi.get("id")
             linked_prs = wi_to_prs.get(wi_id, [])
             linked_repos = sorted(wi_to_repos.get(wi_id, set()))
             html_link = wi.get("htmlLink", "") or ""
@@ -1547,29 +2082,14 @@ class DevOpsBackend(QObject):
                 else:
                     active_wi_count += 1
 
-            # Iteration and Deadline parsing
-            iter_path = wi.get("iteration_path") or ""
-            raw_fields = wi.get("fields")
-            raw_data = wi.get("raw_dict")
-            if raw_fields is None or raw_data is None:
-                raw_s = wi.get("raw_json")
-                if raw_s and isinstance(raw_s, str):
-                    try:
-                        raw_data = json.loads(raw_s)
-                        raw_fields = raw_data.get("fields", {})
-                    except Exception:
-                        raw_fields = {}
-                        raw_data = {}
-                else:
-                    raw_fields = {}
-                    raw_data = {}
-
-            if not iter_path:
-                iter_path = raw_fields.get("System.IterationPath") or ""
-
-            target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=deadline_field_setting)
-            if not target_date:
-                target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
+            # AreaPath TargetMilestone target date calculation (Monday of the milestone week)
+            area_ms_info = utils.parse_target_milestone_area_path(area_path)
+            if area_ms_info:
+                target_date = area_ms_info["target_date"]
+            else:
+                target_date, _ = utils.extract_work_item_deadline(raw_fields, custom_field=deadline_field_setting)
+                if not target_date:
+                    target_date = wi.get("target_date") or wi.get("finish_date") or wi.get("due_date") or ""
 
             raw_tags = raw_fields.get("System.Tags") or raw_fields.get("Tags") or wi.get("tags") or ""
             if isinstance(raw_tags, list):
@@ -1701,6 +2221,9 @@ class DevOpsBackend(QObject):
                 "linked_repo_count": len(linked_repos),
             })
 
+        self._work_items_filtered_by_area_path_count = filtered_by_area_path_count
+        self._work_items_total_before_area_filter = total_before_area_filter
+
         # Resolve Backlog Hierarchy (Level 1-4), PBS Syntax Grouping, and Level 3 Prio 1 Priorities
         all_wis_map = {w["id"]: w for w in wi_list}
         for item in wi_list:
@@ -1711,6 +2234,26 @@ class DevOpsBackend(QObject):
 
         sorted_wis = sorted(wi_list, key=lambda x: x["id"], reverse=True)
         self._enrich_work_items_with_milestones(items=sorted_wis, all_wis_map=all_wis_map)
+
+        for item in sorted_wis:
+            tokens = [
+                str(item.get("id") or ""),
+                item.get("title") or "",
+                item.get("assigned_to") or "",
+                item.get("type") or "",
+                item.get("state") or "",
+                item.get("iteration_name") or "",
+                item.get("iteration_path") or "",
+                item.get("level1_display") or "",
+                item.get("level2_display") or "",
+                item.get("prio_tag") or "",
+                item.get("tags") or "",
+                item.get("milestone_name") or "",
+                item.get("effective_milestone_name") or "",
+                item.get("milestone_category") or "",
+                item.get("area_path") or "",
+            ]
+            item["_search_text"] = " ".join(t.lower() for t in tokens if t)
 
         if worker:
             worker.report_progress(60, "Processing pull requests and links...")
@@ -1815,106 +2358,30 @@ class DevOpsBackend(QObject):
 
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
+        all_repos_raw = td_raw.get("all_repositories") or {}
+        if not all_repos_raw:
+            all_repos_raw = repos_changed_map
+
+        all_repos_summary = []
         repos_summary = []
-        for rname, rinfo in sorted(repos_changed_map.items()):
-            latest_tag = rinfo.get("latest_tag")
-            tag_name = "-"
-            tag_details = None
-            if isinstance(latest_tag, dict):
-                tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
-                tag_details = {
-                    "name": tag_name,
-                    "commit_date": latest_tag.get("commit_date") or "",
-                    "committer": latest_tag.get("committer") or "",
-                    "comment": latest_tag.get("comment") or "",
-                }
-
-            prs_after_tag = rinfo.get("prs_after_tag", [])
-            active_prs = rinfo.get("active_prs", [])
-            all_prs = rinfo.get("all_prs", [])
-            unmerged_branches = rinfo.get("unmerged_branches", [])
-
-            enriched_prs_after_tag = []
-            for p in prs_after_tag:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_prs_after_tag.append(p_copy)
-
-            enriched_active_prs = []
-            for p in active_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_active_prs.append(p_copy)
-
-            enriched_all_prs = []
-            for p in all_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
-                enriched_all_prs.append(p_copy)
-
-            clean_branches = []
-            for b in unmerged_branches:
-                prep_pr_id = ""
-                prep_pr_title = ""
-                prep_pr_status = ""
-                is_abandoned = b.get("is_abandoned", False)
-                if b.get("prepared_pr"):
-                    prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
-                    prep_pr_title = str(b["prepared_pr"].get("title", ""))
-                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
-                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
-                        is_abandoned = True
-
-                clean_branches.append({
-                    "branch_name": b.get("branch_name", ""),
-                    "commit_id": b.get("commit_id", ""),
-                    "short_hash": b.get("short_hash", ""),
-                    "commit_date": b.get("commit_date", ""),
-                    "committer": b.get("committer", ""),
-                    "comment": b.get("comment", ""),
-                    "ahead": b.get("ahead", 0),
-                    "behind": b.get("behind", 0),
-                    "prepared_pr_id": prep_pr_id,
-                    "prepared_pr_title": prep_pr_title,
-                    "prepared_pr_status": prep_pr_status,
-                    "is_abandoned": is_abandoned,
-                })
-
-            has_untagged_prs = len(prs_after_tag) > 0
-
-            repos_summary.append({
-                "name": rname,
-                "id": rinfo.get("id", ""),
-                "default_branch": rinfo.get("default_branch", "main"),
-                "web_url": rinfo.get("web_url", ""),
-                "category": rinfo.get("category", "OTHERS"),
-                "is_disabled": rinfo.get("is_disabled", False),
-                "latest_tag": tag_name,
-                "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
-                "prs_count": len(prs_after_tag),
-                "active_prs_count": len(active_prs),
-                "all_prs_count": len(all_prs),
-                "branches_count": len(unmerged_branches),
-                "prs_after_tag": enriched_prs_after_tag,
-                "active_prs": enriched_active_prs,
-                "all_prs": enriched_all_prs,
-                "unmerged_branches": clean_branches,
-            })
+        for rname, rinfo in sorted(all_repos_raw.items()):
+            item = self._format_repo_summary_item(rname, rinfo, all_wis_map)
+            all_repos_summary.append(item)
+            if rname in repos_changed_map or item["prs_count"] > 0 or item["active_prs_count"] > 0 or item["branches_count"] > 0:
+                repos_summary.append(item)
 
         repos_with_prs_count = sum(1 for r in repos_summary if r.get("prs_count", 0) > 0)
         repos_with_branches_count = sum(1 for r in repos_summary if r.get("branches_count", 0) > 0)
 
         tagday_data = {
-            "repos_analyzed": len(td_raw.get("all_repositories", {})),
-            "repos_with_changes_count": len(repos_changed_map),
+            "repos_analyzed": len(all_repos_summary),
+            "repos_with_changes_count": len(repos_summary),
             "repos_with_prs_count": repos_with_prs_count,
             "repos_with_branches_count": repos_with_branches_count,
             "timeline_items_count": len(timeline),
             "timeline": timeline[:100],
             "repos_summary": repos_summary,
+            "all_repos_summary": all_repos_summary,
             "generated_at": td_raw.get("generated_at", ""),
         }
 
@@ -2156,6 +2623,26 @@ class DevOpsBackend(QObject):
             "active_prs": cur_active_prs[:8],
         }
 
+        # Team Motivation & Gamification Data
+        team_motivation_data = {}
+        try:
+            import team_motivation
+            user_settings = _load_user_settings()
+            user_aliases = user_settings.get("user_aliases")
+            system_users = user_settings.get("system_users")
+            team_motivation_data = team_motivation.compute_team_motivation_data(
+                self._cache_db,
+                timeframe=self._team_motivation_timeframe,
+                custom_sprint=self._team_motivation_custom_sprint,
+                work_items=sorted_wis,
+                pull_requests=sorted_prs,
+                user_aliases=user_aliases,
+                score_config=self._team_motivation_score_config,
+                system_users=system_users
+            )
+        except Exception as e:
+            logger.debug(f"Could not compute initial team motivation data: {e}")
+
         return {
             "repositories": sorted_repos,
             "work_items": sorted_wis,
@@ -2168,6 +2655,7 @@ class DevOpsBackend(QObject):
             "shift_summary_map": shift_summary_map,
             "last_week_activity": last_week_activity,
             "current_week_planned": current_week_planned,
+            "team_motivation_data": team_motivation_data,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -2177,6 +2665,7 @@ class DevOpsBackend(QObject):
         self._repositories = data.get("repositories", [])
         self._work_items = data.get("work_items", [])
         self._work_items_map = data.get("work_items_map", {w["id"]: w for w in self._work_items})
+        self._invalidate_work_items_cache()
         self._pull_requests = data.get("pull_requests", [])
         self._pr_repositories = data.get("pr_repositories", [])
         self._tagday_data = data.get("tagday_data", {})
@@ -2184,6 +2673,7 @@ class DevOpsBackend(QObject):
         self._shift_summary_map = data.get("shift_summary_map", {})
         self._last_week_activity = data.get("last_week_activity", {})
         self._current_week_planned = data.get("current_week_planned", {})
+        self._team_motivation_data = data.get("team_motivation_data", {})
         if "stats" in data:
             self._stats = data["stats"]
 
@@ -2196,6 +2686,7 @@ class DevOpsBackend(QObject):
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
         self.milestonesChanged.emit()
+        self.teamMotivationChanged.emit()
 
     @Slot()
     def startup_load_async(self):
@@ -2448,12 +2939,12 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"Error loading report metrics: {e}")
 
     def get_effective_reports_dir(self):
-        """Returns the configured reports target folder, or BASE_FOLDER / os.getcwd() by default."""
+        """Returns the configured reports target folder, or reports folder by default."""
         if self._reports_dir and str(self._reports_dir).strip():
             return os.path.normpath(str(self._reports_dir).strip())
         if devops_helper.BASE_FOLDER and os.path.isabs(devops_helper.BASE_FOLDER) and devops_helper.BASE_FOLDER != os.getcwd():
             return os.path.normpath(devops_helper.BASE_FOLDER)
-        return os.getcwd()
+        return utils.get_reports_dir()
 
     @Slot(str)
     def setReportsDir(self, path):
@@ -2606,7 +3097,7 @@ class DevOpsBackend(QObject):
             return
 
         def _work(worker):
-            worker.log_message.emit("Generating Release Notes (REVISION.md & REVISION.docx)...")
+            worker.log_message.emit("Generating Release Notes (REVISION.md)...")
             reports_dir = self.get_effective_reports_dir()
             revision_md_path = os.path.join(reports_dir, devops_helper.REVISION_FILE_MD)
             success = devops_helper.generate_revision_report(
@@ -2776,18 +3267,16 @@ class DevOpsBackend(QObject):
             success_msg = f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
             worker.log_message.emit(success_msg)
             logger.info(success_msg)
-
-            try:
-                self.load_interactive_reports()
-                self.refresh_all_data()
-            except Exception as ref_err:
-                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
-
             return success_msg
 
         def _on_success(result_msg):
             self.logMessage.emit(f"✅ {result_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
+            try:
+                self.load_interactive_reports()
+                self.refresh_all_data()
+            except Exception as ref_err:
+                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
 
         def _on_error(err_msg):
             self.logMessage.emit(f"❌ Failed to create tag '{tag_name}' on '{repo_name_or_id}': {err_msg}")
@@ -2831,6 +3320,12 @@ class DevOpsBackend(QObject):
     @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
     @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, bool, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, int, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, str, result="QVariantMap")
+    @Slot(int, str, str, bool, bool, bool, result="QVariantMap")
     @Slot(int, str, str, bool, bool, result="QVariantMap")
     @Slot(int, str, str, result="QVariantMap")
     @Slot(int, str, result="QVariantMap")
@@ -2838,7 +3333,7 @@ class DevOpsBackend(QObject):
     @Slot(result="QVariantMap")
     def getWorkloadMatrix(
         self,
-        horizon_weeks: int = 4,
+        horizon_weeks: int = 8,
         filter_level1: str = "ALL",
         filter_level2: str = "ALL",
         prio1_only: bool = False,
@@ -2848,11 +3343,13 @@ class DevOpsBackend(QObject):
         lookback_weeks: int = 0,
         filter_milestone: str = "ALL",
         overdue_only: bool = False,
+        waiting_tasks_only: bool = False,
     ):
         """
         Computes the interactive capacity and workload matrix for team members across
         the given horizon of weekly iterations (4, 8, or 12 weeks), filtered by
-        Level 1, Level 2, priority, grouping, completion status, search query, or milestone.
+        Level 1, Level 2, priority, grouping, completion status, search query, milestone,
+        or waiting on unfinished subtasks.
         lookback_weeks > 0 shifts the window into the past so historic sprints are shown.
         """
         # Current date and ISO week determination
@@ -2865,7 +3362,7 @@ class DevOpsBackend(QObject):
         curr_sprint_label = utils.format_sprint_range_label(curr_y, curr_w)
 
         if horizon_weeks <= 0:
-            horizon_weeks = 4
+            horizon_weeks = 8
         lookback_weeks = max(0, int(lookback_weeks or 0))
 
         # Anchor window: Default view (lookback_weeks=0) starts with the previous week (curr_w - 1)
@@ -3252,6 +3749,17 @@ class DevOpsBackend(QObject):
 
         all_wis_by_id = {wi["id"]: wi for wi in self._work_items if not wi.get("deleted")}
 
+        # Index children by parent_id
+        children_by_parent = {}
+        for wi in self._work_items:
+            if wi.get("deleted"):
+                continue
+            p_id = wi.get("parent_id")
+            if p_id:
+                if p_id not in children_by_parent:
+                    children_by_parent[p_id] = []
+                children_by_parent[p_id].append(wi)
+
         assignee_rows = []
         for assignee, sprints_map in sorted(assignees_data.items(), key=lambda x: assignee_stats[x[0]]["total"], reverse=True):
             cells = []
@@ -3274,8 +3782,23 @@ class DevOpsBackend(QObject):
                 # Group items by parent containers
                 grouped = self._group_items_into_containers(
                     items, all_wis_by_id, bug_mode=self._bug_hierarchy_mode,
-                    milestones_by_date=milestones_by_date, all_milestones=all_milestones
+                    milestones_by_date=milestones_by_date, all_milestones=all_milestones,
+                    children_by_parent=children_by_parent, cell_assignee=assignee, sprint_name=s_name,
+                    waiting_tasks_only=waiting_tasks_only
                 )
+
+                if waiting_tasks_only:
+                    cell_grouped_items = []
+                    for c in grouped:
+                        if c.get("id") != 0:
+                            cell_grouped_items.append(c)
+                        cell_grouped_items.extend(c.get("tasks", []))
+                    st_count = sum(1 for it in cell_grouped_items if it.get("is_story", False) or (it.get("type", "").lower() in ("requirement", "user story", "story", "product backlog item")))
+                    bg_count = sum(1 for it in cell_grouped_items if it.get("is_bug", False) or (it.get("type", "").lower() in ("bug", "defect", "problem")))
+                    tk_count = sum(1 for it in cell_grouped_items if it.get("is_task", False) or (it.get("type", "").lower() in ("task", "subtask")))
+                    cell_total = len(grouped)
+                else:
+                    cell_total = len(items)
 
                 tk_closed_percent = round((tk_closed / max(1, tk_count)) * 100) if tk_count > 0 else 0
 
@@ -3285,7 +3808,7 @@ class DevOpsBackend(QObject):
                     "is_current": col.get("is_current", False),
                     "is_past": col.get("is_past", False),
                     "is_future": col.get("is_future", False),
-                    "total_count": len(items),
+                    "total_count": cell_total,
                     "stories_count": st_count,
                     "bugs_count": bg_count,
                     "tasks_count": tk_count,
@@ -3387,15 +3910,21 @@ class DevOpsBackend(QObject):
             "suggested_lookback_offset": suggested_lookback_offset,
         }
 
-    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None):
+    def _group_items_into_containers(self, items_in_cell, all_wis_by_id, bug_mode="like_user_story", milestones_by_date=None, all_milestones=None, children_by_parent=None, cell_assignee=None, sprint_name=None, waiting_tasks_only=False):
         """
         Groups work items in a sprint cell by parent container.
         - If bug_mode == 'like_user_story': Bugs are top-level containers that can contain tasks.
         - If bug_mode == 'like_task': Bugs are child tasks grouped under parent User Stories / Requirements.
+        - If a user owns a group item (Bug / Story): All subtasks (even owned by other users) are visible under the container,
+          especially the open subtasks keeping the group item from being closed.
+        - If a user only contributed to a group item owned by someone else: Marked as is_external_parent / is_contributor_only,
+          so the open parent item is not counted with the contributing user when their own tasks are closed.
+        - If waiting_tasks_only is True: Only containers waiting on unfinished subtasks (especially external tasks) are included.
         """
         story_types = {"requirement", "user story", "story", "product backlog item"}
         done_states = {"closed", "done", "resolved", "completed", "cut"}
         m_map = milestones_by_date or {}
+        p_children_map = children_by_parent if children_by_parent is not None else {}
 
         def _is_container_type(t_str):
             t = (t_str or "").lower()
@@ -3411,6 +3940,15 @@ class DevOpsBackend(QObject):
             st = (item_dict.get("state") or "").lower()
             return st in done_states
 
+        def _get_state_category(st_str):
+            s = (st_str or "").lower().strip()
+            if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
+                return "closed"
+            elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
+                return "active"
+            else:
+                return "not_started"
+
         cell_containers = []
         cell_children = []
         for it in items_in_cell:
@@ -3424,14 +3962,16 @@ class DevOpsBackend(QObject):
             cid = c["id"]
             c_done = _is_item_done(c)
             matched_c_m = utils.match_work_item_to_milestone(c, all_milestones, m_map)
+            c_owner = (c.get("assigned_to") or cell_assignee or "Unassigned").strip()
             container_map[cid] = {
                 "id": cid,
                 "title": c.get("title") or f"#{cid}",
                 "type": c.get("type") or "Story",
                 "state": c.get("state") or "Active",
-                "assigned_to": c.get("assigned_to") or "Unassigned",
+                "assigned_to": c_owner,
                 "is_parent_in_cell": True,
                 "is_external_parent": False,
+                "is_contributor_only": False,
                 "tfs_url": c.get("tfs_url", ""),
                 "deadline_str": c.get("deadline_str", ""),
                 "milestone_name": matched_c_m.get("name", "") if matched_c_m else "",
@@ -3523,6 +4063,7 @@ class DevOpsBackend(QObject):
                         "assigned_to": p_wi.get("assigned_to") or "Unassigned",
                         "is_parent_in_cell": False,
                         "is_external_parent": True,
+                        "is_contributor_only": True,
                         "tfs_url": p_wi.get("tfs_url", ""),
                         "deadline_str": "" if is_p_epic_or_feature else p_wi.get("deadline_str", ""),
                         "milestone_name": matched_p_m.get("name", "") if matched_p_m else "",
@@ -3563,29 +4104,82 @@ class DevOpsBackend(QObject):
             else:
                 unparented_children.append(ch)
 
-        def _get_state_category(st_str):
-            s = (st_str or "").lower().strip()
-            if s in ("closed", "done", "resolved", "completed", "cut", "removed"):
-                return "closed"
-            elif s in ("active", "in progress", "in_progress", "doing", "committed", "in development", "in review", "investigating", "testing"):
-                return "active"
-            else:
-                return "not_started"
+        # For containers owned by the cell assignee (not external parents),
+        # pull in all subtasks (including those assigned to other users)
+        for cid, c_obj in list(container_map.items()):
+            if not c_obj.get("is_external_parent"):
+                existing_task_ids = {t["id"] for t in c_obj["tasks"] if "id" in t}
+                # Check children from p_children_map or all_wis_by_id
+                all_children = p_children_map.get(cid, [])
+                if not all_children and all_wis_by_id:
+                    all_children = [w for w in all_wis_by_id.values() if w.get("parent_id") == cid]
+
+                for raw_child in all_children:
+                    r_id = raw_child.get("id")
+                    if r_id and r_id not in existing_task_ids:
+                        existing_task_ids.add(r_id)
+                        child_assignee = (raw_child.get("assigned_to") or "Unassigned").strip()
+                        child_done = _is_item_done(raw_child)
+                        child_m = utils.match_work_item_to_milestone(raw_child, all_milestones, m_map)
+                        child_cat = _get_state_category(raw_child.get("state"))
+                        task_entry = {
+                            "id": r_id,
+                            "title": raw_child.get("title") or f"#{r_id}",
+                            "type": raw_child.get("type") or "Task",
+                            "state": raw_child.get("state") or "Active",
+                            "state_category": child_cat,
+                            "assigned_to": child_assignee,
+                            "parent_id": cid,
+                            "sprint_name": raw_child.get("sprint_week_name") or raw_child.get("iteration_path") or sprint_name or "",
+                            "deadline_str": raw_child.get("deadline_str") or raw_child.get("target_date") or "",
+                            "milestone_name": child_m.get("name", "") if child_m else "",
+                            "milestone_icon": child_m.get("category_icon", "") if child_m else "",
+                            "milestone_color": child_m.get("category_color", "") if child_m else "",
+                            "milestone_bg": child_m.get("category_bg_color", "") if child_m else "",
+                            "milestone_category": child_m.get("category_name", "") if child_m else "",
+                            "urgency_status": raw_child.get("urgency_status", "none"),
+                            "urgency_badge": raw_child.get("urgency_badge", "—"),
+                            "urgency_color": raw_child.get("urgency_color", "#8b949e"),
+                            "tfs_url": raw_child.get("tfs_url", ""),
+                            "iteration_path": raw_child.get("iteration_path", ""),
+                            "is_done": child_done,
+                            "is_external_assignee": (child_assignee != c_obj.get("assigned_to")),
+                            "is_blocking": not child_done,
+                            "is_task": (raw_child.get("type") or "").lower() in ("task", "subtask"),
+                            "is_bug": (raw_child.get("type") or "").lower() in ("bug", "defect", "problem"),
+                            "is_story": (raw_child.get("type") or "").lower() in story_types,
+                        }
+                        c_obj["tasks"].append(task_entry)
 
         containers_list = []
         for cid, c_obj in container_map.items():
             tsks = c_obj["tasks"]
+            # Sort tasks: open blocking tasks first, external tasks first, then by ID
+            tsks.sort(key=lambda t: (1 if _is_item_done(t) else 0, 0 if t.get("is_external_assignee") else 1, -t.get("id", 0)))
             tot = len(tsks)
             comp = sum(1 for t in tsks if _is_item_done(t))
             pct = round((comp / tot * 100)) if tot > 0 else (100 if c_obj["is_done"] else 0)
+            open_tasks = [t for t in tsks if not _is_item_done(t)]
+            blocking_assignees = list(dict.fromkeys([t.get("assigned_to") for t in open_tasks if t.get("assigned_to") and t.get("assigned_to") != c_obj.get("assigned_to")]))
+            external_tasks = [t for t in tsks if t.get("assigned_to") != c_obj.get("assigned_to")]
+
             c_obj["total_tasks_count"] = tot
             c_obj["completed_tasks_count"] = comp
             c_obj["tasks_not_started_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "not_started")
             c_obj["tasks_active_count"] = sum(1 for t in tsks if _get_state_category(t.get("state")) == "active")
             c_obj["tasks_closed_count"] = comp
+            c_obj["open_tasks_count"] = len(open_tasks)
+            c_obj["blocking_tasks_count"] = len(open_tasks)
+            c_obj["blocking_assignees"] = blocking_assignees
+            c_obj["blocking_assignees_str"] = ", ".join(blocking_assignees)
+            c_obj["has_blocking_external_tasks"] = bool(blocking_assignees)
+            c_obj["external_tasks_count"] = len(external_tasks)
+            c_obj["has_external_subtasks"] = bool(external_tasks)
             c_obj["state_category"] = _get_state_category(c_obj.get("state"))
             c_obj["progress_percent"] = pct
             c_obj["progress_pct"] = pct
+            c_obj["is_contributor_only"] = bool(c_obj.get("is_external_parent"))
+            c_obj["user_contributions_done"] = (comp == tot and tot > 0)
             containers_list.append(c_obj)
 
         # Prioritize complying [<NR>] <Name> containers first, then Prio 1 focus items, then cell parents, then ID
@@ -3656,6 +4250,18 @@ class DevOpsBackend(QObject):
                 "progress_pct": pct_un,
             })
 
+        if waiting_tasks_only:
+            def _is_waiting_container(c):
+                if c.get("is_done"):
+                    return False
+                ts = c.get("tasks", [])
+                has_open_tasks = any(not _is_item_done(t) for t in ts)
+                has_external_blockers = bool(c.get("has_blocking_external_tasks") or c.get("blocking_assignees")) or any(
+                    not _is_item_done(t) and (t.get("is_external_assignee") or t.get("assigned_to") != c.get("assigned_to")) for t in ts
+                )
+                return has_open_tasks or has_external_blockers
+            containers_list = [c for c in containers_list if _is_waiting_container(c)]
+
         return containers_list
 
     @Slot()
@@ -3666,9 +4272,7 @@ class DevOpsBackend(QObject):
             return {}
         try:
             import generate_sprint_report
-            clean_sprint = (sprint_name or "").strip()
-            if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-                clean_sprint = self.availableSprintList[0]
+            clean_sprint = self._get_default_sprint_name(sprint_name)
             work_items = self._work_items if self._work_items else None
             return generate_sprint_report.generate_sprint_report_data(
                 self._cache_db, sprint_name=clean_sprint, work_items=work_items
@@ -3686,11 +4290,7 @@ class DevOpsBackend(QObject):
         if self._is_busy:
             return
 
-        clean_sprint = (sprint_name or "").strip()
-        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-            clean_sprint = self.availableSprintList[0]
-        elif not clean_sprint:
-            clean_sprint = "latest"
+        clean_sprint = self._get_default_sprint_name(sprint_name)
 
         reports_dir = self.get_effective_reports_dir()
         if not md_path:
@@ -3719,11 +4319,7 @@ class DevOpsBackend(QObject):
     @Slot(str)
     def open_sprint_report_file(self, sprint_name=""):
         """Opens generated sprint report markdown in default editor."""
-        clean_sprint = (sprint_name or "").strip()
-        if (not clean_sprint or clean_sprint.lower() == "latest") and self.availableSprintList:
-            clean_sprint = self.availableSprintList[0]
-        elif not clean_sprint:
-            clean_sprint = "latest"
+        clean_sprint = self._get_default_sprint_name(sprint_name)
         reports_dir = self.get_effective_reports_dir()
         path = os.path.join(reports_dir, f"SPRINT_REPORT_{clean_sprint}.md")
         if not os.path.exists(path):
@@ -3732,6 +4328,448 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot(str)
+    @Slot(str, str)
+    def set_team_motivation_timeframe(self, timeframe, custom_sprint=""):
+        """Sets the active timeframe / sprint for team motivation and recomputes stats."""
+        self._team_motivation_timeframe = timeframe or "last_week"
+        self._team_motivation_custom_sprint = custom_sprint or ""
+        self.teamMotivationTimeframeChanged.emit()
+        self.recompute_team_motivation()
+
+    @Slot()
+    def recompute_team_motivation(self):
+        """Recomputes team motivation, streaks, leaderboards, and user profiles."""
+        if not self._cache_db:
+            return
+        try:
+            import team_motivation
+            user_settings = _load_user_settings()
+            user_aliases = user_settings.get("user_aliases")
+            system_users = user_settings.get("system_users")
+            self._team_motivation_data = team_motivation.compute_team_motivation_data(
+                self._cache_db,
+                timeframe=self._team_motivation_timeframe,
+                custom_sprint=self._team_motivation_custom_sprint,
+                work_items=self._work_items,
+                pull_requests=self._pull_requests,
+                user_aliases=user_aliases,
+                score_config=self._team_motivation_score_config,
+                system_users=system_users
+            )
+            self.teamMotivationChanged.emit()
+            self.userProfilesChanged.emit()
+        except Exception as e:
+            logger.error(f"Error computing team motivation data: {e}", exc_info=True)
+
+    @Slot("QVariantMap", result=bool)
+    @Slot(dict, result=bool)
+    @Slot(str, result=bool)
+    def save_team_motivation_score_config(self, cfg_data):
+        """
+        Saves custom team motivation score weights to user settings and SQLite project_config,
+        and recomputes all gamification scores.
+        """
+        try:
+            import team_motivation
+            parsed = json.loads(cfg_data) if isinstance(cfg_data, str) else dict(cfg_data)
+            clean_cfg = team_motivation.get_default_score_config()
+            for k, v in parsed.items():
+                if k in clean_cfg:
+                    try:
+                        clean_cfg[k] = int(v)
+                    except (ValueError, TypeError):
+                        pass
+
+            self._team_motivation_score_config = clean_cfg
+
+            # Persist to user_settings.yaml
+            cfg = _load_user_settings()
+            cfg["team_motivation_score_config"] = clean_cfg
+            _save_user_settings(cfg)
+
+            # Persist to project_config in database
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("MOTIVATION_SCORE_CONFIG", json.dumps(clean_cfg))
+                except Exception as dbe:
+                    logger.debug(f"Could not persist score config to DB: {dbe}")
+
+            self.teamMotivationScoreConfigChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Saved Team Motivation score system configuration")
+            self.logMessage.emit("🏆 Team Motivation score weights updated successfully!")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving team motivation score config: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def apply_team_motivation_preset(self, preset_id):
+        """Applies a built-in scoring preset (balanced, code_pr_focused, agile_quality_focused, high_velocity)."""
+        import team_motivation
+        presets = team_motivation.get_score_presets()
+        target = presets.get(preset_id)
+        if not target:
+            return False
+        return self.save_team_motivation_score_config(target.get("config", {}))
+
+    @Slot(result=bool)
+    def reset_team_motivation_score_config(self):
+        """Resets team motivation score weights back to built-in default values."""
+        import team_motivation
+        defaults = team_motivation.get_default_score_config()
+        return self.save_team_motivation_score_config(defaults)
+
+    @Slot(result=str)
+    def get_team_motivation_markdown_summary(self):
+        """Returns markdown sprint motivation summary for copying to Slack/Teams."""
+        try:
+            import team_motivation
+            if not self._team_motivation_data:
+                self.recompute_team_motivation()
+            return team_motivation.generate_motivation_markdown_summary(self._team_motivation_data)
+        except Exception as e:
+            logger.error(f"Error generating team motivation markdown summary: {e}", exc_info=True)
+            return f"Error: {e}"
+
+    @Slot(str, result=dict)
+    def get_team_member_profile(self, member_name):
+        """Returns detailed contribution and badge profile for a specific team member."""
+        if not self._team_motivation_data:
+            self.recompute_team_motivation()
+        members = self._team_motivation_data.get("members", [])
+        target = (member_name or "").strip().lower()
+        for m in members:
+            if m.get("name", "").lower() == target:
+                return m
+            for al in m.get("aliases", []):
+                if al.lower() == target:
+                    return m
+        return {}
+
+    # ------------------------------------------------------------------
+    # User Profiles & Aliases Management
+    # ------------------------------------------------------------------
+
+    @Property(list, notify=userAliasesChanged)
+    def userAliases(self):
+        """Returns list of configured user alias mappings: [{"canonical": "...", "aliases": [...]}]"""
+        cfg = _load_user_settings()
+        raw = cfg.get("user_aliases", {})
+        try:
+            import team_motivation
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            results = []
+            for canon, aliases in sorted(canonical_to_aliases.items(), key=lambda x: x[0].lower()):
+                results.append({
+                    "canonical": canon,
+                    "aliases": list(aliases),
+                    "aliases_count": len(aliases)
+                })
+            return results
+        except Exception:
+            return []
+
+    @Slot(result=list)
+    def get_user_aliases(self):
+        """Returns list of configured user aliases."""
+        return self.userAliases
+
+    @Slot(str)
+    def save_user_aliases(self, aliases_json):
+        """Persists user aliases mapping (dict or list format) to user_settings.yaml and refreshes data."""
+        try:
+            data = json.loads(aliases_json) if isinstance(aliases_json, str) else aliases_json
+            import team_motivation
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(data)
+            cfg = _load_user_settings()
+            cfg["user_aliases"] = canonical_to_aliases
+            _save_user_settings(cfg)
+            self.userAliasesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Saved user aliases config: %d users mapped", len(canonical_to_aliases))
+        except Exception as e:
+            logger.error("Error saving user aliases: %s", e)
+
+    @Slot(str, str, result=bool)
+    def add_user_alias(self, canonical_name, alias_name):
+        """Adds a single alias to a canonical user and saves configuration."""
+        c_clean = (canonical_name or "").strip()
+        a_clean = (alias_name or "").strip()
+        if not c_clean or not a_clean or c_clean.lower() == a_clean.lower():
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("user_aliases", {})
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            canonical_to_aliases.setdefault(c_clean, [])
+            if a_clean not in canonical_to_aliases[c_clean]:
+                canonical_to_aliases[c_clean].append(a_clean)
+            cfg["user_aliases"] = canonical_to_aliases
+            _save_user_settings(cfg)
+            self.userAliasesChanged.emit()
+            self.recompute_team_motivation()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding user alias: {e}")
+            return False
+
+    @Slot(str, str, result=bool)
+    def remove_user_alias(self, canonical_name, alias_name):
+        """Removes an alias from a canonical user."""
+        c_clean = (canonical_name or "").strip()
+        a_clean = (alias_name or "").strip()
+        if not c_clean or not a_clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("user_aliases", {})
+            _, canonical_to_aliases = team_motivation.normalize_user_aliases(raw)
+            if c_clean in canonical_to_aliases and a_clean in canonical_to_aliases[c_clean]:
+                canonical_to_aliases[c_clean].remove(a_clean)
+                if not canonical_to_aliases[c_clean]:
+                    del canonical_to_aliases[c_clean]
+                cfg["user_aliases"] = canonical_to_aliases
+                _save_user_settings(cfg)
+                self.userAliasesChanged.emit()
+                self.recompute_team_motivation()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error removing user alias: {e}")
+            return False
+
+    @Slot(str, str, result=bool)
+    def merge_user_profiles(self, target_canonical, source_user):
+        """Merges source user profile into target canonical user as an alias."""
+        return self.add_user_alias(target_canonical, source_user)
+
+    @Slot(result=list)
+    def auto_detect_aliases(self):
+        """Scans database and discovers suggested user aliases."""
+        if not self._cache_db:
+            return []
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            return team_motivation.detect_potential_user_aliases(self._cache_db, cfg.get("user_aliases"), cfg.get("system_users"))
+        except Exception as e:
+            logger.error(f"Error auto-detecting user aliases: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # System Users & Automation Accounts (Hall of Fame Exclusion)
+    # ------------------------------------------------------------------
+
+    @Property(list, notify=systemUsersChanged)
+    def systemUsers(self):
+        """Returns list of configured and built-in system users: [{"name": "...", "is_builtin": bool, "note": "..."}]"""
+        cfg = _load_user_settings()
+        raw = cfg.get("system_users")
+        try:
+            import team_motivation
+            _, sys_list = team_motivation.normalize_system_users(raw)
+            return sorted(sys_list, key=lambda x: (1 if x.get("is_builtin") else 0, x.get("name", "").lower()))
+        except Exception:
+            return []
+
+    @Property(int, notify=systemUsersChanged)
+    def systemUsersCount(self):
+        """Returns count of custom configured system users."""
+        users = self.systemUsers
+        return len([u for u in users if not u.get("is_builtin", False)])
+
+    @Slot(result=list)
+    def get_system_users(self):
+        """Returns list of configured system users."""
+        return self.systemUsers
+
+    @Slot(str, result=bool)
+    def is_system_user(self, user_name):
+        """Checks if a user identity is currently marked as a system user."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        import team_motivation
+        cfg = _load_user_settings()
+        sys_set, _ = team_motivation.normalize_system_users(cfg.get("system_users"))
+        return not team_motivation._is_valid_member(clean, sys_set)
+
+    @Slot(str, result=bool)
+    @Slot(str, str, result=bool)
+    def add_system_user(self, user_name, note=""):
+        """Adds a user name/pattern to configured system users (excluded from Hall of Fame)."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("system_users", [])
+            _, sys_list = team_motivation.normalize_system_users(raw)
+
+            custom_entries = [u for u in sys_list if not u.get("is_builtin")]
+            if any(u.get("name", "").lower() == clean.lower() for u in custom_entries):
+                return True
+
+            custom_entries.append({"name": clean, "note": note or "Custom system user"})
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Added '%s' as System User (excluded from Hall of Fame)", clean)
+            self.logMessage.emit(f"🤖 User '{clean}' excluded from Hall of Fame")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding system user: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def remove_system_user(self, user_name):
+        """Removes a user from configured custom system users."""
+        clean = (user_name or "").strip()
+        if not clean:
+            return False
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            raw = cfg.get("system_users", [])
+            _, sys_list = team_motivation.normalize_system_users(raw)
+            custom_entries = [u for u in sys_list if not u.get("is_builtin") and u.get("name", "").lower() != clean.lower()]
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            logger.info("Removed '%s' from custom System Users", clean)
+            self.logMessage.emit(f"✅ User '{clean}' restored to active Hall of Fame members")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing system user: {e}", exc_info=True)
+            return False
+
+    @Slot(str, result=bool)
+    def toggle_system_user(self, user_name):
+        """Toggles system user status for a user."""
+        if self.is_system_user(user_name):
+            return self.remove_system_user(user_name)
+        else:
+            return self.add_system_user(user_name)
+
+    @Slot(result=list)
+    def get_potential_system_users(self):
+        """Scans database to discover potential bot and system accounts."""
+        if not self._cache_db:
+            return []
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            return team_motivation.detect_potential_system_users(self._cache_db, cfg.get("system_users"))
+        except Exception as e:
+            logger.error(f"Error auto-detecting system users: {e}")
+            return []
+
+    @Slot(str, result=bool)
+    def save_system_users(self, system_users_json):
+        """Saves custom system users list from JSON."""
+        try:
+            data = json.loads(system_users_json) if isinstance(system_users_json, str) else system_users_json
+            import team_motivation
+            _, sys_list = team_motivation.normalize_system_users(data)
+            custom_entries = [u for u in sys_list if not u.get("is_builtin")]
+            cfg = _load_user_settings()
+            cfg["system_users"] = custom_entries
+            _save_user_settings(cfg)
+            if self._cache_db:
+                try:
+                    self._cache_db.set_config("SYSTEM_USERS", json.dumps(custom_entries))
+                except Exception:
+                    pass
+            self.systemUsersChanged.emit()
+            self.userProfilesChanged.emit()
+            self.recompute_team_motivation()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving system users: {e}")
+            return False
+
+
+    @Slot(result=list)
+    def get_all_user_profiles(self):
+        """Returns all aggregated individual user profiles sorted by last activity and score."""
+        if not self._team_motivation_data:
+            self.recompute_team_motivation()
+        members = [dict(m) for m in (self._team_motivation_data.get("all_user_profiles") or self._team_motivation_data.get("members", []))]
+
+        for m in members:
+            m["is_system_user"] = False
+
+        try:
+            import team_motivation
+            cfg = _load_user_settings()
+            _, sys_list = team_motivation.normalize_system_users(cfg.get("system_users"))
+            existing_names = {m.get("name", "").lower() for m in members}
+
+            for su in sys_list:
+                su_name = su.get("name", "")
+                if su_name and su_name.lower() not in existing_names:
+                    parts = su_name.split()
+                    initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "🤖"
+                    members.append({
+                        "name": su_name,
+                        "initials": initials,
+                        "aliases": [],
+                        "is_aliased": False,
+                        "is_system_user": True,
+                        "is_builtin_system_user": bool(su.get("is_builtin")),
+                        "note": su.get("note", "System user"),
+                        "score": 0,
+                        "rank": None,
+                        "has_activity": False,
+                        "recent_achievements": ["🤖 Excluded from Hall of Fame"],
+                        "recent_activities": [],
+                        "assigned_work_items": [],
+                        "assigned_bugs": [],
+                        "assigned_user_stories": [],
+                        "recent_prs": [],
+                        "recent_commits": [],
+                        "prs_created": 0,
+                        "prs_closed": 0,
+                        "tasks_completed": 0,
+                        "bugs_resolved": 0,
+                        "commits_count": 0,
+                        "builds_total": 0,
+                        "tags_pushed": 0,
+                        "current_streak_weeks": 0,
+                        "best_streak_weeks": 0,
+                        "badges": [],
+                        "time_stats": {"persona": "System / Bot Account"},
+                    })
+        except Exception as e:
+            logger.debug(f"Error enriching user profiles with system users: {e}")
+
+        return sorted(members, key=lambda m: (m.get("is_system_user", False), m.get("is_aliased", False), -(m.get("score", 0)), m.get("name", "").lower()))
+
+    @Slot(str, result=dict)
+    def get_user_profile(self, user_name_or_alias):
+        """Returns rich user profile for a specific canonical user name or alias."""
+        return self.get_team_member_profile(user_name_or_alias)
+
 
     @Slot(int, str, result=dict)
     def update_work_item_deadline(self, work_item_id, new_date_str):
@@ -4533,15 +5571,15 @@ class DevOpsBackend(QObject):
 
     @Slot(result=str)
     def browse_milestone_export_path(self):
-        """Opens native file dialog to select save destination for Excel milestone export."""
+        """Opens native file dialog to select save destination for CSV milestone export."""
         try:
             from PySide6.QtWidgets import QFileDialog
             initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_path = os.path.join(initial_dir, f"MILESTONES_EXPORT_{timestamp}.xlsx")
+            default_path = os.path.join(initial_dir, f"MILESTONES_EXPORT_{timestamp}.csv")
             file_path, _ = QFileDialog.getSaveFileName(
-                None, "Export Milestones to Excel", default_path,
-                "Excel Spreadsheet (*.xlsx);;All Files (*.*)"
+                None, "Export Milestones to CSV", default_path,
+                "CSV Spreadsheet (*.csv);;All Files (*.*)"
             )
             return file_path or ""
         except Exception as e:
@@ -4635,15 +5673,15 @@ class DevOpsBackend(QObject):
         if all_wis_map is None:
             all_wis_map = {w["id"]: w for w in target_items}
 
-        # First pass: direct milestone match
+        # First pass: direct milestone match (TargetMilestone AreaPath / Tag / Configured Milestone)
         for item in target_items:
             matched_m = utils.match_work_item_to_milestone(item, all_milestones, milestones_by_date)
             if matched_m:
                 item["milestone_name"] = matched_m.get("name", "")
-                item["milestone_icon"] = matched_m.get("category_icon", "")
-                item["milestone_color"] = matched_m.get("category_color", "")
-                item["milestone_bg"] = matched_m.get("category_bg_color", "")
-                item["milestone_category"] = matched_m.get("category_name", "")
+                item["milestone_icon"] = matched_m.get("category_icon", "🚩")
+                item["milestone_color"] = matched_m.get("category_color", "#f0883e")
+                item["milestone_bg"] = matched_m.get("category_bg_color", "#3d2800")
+                item["milestone_category"] = matched_m.get("category_name", "Target Milestone")
                 item["milestone_start_date"] = matched_m.get("start_date") or matched_m.get("target_date") or ""
                 item["milestone_end_date"] = matched_m.get("end_date") or item["milestone_start_date"]
                 item["milestone_date_display"] = matched_m.get("date_display") or item["milestone_start_date"]
@@ -4652,6 +5690,11 @@ class DevOpsBackend(QObject):
                 item["has_milestone"] = True
                 item["effective_milestone_name"] = matched_m.get("name", "")
                 item["is_milestone_inherited"] = False
+                # If matched through AreaPath or if work item has no target_date, set target_date to Monday
+                if matched_m.get("is_area_path_milestone") or not item.get("target_date"):
+                    if matched_m.get("target_date"):
+                        item["target_date"] = matched_m["target_date"]
+                        item["deadline_str"] = matched_m["target_date"]
             else:
                 item["milestone_name"] = ""
                 item["milestone_icon"] = ""
@@ -4689,6 +5732,9 @@ class DevOpsBackend(QObject):
                         item["has_milestone"] = True
                         item["effective_milestone_name"] = p_item.get("effective_milestone_name", "") or p_item.get("milestone_name", "")
                         item["is_milestone_inherited"] = True
+                        if not item.get("target_date") and p_item.get("target_date"):
+                            item["target_date"] = p_item["target_date"]
+                            item["deadline_str"] = p_item["target_date"]
                         break
                     curr_pid = p_item.get("parent_id")
 
@@ -4721,10 +5767,47 @@ class DevOpsBackend(QObject):
 
     @Slot(result=list)
     def get_milestones(self):
-        """Returns all configured milestones."""
+        """Returns all milestones discovered from Area Paths (*\\TargetMilestone\\<Year>_<Week> Title Format) combined with configured milestones for GANTT visualization."""
+        all_paths = set()
+        if hasattr(self, "_all_discovered_area_paths") and self._all_discovered_area_paths:
+            for p in self._all_discovered_area_paths:
+                if p:
+                    all_paths.add(p)
+        if hasattr(self, "_work_items") and self._work_items:
+            for wi in self._work_items:
+                ap = wi.get("area_path")
+                if ap:
+                    all_paths.add(ap)
+
+        area_milestones = utils.extract_milestones_from_area_paths(all_paths)
+
+        db_milestones = []
         if self._cache_db:
-            return self._cache_db.get_milestones()
-        return []
+            try:
+                db_milestones = self._cache_db.get_milestones()
+            except Exception:
+                db_milestones = []
+
+        # Merge, prioritizing area path milestones while preserving categories and custom metadata
+        merged_map = {}
+        for m in area_milestones:
+            merged_map[m["name"].lower()] = dict(m)
+
+        for dm in db_milestones:
+            k = (dm.get("name") or "").lower()
+            if k not in merged_map:
+                merged_map[k] = dict(dm)
+            else:
+                if dm.get("category_name"):
+                    merged_map[k]["category_name"] = dm.get("category_name")
+                if dm.get("category_icon"):
+                    merged_map[k]["category_icon"] = dm.get("category_icon")
+                if dm.get("category_color"):
+                    merged_map[k]["category_color"] = dm.get("category_color")
+                if dm.get("category_bg_color"):
+                    merged_map[k]["category_bg_color"] = dm.get("category_bg_color")
+
+        return sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
 
     @Slot(result=list)
     def get_coming_milestones(self):
@@ -4875,12 +5958,11 @@ class DevOpsBackend(QObject):
     @Slot(result="QVariantMap")
     def exportMilestonesToExcel(self, file_path=""):
         """
-        Exports all project milestones (with Team, Category, Start/End Dates, and Week Range) to an Excel (.xlsx) file.
+        Exports all project milestones (with Team, Category, Start/End Dates, and Week Range) to a CSV spreadsheet (.csv).
+        Never exports to binary XLSX format.
         """
         try:
-            import openpyxl
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-            from openpyxl.utils import get_column_letter
+            import csv
 
             milestones = self.get_milestones() or []
             target_path = file_path or ""
@@ -4892,15 +5974,15 @@ class DevOpsBackend(QObject):
             if not target_path:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 target_dir = devops_helper.BASE_FOLDER if os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
-                target_path = os.path.join(target_dir, f"MILESTONES_EXPORT_{timestamp}.xlsx")
+                target_path = os.path.join(target_dir, f"MILESTONES_EXPORT_{timestamp}.csv")
+
+            if target_path.lower().endswith(".xlsx"):
+                target_path = target_path[:-5] + ".csv"
+            elif not target_path.lower().endswith(".csv"):
+                target_path = target_path + ".csv"
 
             target_path = os.path.abspath(target_path)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Milestones"
-            ws.views.sheetView[0].showGridLines = True
 
             headers = [
                 "ID",
@@ -4915,99 +5997,48 @@ class DevOpsBackend(QObject):
                 "Duration (Days)",
                 "Description"
             ]
-            ws.append(headers)
 
-            # Header styling
-            header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-            header_align = Alignment(horizontal="center", vertical="center", wrap_text=False)
-            thin_border = Border(
-                left=Side(style="thin", color="D0D7DE"),
-                right=Side(style="thin", color="D0D7DE"),
-                top=Side(style="thin", color="D0D7DE"),
-                bottom=Side(style="thin", color="D0D7DE")
-            )
+            with open(target_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(headers)
 
-            for col_idx in range(1, len(headers) + 1):
-                cell = ws.cell(row=1, column=col_idx)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_align
-                cell.border = thin_border
-            ws.row_dimensions[1].height = 28
+                for m in milestones:
+                    m_id = m.get("id") or ""
+                    m_name = m.get("name") or ""
+                    m_team = m.get("team") or m.get("team_name") or ""
+                    m_cat = m.get("category_name") or m.get("category_id") or "General"
+                    m_start = m.get("start_date") or m.get("target_date") or ""
+                    m_end = m.get("end_date") or m_start
+                    m_start_w = m.get("start_week") or ""
+                    m_end_w = m.get("end_week") or m_start_w
+                    m_week_range = m.get("week_range") or m_start_w
+                    m_duration = m.get("duration_days") or 1
+                    m_desc = m.get("description") or ""
 
-            data_font = Font(name="Segoe UI", size=10)
-            id_font = Font(name="Segoe UI", size=10, bold=True, color="0969DA")
-            zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+                    writer.writerow([
+                        m_id,
+                        m_name,
+                        m_team,
+                        m_cat,
+                        m_start,
+                        m_end,
+                        m_start_w,
+                        m_end_w,
+                        m_week_range,
+                        m_duration,
+                        m_desc
+                    ])
 
-            for row_idx, m in enumerate(milestones, start=2):
-                m_id = m.get("id") or ""
-                m_name = m.get("name") or ""
-                m_team = m.get("team") or m.get("team_name") or ""
-                m_cat = m.get("category_name") or m.get("category_id") or "General"
-                m_start = m.get("start_date") or m.get("target_date") or ""
-                m_end = m.get("end_date") or m_start
-                m_start_w = m.get("start_week") or ""
-                m_end_w = m.get("end_week") or m_start_w
-                m_week_range = m.get("week_range") or m_start_w
-                m_duration = m.get("duration_days") or 1
-                m_desc = m.get("description") or ""
-
-                row_vals = [
-                    m_id,
-                    m_name,
-                    m_team,
-                    m_cat,
-                    m_start,
-                    m_end,
-                    m_start_w,
-                    m_end_w,
-                    m_week_range,
-                    m_duration,
-                    m_desc
-                ]
-                ws.append(row_vals)
-
-                is_even = (row_idx % 2 == 0)
-                row_fill = zebra_fill if is_even else None
-
-                for col_idx in range(1, len(row_vals) + 1):
-                    c = ws.cell(row=row_idx, column=col_idx)
-                    c.font = id_font if col_idx == 1 else data_font
-                    c.border = thin_border
-                    if row_fill:
-                        c.fill = row_fill
-
-                    # Alignment
-                    if col_idx == 1:
-                        c.alignment = Alignment(horizontal="center")
-                    elif col_idx in [3, 4, 5, 6, 7, 8, 9, 10]:
-                        c.alignment = Alignment(horizontal="center")
-                    else:
-                        c.alignment = Alignment(horizontal="left")
-
-                ws.row_dimensions[row_idx].height = 22
-
-            # Auto-fit columns
-            for col in ws.columns:
-                max_len = 0
-                col_letter = get_column_letter(col[0].column)
-                for cell in col:
-                    val_str = str(cell.value or "")
-                    if len(val_str) > max_len:
-                        max_len = len(val_str)
-                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
-
-            wb.save(target_path)
-            logger.info(f"Exported {len(milestones)} milestones to Excel: {target_path}")
+            logger.info(f"Exported {len(milestones)} milestones to CSV: {target_path}")
             return {
                 "success": True,
                 "file_path": target_path,
                 "count": len(milestones),
-                "message": f"Successfully exported {len(milestones)} milestone(s) to Excel."
+                "item_count": len(milestones),
+                "message": f"Successfully exported {len(milestones)} milestone(s) to CSV."
             }
         except Exception as e:
-            logger.error(f"Error exporting milestones to Excel: {e}")
+            logger.error(f"Error exporting milestones to CSV: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -5210,7 +6241,21 @@ class DevOpsBackend(QObject):
                 for enc in ["utf-8-sig", "utf-8", "latin-1"]:
                     try:
                         with open(clean_path, mode="r", encoding=enc, newline="") as f:
-                            reader = csv.DictReader(f)
+                            sample = f.read(4096)
+                            f.seek(0)
+                            delim = ","
+                            if sample:
+                                try:
+                                    dialect = csv.Sniffer().sniff(sample, delimiters=";,|\t")
+                                    delim = dialect.delimiter
+                                except Exception:
+                                    if ";" in sample and "," not in sample:
+                                        delim = ";"
+                                    elif sample.count(";") > sample.count(","):
+                                        delim = ";"
+                                    else:
+                                        delim = ","
+                            reader = csv.DictReader(f, delimiter=delim)
                             for r in reader:
                                 norm_dict = {
                                     k.strip().lower().replace(" ", "").replace("_", "").replace("-", ""): v
@@ -5283,17 +6328,17 @@ class DevOpsBackend(QObject):
 
     @Slot(list, str, result="QVariantMap")
     @Slot(list, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
     @Slot(str, result="QVariantMap")
     @Slot(result="QVariantMap")
     def exportWorkItemsToExcel(self, items_or_file_path=None, file_path=""):
         """
-        Exports work items to an Excel (.xlsx) spreadsheet with professional formatting.
+        Exports work items to a CSV spreadsheet (.csv) formatted with UTF-8 BOM for full Excel compatibility.
+        Never exports to binary XLSX format.
         Accepts either a list of work item dicts (e.g. filtered items from QML) or defaults to all cached items.
         """
         try:
-            import openpyxl
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-            from openpyxl.utils import get_column_letter
+            import csv
 
             items_to_export = []
             target_path = ""
@@ -5314,15 +6359,16 @@ class DevOpsBackend(QObject):
             if not target_path:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 target_dir = devops_helper.BASE_FOLDER if os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
-                target_path = os.path.join(target_dir, f"WORK_ITEMS_EXPORT_{timestamp}.xlsx")
+                target_path = os.path.join(target_dir, f"WORK_ITEMS_EXPORT_{timestamp}.csv")
+
+            # Always enforce .csv extension, replacing .xlsx if passed
+            if target_path.lower().endswith(".xlsx"):
+                target_path = target_path[:-5] + ".csv"
+            elif not target_path.lower().endswith(".csv"):
+                target_path = target_path + ".csv"
 
             target_path = os.path.abspath(target_path)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Work Items"
-            ws.views.sheetView[0].showGridLines = True
 
             headers = [
                 "ID",
@@ -5347,148 +6393,76 @@ class DevOpsBackend(QObject):
                 "Changed Date",
                 "TFS URL"
             ]
-            ws.append(headers)
 
-            # Styling definitions
-            header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-            header_align = Alignment(horizontal="center", vertical="center", wrap_text=False)
+            with open(target_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(headers)
 
-            thin_border = Border(
-                left=Side(style="thin", color="D0D7DE"),
-                right=Side(style="thin", color="D0D7DE"),
-                top=Side(style="thin", color="D0D7DE"),
-                bottom=Side(style="thin", color="D0D7DE")
-            )
+                for item in items_to_export:
+                    wi_id = item.get("id") or ""
+                    wi_type = item.get("type") or ""
+                    wi_title = item.get("title") or ""
+                    wi_state = item.get("state") or ""
+                    wi_assigned = item.get("assigned_to") or "Unassigned"
+                    wi_sprint = item.get("sprint_week_name") or item.get("iteration_name") or ""
+                    wi_iter_path = item.get("iteration_path") or ""
+                    wi_deadline = item.get("deadline_str") or item.get("target_date") or ""
+                    wi_urgency = (item.get("urgency_status") or "").upper()
+                    wi_milestone = item.get("effective_milestone_name") or item.get("milestone_name") or ""
+                    wi_ms_cat = item.get("milestone_category") or ""
+                    wi_l1 = item.get("level1_display") or item.get("level1_name") or item.get("level1_title") or ""
+                    wi_l1_pbs = item.get("level1_pbs") or ""
+                    wi_l2 = item.get("level2_display") or item.get("level2_name") or item.get("level2_title") or ""
+                    wi_l2_pbs = item.get("level2_pbs") or ""
+                    wi_prio = item.get("prio_badge") or ("Prio 1" if item.get("is_prio1") else "Standard")
+                    wi_grouped = "Grouped" if item.get("is_grouped") else "Ungrouped"
+                    wi_rem = item.get("remaining_work") or 0.0
+                    wi_comp = item.get("completed_work") or 0.0
+                    wi_changed = (item.get("changed_date") or "").split("T")[0]
+                    wi_url = item.get("tfs_url") or ""
 
-            for col_idx in range(1, len(headers) + 1):
-                cell = ws.cell(row=1, column=col_idx)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_align
-                cell.border = thin_border
-            ws.row_dimensions[1].height = 28
+                    writer.writerow([
+                        wi_id,
+                        wi_type,
+                        wi_title,
+                        wi_state,
+                        wi_assigned,
+                        wi_sprint,
+                        wi_iter_path,
+                        wi_deadline,
+                        wi_urgency,
+                        wi_milestone,
+                        wi_ms_cat,
+                        wi_l1,
+                        wi_l1_pbs,
+                        wi_l2,
+                        wi_l2_pbs,
+                        wi_prio,
+                        wi_grouped,
+                        wi_rem,
+                        wi_comp,
+                        wi_changed,
+                        wi_url
+                    ])
 
-            data_font = Font(name="Segoe UI", size=10)
-            id_font = Font(name="Segoe UI", size=10, bold=True, color="0969DA")
-            link_font = Font(name="Segoe UI", size=10, color="0969DA", underline="single")
-
-            zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-            overdue_fill = PatternFill(start_color="FFDCE0", end_color="FFDCE0", fill_type="solid")
-            due_soon_fill = PatternFill(start_color="FFF3C4", end_color="FFF3C4", fill_type="solid")
-            closed_fill = PatternFill(start_color="DCFFE4", end_color="DCFFE4", fill_type="solid")
-
-            for row_idx, item in enumerate(items_to_export, start=2):
-                wi_id = item.get("id") or ""
-                wi_type = item.get("type") or ""
-                wi_title = item.get("title") or ""
-                wi_state = item.get("state") or ""
-                wi_assigned = item.get("assigned_to") or "Unassigned"
-                wi_sprint = item.get("sprint_week_name") or item.get("iteration_name") or ""
-                wi_iter_path = item.get("iteration_path") or ""
-                wi_deadline = item.get("deadline_str") or item.get("target_date") or ""
-                wi_urgency = (item.get("urgency_status") or "").lower()
-                wi_ms_name = item.get("milestone_name") or item.get("effective_milestone_name") or ""
-                wi_ms_cat = item.get("milestone_category") or ""
-                wi_l1 = item.get("level1_display") or item.get("level1_title") or ""
-                wi_l1_pbs = item.get("level1_pbs") or ""
-                wi_l2 = item.get("level2_display") or item.get("level2_title") or ""
-                wi_l2_pbs = item.get("level2_pbs") or ""
-                wi_prio = item.get("prio_badge") or ("Prio 1" if item.get("is_prio1") else "Standard")
-                wi_grouped = "Grouped" if item.get("is_grouped") else "Ungrouped"
-                wi_rem = item.get("remaining_work") or 0.0
-                wi_comp = item.get("completed_work") or 0.0
-                wi_changed = (item.get("changed_date") or "").split("T")[0]
-                wi_tfs_url = item.get("tfs_url") or ""
-
-                row_vals = [
-                    wi_id,
-                    wi_type,
-                    wi_title,
-                    wi_state,
-                    wi_assigned,
-                    wi_sprint,
-                    wi_iter_path,
-                    wi_deadline,
-                    wi_urgency.replace("_", " ").title() if wi_urgency else "—",
-                    wi_ms_name,
-                    wi_ms_cat,
-                    wi_l1,
-                    wi_l1_pbs,
-                    wi_l2,
-                    wi_l2_pbs,
-                    wi_prio,
-                    wi_grouped,
-                    wi_rem,
-                    wi_comp,
-                    wi_changed,
-                    wi_tfs_url
-                ]
-                ws.append(row_vals)
-                ws.row_dimensions[row_idx].height = 20
-
-                is_even = (row_idx % 2 == 0)
-                for col_idx in range(1, len(headers) + 1):
-                    c = ws.cell(row=row_idx, column=col_idx)
-                    c.font = data_font
-                    c.border = thin_border
-                    if is_even:
-                        c.fill = zebra_fill
-
-                    if col_idx in (1, 2, 4, 6, 8, 9, 13, 15, 16, 17, 20):
-                        c.alignment = Alignment(horizontal="center", vertical="center")
-                    elif col_idx in (18, 19):
-                        c.alignment = Alignment(horizontal="right", vertical="center")
-                    else:
-                        c.alignment = Alignment(horizontal="left", vertical="center")
-
-                    if col_idx == 9:
-                        if wi_urgency == "overdue":
-                            c.fill = overdue_fill
-                            c.font = Font(name="Segoe UI", size=10, bold=True, color="9E1C23")
-                        elif "due" in wi_urgency:
-                            c.fill = due_soon_fill
-                            c.font = Font(name="Segoe UI", size=10, bold=True, color="8A6D3B")
-                        elif wi_urgency == "completed":
-                            c.fill = closed_fill
-                            c.font = Font(name="Segoe UI", size=10, color="1B5E20")
-
-                    if col_idx == 21 and wi_tfs_url:
-                        c.hyperlink = wi_tfs_url
-                        c.font = link_font
-                        c.value = "Open TFS"
-
-                ws.cell(row=row_idx, column=1).font = id_font
-
-            for col in ws.columns:
-                max_len = 0
-                col_letter = get_column_letter(col[0].column)
-                for cell in col:
-                    val_str = str(cell.value or '')
-                    if len(val_str) > max_len:
-                        max_len = len(val_str)
-                ws.column_dimensions[col_letter].width = min(max(max_len + 4, 11), 60)
-
-            ws.auto_filter.ref = ws.dimensions
-            ws.freeze_panes = "A2"
-
-            wb.save(target_path)
-            msg = f"Exported {len(items_to_export)} work items to Excel: {target_path}"
+            msg = f"Exported {len(items_to_export)} work items to CSV: {target_path}"
             logger.info(msg)
             self.logMessage.emit(f"✅ {msg}")
             return {
                 "success": True,
                 "file_path": target_path,
-                "item_count": len(items_to_export)
+                "item_count": len(items_to_export),
+                "count": len(items_to_export)
             }
         except Exception as e:
-            err = f"Failed to export work items to Excel: {e}"
+            err = f"Failed to export work items to CSV: {e}"
             logger.error(err)
             self.logMessage.emit(f"❌ {err}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e), "file_path": "", "item_count": 0, "count": 0}
 
     @Slot(list, str, result="QVariantMap")
     @Slot(list, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
     @Slot(str, result="QVariantMap")
     @Slot(result="QVariantMap")
     def export_work_items_to_excel(self, items_or_file_path=None, file_path=""):
@@ -6331,6 +7305,108 @@ class DevOpsBackend(QObject):
                 })
         return tasks
 
+    def _format_repo_summary_item(self, rname: str, rinfo: dict, wis_map: dict = None) -> dict:
+        """Helper to format a single repository entry for TagDay summaries."""
+        latest_tag = rinfo.get("latest_tag")
+        tag_name = "-"
+        tag_details = None
+        if isinstance(latest_tag, dict):
+            tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
+            tag_details = {
+                "name": tag_name,
+                "commit_date": latest_tag.get("commit_date") or "",
+                "committer": latest_tag.get("committer") or "",
+                "comment": latest_tag.get("comment") or "",
+            }
+        elif isinstance(latest_tag, str) and latest_tag:
+            tag_name = latest_tag
+
+        prs_after_tag = rinfo.get("prs_after_tag", [])
+        active_prs = rinfo.get("active_prs", [])
+        all_prs = rinfo.get("all_prs", [])
+        unmerged_branches = rinfo.get("unmerged_branches", [])
+
+        enriched_prs_after_tag = []
+        for p in prs_after_tag:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_prs_after_tag.append(p_copy)
+
+        enriched_active_prs = []
+        for p in active_prs:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_active_prs.append(p_copy)
+
+        enriched_all_prs = []
+        for p in all_prs:
+            p_copy = dict(p)
+            p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
+            enriched_all_prs.append(p_copy)
+
+        r_web_url = rinfo.get("web_url", "")
+        clean_branches = []
+        for b in unmerged_branches:
+            prep_pr_id = ""
+            prep_pr_title = ""
+            prep_pr_status = ""
+            is_abandoned = b.get("is_abandoned", False)
+            if b.get("prepared_pr"):
+                prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
+                prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                    is_abandoned = True
+
+            b_name = b.get("branch_name", "")
+            clean_b_name = b_name.replace("refs/heads/", "")
+            branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
+
+            clean_branches.append({
+                "branch_name": b_name,
+                "repo_name": rname,
+                "repo_url": r_web_url,
+                "branch_url": branch_url,
+                "repo_category": rinfo.get("category", "OTHERS"),
+                "default_branch": rinfo.get("default_branch", "main"),
+                "commit_id": b.get("commit_id", ""),
+                "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
+                "commit_date": b.get("commit_date", ""),
+                "committer": b.get("committer", ""),
+                "comment": b.get("comment", ""),
+                "ahead": b.get("ahead", 0),
+                "behind": b.get("behind", 0),
+                "prepared_pr_id": prep_pr_id,
+                "prepared_pr_title": prep_pr_title,
+                "prepared_pr_status": prep_pr_status,
+                "is_abandoned": is_abandoned,
+            })
+
+        has_untagged_prs = len(prs_after_tag) > 0
+
+        return {
+            "name": rname,
+            "id": rinfo.get("id", ""),
+            "default_branch": rinfo.get("default_branch", "main"),
+            "web_url": r_web_url,
+            "category": rinfo.get("category", "OTHERS"),
+            "is_disabled": rinfo.get("is_disabled", False),
+            "latest_tag": tag_name,
+            "latest_tag_details": tag_details,
+            "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
+            "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
+            "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
+            "prs_count": len(prs_after_tag),
+            "active_prs_count": len(active_prs),
+            "all_prs_count": len(all_prs),
+            "branches_count": len(unmerged_branches),
+            "prs": enriched_prs_after_tag,
+            "prs_after_tag": enriched_prs_after_tag,
+            "active_prs": enriched_active_prs,
+            "all_prs": enriched_all_prs,
+            "unmerged_branches": clean_branches,
+        }
+
     def _populate_tagday_data(self, td_raw, work_items_map=None):
         """Populates _tagday_data structure and emits tagDayDataChanged."""
         if not td_raw:
@@ -6340,103 +7416,1148 @@ class DevOpsBackend(QObject):
 
         wis_map = work_items_map if work_items_map is not None else getattr(self, "_work_items_map", None)
 
+        all_repos_raw = td_raw.get("all_repositories") or {}
+        if not all_repos_raw:
+            all_repos_raw = repos_changed
+
+        all_repos_summary = []
         repos_summary = []
-        for rname, rinfo in sorted(repos_changed.items()):
-            latest_tag = rinfo.get("latest_tag")
-            tag_name = "-"
-            tag_details = None
-            if isinstance(latest_tag, dict):
-                tag_name = latest_tag.get("name") or latest_tag.get("tag_name") or "-"
-                tag_details = {
-                    "name": tag_name,
-                    "commit_date": latest_tag.get("commit_date") or "",
-                    "committer": latest_tag.get("committer") or "",
-                    "comment": latest_tag.get("comment") or "",
-                }
+        for rname, rinfo in sorted(all_repos_raw.items()):
+            item = self._format_repo_summary_item(rname, rinfo, wis_map)
+            all_repos_summary.append(item)
+            if rname in repos_changed or item["prs_count"] > 0 or item["active_prs_count"] > 0 or item["branches_count"] > 0:
+                repos_summary.append(item)
 
-            prs_after_tag = rinfo.get("prs_after_tag", [])
-            active_prs = rinfo.get("active_prs", [])
-            all_prs = rinfo.get("all_prs", [])
-            unmerged_branches = rinfo.get("unmerged_branches", [])
-
-            # Enrich PRs with referenced tasks queried from memory cache or DB
-            enriched_prs_after_tag = []
-            for p in prs_after_tag:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_prs_after_tag.append(p_copy)
-
-            enriched_active_prs = []
-            for p in active_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_active_prs.append(p_copy)
-
-            enriched_all_prs = []
-            for p in all_prs:
-                p_copy = dict(p)
-                p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=wis_map)
-                enriched_all_prs.append(p_copy)
-
-            clean_branches = []
-            for b in unmerged_branches:
-                prep_pr_id = ""
-                prep_pr_title = ""
-                prep_pr_status = ""
-                is_abandoned = b.get("is_abandoned", False)
-                if b.get("prepared_pr"):
-                    prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
-                    prep_pr_title = str(b["prepared_pr"].get("title", ""))
-                    prep_pr_status = str(b["prepared_pr"].get("status", ""))
-                    if not is_abandoned and prep_pr_status in ("abandoned", "2"):
-                        is_abandoned = True
-
-                clean_branches.append({
-                    "branch_name": b.get("branch_name", ""),
-                    "commit_id": b.get("commit_id", ""),
-                    "short_hash": b.get("short_hash", ""),
-                    "commit_date": b.get("commit_date", ""),
-                    "committer": b.get("committer", ""),
-                    "comment": b.get("comment", ""),
-                    "ahead": b.get("ahead", 0),
-                    "behind": b.get("behind", 0),
-                    "prepared_pr_id": prep_pr_id,
-                    "prepared_pr_title": prep_pr_title,
-                    "prepared_pr_status": prep_pr_status,
-                    "is_abandoned": is_abandoned,
-                })
-
-            has_untagged_prs = len(prs_after_tag) > 0
-
-            repos_summary.append({
-                "name": rname,
-                "id": rinfo.get("id", ""),
-                "default_branch": rinfo.get("default_branch", "main"),
-                "web_url": rinfo.get("web_url", ""),
-                "category": rinfo.get("category", "OTHERS"),
-                "is_disabled": rinfo.get("is_disabled", False),
-                "latest_tag": tag_name,
-                "latest_tag_details": tag_details,
-                "proposed_tag": utils.propose_next_tag(tag_name, bump="patch") if has_untagged_prs else "",
-                "proposed_minor_tag": utils.propose_next_tag(tag_name, bump="minor") if has_untagged_prs else "",
-                "proposed_major_tag": utils.propose_next_tag(tag_name, bump="major") if has_untagged_prs else "",
-                "prs_count": len(prs_after_tag),
-                "active_prs_count": len(active_prs),
-                "all_prs_count": len(all_prs),
-                "branches_count": len(unmerged_branches),
-                "prs_after_tag": enriched_prs_after_tag,
-                "active_prs": enriched_active_prs,
-                "all_prs": enriched_all_prs,
-                "unmerged_branches": clean_branches,
-            })
+        repos_with_prs_count = sum(1 for r in repos_summary if r.get("prs_count", 0) > 0)
+        repos_with_branches_count = sum(1 for r in repos_summary if r.get("branches_count", 0) > 0)
 
         self._tagday_data = {
-            "repos_analyzed": len(td_raw.get("all_repositories", {})),
-            "repos_with_changes_count": len(repos_changed),
+            "repos_analyzed": len(all_repos_summary),
+            "repos_with_changes_count": len(repos_summary),
+            "repos_with_prs_count": repos_with_prs_count,
+            "repos_with_branches_count": repos_with_branches_count,
             "timeline_items_count": len(timeline),
             "timeline": timeline[:100],
             "repos_summary": repos_summary,
+            "all_repos_summary": all_repos_summary,
             "generated_at": td_raw.get("generated_at", ""),
         }
         self.tagDayDataChanged.emit()
         return self._tagday_data
+
+    @Slot(str, result="QVariantMap")
+    def get_file_content(self, file_path: str):
+        """
+        Reads and returns text file content and file metadata.
+        Resolves relative paths against effectiveReportsDir or current working directory.
+        """
+        if not file_path:
+            return {"success": False, "error": "No file path provided", "content": ""}
+
+        # Attempt resolving path
+        candidates = [
+            file_path,
+            os.path.join(self.get_effective_reports_dir(), file_path),
+            os.path.join(os.getcwd(), file_path)
+        ]
+        target_path = None
+        for p in candidates:
+            if p and os.path.isfile(p):
+                target_path = os.path.abspath(p)
+                break
+
+        if not target_path:
+            return {
+                "success": False,
+                "error": f"File not found: {file_path}",
+                "file_path": file_path,
+                "file_name": os.path.basename(file_path),
+                "content": "",
+                "line_count": 0,
+                "word_count": 0,
+                "size_bytes": 0,
+                "modified_at": ""
+            }
+
+        try:
+            with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+
+            stats = os.stat(target_path)
+            lines = content.splitlines()
+            word_count = len(re.findall(r"\b\w+\b", content))
+            mod_time = datetime.fromtimestamp(stats.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            return {
+                "success": True,
+                "error": "",
+                "file_path": target_path,
+                "file_name": os.path.basename(target_path),
+                "content": content,
+                "line_count": len(lines),
+                "word_count": word_count,
+                "size_bytes": stats.st_size,
+                "modified_at": mod_time
+            }
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "file_path": target_path or file_path,
+                "file_name": os.path.basename(target_path or file_path),
+                "content": "",
+                "line_count": 0,
+                "word_count": 0,
+                "size_bytes": 0,
+                "modified_at": ""
+            }
+
+    @Slot(str, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    def get_report_content(self, report_type: str, param: str = ""):
+        """
+        Retrieves formatted report content, format type ('markdown'/'csv'/'text'), and file metadata
+        for Right Sidebar preview.
+        Supported report_types: 'tagday', 'revision', 'storage', 'sprint', 'workload_csv', 'team_motivation'.
+        """
+        r_type = (report_type or "").strip().lower()
+        eff_dir = self.get_effective_reports_dir()
+
+        if r_type in ("tagday", "tag_day"):
+            candidates = [
+                os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD),
+                os.path.join(eff_dir, "TAGDAY.md"),
+                os.path.join(os.getcwd(), devops_helper.TAGDAY_FILE_MD),
+                os.path.join(os.getcwd(), "TAGDAY.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Tag Day Release Report"
+                        res["format"] = "markdown"
+                        return res
+            # Fallback to in-memory tag day data if file not yet written to disk
+            if self._tagday_data and self._tagday_data.get("repos_summary"):
+                import generate_tagday_report
+                try:
+                    md_text = generate_tagday_report.build_tagday_markdown(self._tagday_data, project_id=self.selectedProject)
+                    return {
+                        "success": True,
+                        "title": "Tag Day Release Report (Live Draft)",
+                        "format": "markdown",
+                        "file_path": os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD),
+                        "file_name": devops_helper.TAGDAY_FILE_MD,
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": self._tagday_data.get("generated_at", "") or "Just now"
+                    }
+                except Exception as e:
+                    logger.debug(f"Could not build draft tagday markdown: {e}")
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.TAGDAY_FILE_MD))
+            res["title"] = "Tag Day Release Report"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("revision", "release_notes"):
+            candidates = [
+                os.path.join(eff_dir, devops_helper.REVISION_FILE_MD),
+                os.path.join(eff_dir, "REVISION.md"),
+                os.path.join(eff_dir, "doc", "04_Development", "REVISION.md"),
+                os.path.join(os.getcwd(), "doc", "04_Development", "REVISION.md"),
+                os.path.join(os.getcwd(), "REVISION.md"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "doc", "04_Development", "REVISION.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Release Notes & Revision History"
+                        res["format"] = "markdown"
+                        return res
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.REVISION_FILE_MD))
+            res["title"] = "Release Notes & Revision History"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("storage", "artifacts"):
+            candidates = [
+                os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                os.path.join(eff_dir, "BUILD_ARTIFACTS.md"),
+                os.path.join(eff_dir, "STORAGE.md"),
+                os.path.join(os.getcwd(), "reports", devops_helper.BUILD_ARTIFACTS_MD),
+                os.path.join(os.getcwd(), "reports", "BUILD_ARTIFACTS.md"),
+                os.path.join(os.getcwd(), "reports", "STORAGE.md"),
+                os.path.join(os.getcwd(), devops_helper.BUILD_ARTIFACTS_MD),
+                os.path.join(os.getcwd(), "BUILD_ARTIFACTS.md"),
+                os.path.join(os.getcwd(), "STORAGE.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Storage & Build Artifacts Report"
+                        res["format"] = "markdown"
+                        return res
+
+            # Try generating dynamic markdown from cache DB if available
+            if self._cache_db:
+                try:
+                    import generate_artifacts_report
+                    artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
+                    if artifacts:
+                        metrics = generate_artifacts_report.calculate_metrics(artifacts)
+                        md_content = generate_artifacts_report.generate_markdown_report(
+                            metrics,
+                            artifacts,
+                            output_path=os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                            project_name=devops_helper.AZURE_PROJECT_ID,
+                            csv_filename=devops_helper.BUILD_ARTIFACTS_CSV
+                        )
+                        if md_content:
+                            return {
+                                "success": True,
+                                "title": "Storage & Build Artifacts Report",
+                                "format": "markdown",
+                                "file_path": os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                                "file_name": devops_helper.BUILD_ARTIFACTS_MD,
+                                "content": md_content,
+                                "line_count": len(md_content.splitlines()),
+                                "word_count": len(re.findall(r"\b\w+\b", md_content)),
+                                "size_bytes": len(md_content.encode("utf-8")),
+                                "modified_at": "Live generated"
+                            }
+                except Exception as e:
+                    logger.debug(f"Could not render full storage markdown: {e}")
+
+            # Structured live fallback from _storage_data
+            s_data = self._storage_data or {}
+            repo_groups = s_data.get("artifacts_by_repo", [])
+            total_builds = s_data.get("total_builds", 0)
+            total_artifacts = s_data.get("total_artifacts", 0)
+            total_gb = s_data.get("total_size_gb", "0.00")
+            active_gb = s_data.get("active_size_gb", "0.00")
+            deleted_gb = s_data.get("deleted_size_gb", "0.00")
+
+            md_lines = [
+                "# 📦 Build Artifact & Storage Report",
+                "",
+                f"> **Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ",
+                f"> **Target Directory:** `{eff_dir}`  ",
+                "",
+                "## 📊 Storage Metrics Summary",
+                "",
+                "| Metric | Count / Size | Description |",
+                "| :--- | :--- | :--- |",
+                f"| **Total Builds Tracked** | `{total_builds}` | Completed pipeline builds analyzed |",
+                f"| **Total Artifact Packages** | `{total_artifacts}` | Published drop folders and build artifacts |",
+                f"| **Total Storage Footprint** | `{total_gb} GB` | Combined active and historical storage |",
+                f"| **Active Storage in Use** | `{active_gb} GB` | Current retained build packages |",
+                f"| **Reclaimed / Deleted** | `{deleted_gb} GB` | Cleaned up artifact storage |",
+                "",
+                "## 📂 Repository Breakdown",
+                "",
+                "| Repository | Builds | Artifacts | Active Size | Total Size |",
+                "| :--- | :--- | :--- | :--- | :--- |"
+            ]
+            if repo_groups:
+                for grp in repo_groups:
+                    r_name = grp.get("repo_name", "-")
+                    b_count = grp.get("builds_count", 0)
+                    a_count = grp.get("artifacts_count", 0)
+                    act_sz = f"{grp.get('active_size_mb', 0):.2f} MB"
+                    tot_sz = grp.get("total_size_str", "0 MB")
+                    md_lines.append(f"| **{r_name}** | {b_count} | {a_count} | `{act_sz}` | `{tot_sz}` |")
+            else:
+                md_lines.append("| *No repository artifact data cached yet* | - | - | - | - |")
+                md_lines.append("")
+                md_lines.append("*Click '⚡ Generate Storage Report' in the Storage page to sync live builds and generate full analysis.*")
+
+            content = "\n".join(md_lines)
+            return {
+                "success": True,
+                "title": "Storage & Build Artifacts Report",
+                "format": "markdown",
+                "file_path": os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                "file_name": devops_helper.BUILD_ARTIFACTS_MD,
+                "content": content,
+                "line_count": len(md_lines),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Live snapshot"
+            }
+
+        elif r_type in ("sprint", "sprint_report"):
+            clean_sprint = self._get_default_sprint_name(param)
+            candidates = [
+                os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                os.path.join(eff_dir, f"SPRINT_{clean_sprint}.md"),
+                os.path.join(os.getcwd(), f"SPRINT_REPORT_{clean_sprint}.md"),
+                os.path.join(os.getcwd(), f"SPRINT_{clean_sprint}.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = f"Sprint Report - {clean_sprint}"
+                        res["format"] = "markdown"
+                        return res
+
+            # Live full rendered sprint markdown fallback
+            try:
+                import generate_sprint_report
+                work_items = self._work_items if self._work_items else None
+                data = generate_sprint_report.generate_sprint_report_data(
+                    self._cache_db, sprint_name=clean_sprint, work_items=work_items
+                )
+                md_text = generate_sprint_report.render_sprint_markdown(data)
+                if md_text:
+                    return {
+                        "success": True,
+                        "title": f"Sprint Report - {clean_sprint}",
+                        "format": "markdown",
+                        "file_path": os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                        "file_name": f"SPRINT_REPORT_{clean_sprint}.md",
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": "Live generated"
+                    }
+            except Exception as e:
+                logger.debug(f"Could not render full sprint markdown: {e}")
+
+            matching_wis = [w for w in (self._work_items or []) if (w.get("sprint_week_name") == clean_sprint or clean_sprint in (w.get("iteration_path") or ""))]
+            md_lines = [
+                f"# Sprint Report: {clean_sprint}",
+                "",
+                f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | **Items:** {len(matching_wis)}",
+                "",
+                "| ID | Type | Title | State | Assigned To | Target Date |",
+                "|---|---|---|---|---|---|"
+            ]
+            for wi in matching_wis:
+                t_date = wi.get("target_date") or "-"
+                md_lines.append(f"| #{wi.get('id')} | {wi.get('type')} | {wi.get('title')} | {wi.get('state')} | {wi.get('assigned_to')} | {t_date} |")
+
+            content = "\n".join(md_lines)
+            return {
+                "success": True,
+                "title": f"Sprint Report - {clean_sprint}",
+                "format": "markdown",
+                "file_path": os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
+                "file_name": f"SPRINT_REPORT_{clean_sprint}.md",
+                "content": content,
+                "line_count": len(md_lines),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Live snapshot"
+            }
+
+        elif r_type in ("rescheduling", "shifts", "iteration_shifts", "moved_items"):
+            candidates = [
+                os.path.join(eff_dir, "RESCHEDULING_REPORT.md"),
+                os.path.join(eff_dir, "doc", "04_Development", "RESCHEDULING_REPORT.md"),
+                os.path.join(os.getcwd(), "RESCHEDULING_REPORT.md"),
+                os.path.join(os.getcwd(), "doc", "04_Development", "RESCHEDULING_REPORT.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Iteration Shifts & Rescheduling Report"
+                        res["format"] = "markdown"
+                        return res
+            # Fallback draft generation
+            try:
+                import generate_rescheduling_report
+                temp_res = generate_rescheduling_report.generate_rescheduling_report(
+                    self._cache_db,
+                    output_md=None,
+                    output_csv=None,
+                    review_status=None
+                )
+                md_text = temp_res.get("markdown", "")
+                if md_text:
+                    return {
+                        "success": True,
+                        "title": "Iteration Shifts & Rescheduling Report (Live)",
+                        "format": "markdown",
+                        "file_path": os.path.join(eff_dir, "RESCHEDULING_REPORT.md"),
+                        "file_name": "RESCHEDULING_REPORT.md",
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": "Live generated"
+                    }
+            except Exception as e:
+                logger.debug(f"Could not build draft rescheduling markdown: {e}")
+            res = self.get_file_content(os.path.join(eff_dir, "RESCHEDULING_REPORT.md"))
+            res["title"] = "Iteration Shifts & Rescheduling Report"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("team_motivation", "motivation"):
+            content = self.get_team_motivation_markdown_summary()
+            return {
+                "success": True,
+                "title": "Team Motivation & Sprint Retro Summary",
+                "format": "markdown",
+                "file_path": "clipboard://retro_summary.md",
+                "file_name": "team_retro_summary.md",
+                "content": content,
+                "line_count": len(content.splitlines()),
+                "word_count": len(re.findall(r"\b\w+\b", content)),
+                "size_bytes": len(content.encode("utf-8")),
+                "modified_at": "Live calculated"
+            }
+
+        else:
+            res = self.get_file_content(report_type or param)
+            res["title"] = os.path.basename(res.get("file_path") or report_type)
+            res["format"] = "csv" if (res.get("file_name", "").endswith(".csv")) else ("markdown" if res.get("file_name", "").endswith(".md") else "text")
+            return res
+
+    @Slot(str, result="QVariantMap")
+    def parse_csv_to_table(self, csv_content_or_path: str):
+        """
+        Parses CSV string or file into structured table headers and rows.
+        """
+        import csv
+        import io
+        if not csv_content_or_path:
+            return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0}
+
+        text = csv_content_or_path
+        if os.path.isfile(csv_content_or_path):
+            try:
+                with open(csv_content_or_path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read CSV file: {e}")
+                return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0, "error": str(e)}
+
+        try:
+            reader = csv.reader(io.StringIO(text.strip()))
+            all_rows = list(reader)
+            if not all_rows:
+                return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0}
+
+            headers = all_rows[0]
+            rows = all_rows[1:]
+            return {
+                "headers": headers,
+                "rows": rows[:500],
+                "total_rows": len(rows),
+                "total_cols": len(headers)
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse CSV: {e}")
+            return {"headers": [], "rows": [], "total_rows": 0, "total_cols": 0, "error": str(e)}
+
+    @Slot(str, result="QVariantMap")
+    def get_member_workload_details(self, assignee_name: str):
+        """
+        Calculates detailed workload, active sprint focus, work items list,
+        and state breakdown for a specific team member.
+        """
+        name = (assignee_name or "").strip()
+        matching = []
+        is_all = not name or name.upper() == "ALL"
+
+        for wi in self._work_items:
+            assigned = wi.get("assigned_to") or ""
+            if is_all or assigned.strip().lower() == name.lower():
+                matching.append(wi)
+
+        total = len(matching)
+        active_count = 0
+        closed_count = 0
+        new_count = 0
+        overdue_count = 0
+        stories_total = 0
+        stories_solved = 0
+        bugs_total = 0
+        bugs_solved = 0
+        tasks_total = 0
+        tasks_solved = 0
+        by_type_map = {}
+        by_sprint_map = {}
+        by_milestone_map = {}
+        by_state_map = {}
+
+        for wi in matching:
+            state = (wi.get("state") or "New").strip()
+            wtype = (wi.get("type") or "Task").strip()
+            sprint = wi.get("sprint_week_name") or "Unplanned"
+            ms = wi.get("milestone_name") or wi.get("effective_milestone_name") or ""
+            urgency = wi.get("urgency_status") or "none"
+
+            s_lower = state.lower()
+            is_closed = s_lower in ("closed", "done", "resolved", "completed", "removed", "cut")
+            if is_closed:
+                closed_count += 1
+            elif s_lower in ("active", "in progress", "doing", "investigating"):
+                active_count += 1
+            else:
+                new_count += 1
+
+            wtype_lower = wtype.lower()
+            if wtype_lower in ("requirement", "user story", "story", "product backlog item"):
+                stories_total += 1
+                if is_closed:
+                    stories_solved += 1
+            elif wtype_lower in ("bug", "defect", "problem"):
+                bugs_total += 1
+                if is_closed:
+                    bugs_solved += 1
+            elif wtype_lower in ("task", "subtask"):
+                tasks_total += 1
+                if is_closed:
+                    tasks_solved += 1
+
+            if urgency == "overdue":
+                overdue_count += 1
+
+            by_type_map[wtype] = by_type_map.get(wtype, 0) + 1
+            by_state_map[state] = by_state_map.get(state, 0) + 1
+            if ms:
+                by_milestone_map[ms] = by_milestone_map.get(ms, 0) + 1
+
+            if sprint not in by_sprint_map:
+                by_sprint_map[sprint] = {"sprint": sprint, "total": 0, "active": 0, "closed": 0, "overdue": 0}
+            by_sprint_map[sprint]["total"] += 1
+            if s_lower in ("closed", "done", "resolved", "completed"):
+                by_sprint_map[sprint]["closed"] += 1
+            else:
+                by_sprint_map[sprint]["active"] += 1
+            if urgency == "overdue":
+                by_sprint_map[sprint]["overdue"] += 1
+
+        completion_pct = round((closed_count / total * 100)) if total > 0 else 0
+
+        def sprint_sort_key(s_dict):
+            y, w, _ = utils.parse_sprint_week(s_dict["sprint"])
+            return (y or 0, w or 0)
+        sprints_list = sorted(by_sprint_map.values(), key=sprint_sort_key, reverse=True)
+
+        sorted_wis = sorted(matching, key=lambda x: (x.get("urgency_status") == "overdue", x.get("id") or 0), reverse=True)
+        recent_items = []
+        for wi in sorted_wis[:30]:
+            recent_items.append({
+                "id": wi.get("id"),
+                "title": wi.get("title") or f"Work Item #{wi.get('id')}",
+                "type": wi.get("type") or "Task",
+                "state": wi.get("state") or "New",
+                "sprint_week_name": wi.get("sprint_week_name") or "",
+                "iteration_path": wi.get("iteration_path") or "",
+                "target_date": wi.get("target_date") or "",
+                "deadline_str": wi.get("deadline_str") or "",
+                "urgency_badge": wi.get("urgency_badge") or "",
+                "urgency_color": wi.get("urgency_color") or "#8b949e",
+                "urgency_status": wi.get("urgency_status") or "none",
+                "tfs_url": wi.get("tfs_url") or "",
+                "tfs_sprint_url": wi.get("tfs_sprint_url") or "",
+                "milestone_name": wi.get("milestone_name") or wi.get("effective_milestone_name") or "",
+                "level1_pbs": wi.get("level1_pbs") or "",
+                "level2_pbs": wi.get("level2_pbs") or "",
+                "is_prio1": wi.get("is_prio1", False)
+            })
+
+        parts = name.split()
+        initials = "".join(p[0].upper() for p in parts[:2]) if parts else "U"
+
+        return {
+            "assignee": name,
+            "initials": initials,
+            "total_items": total,
+            "active_items": active_count,
+            "closed_items": closed_count,
+            "new_items": new_count,
+            "overdue_items": overdue_count,
+            "completion_rate": completion_pct,
+            "stories_total": stories_total,
+            "stories_solved": stories_solved,
+            "bugs_total": bugs_total,
+            "bugs_solved": bugs_solved,
+            "tasks_total": tasks_total,
+            "tasks_solved": tasks_solved,
+            "by_type": [{"type": k, "count": v} for k, v in sorted(by_type_map.items(), key=lambda x: x[1], reverse=True)],
+            "by_state": [{"state": k, "count": v} for k, v in sorted(by_state_map.items(), key=lambda x: x[1], reverse=True)],
+            "by_milestone": [{"milestone": k, "count": v} for k, v in sorted(by_milestone_map.items(), key=lambda x: x[1], reverse=True)],
+            "sprints": sprints_list[:12],
+            "work_items": recent_items
+        }
+
+    # =========================================================================
+    # Universal Global Search (Work Items, Commits, PRs, OI, MP, Scenarios, Repos)
+    # =========================================================================
+    @Slot(str, str, int, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def global_search(self, query: str = "", category_filter: str = "ALL", limit: int = 80) -> dict:
+        """
+        Performs ultra-fast, cross-domain search across Work Items, Git Commits,
+        Pull Requests, Open Item codes (OI/OIL), Merkpunkt codes (MP), Scenarios,
+        Repositories, and Milestones.
+        """
+        q = (query or "").strip()
+        cat_filter = (category_filter or "ALL").upper().strip()
+        max_limit = max(10, min(300, int(limit or 80)))
+
+        counts = {
+            "all": 0,
+            "work_items": 0,
+            "commits": 0,
+            "pull_requests": 0,
+            "open_items": 0,
+            "merkpunkte": 0,
+            "scenarios": 0,
+            "repositories": 0,
+            "milestones": 0,
+        }
+
+        if not q:
+            return {
+                "query": "",
+                "category_filter": cat_filter,
+                "total_count": 0,
+                "counts_by_category": counts,
+                "results": [],
+            }
+
+        q_lower = q.lower()
+        q_clean = q.lstrip("#").lstrip("!").strip()
+        
+        # Check if query contains numeric ID (e.g. 12345, #12345, PR 42, WI 12345)
+        num_match = re.search(r'\b\d+\b', q)
+        query_num = int(num_match.group(0)) if num_match else None
+        
+        # Extract schematic tags from search query (e.g. [OI_171], [MP_01], [SCENARIO_12])
+        extracted_query_schematics = devops_helper.extract_schematics_from_text(q)
+        is_oi_query = bool(re.search(r'\b(oi|oil)[_\-\s]?\d*\b', q_lower)) or any("[OI_" in s or "[OIL_" in s for s in extracted_query_schematics)
+        is_mp_query = bool(re.search(r'\b(mp)[_\-\s]?\d*\b', q_lower)) or any("[MP_" in s for s in extracted_query_schematics)
+        is_scenario_query = bool(re.search(r'\b(scenario|scen)[_\-\s]?\d*\b', q_lower)) or any("[SCENARIO_" in s or "[SCEN_" in s for s in extracted_query_schematics)
+
+        # ADO / TFS URL components
+        base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
+        col = (getattr(devops_helper, "DEFAULT_COLLECTION", "") or getattr(devops_helper, "AZURE_COLLECTION", "") or "").strip("/")
+        proj = (getattr(devops_helper, "DEFAULT_PROJECT", "") or getattr(devops_helper, "AZURE_PROJECT_ID", "") or "").strip("/")
+
+        results_by_cat = {
+            "work_items": [],
+            "commits": [],
+            "pull_requests": [],
+            "open_items": [],
+            "merkpunkte": [],
+            "scenarios": [],
+            "repositories": [],
+            "milestones": [],
+        }
+
+        # ---------------------------------------------------------------------
+        # 1. Search Work Items
+        # ---------------------------------------------------------------------
+        wis_to_search = self._work_items
+        if not wis_to_search and self._cache_db:
+            try:
+                wis_to_search = self._cache_db.get_all_work_items(include_deleted=True)
+            except Exception:
+                wis_to_search = []
+
+        for wi in wis_to_search:
+            if wi.get("deleted"):
+                continue
+            wi_id = wi.get("id") or 0
+            wi_title = wi.get("title") or f"Work Item #{wi_id}"
+            wi_type = wi.get("type") or "Task"
+            wi_state = wi.get("state") or "New"
+            wi_assignee = wi.get("assigned_to") or "Unassigned"
+            wi_tags = wi.get("tags") or ""
+            if not wi_tags and wi.get("fields"):
+                wi_tags = wi.get("fields", {}).get("System.Tags") or ""
+            elif not wi_tags and wi.get("raw_json"):
+                try:
+                    wi_tags = json.loads(wi["raw_json"]).get("fields", {}).get("System.Tags") or ""
+                except Exception:
+                    pass
+
+            wi_sprint = wi.get("sprint_week_name") or wi.get("iteration_name") or ""
+            wi_url = wi.get("tfs_url") or (f"{base_url}/{col}/{proj}/_workitems/edit/{wi_id}" if base_url else "")
+
+            # Extract schematics from title and tags
+            combined_text = f"{wi_title} {wi_tags}"
+            schematics = devops_helper.extract_schematics_from_text(combined_text)
+
+            # Match calculation & Scoring
+            matched = False
+            relevance = 0
+
+            has_schematic_match = (
+                any(s in extracted_query_schematics for s in schematics)
+                or any(q_lower in s.lower() for s in schematics)
+                or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+            )
+
+            if query_num and wi_id == query_num:
+                matched = True
+                relevance += 1000  # Exact ID match gets highest priority
+            elif str(wi_id).startswith(q_clean):
+                matched = True
+                relevance += 500
+            elif q_lower in wi_title.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in str(wi_assignee).lower():
+                matched = True
+                relevance += 100
+            elif q_lower in str(wi_tags).lower():
+                matched = True
+                relevance += 150
+            elif q_lower in str(wi_sprint).lower():
+                matched = True
+                relevance += 50
+            elif has_schematic_match:
+                matched = True
+                relevance += 300
+
+            if matched:
+                t_lower = str(wi_type).lower()
+                is_bug = t_lower in ("bug", "defect", "problem")
+                is_story = t_lower in ("requirement", "user story", "story", "product backlog item")
+                is_feat = t_lower in ("feature", "epic")
+                icon = "🐛" if is_bug else ("🎯" if is_feat else ("📘" if is_story else "📋"))
+                badge_color = "#f85149" if is_bug else ("#a371f7" if is_feat else ("#58a6ff" if is_story else "#3fb950"))
+
+                item_payload = {
+                    "key": f"wi_{wi_id}",
+                    "category": "work_items",
+                    "category_label": "Work Item",
+                    "type": wi_type,
+                    "icon": icon,
+                    "id": str(wi_id),
+                    "title": wi_title,
+                    "subtitle": f"{wi_type} • {wi_state} • {wi_assignee} • {wi_sprint or 'Backlog'}",
+                    "badge": f"#{wi_id}",
+                    "badge_color": badge_color,
+                    "state": wi_state,
+                    "assignee": wi_assignee,
+                    "iteration": wi_sprint,
+                    "schematics": schematics,
+                    "url": wi_url,
+                    "action_type": "open_work_item",
+                    "target_id": wi_id,
+                    "relevance": relevance,
+                }
+                results_by_cat["work_items"].append(item_payload)
+
+                # Check if it belongs to Open Items, Merkpunkte, or Scenarios
+                has_oi = any("[OI_" in s or "[OIL_" in s for s in schematics) or ("OI" in str(wi_tags))
+                has_mp = any("[MP_" in s for s in schematics) or ("MP" in str(wi_tags))
+                has_scen = any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) or ("scenario" in str(wi_tags).lower())
+
+                if has_oi and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                    oi_copy = dict(item_payload)
+                    oi_copy["key"] = f"oi_wi_{wi_id}"
+                    oi_copy["category"] = "open_items"
+                    oi_copy["category_label"] = "Open Item"
+                    oi_copy["icon"] = "📌"
+                    oi_copy["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI #{wi_id}")
+                    oi_copy["badge_color"] = "#d29922"
+                    results_by_cat["open_items"].append(oi_copy)
+
+                if has_mp and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                    mp_copy = dict(item_payload)
+                    mp_copy["key"] = f"mp_wi_{wi_id}"
+                    mp_copy["category"] = "merkpunkte"
+                    mp_copy["category_label"] = "Merkpunkt"
+                    mp_copy["icon"] = "💡"
+                    mp_copy["badge"] = next((s for s in schematics if "[MP_" in s), f"MP #{wi_id}")
+                    mp_copy["badge_color"] = "#3fb950"
+                    results_by_cat["merkpunkte"].append(mp_copy)
+
+                if has_scen and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                    scen_copy = dict(item_payload)
+                    scen_copy["key"] = f"scen_wi_{wi_id}"
+                    scen_copy["category"] = "scenarios"
+                    scen_copy["category_label"] = "Scenario"
+                    scen_copy["icon"] = "🎬"
+                    scen_copy["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario")
+                    scen_copy["badge_color"] = "#f0883e"
+                    results_by_cat["scenarios"].append(scen_copy)
+
+        # ---------------------------------------------------------------------
+        # 2. Search Pull Requests
+        # ---------------------------------------------------------------------
+        prs_to_search = getattr(self, "_pull_requests", None) or []
+        if not prs_to_search and self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    rows = conn.execute(
+                        "SELECT id, repo_id, title, status, source_branch, target_branch, created_by, raw_json FROM pull_requests"
+                    ).fetchall()
+                    prs_to_search = [dict(r) for r in rows]
+            except Exception as e:
+                logger.debug(f"Error fetching PRs from DB for search: {e}")
+                prs_to_search = []
+
+        for pr in prs_to_search:
+            pr_id = pr.get("id") or pr.get("pr_id") or 0
+            pr_title = pr.get("title") or f"PR #{pr_id}"
+            pr_repo = pr.get("repo_name") or pr.get("repo_id") or "Repository"
+            pr_source = pr.get("source_branch") or ""
+            pr_target = pr.get("target_branch") or ""
+            pr_status = pr.get("status") or "active"
+            pr_creator = pr.get("created_by") or ""
+            pr_url = pr.get("web_url") or (f"{base_url}/{col}/{proj}/_git/{pr_repo}/pullrequest/{pr_id}" if base_url else "")
+
+            schematics = devops_helper.extract_schematics_from_text(pr_title)
+
+            matched = False
+            relevance = 0
+
+            has_schematic_match = (
+                any(s in extracted_query_schematics for s in schematics)
+                or any(q_lower in s.lower() for s in schematics)
+                or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+            )
+
+            if query_num and pr_id == query_num:
+                matched = True
+                relevance += 950
+            elif str(pr_id).startswith(q_clean):
+                matched = True
+                relevance += 450
+            elif q_lower in pr_title.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in pr_repo.lower():
+                matched = True
+                relevance += 120
+            elif q_lower in pr_creator.lower():
+                matched = True
+                relevance += 100
+            elif q_lower in pr_source.lower() or q_lower in pr_target.lower():
+                matched = True
+                relevance += 100
+            elif has_schematic_match:
+                matched = True
+                relevance += 300
+
+            if matched:
+                pr_badge_color = "#a371f7" if pr_status == "completed" else ("#3fb950" if pr_status == "active" else "#8b949e")
+                pr_payload = {
+                    "key": f"pr_{pr_id}",
+                    "category": "pull_requests",
+                    "category_label": "Pull Request",
+                    "type": "Pull Request",
+                    "icon": "🔀",
+                    "id": str(pr_id),
+                    "title": pr_title,
+                    "subtitle": f"PR #{pr_id} in {pr_repo} • {pr_source} ➔ {pr_target} • by {pr_creator or 'Unknown'} ({pr_status})",
+                    "badge": f"PR #{pr_id}",
+                    "badge_color": pr_badge_color,
+                    "state": pr_status,
+                    "assignee": pr_creator,
+                    "repo": pr_repo,
+                    "schematics": schematics,
+                    "url": pr_url,
+                    "action_type": "open_url",
+                    "target_id": pr_id,
+                    "relevance": relevance,
+                }
+                results_by_cat["pull_requests"].append(pr_payload)
+
+                # Check if PR maps to OI, MP, or Scenario
+                if any("[OI_" in s or "[OIL_" in s for s in schematics) and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                    oi_pr = dict(pr_payload)
+                    oi_pr["key"] = f"oi_pr_{pr_id}"
+                    oi_pr["category"] = "open_items"
+                    oi_pr["category_label"] = "Open Item (PR)"
+                    oi_pr["icon"] = "📌"
+                    oi_pr["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI (PR #{pr_id})")
+                    oi_pr["badge_color"] = "#d29922"
+                    results_by_cat["open_items"].append(oi_pr)
+
+                if any("[MP_" in s for s in schematics) and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                    mp_pr = dict(pr_payload)
+                    mp_pr["key"] = f"mp_pr_{pr_id}"
+                    mp_pr["category"] = "merkpunkte"
+                    mp_pr["category_label"] = "Merkpunkt (PR)"
+                    mp_pr["icon"] = "💡"
+                    mp_pr["badge"] = next((s for s in schematics if "[MP_" in s), f"MP (PR #{pr_id})")
+                    mp_pr["badge_color"] = "#3fb950"
+                    results_by_cat["merkpunkte"].append(mp_pr)
+
+                if any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                    scen_pr = dict(pr_payload)
+                    scen_pr["key"] = f"scen_pr_{pr_id}"
+                    scen_pr["category"] = "scenarios"
+                    scen_pr["category_label"] = "Scenario (PR)"
+                    scen_pr["icon"] = "🎬"
+                    scen_pr["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario (PR)")
+                    scen_pr["badge_color"] = "#f0883e"
+                    results_by_cat["scenarios"].append(scen_pr)
+
+        # ---------------------------------------------------------------------
+        # 3. Search Git Commits (via SQLite database)
+        # ---------------------------------------------------------------------
+        if self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    commit_sql = """
+                        SELECT commit_id, comment, author_name, author_date, repo_id
+                        FROM commits
+                        WHERE commit_id LIKE ? OR comment LIKE ? OR author_name LIKE ? OR repo_id LIKE ?
+                        ORDER BY author_date DESC
+                        LIMIT 60
+                    """
+                    pattern = f"%{q}%"
+                    c_rows = conn.execute(commit_sql, (pattern, pattern, pattern, pattern)).fetchall()
+                    for cr in c_rows:
+                        cid = cr["commit_id"] or ""
+                        short_cid = cid[:8] if len(cid) >= 8 else cid
+                        comment = (cr["comment"] or "").strip()
+                        c_title = comment.split("\n")[0] if comment else f"Commit {short_cid}"
+                        c_author = cr["author_name"] or "Unknown"
+                        c_date = (cr["author_date"] or "").split("T")[0]
+                        c_repo = cr["repo_id"] or "Repository"
+                        c_url = f"{base_url}/{col}/{proj}/_git/{c_repo}/commit/{cid}" if base_url else ""
+
+                        schematics = devops_helper.extract_schematics_from_text(comment)
+
+                        relevance = 150
+                        has_schematic_match = (
+                            any(s in extracted_query_schematics for s in schematics)
+                            or any(q_lower in s.lower() for s in schematics)
+                            or any(q_lower.replace("-", "_") in s.lower().replace("-", "_") for s in schematics)
+                            or any(q_lower.replace("_", "-") in s.lower().replace("_", "-") for s in schematics)
+                        )
+
+                        if cid.lower().startswith(q_lower):
+                            relevance += 700
+                        elif q_lower in short_cid.lower():
+                            relevance += 500
+                        elif q_lower in c_title.lower():
+                            relevance += 180
+                        elif has_schematic_match:
+                            relevance += 250
+
+                        commit_payload = {
+                            "key": f"commit_{short_cid}",
+                            "category": "commits",
+                            "category_label": "Commit",
+                            "type": "Commit",
+                            "icon": "📜",
+                            "id": short_cid,
+                            "full_id": cid,
+                            "title": c_title,
+                            "subtitle": f"Commit {short_cid} in {c_repo} • by {c_author} on {c_date}",
+                            "badge": short_cid,
+                            "badge_color": "#d29922",
+                            "state": "Committed",
+                            "assignee": c_author,
+                            "repo": c_repo,
+                            "schematics": schematics,
+                            "url": c_url,
+                            "action_type": "open_url",
+                            "target_id": cid,
+                            "relevance": relevance,
+                        }
+                        results_by_cat["commits"].append(commit_payload)
+
+                        if any("[OI_" in s or "[OIL_" in s for s in schematics) and (is_oi_query or cat_filter in ("ALL", "OPEN_ITEMS")):
+                            oi_c = dict(commit_payload)
+                            oi_c["key"] = f"oi_commit_{short_cid}"
+                            oi_c["category"] = "open_items"
+                            oi_c["category_label"] = "Open Item (Commit)"
+                            oi_c["icon"] = "📌"
+                            oi_c["badge"] = next((s for s in schematics if "[OI_" in s or "[OIL_" in s), f"OI ({short_cid})")
+                            results_by_cat["open_items"].append(oi_c)
+
+                        if any("[MP_" in s for s in schematics) and (is_mp_query or cat_filter in ("ALL", "MERKPUNKTE")):
+                            mp_c = dict(commit_payload)
+                            mp_c["key"] = f"mp_commit_{short_cid}"
+                            mp_c["category"] = "merkpunkte"
+                            mp_c["category_label"] = "Merkpunkt (Commit)"
+                            mp_c["icon"] = "💡"
+                            mp_c["badge"] = next((s for s in schematics if "[MP_" in s), f"MP ({short_cid})")
+                            results_by_cat["merkpunkte"].append(mp_c)
+
+                        if any("[SCENARIO_" in s or "[SCEN_" in s for s in schematics) and (is_scenario_query or cat_filter in ("ALL", "SCENARIOS")):
+                            scen_c = dict(commit_payload)
+                            scen_c["key"] = f"scen_commit_{short_cid}"
+                            scen_c["category"] = "scenarios"
+                            scen_c["category_label"] = "Scenario (Commit)"
+                            scen_c["icon"] = "🎬"
+                            scen_c["badge"] = next((s for s in schematics if "[SCEN" in s), "Scenario (Commit)")
+                            results_by_cat["scenarios"].append(scen_c)
+            except Exception as e:
+                logger.debug(f"Error querying commits for search: {e}")
+
+        # ---------------------------------------------------------------------
+        # 4. Search Repositories
+        # ---------------------------------------------------------------------
+        repos_to_search = getattr(self, "_repositories", None) or []
+        if not repos_to_search and self._cache_db:
+            try:
+                with self._cache_db._connection() as conn:
+                    rows = conn.execute(
+                        "SELECT id, name, default_branch, web_url FROM repositories"
+                    ).fetchall()
+                    repos_to_search = [dict(r) for r in rows]
+            except Exception as e:
+                logger.debug(f"Error fetching repositories from DB for search: {e}")
+                repos_to_search = []
+
+        for r in repos_to_search:
+            r_name = r.get("name") or ""
+            r_url = r.get("url") or r.get("web_url") or (f"{base_url}/{col}/{proj}/_git/{r_name}" if base_url else "")
+            r_branch = r.get("default_branch") or "main"
+            r_cat = r.get("category") or "General"
+
+            matched = False
+            relevance = 0
+
+            if r_name.lower() == q_lower:
+                matched = True
+                relevance += 900
+            elif q_lower in r_name.lower():
+                matched = True
+                relevance += 400
+            elif q_lower in str(r_cat).lower():
+                matched = True
+                relevance += 150
+
+            if matched:
+                results_by_cat["repositories"].append({
+                    "key": f"repo_{r_name}",
+                    "category": "repositories",
+                    "category_label": "Repository",
+                    "type": "Repository",
+                    "icon": "📦",
+                    "id": r_name,
+                    "title": r_name,
+                    "subtitle": f"Branch: {r_branch} • Category: {r_cat}",
+                    "badge": "Repo",
+                    "badge_color": "#1f6feb",
+                    "state": "Active",
+                    "assignee": "",
+                    "repo": r_name,
+                    "schematics": [],
+                    "url": r_url,
+                    "action_type": "open_repo",
+                    "target_id": r_name,
+                    "relevance": relevance,
+                })
+
+        # ---------------------------------------------------------------------
+        # 5. Search Milestones & Major Scenarios
+        # ---------------------------------------------------------------------
+        all_milestones = self.get_milestones()
+        for m in all_milestones:
+            m_id = m.get("id") or 0
+            m_name = m.get("name") or ""
+            m_desc = m.get("description") or ""
+            m_cat = (m.get("category_id") or "").lower()
+            m_cat_name = m.get("category_name") or "Milestone"
+            m_date = m.get("target_date") or m.get("start_date") or ""
+            m_team = m.get("team") or "All Teams"
+            m_color = m.get("category_color") or "#79c0ff"
+            m_icon = m.get("category_icon") or "🚩"
+
+            matched = False
+            relevance = 0
+
+            if q_lower in m_name.lower():
+                matched = True
+                relevance += 400
+            elif q_lower in m_desc.lower():
+                matched = True
+                relevance += 200
+            elif q_lower in m_cat_name.lower() or q_lower in m_cat:
+                matched = True
+                relevance += 250
+
+            if matched:
+                is_scen = m_cat == "scenario" or "scenario" in m_name.lower()
+                cat_key = "scenarios" if is_scen else "milestones"
+                m_payload = {
+                    "key": f"ms_{m_id}_{m_name}",
+                    "category": cat_key,
+                    "category_label": "Scenario" if is_scen else "Milestone",
+                    "type": "Scenario" if is_scen else "Milestone",
+                    "icon": m_icon if m_icon else ("🎬" if is_scen else "🚩"),
+                    "id": str(m_id),
+                    "title": m_name,
+                    "subtitle": f"Target: {m_date or 'TBD'} • Category: {m_cat_name} • {m_team}",
+                    "badge": m_cat_name,
+                    "badge_color": m_color,
+                    "state": "Planned",
+                    "assignee": m_team,
+                    "repo": "",
+                    "schematics": [],
+                    "url": "",
+                    "action_type": "open_milestones",
+                    "target_id": m_id,
+                    "relevance": relevance,
+                }
+                results_by_cat[cat_key].append(m_payload)
+
+        # ---------------------------------------------------------------------
+        # Count & Filter Aggregation
+        # ---------------------------------------------------------------------
+        for cat_k, cat_items in results_by_cat.items():
+            counts[cat_k] = len(cat_items)
+            counts["all"] += len(cat_items)
+
+        # Select items based on active category filter
+        combined_results = []
+        if cat_filter in ("ALL", ""):
+            for cat_k, cat_items in results_by_cat.items():
+                combined_results.extend(cat_items)
+        elif cat_filter.lower() in results_by_cat:
+            combined_results = results_by_cat[cat_filter.lower()]
+        elif cat_filter == "WORK_ITEMS":
+            combined_results = results_by_cat["work_items"]
+        elif cat_filter == "COMMITS":
+            combined_results = results_by_cat["commits"]
+        elif cat_filter == "PULL_REQUESTS":
+            combined_results = results_by_cat["pull_requests"]
+        elif cat_filter == "OPEN_ITEMS":
+            combined_results = results_by_cat["open_items"]
+        elif cat_filter == "MERKPUNKTE":
+            combined_results = results_by_cat["merkpunkte"]
+        elif cat_filter == "SCENARIOS":
+            combined_results = results_by_cat["scenarios"]
+        elif cat_filter == "REPOSITORIES":
+            combined_results = results_by_cat["repositories"]
+        elif cat_filter == "MILESTONES":
+            combined_results = results_by_cat["milestones"]
+
+        # Sort by relevance descending
+        sorted_results = sorted(combined_results, key=lambda x: x.get("relevance", 0), reverse=True)
+
+        return {
+            "query": q,
+            "category_filter": cat_filter,
+            "total_count": len(sorted_results),
+            "counts_by_category": counts,
+            "results": sorted_results[:max_limit],
+        }
+
+    @Slot(str, str, int, result="QVariantMap")
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def globalSearch(self, query: str = "", category_filter: str = "ALL", limit: int = 80) -> dict:
+        """CamelCase alias for global_search."""
+        return self.global_search(query=query, category_filter=category_filter, limit=limit)
+

@@ -21,6 +21,21 @@ class AzureServerConnectionError(ConnectionError):
         self.status_code = status_code
 
 
+class AzureAuthenticationError(AzureServerConnectionError):
+    """Raised when authentication or authorization fails with the TFS / Azure DevOps server (HTTP 401 Unauthorized or HTTP 403 Forbidden)."""
+    def __init__(self, message=None, original_error=None, status_code=None):
+        status = status_code or (getattr(original_error, "code", None) if original_error else 401)
+        if not message:
+            err_type = "Unauthorized (HTTP 401)" if status == 401 else "Forbidden / Access Denied (HTTP 403)"
+            message = (
+                f"Authentication failed with Azure DevOps / TFS server: {err_type}. "
+                f"Your Personal Access Token (PAT) may be expired, invalid, or lacking required scopes. "
+                f"Please update or upgrade your PAT in Project Settings with 'Work Items (Read & Write)', "
+                f"'Code (Read)', and 'Project and Team (Read)' permissions."
+            )
+        super().__init__(message, original_error=original_error, status_code=status)
+
+
 def is_connection_error(exc):
     """
     Returns True if the exception represents a lost connection or unreachable repository server.
@@ -138,7 +153,14 @@ class AzureBaseClient:
                 print(f"[HTTP ERROR {err.code}] {method} {full_url}\n[REQUEST DATA] {data}\n[SERVER ERROR RESPONSE]\n{err_body}")
                 logger.error("[HTTP %s %s] URL: %s | Reason: %s | Response: %s", method, err.code, full_url, err.reason, err_body)
             if err.code in (401, 403):
-                raise AzureServerConnectionError(f"Authentication/permission failed with repository server ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
+                err_type_str = "Unauthorized (HTTP 401)" if err.code == 401 else "Forbidden / Access Denied (HTTP 403)"
+                msg = (
+                    f"Authentication failed with repository server ({self.url}): {err_type_str}. "
+                    f"Your Personal Access Token (PAT) may be expired, invalid, or lacking required scopes. "
+                    f"Please update or upgrade your PAT in Project Settings with 'Work Items (Read & Write)', "
+                    f"'Code (Read)', and 'Project and Team (Read)' permissions."
+                )
+                raise AzureAuthenticationError(msg, original_error=err, status_code=err.code) from err
             elif err.code in (408, 502, 503, 504):
                 raise AzureServerConnectionError(f"Repository server unavailable ({self.url}): HTTP {err.code} {err.reason}", original_error=err, status_code=err.code) from err
             raise err
@@ -191,6 +213,31 @@ class AzureBaseClient:
             params["$timeframe"] = timeframe
         res, _ = self._request("GET", path, params=params)
         return res.get("value", [])
+
+    def get_team_field_values(self, project_id, team_id_or_name=None):
+        """
+        Retrieves the team field values (e.g. Area Path settings) for a team or project in TFS / Azure DevOps.
+
+        Args:
+            project_id (str): The target project ID or name.
+            team_id_or_name (str, optional): Team name or GUID. If None, queries the default team settings.
+
+        Returns:
+            dict: Team field values containing defaultValue and values list:
+                  {
+                      "defaultValue": "ProjectName\\DefaultArea",
+                      "values": [{"value": "ProjectName\\DefaultArea", "includeChildren": True}],
+                      "field": {"referenceName": "System.AreaPath", "name": "Area Path"}
+                  }
+        """
+        if team_id_or_name:
+            encoded_team = urllib.parse.quote(str(team_id_or_name), safe="")
+            path = f"{project_id}/{encoded_team}/_apis/work/teamsettings/teamfieldvalues"
+        else:
+            path = f"{project_id}/_apis/work/teamsettings/teamfieldvalues"
+        params = {"api-version": "6.0"}
+        res, _ = self._request("GET", path, params=params)
+        return res
 
     def get_classification_nodes(self, project_id, structure_group="iterations", depth=4):
         """
@@ -948,15 +995,17 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/pushes/{push_id}", params={"includeCommits": 0, "includeRefUpdates": True, "api-version": "6.0"})
         return res
 
-    def get_commits(self, project_id, repo_id, branch_name=None, limit=100):
+    def get_commits(self, project_id, repo_id, branch_name=None, limit=100, from_date=None, to_date=None):
         """
-        Retrieves commits for a repository with optional branch filtering.
+        Retrieves commits for a repository with optional branch and date filtering.
 
         Args:
             project_id (str): The project ID or name.
             repo_id (str): The repository ID.
             branch_name (str, optional): The branch name to retrieve commits from.
             limit (int): Maximum number of commits to retrieve.
+            from_date (str, optional): ISO formatted start date.
+            to_date (str, optional): ISO formatted end date.
 
         Returns:
             list: List of commit dictionaries.
@@ -965,6 +1014,10 @@ class AzureBaseClient:
         if branch_name:
             params["searchCriteria.itemVersion.version"] = branch_name
             params["searchCriteria.itemVersion.versionType"] = "branch"
+        if from_date:
+            params["searchCriteria.fromDate"] = from_date
+        if to_date:
+            params["searchCriteria.toDate"] = to_date
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/commits", params=params)
         return res.get("value", [])
 

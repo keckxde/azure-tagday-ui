@@ -1,7 +1,7 @@
 # -*- coding: UTF-8 -*-
 import logging, re, os, sys, fnmatch
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 log = logging.getLogger('azure')
 
@@ -174,14 +174,14 @@ def get_reports_dir(default=None):
     """
     Returns the configured target directory for reading baseline reports and writing generated reports.
     Checks database / user configuration ('REPORTS_DIR', 'reports_dir', 'BASE_FOLDER', 'base_folder'),
-    falling back to environment variables, and defaulting to default or os.getcwd().
+    falling back to environment variables, and defaulting to 'reports' folder under cwd (or specified default).
     """
     configured = GetEnvVariable("REPORTS_DIR") or GetEnvVariable("BASE_FOLDER")
     if configured and str(configured).strip():
         return os.path.normpath(str(configured).strip())
-    if default is not None:
-        return os.path.normpath(default)
-    return os.getcwd()
+    if default is not None and str(default).strip():
+        return os.path.normpath(str(default).strip())
+    return os.path.normpath(os.path.join(os.getcwd(), "reports"))
         
 
 def parse_iso_datetime(date_str):
@@ -190,7 +190,7 @@ def parse_iso_datetime(date_str):
     Strips timezones and milliseconds for naive UTC comparison.
 
     Args:
-        date_str (str/datetime): The input date string or datetime object.
+        date_str (str/datetime/date): The input date string or datetime object.
 
     Returns:
         datetime: Naive datetime object or None if parsing fails.
@@ -199,18 +199,23 @@ def parse_iso_datetime(date_str):
         return None
     if isinstance(date_str, datetime):
         return date_str
+    if isinstance(date_str, date):
+        return datetime.combine(date_str, datetime.min.time())
     try:
         # Normalize the string: remove Z, replace T with space, remove ms if any
-        s = date_str.replace("Z", "").replace("T", " ")
+        s = str(date_str).replace("Z", "").replace("T", " ").strip()
         if "." in s:
             s = s.split(".")[0]
         # Ignore timezone offset for naive comparison in UTC
         if "+" in s:
             s = s.split("+")[0]
-        return datetime.strptime(s.strip(), "%Y-%m-%d %H:%M:%S")
+        s = s.strip()
+        if len(s) == 10 and "-" in s:
+            return datetime.strptime(s, "%Y-%m-%d")
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
     except Exception:
         try:
-            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return datetime.fromisoformat(str(date_str).replace("Z", ""))
         except Exception:
             return None
 
@@ -1842,6 +1847,124 @@ def resolve_work_item_hierarchy(wi, all_wis_by_id, bug_hierarchy_mode="like_user
     }
 
 
+def parse_target_milestone_area_path(area_path):
+    """
+    Parses an AreaPath to extract planned TargetMilestone definitions formatted as:
+    *\\TargetMilestone\\<Year>_<Week>[ <Title Format>]
+
+    The target date is purely calculated as the first day of the ISO week (Monday).
+
+    Examples:
+        "Project\\TargetMilestone\\2026_33 Feature Freeze" -> {
+            "name": "2026_33 Feature Freeze",
+            "title": "Feature Freeze",
+            "year": 2026,
+            "week": 33,
+            "target_date": "2026-08-10",  # Monday of week 33
+            "start_date": "2026-08-10",
+            "end_date": "2026-08-14",    # Friday of week 33
+            "area_path": "Project\\TargetMilestone\\2026_33 Feature Freeze",
+            "category_name": "Target Milestone",
+            "category_icon": "🚩",
+            "category_color": "#f0883e",
+            "category_bg_color": "#3d2800"
+        }
+    """
+    if not area_path or not isinstance(area_path, str):
+        return None
+
+    norm_path = area_path.replace("/", "\\").strip("\\")
+    parts = [p.strip() for p in norm_path.split("\\") if p.strip()]
+    if not parts:
+        return None
+
+    # Search for TargetMilestone segment
+    tm_idx = -1
+    for i, p in enumerate(parts):
+        p_clean = re.sub(r'[\s_-]+', '', p).lower()
+        if p_clean in ("targetmilestone", "targetmilestones", "targetmileston", "target_milestone"):
+            tm_idx = i
+            break
+
+    node_str = ""
+    if tm_idx != -1 and tm_idx + 1 < len(parts):
+        node_str = parts[tm_idx + 1]
+    else:
+        # Fallback: check if any segment matches <Year>_<Week>
+        for p in parts:
+            if re.match(r'^\d{2,4}_\d{1,2}(?:[\s_-].*)?$', p):
+                node_str = p
+                break
+
+    if not node_str:
+        return None
+
+    m = re.match(r'^(\d{2,4})_(\d{1,2})(?:[\s_-]+(.*))?$', node_str)
+    if not m:
+        return None
+
+    raw_year = int(m.group(1))
+    year = 2000 + raw_year if raw_year < 100 else raw_year
+    if not (2000 <= year <= 2100):
+        return None
+
+    week = int(m.group(2))
+    if not (1 <= week <= 53):
+        return None
+
+    raw_title = (m.group(3) or "").strip()
+    title = raw_title if raw_title else node_str
+
+    try:
+        from datetime import date
+        # First day of the week (Monday)
+        start_d = date.fromisocalendar(year, week, 1)
+        end_d = date.fromisocalendar(year, week, 5)
+        start_str = start_d.strftime("%Y-%m-%d")
+        end_str = end_d.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+    return {
+        "name": node_str,
+        "title": title,
+        "year": year,
+        "week": week,
+        "target_date": start_str,
+        "start_date": start_str,
+        "end_date": end_str,
+        "date_display": start_str,
+        "area_path": norm_path,
+        "category_id": "target_milestone",
+        "category_name": "Target Milestone",
+        "category_icon": "🚩",
+        "category_color": "#f0883e",
+        "category_bg_color": "#3d2800",
+        "is_multi_day": False,
+        "is_area_path_milestone": True,
+    }
+
+
+def extract_milestones_from_area_paths(area_paths):
+    """
+    Extracts all unique TargetMilestone definitions from an iterable of AreaPath strings.
+    Returns a list of milestone dictionaries sorted by target_date.
+    """
+    if not area_paths:
+        return []
+
+    milestones_map = {}
+    for ap in area_paths:
+        if not ap:
+            continue
+        ms = parse_target_milestone_area_path(str(ap))
+        if ms and ms["name"] not in milestones_map:
+            milestones_map[ms["name"]] = ms
+
+    sorted_list = sorted(milestones_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+    return sorted_list
+
+
 def extract_target_milestone_tags(tags_val):
     """
     Extracts target milestone short names from work item tags formatted as Target:<TargetShortName>.
@@ -1890,25 +2013,49 @@ def is_date_in_milestone_range(date_str, milestone):
     return False
 
 
-def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
+def match_work_item_to_milestone(wi, all_milestones=None, milestones_by_date=None):
     """
     Identifies the target milestone for a work item.
     Matching precedence:
-    1. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
-    2. Date matching against the milestone start/target_date or multi-day range [start_date, end_date].
+    1. AreaPath matching: Area paths containing TargetMilestone\\<Year>_<Week> Title Format.
+    2. Work item tags formatted as Target:<TargetShortName> matching a milestone by name.
+    3. Date matching against the milestone start/target_date or multi-day range [start_date, end_date].
 
     Args:
         wi (dict): Work item dictionary.
-        all_milestones (list of dict): Configured milestones list.
+        all_milestones (list of dict, optional): Configured milestones list.
         milestones_by_date (dict, optional): Map of target_date (YYYY-MM-DD) -> milestone dict.
 
     Returns:
         dict or None: The matched milestone dictionary, or None if no match.
     """
-    if not all_milestones or not wi:
+    if not wi:
         return None
 
-    # 1. Tag-based matching
+    # 1. Area Path based matching (primary planned milestone mechanism)
+    area_path = wi.get("area_path") or ""
+    if not area_path and wi.get("raw_json"):
+        try:
+            raw_data = json.loads(wi["raw_json"]) if isinstance(wi["raw_json"], str) else wi["raw_json"]
+            fields = raw_data.get("fields", {}) if isinstance(raw_data, dict) else {}
+            area_path = fields.get("System.AreaPath") or fields.get("AreaPath") or ""
+        except Exception:
+            area_path = ""
+
+    if area_path:
+        ap_ms = parse_target_milestone_area_path(area_path)
+        if ap_ms:
+            # Check if an entry in all_milestones matches this AreaPath milestone name or target date
+            if all_milestones:
+                for m in all_milestones:
+                    if (m.get("name") or "").strip().lower() == ap_ms["name"].lower():
+                        return m
+            return ap_ms
+
+    if not all_milestones:
+        return None
+
+    # 2. Tag-based matching
     target_tags = wi.get("target_tags")
     if target_tags is None:
         raw_tags = wi.get("tags") or ""
@@ -1937,7 +2084,7 @@ def match_work_item_to_milestone(wi, all_milestones, milestones_by_date=None):
                 if t_lower in m_name or m_name in t_lower:
                     return m
 
-    # 2. Date-based matching (fallback)
+    # 3. Date-based matching (fallback for pure visualization)
     wi_deadline = (wi.get("deadline_str") or wi.get("target_date") or "").split("T")[0].split(" ")[0].strip()
     if wi_deadline:
         if milestones_by_date is not None and wi_deadline in milestones_by_date:
@@ -1972,5 +2119,77 @@ def normalize_pr_status(status_val) -> str:
     elif s in ("2", "abandoned", "rejected", "canceled", "cancelled", "declined"):
         return "abandoned"
     return s or "unknown"
+
+
+def extract_iteration_yyww(iter_str: str) -> str:
+    """
+    Extracts the year and week number as a compact 4-digit 'YYWW' string
+    from an iteration path or iteration name (e.g. 'Sprint 2641', 'week-2641', '2026_41', '2026-W41').
+    Returns an empty string if no valid year/week pattern is found.
+    """
+    if not iter_str:
+        return ""
+    s = str(iter_str).strip()
+    if not s:
+        return ""
+
+    # 1. 4-digit year (20YY) separated by delimiter: e.g. "2026_41", "2026-W41", "2026/41", "2026.41", "2026-05"
+    m_full_sep = re.search(r'(?:^|[^\d])20([2-3]\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_full_sep:
+        yy = m_full_sep.group(1)
+        w_num = int(m_full_sep.group(2))
+        if 1 <= w_num <= 53:
+            return f"{yy}{w_num:02d}"
+
+    # 2. 6-digit combined 20YYWW: e.g. "202641", "Sprint 202641"
+    m6 = re.search(r'(?:^|[^\d])20([2-3]\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)', s, re.IGNORECASE)
+    if m6:
+        return f"{m6.group(1)}{m6.group(2)}"
+
+    # 3. 2-digit year (YY) separated by delimiter: e.g. "26_41", "26-W41", "26.41", "Sprint 26_5", "26-05"
+    m_sep = re.search(r'(?:^|[^\d])(2[4-9]|3\d)[\s_./-]+[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_sep:
+        yy = m_sep.group(1)
+        w_num = int(m_sep.group(2))
+        if 1 <= w_num <= 53:
+            return f"{yy}{w_num:02d}"
+
+    # 4. 4-digit combined YYWW: e.g. "Sprint 2641", "2641", "week-2641", "2641_Release"
+    m4 = re.search(r'(?:^|[^\d])(2[4-9]|3\d)(0[1-9]|[1-4]\d|5[0-3])(?=[^\d]|$)', s, re.IGNORECASE)
+    if m4:
+        return f"{m4.group(1)}{m4.group(2)}"
+
+    # 5. Sprint <week> with year elsewhere in path: e.g. "2026\\Sprint 41"
+    m_sprint_w = re.search(r'(?:sprint|iteration)[\s_.-]*[wW]?(\d{1,2})(?=[^\d]|$)', s, re.IGNORECASE)
+    if m_sprint_w:
+        w_num = int(m_sprint_w.group(1))
+        if 1 <= w_num <= 53:
+            m_year = re.search(r'(?:^|[^\d])(?:20)?(2[4-9]|3\d)(?=[^\d]|$)', s)
+            if m_year:
+                return f"{m_year.group(1)}{w_num:02d}"
+
+    return ""
+
+
+def format_compact_iteration(iter_name: str, is_planned: bool = False, has_milestone: bool = False) -> str:
+    """
+    Formats an iteration path or name into a compact string (preferably 'YYWW').
+    Falls back to 'Backlog' or '—' or cleaned leaf name.
+    """
+    if not iter_name or str(iter_name).strip() in ("", "CH_SAPH_KAWEST"):
+        return "Backlog" if has_milestone else "—"
+
+    s = str(iter_name).strip()
+    yyww = extract_iteration_yyww(s)
+    if yyww:
+        return yyww
+
+    parts = re.split(r'[\\/]', s)
+    leaf = parts[-1].strip()
+    clean = re.sub(r'^(sprint|iteration)[\s_-]*', '', leaf, flags=re.IGNORECASE).strip()
+    if not clean or clean == "CH_SAPH_KAWEST":
+        return "Backlog" if has_milestone else "—"
+    return clean
+
 
 

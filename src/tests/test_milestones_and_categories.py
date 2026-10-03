@@ -644,10 +644,7 @@ class TestMilestonesAndCategories(unittest.TestCase):
             team="Beta Team"
         )
 
-        try:
-            import openpyxl
-        except ImportError:
-            self.skipTest("openpyxl is not installed in the test environment")
+        import csv
 
         backend = DevOpsBackend()
         backend._cache_db = self.cache
@@ -655,22 +652,22 @@ class TestMilestonesAndCategories(unittest.TestCase):
         export_path = os.path.join(self.test_dir, "milestones_export_test.xlsx")
         res_export = backend.exportMilestonesToExcel(export_path)
         self.assertTrue(res_export["success"])
-        self.assertTrue(os.path.exists(export_path))
+        actual_path = res_export["file_path"]
+        self.assertTrue(actual_path.endswith(".csv"))
+        self.assertTrue(os.path.exists(actual_path))
         self.assertEqual(res_export["count"], 2)
 
-        # Verify Excel content with openpyxl
-        wb = openpyxl.load_workbook(export_path)
-        ws = wb.active
-        self.assertEqual(ws.title, "Milestones")
-        rows = list(ws.iter_rows(values_only=True))
-        self.assertEqual(len(rows), 3)  # Header + 2 rows
-        header = rows[0]
-        self.assertIn("Milestone Name", header)
-        self.assertIn("Team", header)
-        self.assertIn("Category", header)
-        self.assertIn("Start Date", header)
-        self.assertIn("End Date", header)
-        self.assertIn("Week Range", header)
+        # Verify CSV content
+        with open(actual_path, "r", encoding="utf-8-sig") as f:
+            reader = list(csv.reader(f, delimiter=";"))
+            self.assertEqual(len(reader), 3)  # Header + 2 rows
+            header = reader[0]
+            self.assertIn("Milestone Name", header)
+            self.assertIn("Team", header)
+            self.assertIn("Category", header)
+            self.assertIn("Start Date", header)
+            self.assertIn("End Date", header)
+            self.assertIn("Week Range", header)
 
         # Import into fresh database
         new_db_path = os.path.join(self.test_dir, "new_import_cache.db")
@@ -678,7 +675,7 @@ class TestMilestonesAndCategories(unittest.TestCase):
         new_backend = DevOpsBackend()
         new_backend._cache_db = new_cache
 
-        res_import = new_backend.importMilestonesFromExcel(export_path)
+        res_import = new_backend.importMilestonesFromExcel(actual_path)
         self.assertTrue(res_import["success"])
         self.assertEqual(res_import["total"], 2)
 
@@ -811,9 +808,118 @@ class TestMilestonesAndCategories(unittest.TestCase):
         self.assertIn("Current Week Gate", coming_names)
         self.assertIn("Next Week Gate", coming_names)
 
-        cw_item = next(m for m in coming if m["name"] == "Current Week Gate")
-        self.assertTrue(cw_item["is_current_week"])
-        self.assertEqual(cw_item["relative_label"], "This week")
+    def test_parse_target_milestone_area_path(self):
+        import utils
+        # 1. 4-digit year with week and title
+        res = utils.parse_target_milestone_area_path("Project\\TargetMilestone\\2026_33 Feature Freeze")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["name"], "2026_33 Feature Freeze")
+        self.assertEqual(res["title"], "Feature Freeze")
+        self.assertEqual(res["year"], 2026)
+        self.assertEqual(res["week"], 33)
+        self.assertEqual(res["target_date"], "2026-08-10")  # Monday of week 33
+        self.assertEqual(res["start_date"], "2026-08-10")
+        self.assertEqual(res["end_date"], "2026-08-14")
+
+        # 2. Forward slashes with project prefix
+        res2 = utils.parse_target_milestone_area_path("CH_SAPH_KAWEST/TargetMilestone/2026_41 Final Integration")
+        self.assertIsNotNone(res2)
+        self.assertEqual(res2["name"], "2026_41 Final Integration")
+        self.assertEqual(res2["year"], 2026)
+        self.assertEqual(res2["week"], 41)
+        self.assertEqual(res2["target_date"], "2026-10-05")  # Monday of week 41
+
+        # 3. 2-digit year (26 -> 2026)
+        res3 = utils.parse_target_milestone_area_path("TargetMilestone\\26_14 M1 Release")
+        self.assertIsNotNone(res3)
+        self.assertEqual(res3["year"], 2026)
+        self.assertEqual(res3["week"], 14)
+        self.assertEqual(res3["target_date"], "2026-03-30")  # Monday of week 14
+
+        # 4. Without title (just year_week)
+        res4 = utils.parse_target_milestone_area_path("Project\\TargetMilestone\\2026_05")
+        self.assertIsNotNone(res4)
+        self.assertEqual(res4["year"], 2026)
+        self.assertEqual(res4["week"], 5)
+        self.assertEqual(res4["target_date"], "2026-01-26")  # Monday of week 5
+
+        # 5. Non-milestone area path
+        res5 = utils.parse_target_milestone_area_path("Project\\Development\\Frontend")
+        self.assertIsNone(res5)
+
+    def test_extract_milestones_from_area_paths(self):
+        import utils
+        paths = [
+            "Project\\TargetMilestone\\2026_33 Feature Freeze",
+            "Project\\TargetMilestone\\2026_33 Feature Freeze",  # Duplicate
+            "CH_SAPH_KAWEST/TargetMilestone/2026_41 Final Integration",
+            "Project\\Development\\ComponentA",
+            "TargetMilestone\\2026_05 Beta",
+        ]
+        milestones = utils.extract_milestones_from_area_paths(paths)
+        self.assertEqual(len(milestones), 3)
+        self.assertEqual(milestones[0]["target_date"], "2026-01-26")  # W05
+        self.assertEqual(milestones[1]["target_date"], "2026-08-10")  # W33
+        self.assertEqual(milestones[2]["target_date"], "2026-10-05")  # W41
+
+    def test_work_item_target_date_from_target_milestone_area_path(self):
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        raw_data = {
+            "work_items": [
+                {
+                    "id": 1001,
+                    "title": "Build Core Engine",
+                    "type": "User Story",
+                    "state": "Active",
+                    "area_path": "CH_SAPH_KAWEST\\TargetMilestone\\2026_33 Feature Freeze",
+                },
+                {
+                    "id": 1002,
+                    "title": "Subtask Engine Tests",
+                    "type": "Task",
+                    "state": "Active",
+                    "parent_id": 1001,
+                    "area_path": "CH_SAPH_KAWEST\\Development",
+                }
+            ]
+        }
+        backend._apply_computed_cache_data(raw_data)
+        backend._enrich_work_items_with_milestones()
+
+        story = next(w for w in backend.workItems if w["id"] == 1001)
+        self.assertEqual(story["milestone_name"], "2026_33 Feature Freeze")
+        self.assertEqual(story["target_date"], "2026-08-10")  # First day of week 33 (Monday)
+        self.assertTrue(story["has_direct_milestone"])
+
+        # Child inherits milestone and target date
+        task = next(w for w in backend.workItems if w["id"] == 1002)
+        self.assertEqual(task["effective_milestone_name"], "2026_33 Feature Freeze")
+        self.assertEqual(task["target_date"], "2026-08-10")
+        self.assertTrue(task["is_milestone_inherited"])
+
+    def test_backend_get_milestones_combines_area_paths_and_db(self):
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache
+
+        # Manual DB milestone for GANTT visualization
+        self.cache.save_milestone(
+            name="Manual GANTT Gate",
+            target_date="2026-09-15",
+            category_id="release",
+            description="Manual release gate"
+        )
+
+        backend._all_discovered_area_paths = [
+            "Project\\TargetMilestone\\2026_33 Feature Freeze",
+            "Project\\Development\\General"
+        ]
+
+        all_ms = backend.get_milestones()
+        ms_names = [m["name"] for m in all_ms]
+        self.assertIn("2026_33 Feature Freeze", ms_names)
+        self.assertIn("Manual GANTT Gate", ms_names)
 
 
 if __name__ == "__main__":

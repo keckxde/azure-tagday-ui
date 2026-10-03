@@ -96,10 +96,8 @@ class TestGenerateRevision(unittest.TestCase):
 
             # Target revision file in a nested subdirectory that doesn't exist yet
             target_md = os.path.join(tmp_dir, "doc", "04_Development", "REVISION.md")
-            target_docx = os.path.join(tmp_dir, "doc", "04_Development", "REVISION.docx")
 
             self.assertFalse(os.path.exists(target_md))
-            self.assertFalse(os.path.exists(target_docx))
 
             success = devops_helper.generate_revision_report(
                 db_path=db_path,
@@ -108,7 +106,6 @@ class TestGenerateRevision(unittest.TestCase):
 
             self.assertTrue(success)
             self.assertTrue(os.path.exists(target_md))
-            self.assertTrue(os.path.exists(target_docx))
 
             with open(target_md, "r", encoding="utf-8") as f:
                 content = f.read()

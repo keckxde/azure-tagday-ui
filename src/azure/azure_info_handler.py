@@ -509,6 +509,25 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as ms_err:
             logger.debug("Could not prefill milestones from work item tags: %s", ms_err)
 
+        # Auto-discover and cache Area Path settings for the project
+        try:
+            area_settings = self.get_project_area_path_settings(project_id=target_proj)
+            if area_settings and hasattr(cache_db, "set_area_path_settings"):
+                existing_rules = cache_db.get_config("area_path_rules")
+                if not existing_rules or force_full_sync:
+                    cache_db.set_area_path_settings(
+                        enabled=True,
+                        default_area=area_settings.get("default_area"),
+                        rules=area_settings.get("rules"),
+                        all_areas=area_settings.get("all_areas")
+                    )
+                else:
+                    cache_db.set_area_path_settings(
+                        all_areas=area_settings.get("all_areas")
+                    )
+        except Exception as a_err:
+            logger.debug("Could not auto-discover area path settings during sync: %s", a_err)
+
         unchanged_str = f", {summary.get('unchanged', 0)} already up-to-date" if summary.get("unchanged") else ""
         _notify(
             f"Work items sync completed: {summary.get('synced', 0)} synced, {summary.get('deleted', 0)} marked deleted{unchanged_str}, {summary.get('errors', 0)} errors",
@@ -1479,11 +1498,21 @@ class AzureInfoHandler(AzureBaseClient):
             # Load PRs directly in bulk
             dev_prs, stable_prs = self._process_pushes_and_prs(project_id, repo, cache_db=cache_db)
 
+            # Load recent commits
+            commits = []
+            try:
+                commits = self.get_commits(project_id, repo_id, limit=200)
+            except Exception as e:
+                if is_connection_error(e):
+                    raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+                logger.debug("Could not fetch commits for %s: %s", repo_name, e)
+
             submodules = []
             repo_data = {
                 "info": repo,
                 "branches": branches,
                 "tags": tags_filtered,
+                "commits": commits,
                 "submodules": submodules,
                 "devPRs": dev_prs,
                 "stablePRs": stable_prs,
@@ -1498,6 +1527,7 @@ class AzureInfoHandler(AzureBaseClient):
                 "remote_push_id": remote_push_id,
                 "branches": branches,
                 "tags": tags_filtered,
+                "commits": commits,
                 "submodules": submodules,
                 "prs": dev_prs + stable_prs
             }
@@ -1531,6 +1561,8 @@ class AzureInfoHandler(AzureBaseClient):
                                 cache_db.save_repository(db_payload["project_id"], db_payload["repo"], db_payload["remote_push_id"])
                                 cache_db.save_branches(db_payload["repo_id"], db_payload["branches"])
                                 cache_db.save_tags(db_payload["repo_id"], db_payload["tags"])
+                                if db_payload.get("commits"):
+                                    cache_db.save_commits(db_payload["repo_id"], db_payload["commits"])
                                 cache_db.save_submodules(db_payload["repo_id"], db_payload["submodules"])
                                 cache_db.save_pull_requests(db_payload["repo_id"], db_payload["prs"])
                             except Exception as e:
@@ -1704,6 +1736,117 @@ class AzureInfoHandler(AzureBaseClient):
             "total_generated": len(results),
             "created_on_server": created_count,
             "iterations": results
+        }
+
+    def get_project_area_path_settings(self, project_id=None, team_name=None):
+        """
+        Retrieves the configured Area Path settings for a project and team.
+        Attempts to read team field values (teamsettings/teamfieldvalues) and classification nodes.
+        Returns a dictionary with default_area, rules list, and all discovered area paths.
+        """
+        target_proj = project_id or getattr(self, "project_id", "") or "default"
+        team = team_name or getattr(self, "team_name", None)
+
+        default_area = ""
+        rules = []
+        all_areas = []
+        had_permission_error = False
+
+        # 1. Try team field values
+        try:
+            tfv = self.get_team_field_values(target_proj, team_id_or_name=team)
+            if tfv and isinstance(tfv, dict):
+                default_area = tfv.get("defaultValue") or ""
+                for v in tfv.get("values", []):
+                    val_path = v.get("value") or ""
+                    inc_children = bool(v.get("includeChildren", True))
+                    if val_path:
+                        clean_p = val_path.replace("/", "\\")
+                        rules.append({
+                            "value": clean_p,
+                            "path": clean_p,
+                            "include_children": inc_children,
+                            "includeChildren": inc_children
+                        })
+        except Exception as e:
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg or "Authentication" in err_msg:
+                had_permission_error = True
+            logger.info("Could not retrieve team field values for project %s, team %s: %s", target_proj, team, e)
+
+        # If specific team failed and team was specified, try without team (project default team)
+        if not rules and team:
+            try:
+                tfv = self.get_team_field_values(target_proj, team_id_or_name=None)
+                if tfv and isinstance(tfv, dict):
+                    default_area = tfv.get("defaultValue") or ""
+                    for v in tfv.get("values", []):
+                        val_path = v.get("value") or ""
+                        inc_children = bool(v.get("includeChildren", True))
+                        if val_path:
+                            clean_p = val_path.replace("/", "\\")
+                            rules.append({
+                                "value": clean_p,
+                                "path": clean_p,
+                                "include_children": inc_children,
+                                "includeChildren": inc_children
+                            })
+            except Exception as e:
+                err_msg = str(e)
+                if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg:
+                    had_permission_error = True
+                logger.info("Could not retrieve default team field values for project %s: %s", target_proj, e)
+
+        # 2. Retrieve classification nodes for areas (hierarchy tree)
+        try:
+            tree = self.get_classification_nodes(target_proj, structure_group="areas", depth=10)
+            if tree and isinstance(tree, dict):
+                def _collect(n, prefix=""):
+                    name = n.get("name", "")
+                    curr = f"{prefix}\\{name}" if prefix else name
+                    res = [curr] if curr else []
+                    for c in n.get("children", []) or []:
+                        res.extend(_collect(c, curr))
+                    return res
+                all_areas = _collect(tree)
+        except Exception as e:
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "Unauthorized" in err_msg or "Forbidden" in err_msg:
+                had_permission_error = True
+            logger.info("Could not retrieve classification nodes for areas in project %s: %s", target_proj, e)
+
+        # Fallback if no rules found from team settings
+        if not rules and all_areas:
+            root_area = all_areas[0]
+            rules.append({
+                "value": root_area,
+                "path": root_area,
+                "include_children": True,
+                "includeChildren": True
+            })
+            if not default_area:
+                default_area = root_area
+        elif not rules:
+            rules.append({
+                "value": target_proj,
+                "path": target_proj,
+                "include_children": True,
+                "includeChildren": True
+            })
+            if not default_area:
+                default_area = target_proj
+
+        def_val = default_area or target_proj
+        disc_areas = all_areas or [target_proj]
+        return {
+            "enabled": True,
+            "filter_enabled": True,
+            "default_area": def_val,
+            "default_value": def_val,
+            "rules": rules,
+            "all_areas": disc_areas,
+            "all_discovered": disc_areas,
+            "had_permission_error": had_permission_error
         }
 
     def create_repository_tag(self, project_id, repo_id_or_name, tag_name, branch_name="dev", message="", cache_db=None):
@@ -1891,7 +2034,14 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception as e:
             logger.warning("Could not refresh PRs for %s: %s", repo_name, e)
 
-        # 4. Save everything to SQLite cache
+        # 4. Fetch recent commits
+        commits = []
+        try:
+            commits = self.get_commits(project_id, repo_id, limit=200)
+        except Exception as e:
+            logger.warning("Could not refresh commits for %s: %s", repo_name, e)
+
+        # 5. Save everything to SQLite cache
         if cache_db:
             try:
                 cache_db.save_repository(project_id, target_repo)
@@ -1899,10 +2049,12 @@ class AzureInfoHandler(AzureBaseClient):
                     cache_db.save_branches(repo_id, branches)
                 if tags_filtered:
                     cache_db.save_tags(repo_id, tags_filtered)
+                if commits:
+                    cache_db.save_commits(repo_id, commits)
                 if prs:
                     cache_db.save_pull_requests(repo_id, prs)
-                logger.info("Successfully synced repository %s (%d tags, %d branches, %d PRs) to cache",
-                            repo_name, len(tags_filtered), len(branches), len(prs))
+                logger.info("Successfully synced repository %s (%d tags, %d branches, %d commits, %d PRs) to cache",
+                            repo_name, len(tags_filtered), len(branches), len(commits), len(prs))
             except Exception as db_err:
                 logger.warning("Failed writing synced repo %s to database: %s", repo_name, db_err)
 
@@ -1910,7 +2062,101 @@ class AzureInfoHandler(AzureBaseClient):
             "info": target_repo,
             "branches": branches,
             "tags": tags_filtered,
+            "commits": commits,
             "prs": prs
         }
+
+    def sync_commits(
+        self,
+        cache_db,
+        project_id=None,
+        filter_repos="",
+        top=200,
+        progress_callback=None,
+        cancel_token=None,
+        max_workers=6
+    ):
+        """
+        Synchronizes recent Git commits across all enabled repositories into the SQLite cache.
+
+        Args:
+            cache_db: The database cache instance.
+            project_id (str, optional): Project ID.
+            filter_repos (str/list, optional): Repositories filter.
+            top (int, optional): Max commits per repository. Defaults to 200.
+            progress_callback (callable, optional): Callback with (percentage, message).
+            cancel_token (callable/object, optional): Cancellation check.
+            max_workers (int, optional): Thread pool size. Defaults to 6.
+
+        Returns:
+            dict: Summary with synced count, repos scanned, and errors.
+        """
+        if not cache_db:
+            return {"synced": 0, "repos_scanned": 0, "errors": 0}
+
+        proj = project_id or getattr(self, "project_id", "")
+        summary = {"synced": 0, "repos_scanned": 0, "errors": 0}
+
+        def _is_cancelled():
+            if not cancel_token:
+                return False
+            if callable(cancel_token):
+                return cancel_token()
+            return getattr(cancel_token, "is_cancelled", lambda: False)()
+
+        def _report(pct, msg):
+            if progress_callback:
+                try:
+                    progress_callback(pct, msg)
+                except Exception:
+                    pass
+
+        try:
+            repos = self.get_repositories(proj)
+            enabled = [r for r in repos if not self._should_skip_repo(r, filter_repos)]
+            total = len(enabled)
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _fetch_repo_commits(repo):
+                repo_id = repo["id"]
+                repo_name = repo.get("name", "")
+                try:
+                    commits = self.get_commits(proj, repo_id, limit=top)
+                    if commits:
+                        cache_db.save_commits(repo_id, commits)
+                        return (repo_name, len(commits), None)
+                    return (repo_name, 0, None)
+                except Exception as e:
+                    return (repo_name, 0, e)
+
+            if total > 0:
+                with ThreadPoolExecutor(max_workers=min(max_workers, total)) as executor:
+                    futures = {executor.submit(_fetch_repo_commits, r): r for r in enabled}
+                    for idx, fut in enumerate(as_completed(futures)):
+                        if _is_cancelled():
+                            logger.info("Cancellation requested in sync_commits")
+                            break
+                        repo_name, count, err = fut.result()
+                        summary["repos_scanned"] += 1
+                        if err:
+                            if is_connection_error(err):
+                                raise AzureServerConnectionError(f"Lost connection to repository server: {err}", original_error=err) from err
+                            logger.warning("Could not sync commits for %s: %s", repo_name, err)
+                            summary["errors"] += 1
+                        else:
+                            summary["synced"] += count
+                        pct = int(((idx + 1) / total) * 100)
+                        _report(pct, f"Synced commits for {repo_name} ({idx + 1}/{total})...")
+        except Exception as e:
+            if is_connection_error(e):
+                raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+            logger.error("Error syncing repository commits: %s", e)
+            summary["errors"] += 1
+
+        logger.info("Git commits sync completed: %d commits across %d repositories (%d errors)",
+                    summary["synced"], summary["repos_scanned"], summary["errors"])
+        return summary
+
 
 

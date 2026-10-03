@@ -163,7 +163,7 @@ Dialog {
                 Flow {
                     Layout.fillWidth: true
                     spacing: 4
-                    visible: (backend && backend.milestoneCategories && backend.milestoneCategories.length > 0)
+                    visible: !!(backend && backend.milestoneCategories && backend.milestoneCategories.length > 0)
 
                     Rectangle {
                         property bool isCur: root.selectedMilestoneCatFilter === "ALL"

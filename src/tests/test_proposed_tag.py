@@ -208,8 +208,8 @@ def test_proposed_tag_only_when_untagged_prs_exist(tmp_path):
 
     backend = DevOpsBackend()
     backend._db_path = db_path
-    backend._cache_db = cache
-    backend.refresh_all_data()
+    backend.set_cache_db(cache)
+    backend._load_all_data_sync()
 
     tagday = backend.tagDayData
     assert tagday is not None

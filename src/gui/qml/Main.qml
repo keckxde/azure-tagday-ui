@@ -23,15 +23,46 @@ ApplicationWindow {
 
     property int currentTabIndex: 0
 
-    readonly property var reposView: reposViewLoader ? reposViewLoader.item : null
+    Timer {
+        id: idleWarmupTimer
+        interval: 350
+        running: true
+        repeat: false
+        onTriggered: {
+            if (reportsViewLoader && !reportsViewLoader.active) reportsViewLoader.active = true;
+            if (pullRequestsViewLoader && !pullRequestsViewLoader.active) pullRequestsViewLoader.active = true;
+        }
+    }
+
     readonly property var pullRequestsView: pullRequestsViewLoader ? pullRequestsViewLoader.item : null
     readonly property var workItemsView: workItemsViewLoader ? workItemsViewLoader.item : null
     readonly property var workloadExplorerView: workloadExplorerViewLoader ? workloadExplorerViewLoader.item : null
     readonly property var reportsView: reportsViewLoader ? reportsViewLoader.item : null
     readonly property var settingsView: settingsViewLoader ? settingsViewLoader.item : null
+    readonly property var teamMotivationView: teamMotivationViewLoader ? teamMotivationViewLoader.item : null
+    readonly property var usersView: usersViewLoader ? usersViewLoader.item : null
+
+    function openReportsTab(tabIndex) {
+        window.currentTabIndex = 4;
+        if (reportsView) {
+            reportsView.activeReportTab = tabIndex;
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item) {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    reportsViewLoader.item.activeReportTab = tabIndex;
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openTagDay() {
+        openReportsTab(1);
+    }
 
     function navigateToTagDayRepo(repoName) {
-        window.currentTabIndex = 5;
+        window.currentTabIndex = 4;
         if (reportsView) {
             reportsView.openTagDayRepo(repoName);
         } else if (reportsViewLoader) {
@@ -46,35 +77,17 @@ ApplicationWindow {
     }
 
     function navigateToRepos(categoryFilter) {
-        window.currentTabIndex = 1;
-        if (reposView && categoryFilter) {
-            reposView.selectedCategory = categoryFilter;
-            reposView.currentPage = 1;
-        } else if (categoryFilter && reposViewLoader) {
-            var conn = function() {
-                if (reposViewLoader.item) {
-                    reposViewLoader.loaded.disconnect(conn);
-                    reposViewLoader.item.selectedCategory = categoryFilter;
-                    reposViewLoader.item.currentPage = 1;
-                }
-            };
-            reposViewLoader.loaded.connect(conn);
-        }
+        openReportsTab(1);
     }
 
     function navigateToPullRequests(filterArg, isStatus) {
-        window.currentTabIndex = 2;
+        window.currentTabIndex = 1;
         var applyPr = function(view) {
             if (!view) return;
-            if (isStatus) {
+            if (isStatus && typeof view.filterByStatus === "function") {
                 view.filterByStatus(filterArg);
-                view.filterByRepo("ALL");
-            } else if (filterArg) {
+            } else if (!isStatus && typeof view.filterByRepo === "function") {
                 view.filterByRepo(filterArg);
-                view.filterByStatus("ALL");
-            } else {
-                view.filterByRepo("ALL");
-                view.filterByStatus("ALL");
             }
         };
         if (pullRequestsView) {
@@ -91,11 +104,11 @@ ApplicationWindow {
     }
 
     function openPullRequestsPage() {
-        navigateToPullRequests("", false);
+        navigateToPullRequests("ALL", false);
     }
 
     function navigateToSprint(sprintName) {
-        window.currentTabIndex = 5;
+        window.currentTabIndex = 4;
         if (reportsView && typeof reportsView.openSprintReport === "function") {
             reportsView.openSprintReport(sprintName);
         } else if (reportsViewLoader) {
@@ -110,7 +123,7 @@ ApplicationWindow {
     }
 
     function navigateToStorageReport() {
-        window.currentTabIndex = 5;
+        window.currentTabIndex = 4;
         if (reportsView && typeof reportsView.openStorageReport === "function") {
             reportsView.openStorageReport();
         } else if (reportsView) {
@@ -131,7 +144,7 @@ ApplicationWindow {
     }
 
     function navigateToWorkloadSprint(assignee, sprintName) {
-        window.currentTabIndex = 4;
+        window.currentTabIndex = 3;
         var applyWl = function(view) {
             if (!view) return;
             if (assignee && assignee !== "Unassigned" && assignee !== "ALL") {
@@ -156,7 +169,7 @@ ApplicationWindow {
     }
 
     function navigateToWorkItem(workItemId) {
-        window.currentTabIndex = 3;
+        window.currentTabIndex = 2;
         if (workItemsView && typeof workItemsView.searchQuery !== "undefined") {
             workItemsView.searchQuery = "#" + workItemId;
         } else if (workItemsViewLoader) {
@@ -170,15 +183,101 @@ ApplicationWindow {
         }
     }
 
+    function openTeamMotivationPage(timeframe, sprintName) {
+        window.currentTabIndex = 6;
+        if (teamMotivationView && typeof teamMotivationView.setTimeframe === "function") {
+            if (timeframe) {
+                teamMotivationView.setTimeframe(timeframe, sprintName || "");
+            }
+        } else if (teamMotivationViewLoader && timeframe) {
+            var conn = function() {
+                if (teamMotivationViewLoader.item && typeof teamMotivationViewLoader.item.setTimeframe === "function") {
+                    teamMotivationViewLoader.loaded.disconnect(conn);
+                    teamMotivationViewLoader.item.setTimeframe(timeframe, sprintName || "");
+                }
+            };
+            teamMotivationViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openUsersPage(userName) {
+        window.currentTabIndex = 7;
+        if (usersView && typeof usersView.openUserProfile === "function") {
+            if (userName) {
+                usersView.openUserProfile(userName);
+            }
+        } else if (usersViewLoader && userName) {
+            var conn = function() {
+                if (usersViewLoader.item && typeof usersViewLoader.item.openUserProfile === "function") {
+                    usersViewLoader.loaded.disconnect(conn);
+                    usersViewLoader.item.openUserProfile(userName);
+                }
+            };
+            usersViewLoader.loaded.connect(conn);
+        }
+    }
+
+    function openSettingsPage(tabId) {
+        window.currentTabIndex = 5;
+        if (settingsView && tabId) {
+            settingsView.activeTab = tabId;
+        } else if (settingsViewLoader && tabId) {
+            var conn = function() {
+                if (settingsViewLoader.item) {
+                    settingsViewLoader.loaded.disconnect(conn);
+                    settingsViewLoader.item.activeTab = tabId;
+                }
+            };
+            settingsViewLoader.loaded.connect(conn);
+        }
+    }
+
     property bool isSyncLogDrawerOpen: false
     property real syncLogDrawerHeight: 380
     property bool isSidebarCollapsed: backend ? backend.sidebarCollapsed : false
+
+    property bool isRightSidebarOpen: false
+    property string rightSidebarMode: "workload_member" // "workload_member", "report_preview", "contributor_profile", "raw_file"
+    property string rightSidebarTitle: "Context Details"
+    property string rightSidebarSubtitle: ""
+    property var rightSidebarData: null
+    property real rightSidebarWidth: (backend && backend.rightSidebarWidth) ? backend.rightSidebarWidth : 440
+
+    Connections {
+        target: backend
+        function onRightSidebarWidthChanged(w) {
+            window.rightSidebarWidth = w;
+        }
+    }
+
+    function openRightSidebar(mode, title, subtitle, data) {
+        window.rightSidebarMode = mode || "workload_member";
+        window.rightSidebarTitle = title || "Context Details";
+        window.rightSidebarSubtitle = subtitle || "";
+        window.rightSidebarData = data;
+        window.isRightSidebarOpen = true;
+    }
+
+    function closeRightSidebar() {
+        window.isRightSidebarOpen = false;
+    }
+
+    function toggleRightSidebar() {
+        window.isRightSidebarOpen = !window.isRightSidebarOpen;
+    }
 
     Shortcut {
         sequence: "Ctrl+B"
         onActivated: {
             if (backend)
                 backend.toggleSidebar();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Alt+B"
+        onActivated: {
+            window.toggleRightSidebar();
         }
     }
 
@@ -193,6 +292,30 @@ ApplicationWindow {
             } else if (typeof milestonesManagerDialog.open === "function") {
                 milestonesManagerDialog.open();
             }
+        }
+    }
+
+    function openGlobalSearch(initialQuery) {
+        if (globalSearchDialog) {
+            if (typeof globalSearchDialog.openSearch === "function") {
+                globalSearchDialog.openSearch(initialQuery || "");
+            } else if (typeof globalSearchDialog.open === "function") {
+                globalSearchDialog.open();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        onActivated: {
+            window.openGlobalSearch();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+F"
+        onActivated: {
+            window.openGlobalSearch();
         }
     }
 
@@ -382,6 +505,16 @@ ApplicationWindow {
                             width: sidebarRect.width
                             spacing: 3
 
+                            // Global Search (Ctrl+F)
+                            NavItem {
+                                iconText: "🔍"
+                                label: "Search"
+                                badgeText: "Ctrl+F"
+                                active: false
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openGlobalSearch()
+                            }
+
                             // Top-Level Dashboard
                             NavItem {
                                 iconText: "📊"
@@ -433,41 +566,27 @@ ApplicationWindow {
                             }
 
                             NavItem {
-                                iconText: "📦"
-                                label: "Repositories"
+                                iconText: "🔀"
+                                label: "Pull Requests"
                                 active: window.currentTabIndex === 1
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.currentTabIndex = 1
                             }
 
                             NavItem {
-                                iconText: "🔀"
-                                label: "Pull Requests"
-                                active: window.currentTabIndex === 2
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: window.openPullRequestsPage()
-                            }
-
-                            NavItem {
                                 iconText: "🏷️"
                                 label: "Tagday Explorer"
-                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 1 : false)
+                                active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 1 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 5;
-                                    if (reportsView) reportsView.activeReportTab = 1;
-                                }
+                                onClicked: window.openReportsTab(1)
                             }
 
                             NavItem {
                                 iconText: "🚀"
                                 label: "Release Generation"
-                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 3 : false)
+                                active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 3 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 5;
-                                    if (reportsView) reportsView.activeReportTab = 3;
-                                }
+                                onClicked: window.openReportsTab(3)
                             }
 
                             // ==========================================
@@ -514,28 +633,41 @@ ApplicationWindow {
                             NavItem {
                                 iconText: "👥"
                                 label: "Workload Explorer"
-                                active: window.currentTabIndex === 4
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: window.currentTabIndex = 4
-                            }
-
-                            NavItem {
-                                iconText: "📋"
-                                label: "Work Items"
                                 active: window.currentTabIndex === 3
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.currentTabIndex = 3
                             }
 
                             NavItem {
+                                iconText: "📋"
+                                label: "Work Items"
+                                active: window.currentTabIndex === 2
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.currentTabIndex = 2
+                            }
+
+                            NavItem {
+                                iconText: "👤"
+                                label: "Users & Profiles"
+                                active: window.currentTabIndex === 7
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openUsersPage()
+                            }
+
+                            NavItem {
                                 iconText: "📈"
                                 label: "Activity Reports"
-                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 4 : false)
+                                active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 4 : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 5;
-                                    if (reportsView) reportsView.activeReportTab = 4;
-                                }
+                                onClicked: window.openReportsTab(4)
+                            }
+
+                            NavItem {
+                                iconText: "🏆"
+                                label: "Team Motivation"
+                                active: window.currentTabIndex === 6
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.openTeamMotivationPage()
                             }
 
                             // ==========================================
@@ -582,7 +714,7 @@ ApplicationWindow {
                             NavItem {
                                 iconText: "🗄️"
                                 label: "Storage & Artifacts"
-                                active: window.currentTabIndex === 5 && (reportsView ? reportsView.activeReportTab === 2 : false)
+                                active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 2 : false)
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.navigateToStorageReport()
                             }
@@ -590,12 +722,9 @@ ApplicationWindow {
                             NavItem {
                                 iconText: "📑"
                                 label: "Report"
-                                active: window.currentTabIndex === 5 && (reportsView ? (reportsView.activeReportTab === 0 || reportsView.activeReportTab === 5) : false)
+                                active: window.currentTabIndex === 4 && (reportsView ? (reportsView.activeReportTab === 0 || reportsView.activeReportTab === 5) : false)
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 5;
-                                    if (reportsView) reportsView.activeReportTab = 0;
-                                }
+                                onClicked: window.openReportsTab(0)
                             }
 
                             // ==========================================
@@ -641,40 +770,10 @@ ApplicationWindow {
 
                             NavItem {
                                 iconText: "⚙️"
-                                label: "Settings Page"
-                                active: window.currentTabIndex === 6
+                                label: "Settings"
+                                active: window.currentTabIndex === 5
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: window.currentTabIndex = 6
-                            }
-
-                            NavItem {
-                                iconText: "🔤"
-                                label: "Font"
-                                badgeText: backend ? backend.fontSizeMode.toUpperCase() : "M"
-                                active: false
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    if (backend) {
-                                        var cur = backend.fontSizeMode;
-                                        var next = "medium";
-                                        if (cur === "small") next = "medium";
-                                        else if (cur === "medium") next = "large";
-                                        else if (cur === "large") next = "xlarge";
-                                        else if (cur === "xlarge") next = "small";
-                                        backend.setFontSizeMode(next);
-                                    }
-                                }
-                            }
-
-                            NavItem {
-                                iconText: "⏱️"
-                                label: "Sync Settings"
-                                badgeText: backend && backend.autoSyncEnabled ? "AUTO" : ""
-                                active: false
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 6;
-                                }
+                                onClicked: window.currentTabIndex = 5
                             }
 
                             Item {
@@ -956,7 +1055,7 @@ ApplicationWindow {
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        window.currentTabIndex = 6; // Go to Settings
+                                        window.openSettingsPage("connection");
                                     }
                                 }
                             }
@@ -1447,56 +1546,58 @@ ApplicationWindow {
                     DashboardView {}
 
                     Loader {
-                        id: reposViewLoader
+                        id: pullRequestsViewLoader
                         active: window.currentTabIndex === 1 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
-                        source: "views/ReposView.qml"
-                        onLoaded: _hasLoaded = true
-                    }
-
-                    Loader {
-                        id: pullRequestsViewLoader
-                        active: window.currentTabIndex === 2 || _hasLoaded
-                        property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/PullRequestsView.qml"
                         onLoaded: _hasLoaded = true
                     }
 
                     Loader {
                         id: workItemsViewLoader
-                        active: window.currentTabIndex === 3 || _hasLoaded
+                        active: window.currentTabIndex === 2 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/WorkItemsView.qml"
                         onLoaded: _hasLoaded = true
                     }
 
                     Loader {
                         id: workloadExplorerViewLoader
-                        active: window.currentTabIndex === 4 || _hasLoaded
+                        active: window.currentTabIndex === 3 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/WorkloadExplorerView.qml"
                         onLoaded: _hasLoaded = true
                     }
 
                     Loader {
                         id: reportsViewLoader
-                        active: window.currentTabIndex === 5 || _hasLoaded
+                        active: window.currentTabIndex === 4 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
                         source: "views/ReportsView.qml"
                         onLoaded: _hasLoaded = true
                     }
 
                     Loader {
                         id: settingsViewLoader
+                        active: window.currentTabIndex === 5 || _hasLoaded
+                        property bool _hasLoaded: false
+                        source: "views/SettingsView.qml"
+                        onLoaded: _hasLoaded = true
+                    }
+
+                    Loader {
+                        id: teamMotivationViewLoader
                         active: window.currentTabIndex === 6 || _hasLoaded
                         property bool _hasLoaded: false
-                        asynchronous: true
-                        source: "views/SettingsView.qml"
+                        source: "views/TeamMotivationView.qml"
+                        onLoaded: _hasLoaded = true
+                    }
+
+                    Loader {
+                        id: usersViewLoader
+                        active: window.currentTabIndex === 7 || _hasLoaded
+                        property bool _hasLoaded: false
+                        source: "views/UsersView.qml"
                         onLoaded: _hasLoaded = true
                     }
                 }
@@ -1593,6 +1694,20 @@ ApplicationWindow {
                 }
             }
         }
+
+        // =========================================
+        // Dynamic Right Sidebar
+        // =========================================
+        RightSidebar {
+            id: globalRightSidebar
+            isOpen: window.isRightSidebarOpen
+            mode: window.rightSidebarMode
+            sidebarTitle: window.rightSidebarTitle
+            sidebarSubtitle: window.rightSidebarSubtitle
+            sidebarData: window.rightSidebarData
+            preferredWidth: window.rightSidebarWidth
+            onCloseRequested: window.closeRightSidebar()
+        }
     }
 }
 
@@ -1601,5 +1716,12 @@ ApplicationWindow {
     // ==========================================
     MilestonesManagerDialog {
         id: milestonesManagerDialog
+    }
+
+    // ==========================================
+    // Global Search Modal Dialog (Ctrl+F)
+    // ==========================================
+    GlobalSearchDialog {
+        id: globalSearchDialog
     }
 }

@@ -39,10 +39,10 @@ class TestReportsTargetFolder(unittest.TestCase):
             os.environ.pop("BASE_FOLDER", None)
 
     def test_utils_get_reports_dir_default_and_env(self):
-        # When not set, defaults to cwd or custom default
+        # When not set, defaults to reports folder under cwd or custom default
         os.environ.pop("REPORTS_DIR", None)
         os.environ.pop("BASE_FOLDER", None)
-        self.assertEqual(utils.get_reports_dir(), os.getcwd())
+        self.assertEqual(utils.get_reports_dir(), os.path.normpath(os.path.join(os.getcwd(), "reports")))
         self.assertEqual(utils.get_reports_dir(default="custom/path"), os.path.normpath("custom/path"))
 
         # When set via environment variable
@@ -95,12 +95,10 @@ class TestReportsTargetFolder(unittest.TestCase):
 
             # Generate revision report specifying target path in target_dir
             target_report_file = os.path.join(target_dir, "REVISION.md")
-            target_docx_file = os.path.join(target_dir, "REVISION.docx")
 
             success = generate_revision.generate_revision_md(db_path, revision_md_path=target_report_file)
             self.assertTrue(success)
             self.assertTrue(os.path.exists(target_report_file))
-            self.assertTrue(os.path.exists(target_docx_file))
 
             with open(target_report_file, "r", encoding="utf-8") as f:
                 generated = f.read()

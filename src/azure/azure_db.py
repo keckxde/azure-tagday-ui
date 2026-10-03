@@ -92,6 +92,53 @@ def _is_scheduled_sprint(iteration_str):
     return False
 
 
+def is_work_item_in_area_path(area_path, rules):
+    """
+    Checks whether a work item's Area Path matches any of the configured Area Path filter rules.
+
+    Args:
+        area_path (str): The work item's System.AreaPath.
+        rules (list): List of rule dicts with 'value'/'path' and 'include_children'/'includeChildren', or list of strings.
+
+    Returns:
+        bool: True if area_path matches at least one rule or if rules is empty/None.
+    """
+    if not rules:
+        return True
+
+    clean_ap = (str(area_path) if area_path is not None else "").strip().replace("/", "\\")
+    if not clean_ap:
+        return False
+
+    clean_ap_lower = clean_ap.lower()
+
+    for r in rules:
+        if isinstance(r, str):
+            r_path = r.strip().replace("/", "\\")
+            inc_children = True
+        elif isinstance(r, dict):
+            r_path = str(r.get("value") or r.get("path") or "").strip().replace("/", "\\")
+            inc_children = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+        else:
+            continue
+
+        if not r_path:
+            continue
+
+        r_path_lower = r_path.lower()
+
+        # Exact match
+        if clean_ap_lower == r_path_lower:
+            return True
+
+        # Prefix match for child / sub-areas
+        if inc_children:
+            if clean_ap_lower.startswith(r_path_lower + "\\"):
+                return True
+
+    return False
+
+
 class AzureDevOpsCache:
     """
     Manages caching of Azure DevOps (TFS) data inside an SQLite database.
@@ -195,6 +242,23 @@ class AzureDevOpsCache:
                 commit_id TEXT,
                 raw_json TEXT,
                 PRIMARY KEY(parent_repo_id, path)
+            )""")
+
+            # Table: commits
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS commits (
+                repo_id TEXT NOT NULL,
+                commit_id TEXT NOT NULL,
+                author_name TEXT,
+                author_email TEXT,
+                author_date TEXT,
+                committer_name TEXT,
+                committer_email TEXT,
+                committer_date TEXT,
+                comment TEXT,
+                change_counts TEXT,
+                raw_json TEXT,
+                PRIMARY KEY(repo_id, commit_id)
             )""")
 
             # Table: pull_requests
@@ -316,6 +380,21 @@ class AzureDevOpsCache:
                 review_status TEXT DEFAULT 'pending',
                 reviewed_at TEXT,
                 reviewed_by TEXT
+            )""")
+
+            # Table: work_item_state_events
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS work_item_state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_item_id INTEGER NOT NULL,
+                title TEXT,
+                type TEXT,
+                assigned_to TEXT,
+                changed_by TEXT,
+                old_state TEXT,
+                new_state TEXT,
+                is_pushback INTEGER DEFAULT 0,
+                recorded_at TEXT NOT NULL
             )""")
 
             # Schema migrations for iteration_shifts
@@ -461,6 +540,9 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_commit ON tags(commit_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submodules_repo ON submodules(parent_repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_repo ON commits(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_committer_date ON commits(committer_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_author_date ON commits(author_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_repo ON pull_requests(repo_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prs_status ON pull_requests(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_work_items_id ON work_items(id)")
@@ -495,6 +577,9 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_build ON artifacts(build_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_wi ON iteration_shifts(work_item_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_shifts_date ON iteration_shifts(recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_wi ON work_item_state_events(work_item_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_date ON work_item_state_events(recorded_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_changer ON work_item_state_events(changed_by)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_proj ON cached_iterations(project)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_name ON cached_iterations(iteration_name)")
 
@@ -696,6 +781,151 @@ class AzureDevOpsCache:
                     value = excluded.value,
                     updated_at = excluded.updated_at
                 """, (k, val_str, now_str))
+
+    def get_area_path_settings(self):
+        """
+        Retrieves the project Area Path settings from the cache configuration.
+
+        Returns:
+            dict: {
+                "enabled": bool,
+                "filter_enabled": bool,
+                "default_area": str,
+                "default_value": str,
+                "rules": list of dicts [{"value": str, "path": str, "include_children": bool, "includeChildren": bool}],
+                "all_areas": list of str,
+                "all_discovered": list of str
+            }
+        """
+        enabled_val = self.get_config("area_path_filter_enabled", "0")
+        enabled = str(enabled_val).lower() not in ("0", "false", "no", "off", "")
+
+        default_area = self.get_config("area_path_default", "")
+
+        rules_raw = self.get_config("area_path_rules", "")
+        rules = []
+        if rules_raw:
+            try:
+                parsed = json.loads(rules_raw) if isinstance(rules_raw, str) else rules_raw
+                if isinstance(parsed, list):
+                    for r in parsed:
+                        if isinstance(r, dict):
+                            val = str(r.get("value") or r.get("path") or "").strip()
+                            if val:
+                                inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                                rules.append({
+                                    "value": val,
+                                    "path": val,
+                                    "include_children": inc,
+                                    "includeChildren": inc
+                                })
+                        elif isinstance(r, str) and r.strip():
+                            rules.append({
+                                "value": r.strip(),
+                                "path": r.strip(),
+                                "include_children": True,
+                                "includeChildren": True
+                            })
+            except Exception:
+                pass
+
+        all_areas_raw = self.get_config("area_path_all_discovered", "")
+        all_areas = []
+        if all_areas_raw:
+            try:
+                parsed = json.loads(all_areas_raw) if isinstance(all_areas_raw, str) else all_areas_raw
+                if isinstance(parsed, list):
+                    all_areas = [str(a).strip() for a in parsed if str(a).strip()]
+            except Exception:
+                pass
+
+        return {
+            "enabled": enabled,
+            "filter_enabled": enabled,
+            "default_area": default_area,
+            "default_value": default_area,
+            "rules": rules,
+            "all_areas": all_areas,
+            "all_discovered": all_areas
+        }
+
+    def set_area_path_settings(self, settings_dict_or_enabled=None, enabled=None, default_area=None, default_value=None, rules=None, all_areas=None, all_discovered=None):
+        """
+        Saves Area Path settings in the SQLite cache database.
+        Accepts a dictionary or individual keyword/positional arguments.
+        """
+        settings_dict = {}
+        if isinstance(settings_dict_or_enabled, dict):
+            settings_dict = dict(settings_dict_or_enabled)
+        elif isinstance(settings_dict_or_enabled, bool):
+            enabled = settings_dict_or_enabled
+
+        if enabled is None:
+            if "filter_enabled" in settings_dict:
+                enabled = bool(settings_dict["filter_enabled"])
+            elif "enabled" in settings_dict:
+                enabled = bool(settings_dict["enabled"])
+
+        if default_area is None:
+            if default_value is not None:
+                default_area = default_value
+            elif "default_value" in settings_dict:
+                default_area = settings_dict["default_value"]
+            elif "default_area" in settings_dict:
+                default_area = settings_dict["default_area"]
+
+        if rules is None:
+            if "rules" in settings_dict:
+                rules = settings_dict["rules"]
+
+        if all_areas is None:
+            if all_discovered is not None:
+                all_areas = all_discovered
+            elif "all_discovered" in settings_dict:
+                all_areas = settings_dict["all_discovered"]
+            elif "all_areas" in settings_dict:
+                all_areas = settings_dict["all_areas"]
+
+        if enabled is not None:
+            self.set_config("area_path_filter_enabled", "1" if enabled else "0")
+        if default_area is not None:
+            self.set_config("area_path_default", str(default_area).strip())
+        if rules is not None:
+            norm_rules = []
+            if isinstance(rules, str):
+                try:
+                    rules = json.loads(rules)
+                except Exception:
+                    rules = []
+            if isinstance(rules, list):
+                for r in rules:
+                    if isinstance(r, dict):
+                        val = str(r.get("value") or r.get("path") or "").strip()
+                        if val:
+                            inc = bool(r.get("include_children") if "include_children" in r else r.get("includeChildren", True))
+                            norm_rules.append({
+                                "value": val,
+                                "path": val,
+                                "include_children": inc,
+                                "includeChildren": inc
+                            })
+                    elif isinstance(r, str) and r.strip():
+                        norm_rules.append({
+                            "value": r.strip(),
+                            "path": r.strip(),
+                            "include_children": True,
+                            "includeChildren": True
+                        })
+            self.set_config("area_path_rules", json.dumps(norm_rules))
+        if all_areas is not None:
+            if isinstance(all_areas, str):
+                try:
+                    all_areas = json.loads(all_areas)
+                except Exception:
+                    all_areas = []
+            if isinstance(all_areas, list):
+                clean_areas = [str(a).strip() for a in all_areas if str(a).strip()]
+                self.set_config("area_path_all_discovered", json.dumps(clean_areas))
 
     def get_milestone_categories(self):
         """Returns all milestone categories sorted by sort_order ascending."""
@@ -1343,6 +1573,7 @@ class AzureDevOpsCache:
           - 'milestones': milestone_categories, milestones
           - 'work_item_categories': work_item_tag_categories, custom_deadline_field, reports_dir
           - 'team_assignment_and_sprint_url': tfs_team_name, sprint_url_template, default_tfs_team
+          - 'area_path_settings': area_path_filter_enabled, area_path_default, area_path_rules, area_path_all_discovered
 
         Args:
             include_sections (list of str, optional): Sections to export. If None or empty, all sections are exported.
@@ -1358,6 +1589,8 @@ class AzureDevOpsCache:
             "repo_categories": "repo_categories",
             "milestones": "milestones",
             "work_item_categories": "work_item_categories",
+            "area_path_settings": "area_path_settings",
+            "area_paths": "area_path_settings",
         }
 
         all_sections = [
@@ -1366,6 +1599,7 @@ class AzureDevOpsCache:
             "milestones",
             "work_item_categories",
             "team_assignment_and_sprint_url",
+            "area_path_settings",
         ]
 
         if include_sections:
@@ -1464,6 +1698,10 @@ class AzureDevOpsCache:
             data["settings"]["team_assignment_and_sprint_url"] = team_cfg
             data["settings"]["team_and_sprint_url"] = team_cfg
 
+        # 6. area_path_settings
+        if "area_path_settings" in target_sections:
+            data["settings"]["area_path_settings"] = self.get_area_path_settings()
+
         return data
 
     def import_user_settings(self, data, clear_existing=False, include_sections=None):
@@ -1504,6 +1742,8 @@ class AzureDevOpsCache:
             "repo_categories": "repo_categories",
             "milestones": "milestones",
             "work_item_categories": "work_item_categories",
+            "area_path_settings": "area_path_settings",
+            "area_paths": "area_path_settings",
         }
 
         all_sections = [
@@ -1512,6 +1752,7 @@ class AzureDevOpsCache:
             "milestones",
             "work_item_categories",
             "team_assignment_and_sprint_url",
+            "area_path_settings",
         ]
 
         if include_sections:
@@ -1720,6 +1961,23 @@ class AzureDevOpsCache:
 
                 summary["imported_sections"].append("team_assignment_and_sprint_url")
 
+        # 6. area_path_settings
+        if "area_path_settings" in target_sections and "area_path_settings" in settings:
+            aps_data = settings["area_path_settings"]
+            if isinstance(aps_data, dict):
+                enabled = aps_data.get("enabled")
+                def_area = aps_data.get("default_area")
+                rules = aps_data.get("rules")
+                all_areas = aps_data.get("all_areas")
+                self.set_area_path_settings(
+                    enabled=enabled,
+                    default_area=def_area,
+                    rules=rules,
+                    all_areas=all_areas
+                )
+                summary["config_keys_updated"] += 1
+                summary["imported_sections"].append("area_path_settings")
+
         sec_list = summary.get("imported_sections", [])
         sec_str = ", ".join(sec_list) if sec_list else "none"
         summary["message"] = f"Successfully imported settings ({sec_str})."
@@ -1856,6 +2114,79 @@ class AzureDevOpsCache:
                 INSERT OR REPLACE INTO submodules (parent_repo_id, path, url, commit_id, raw_json)
                 VALUES (?, ?, ?, ?, ?)
                 """, (repo_id, sub["path"], sub["url"], commit_id, raw_json))
+
+    def save_commits(self, repo_id, commits):
+        """
+        Saves commits for a repository into the SQLite cache.
+        Merges commits using INSERT OR REPLACE without deleting older historical commits.
+        """
+        if not commits:
+            return
+        with self._connection() as conn:
+            for c in commits:
+                commit_id = c.get("commitId") or c.get("id") or ""
+                if not commit_id:
+                    continue
+                author = c.get("author") if isinstance(c.get("author"), dict) else {}
+                committer = c.get("committer") if isinstance(c.get("committer"), dict) else {}
+
+                author_name = author.get("name") or c.get("author_name") or ""
+                author_email = author.get("email") or c.get("author_email") or ""
+                author_date = author.get("date") or c.get("author_date") or ""
+
+                committer_name = committer.get("name") or c.get("committer_name") or author_name
+                committer_email = committer.get("email") or c.get("committer_email") or author_email
+                committer_date = committer.get("date") or c.get("committer_date") or author_date
+
+                comment = c.get("comment") or c.get("message") or ""
+                change_counts = json.dumps(c.get("changeCounts", {}), ensure_ascii=False) if isinstance(c.get("changeCounts"), dict) else (c.get("change_counts") or "")
+                raw_json = json.dumps(c, cls=DateTimeEncoder, ensure_ascii=False) if not isinstance(c, str) else c
+
+                conn.execute("""
+                INSERT OR REPLACE INTO commits (repo_id, commit_id, author_name, author_email, author_date, committer_name, committer_email, committer_date, comment, change_counts, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (repo_id, commit_id, author_name, author_email, author_date, committer_name, committer_email, committer_date, comment, change_counts, raw_json))
+
+    def get_all_commits(self, limit=10000):
+        """
+        Retrieves all cached commits joined with repository metadata.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("""
+            SELECT c.repo_id, c.commit_id, c.author_name, c.author_email, c.author_date,
+                   c.committer_name, c.committer_email, c.committer_date, c.comment,
+                   c.change_counts, c.raw_json,
+                   COALESCE(r.name, c.repo_id) as repo_name
+            FROM commits c
+            LEFT JOIN repositories r ON c.repo_id = r.id
+            ORDER BY COALESCE(c.committer_date, c.author_date) DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_commits_for_repo(self, repo_id, limit=500):
+        """
+        Retrieves cached commits for a specific repository.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("""
+            SELECT repo_id, commit_id, author_name, author_email, author_date,
+                   committer_name, committer_email, committer_date, comment,
+                   change_counts, raw_json
+            FROM commits
+            WHERE repo_id = ?
+            ORDER BY COALESCE(committer_date, author_date) DESC
+            LIMIT ?
+            """, (repo_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_commit_count(self):
+        """
+        Returns the total number of commits cached across all repositories.
+        """
+        with self._connection() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM commits").fetchone()
+            return row["cnt"] if row else 0
 
     def save_pull_requests(self, repo_id, prs):
         """
@@ -2130,9 +2461,31 @@ class AzureDevOpsCache:
         new_iter = new_fields.get("System.IterationPath") or ""
 
         with self._connection() as conn:
-            if new_iter:
-                old_row = conn.execute("SELECT raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
-                if old_row and old_row["raw_json"]:
+            old_row = conn.execute("SELECT state, raw_json FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if old_row:
+                old_state = str(old_row["state"] or "").strip()
+                new_state = str(state or "").strip()
+                if old_state and new_state and old_state.lower() != new_state.lower():
+                    changed_by_raw = (
+                        new_fields.get("System.ChangedBy", {})
+                        if isinstance(new_fields.get("System.ChangedBy"), dict)
+                        else {"displayName": str(new_fields.get("System.ChangedBy") or "")}
+                    )
+                    changed_by_name = changed_by_raw.get("displayName") or str(changed_by_raw or "")
+                    old_norm = old_state.lower()
+                    new_norm = new_state.lower()
+                    is_pushback = 1 if (
+                        old_norm in ("resolved", "closed", "done", "completed", "review", "testing", "qa") and
+                        new_norm in ("active", "new", "to do", "todo", "in progress", "doing", "reopened")
+                    ) else 0
+
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute("""
+                    INSERT INTO work_item_state_events (work_item_id, title, type, assigned_to, changed_by, old_state, new_state, is_pushback, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (wi_int, title or "", type_str or "", assigned_to or "", changed_by_name or "", old_state, new_state, is_pushback, now_str))
+
+                if new_iter and old_row["raw_json"]:
                     try:
                         old_raw = json.loads(old_row["raw_json"])
                         old_fields = old_raw.get("fields", {}) if isinstance(old_raw, dict) else {}
@@ -2339,6 +2692,47 @@ class AzureDevOpsCache:
                 "most_delayed_item": most_delayed
             }
 
+    def record_state_event(self, work_item_id, old_state, new_state, changed_by="", assigned_to="", title="", type_str="", is_pushback=None, recorded_at=None):
+        """
+        Records an explicit work item state transition event in SQLite.
+        """
+        if not old_state or not new_state or old_state.lower() == new_state.lower():
+            return
+        old_norm = old_state.lower()
+        new_norm = new_state.lower()
+        if is_pushback is None:
+            is_pushback = 1 if (
+                old_norm in ("resolved", "closed", "done", "completed", "review", "testing", "qa") and
+                new_norm in ("active", "new", "to do", "todo", "in progress", "doing", "reopened")
+            ) else 0
+        else:
+            is_pushback = 1 if is_pushback else 0
+
+        now_str = recorded_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connection() as conn:
+            conn.execute("""
+            INSERT INTO work_item_state_events (work_item_id, title, type, assigned_to, changed_by, old_state, new_state, is_pushback, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (work_item_id, title or "", type_str or "", assigned_to or "", changed_by or "", old_state, new_state, is_pushback, now_str))
+
+    def get_state_events(self, limit=2000, work_item_id=None, pushback_only=False):
+        """
+        Retrieves recorded work item state transition events.
+        """
+        query = "SELECT * FROM work_item_state_events WHERE 1=1"
+        params = []
+        if work_item_id:
+            query += " AND work_item_id = ?"
+            params.append(work_item_id)
+        if pushback_only:
+            query += " AND is_pushback = 1"
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
     def mark_work_item_deleted(self, wi_id):
         """
         Marks a specific work item as deleted in the cache database.
@@ -2419,6 +2813,40 @@ class AzureDevOpsCache:
             conn.execute("UPDATE work_items SET raw_json = ? WHERE id = ?", (updated_raw, wi_int))
             return True
 
+    def get_work_item(self, wi_id):
+        """
+        Retrieves a single work item from the cache database.
+        """
+        try:
+            wi_int = int(str(wi_id).lstrip("#"))
+        except (ValueError, TypeError):
+            return None
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM work_items WHERE id = ?", (wi_int,)).fetchone()
+            if not row:
+                return None
+            raw = {}
+            if row["raw_json"]:
+                try:
+                    raw = json.loads(row["raw_json"])
+                except Exception:
+                    pass
+            fields = raw.get("fields", {}) if isinstance(raw, dict) else {}
+            return {
+                "id": row["id"],
+                "title": row["title"] or fields.get("System.Title", ""),
+                "type": row["type"] or fields.get("System.WorkItemType", ""),
+                "state": row["state"] or fields.get("System.State", ""),
+                "assigned_to": row["assigned_to"] or fields.get("System.AssignedTo", {}).get("displayName", ""),
+                "changed_date": row["changed_date"] or fields.get("System.ChangedDate", ""),
+                "iteration_path": fields.get("System.IterationPath") or "",
+                "iteration_id": fields.get("System.IterationId"),
+                "area_path": fields.get("System.AreaPath") or "",
+                "deleted": bool(row["deleted"]),
+                "raw_json": row["raw_json"],
+                "fields": fields
+            }
+
     def get_all_work_item_ids(self, include_deleted=True):
         """
         Retrieves all work item IDs stored in the cache database.
@@ -2441,9 +2869,13 @@ class AzureDevOpsCache:
                 return str(row["max_date"]).strip()
             return None
 
-    def get_all_work_items(self, include_deleted=True):
+    def get_all_work_items(self, include_deleted=True, filter_area_paths=False):
         """
         Retrieves all work items stored in the cache database as structured dictionaries.
+        
+        Args:
+            include_deleted (bool): Whether to include deleted work items. Defaults to True.
+            filter_area_paths (bool): Whether to apply configured Area Path filter rules. Defaults to False.
         """
         filter_deleted = "" if include_deleted else " WHERE (deleted = 0 OR deleted IS NULL)"
         with self._connection() as conn:
@@ -2501,6 +2933,12 @@ class AzureDevOpsCache:
                     "fields": fields,
                     "raw_dict": raw,
                 })
+
+            if filter_area_paths:
+                area_cfg = self.get_area_path_settings()
+                if (area_cfg.get("filter_enabled") or area_cfg.get("enabled")) and area_cfg.get("rules"):
+                    result = [w for w in result if is_work_item_in_area_path(w.get("area_path"), area_cfg.get("rules"))]
+
             return result
 
     def get_all_prs(self):

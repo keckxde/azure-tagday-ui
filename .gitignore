@@ -17,3 +17,7 @@ src/config/user_settings.yaml
 azure_tagday_ui-*/*
 BUILD_ARTIFACTS*
 cache.db
+
+# Generated reports directory and output files
+reports/
+reports/*

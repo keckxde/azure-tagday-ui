@@ -214,6 +214,39 @@ artifact_status:
         self.assertEqual(utils.get_category_color("UNKNOWN_CAT", config=custom_config), "#6e7681")
 
 
+    def test_extract_iteration_yyww_and_compact_formatting(self):
+        # 4-digit / 6-digit combined YYWW
+        self.assertEqual(utils.extract_iteration_yyww("Sprint 2641"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("2641"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("202641"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("week-2641"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("Project\\Team\\Sprint 2641"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("CH_SAPH_KAWEST\\week-2630"), "2630")
+
+        # Separated year and week
+        self.assertEqual(utils.extract_iteration_yyww("2026_41"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("26_41"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("2026-W41"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("26-W05"), "2605")
+        self.assertEqual(utils.extract_iteration_yyww("Sprint 26.41"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("2026/41"), "2641")
+        self.assertEqual(utils.extract_iteration_yyww("2026\\Sprint 41"), "2641")
+
+        # Invalid or non-matching
+        self.assertEqual(utils.extract_iteration_yyww(""), "")
+        self.assertEqual(utils.extract_iteration_yyww("CH_SAPH_KAWEST"), "")
+        self.assertEqual(utils.extract_iteration_yyww("RandomString"), "")
+
+        # Test format_compact_iteration
+        self.assertEqual(utils.format_compact_iteration("Sprint 2641"), "2641")
+        self.assertEqual(utils.format_compact_iteration("Project\\Team\\week-2634"), "2634")
+        self.assertEqual(utils.format_compact_iteration("CH_SAPH_KAWEST", has_milestone=False), "—")
+        self.assertEqual(utils.format_compact_iteration("CH_SAPH_KAWEST", has_milestone=True), "Backlog")
+        self.assertEqual(utils.format_compact_iteration("", has_milestone=False), "—")
+        self.assertEqual(utils.format_compact_iteration("CustomSprint"), "CustomSprint")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

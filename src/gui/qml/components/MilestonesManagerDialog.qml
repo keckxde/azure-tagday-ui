@@ -509,13 +509,13 @@ Dialog {
                                 Text { text: "PROJECT MILESTONES"; font.pixelSize: 11; font.weight: Font.Bold; color: "#8b949e" }
                                 Item { Layout.fillWidth: true }
                                 Button {
-                                    text: "📤 Export Excel"
+                                    text: "📤 Export CSV"
                                     font.pixelSize: 11
                                     font.weight: Font.DemiBold
                                     contentItem: Text { text: parent.text; font: parent.font; color: "#7ee787"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                     background: Rectangle {
                                         implicitHeight: 22
-                                        implicitWidth: 105
+                                        implicitWidth: 100
                                         radius: 4
                                         color: parent.hovered ? "#162b20" : "#0d1b12"
                                         border.color: parent.hovered ? "#3fb950" : "#238636"
@@ -903,13 +903,13 @@ Dialog {
                                     spacing: 8
 
                                     Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: "🎯"
                                         font.pixelSize: 28
                                     }
 
                                     Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: root.milestonesList.length === 0 ? "No milestones defined yet." :
                                               (root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery) ?
                                               ("All " + root.historicCount + " milestone(s) are historic (past).") : "No matching milestones found."
@@ -921,7 +921,7 @@ Dialog {
 
                                     Button {
                                         visible: root.hideHistoric && root.historicCount > 0 && !root.milestoneSearchQuery
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        Layout.alignment: Qt.AlignHCenter
                                         text: "Show " + root.historicCount + " historic milestone" + (root.historicCount > 1 ? "s" : "")
                                         font.pixelSize: 11
                                         font.weight: Font.DemiBold

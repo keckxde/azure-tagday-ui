@@ -1,7 +1,8 @@
-import QtQuick 2.15
-import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
 import "../components"
+import "settings"
 
 Item {
     id: root
@@ -9,6 +10,115 @@ Item {
     property var discoveredDatabases: []
     property string bannerMsg: ""
     property string bannerType: "info" // "info", "success", "error"
+    property string activeTab: "connection" // "connection", "workitems", "reports", "categories", "aliases", "motivation", "general"
+
+    // Team Motivation Score System Form Model
+    property int scorePrsClosed: 15
+    property int scorePrsCreated: 10
+    property int scorePrsApproved: 8
+    property int scorePrsReviewed: 6
+    property int scoreCommitsCount: 3
+    property int scoreBranchesClosed: 5
+    property int scoreTagsPushed: 12
+    property int scoreTasksCompleted: 8
+    property int scoreTasksCreated: 3
+    property int scoreBugsResolved: 10
+    property int scoreStoriesCompleted: 10
+    property int scoreTasksCleaned: 3
+    property int scorePushbacksCount: 4
+    property int scoreTasksFastClosed: 4
+    property int scoreTaskEvidencesCount: 2
+    property int scoreStructuredSyntaxCompleted: 7
+    property int scoreBuildsSucceeded: 4
+    property int scoreBadgeBonus: 5
+    property int scoreStreakWeekBonus: 4
+    property int scoreDelayWeekPenalty: 3
+    property int scoreBuildFailedPenalty: 2
+    property int scoreStaleTaskPenalty: 2
+
+    function loadScoreConfigFromBackend() {
+        if (!backend) return;
+        var cfg = backend.teamMotivationScoreConfig;
+        if (!cfg) return;
+        if (typeof cfg.prs_closed !== "undefined") root.scorePrsClosed = cfg.prs_closed;
+        if (typeof cfg.prs_created !== "undefined") root.scorePrsCreated = cfg.prs_created;
+        if (typeof cfg.prs_approved !== "undefined") root.scorePrsApproved = cfg.prs_approved;
+        if (typeof cfg.prs_reviewed !== "undefined") root.scorePrsReviewed = cfg.prs_reviewed;
+        if (typeof cfg.commits_count !== "undefined") root.scoreCommitsCount = cfg.commits_count;
+        if (typeof cfg.branches_closed !== "undefined") root.scoreBranchesClosed = cfg.branches_closed;
+        if (typeof cfg.tags_pushed !== "undefined") root.scoreTagsPushed = cfg.tags_pushed;
+        if (typeof cfg.tasks_completed !== "undefined") root.scoreTasksCompleted = cfg.tasks_completed;
+        if (typeof cfg.tasks_created !== "undefined") root.scoreTasksCreated = cfg.tasks_created;
+        if (typeof cfg.bugs_resolved !== "undefined") root.scoreBugsResolved = cfg.bugs_resolved;
+        if (typeof cfg.stories_completed !== "undefined") root.scoreStoriesCompleted = cfg.stories_completed;
+        if (typeof cfg.tasks_cleaned !== "undefined") root.scoreTasksCleaned = cfg.tasks_cleaned;
+        if (typeof cfg.pushbacks_count !== "undefined") root.scorePushbacksCount = cfg.pushbacks_count;
+        if (typeof cfg.tasks_fast_closed !== "undefined") root.scoreTasksFastClosed = cfg.tasks_fast_closed;
+        if (typeof cfg.task_evidences_count !== "undefined") root.scoreTaskEvidencesCount = cfg.task_evidences_count;
+        if (typeof cfg.structured_syntax_completed !== "undefined") root.scoreStructuredSyntaxCompleted = cfg.structured_syntax_completed;
+        if (typeof cfg.builds_succeeded !== "undefined") root.scoreBuildsSucceeded = cfg.builds_succeeded;
+        if (typeof cfg.badge_bonus !== "undefined") root.scoreBadgeBonus = cfg.badge_bonus;
+        if (typeof cfg.streak_week_bonus !== "undefined") root.scoreStreakWeekBonus = cfg.streak_week_bonus;
+        if (typeof cfg.delay_week_penalty !== "undefined") root.scoreDelayWeekPenalty = cfg.delay_week_penalty;
+        if (typeof cfg.build_failed_penalty !== "undefined") root.scoreBuildFailedPenalty = cfg.build_failed_penalty;
+        if (typeof cfg.stale_task_penalty !== "undefined") root.scoreStaleTaskPenalty = cfg.stale_task_penalty;
+    }
+
+    function saveScoreConfig() {
+        if (!backend) return;
+        var cfg = {
+            "prs_closed": root.scorePrsClosed,
+            "prs_created": root.scorePrsCreated,
+            "prs_approved": root.scorePrsApproved,
+            "prs_reviewed": root.scorePrsReviewed,
+            "commits_count": root.scoreCommitsCount,
+            "branches_closed": root.scoreBranchesClosed,
+            "tags_pushed": root.scoreTagsPushed,
+            "tasks_completed": root.scoreTasksCompleted,
+            "tasks_created": root.scoreTasksCreated,
+            "bugs_resolved": root.scoreBugsResolved,
+            "stories_completed": root.scoreStoriesCompleted,
+            "tasks_cleaned": root.scoreTasksCleaned,
+            "pushbacks_count": root.scorePushbacksCount,
+            "tasks_fast_closed": root.scoreTasksFastClosed,
+            "task_evidences_count": root.scoreTaskEvidencesCount,
+            "structured_syntax_completed": root.scoreStructuredSyntaxCompleted,
+            "builds_succeeded": root.scoreBuildsSucceeded,
+            "badge_bonus": root.scoreBadgeBonus,
+            "streak_week_bonus": root.scoreStreakWeekBonus,
+            "delay_week_penalty": root.scoreDelayWeekPenalty,
+            "build_failed_penalty": root.scoreBuildFailedPenalty,
+            "stale_task_penalty": root.scoreStaleTaskPenalty
+        };
+        var ok = backend.save_team_motivation_score_config(cfg);
+        if (ok) {
+            root.bannerMsg = "✅ Team Motivation score weights saved and applied across all leaderboards & podiums!";
+            root.bannerType = "success";
+        } else {
+            root.bannerMsg = "❌ Failed to save score weights.";
+            root.bannerType = "error";
+        }
+    }
+
+    function applyScorePreset(presetId) {
+        if (!backend) return;
+        var ok = backend.apply_team_motivation_preset(presetId);
+        if (ok) {
+            loadScoreConfigFromBackend();
+            root.bannerMsg = "✅ Applied preset profile: " + presetId;
+            root.bannerType = "success";
+        }
+    }
+
+    function resetScoreDefaults() {
+        if (!backend) return;
+        var ok = backend.reset_team_motivation_score_config();
+        if (ok) {
+            loadScoreConfigFromBackend();
+            root.bannerMsg = "🔄 Reset score weights to built-in default values.";
+            root.bannerType = "info";
+        }
+    }
 
     function loadDatabasesList() {
         if (backend) {
@@ -17,7 +127,10 @@ Item {
     }
 
     Component.onCompleted: {
-        loadDatabasesList();
+        Qt.callLater(function() {
+            loadDatabasesList();
+            loadScoreConfigFromBackend();
+        });
     }
 
     // Connect to backend settings signals
@@ -31,52 +144,271 @@ Item {
         function onStatsChanged() {
             root.loadDatabasesList();
         }
+
+        function onTeamMotivationScoreConfigChanged() {
+            root.loadScoreConfigFromBackend();
+        }
     }
 
-    ScrollView {
+    // Full screen / full space Master-Detail Layout
+    RowLayout {
         anchors.fill: parent
-        contentWidth: parent.width
-        clip: true
+        spacing: 0
 
-        ColumnLayout {
-            width: Math.min(1080, parent.width - 48)
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 20
+        // ============================================================
+        // LEFT SIDEBAR: Navigation Rail & Project Status
+        // ============================================================
+        Rectangle {
+            Layout.fillHeight: true
+            implicitWidth: 260
+            Layout.minimumWidth: 240
+            Layout.maximumWidth: 280
+            color: "#0d1117"
+            border.color: "#30363d"
+            border.width: 1
 
-            Item { height: 6 }
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 12
 
-            // ==========================================
-            // Page Header with Connect New Project Button
-            // ==========================================
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 16
-
-                Column {
+                // Sidebar Header Area
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: 8
 
                     Text {
-                        text: "Settings & Project Configuration"
+                        text: "⚙️ Settings"
                         font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 20
+                        font.pixelSize: 16
                         font.weight: Font.Bold
                         color: "#f0f6fc"
                     }
 
-                    Text {
-                        text: "Select a different SQLite cache database, switch active projects, or connect to a new TFS instance"
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        color: "#8b949e"
+                    Item { Layout.fillWidth: true }
+
+                    // Project Connection Status Indicator
+                    Rectangle {
+                        implicitHeight: 18
+                        implicitWidth: connBadgeTxt.implicitWidth + 10
+                        radius: 9
+                        color: (backend && backend.dbPath) ? "#162b20" : "#3c1e1e"
+                        border.color: (backend && backend.dbPath) ? "#238636" : "#f85149"
+                        border.width: 1
+
+                        Text {
+                            id: connBadgeTxt
+                            anchors.centerIn: parent
+                            text: (backend && backend.dbPath) ? "● Connected" : "● Offline"
+                            font.family: "Segoe UI, sans-serif"
+                            font.pixelSize: 9
+                            font.weight: Font.DemiBold
+                            color: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                        }
                     }
                 }
 
-                // Connect New Project Button
+                Text {
+                    text: "Configuration, rules & workspace"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: "#21262d"
+                }
+
+                // Vertical Tab Navigation List
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 4
+
+                        Repeater {
+                            model: [
+                                {
+                                    id: "connection",
+                                    icon: "🌐",
+                                    label: "Connection & Sync",
+                                    desc: "TFS, Database & Auto-Sync",
+                                    badge: (backend && backend.dbPath) ? "Active" : "Offline",
+                                    badgeColor: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                                },
+                                {
+                                    id: "workitems",
+                                    icon: "📋",
+                                    label: "Agile & Work Items",
+                                    desc: "Area Paths, Tags & Sprints",
+                                    badge: (backend && backend.areaPathFilterEnabled && backend.areaPathRules && backend.areaPathRules.length > 0) ? (backend.areaPathRules.length + " Rules") : "",
+                                    badgeColor: "#58a6ff"
+                                },
+                                {
+                                    id: "reports",
+                                    icon: "📊",
+                                    label: "Reports & Git Filters",
+                                    desc: "Reports Path & Branches",
+                                    badge: (backend && backend.branchFilterPatterns && backend.branchFilterPatterns.length > 0) ? (backend.branchFilterPatterns.length + " Filters") : "",
+                                    badgeColor: "#d29922"
+                                },
+                                {
+                                    id: "categories",
+                                    icon: "🏷️",
+                                    label: "Repo Categories",
+                                    desc: "Classification & Overrides",
+                                    badge: (backend && backend.repoCategories && backend.repoCategories.length > 0) ? (backend.repoCategories.length + " Categories") : "",
+                                    badgeColor: "#bc8cff"
+                                },
+                                {
+                                    id: "aliases",
+                                    icon: "👤",
+                                    label: "Users & Aliases",
+                                    desc: "Git & TFS User Identities",
+                                    badge: (function() {
+                                        var aCount = (backend && backend.userAliases) ? backend.userAliases.length : 0;
+                                        var sCount = (backend && backend.systemUsersCount) ? backend.systemUsersCount : 0;
+                                        if (aCount > 0 && sCount > 0) return aCount + " Mapped";
+                                        if (aCount > 0) return aCount + " Mapped";
+                                        if (sCount > 0) return sCount + " Bots";
+                                        return "";
+                                    })(),
+                                    badgeColor: "#a371f7"
+                                },
+                                {
+                                    id: "motivation",
+                                    icon: "🏆",
+                                    label: "Team Motivation",
+                                    desc: "Score Weights & Badges",
+                                    badge: "Gamification",
+                                    badgeColor: "#f0883e"
+                                },
+                                {
+                                    id: "general",
+                                    icon: "⚙️",
+                                    label: "General & Tools",
+                                    desc: "Display, Backup & About",
+                                    badge: backend ? backend.appVersion : "",
+                                    badgeColor: "#8b949e"
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 52
+                                radius: 6
+                                property bool isSelected: root.activeTab === modelData.id
+                                color: isSelected 
+                                    ? Qt.rgba(31/255, 111/255, 235/255, 0.20) 
+                                    : (tabMa.containsMouse ? "#161b22" : "transparent")
+                                border.color: isSelected 
+                                    ? "#388bfd" 
+                                    : (tabMa.containsMouse ? "#30363d" : "transparent")
+                                border.width: 1
+
+                                // Left accent marker bar for active tab
+                                Rectangle {
+                                    width: 3
+                                    height: parent.height - 12
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    radius: 1.5
+                                    color: "#58a6ff"
+                                    visible: parent.isSelected
+                                }
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: parent.isSelected ? 12 : 10
+                                    anchors.rightMargin: 10
+                                    spacing: 8
+
+                                    Text {
+                                        text: modelData.icon
+                                        font.pixelSize: 16
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Text {
+                                                text: modelData.label
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: parent.parent.parent.parent.isSelected ? Font.Bold : Font.DemiBold
+                                                color: parent.parent.parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Rectangle {
+                                                visible: modelData.badge !== ""
+                                                implicitHeight: 15
+                                                implicitWidth: tabBadgeTxt.implicitWidth + 8
+                                                radius: 7
+                                                color: "#161b22"
+                                                border.color: modelData.badgeColor
+                                                border.width: 1
+
+                                                Text {
+                                                    id: tabBadgeTxt
+                                                    anchors.centerIn: parent
+                                                    text: modelData.badge
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 8
+                                                    font.weight: Font.Bold
+                                                    color: modelData.badgeColor
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: modelData.desc
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 10
+                                            color: parent.parent.parent.isSelected ? "#79c0ff" : "#8b949e"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: tabMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.activeTab = modelData.id
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Sidebar Footer: Active Database Pill & Connect New Project Button
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: "#21262d"
+                }
+
                 Button {
+                    Layout.fillWidth: true
                     text: "➕ Connect New Project..."
                     font.family: "Segoe UI, sans-serif"
-                    font.pixelSize: 12
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
                     contentItem: Text {
                         text: parent.text
@@ -86,8 +418,7 @@ Item {
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        implicitHeight: 36
-                        implicitWidth: 190
+                        implicitHeight: 32
                         radius: 6
                         color: parent.hovered ? "#2ea043" : "#238636"
                         border.color: "#3fb950"
@@ -96,3496 +427,213 @@ Item {
                     onClicked: newProjectDialog.open()
                 }
             }
+        }
 
-            // Notification / Feedback Banner
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 34
-                radius: 6
-                visible: root.bannerMsg !== ""
-                color: root.bannerType === "success" ? "#162b20" : (root.bannerType === "error" ? "#3c1e1e" : "#16243b")
-                border.color: root.bannerType === "success" ? "#238636" : (root.bannerType === "error" ? "#f85149" : "#388bfd")
-                border.width: 1
+        // ============================================================
+        // RIGHT MAIN CONTENT AREA: Uses ALL Available Width and Height
+        // ============================================================
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "#0d1117"
+            clip: true
 
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                // Top Header of Active Settings Tab
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 8
+                    Layout.fillWidth: true
+                    spacing: 12
 
-                    Text {
-                        text: root.bannerType === "success" ? "✓" : (root.bannerType === "error" ? "⚠️" : "ℹ️")
-                        font.pixelSize: 12
-                        font.weight: Font.Bold
-                        color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#58a6ff")
-                    }
-
-                    Text {
-                        text: root.bannerMsg
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 11
-                        color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#79c0ff")
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        elide: Text.ElideRight
-                    }
-
-                    Text {
-                        text: "✕"
-                        font.pixelSize: 11
-                        color: "#8b949e"
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.bannerMsg = ""
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Active Database & Connection Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: activeDbCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: activeDbCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 14
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                        spacing: 2
 
                         Text {
-                            text: "Active Database & TFS Environment"
+                            text: {
+                                if (root.activeTab === "connection") return "🌐 Connection & Project Sync";
+                                if (root.activeTab === "workitems") return "📋 Agile Sprints & Work Item Filters";
+                                if (root.activeTab === "reports") return "📊 Reports Export & Git Branch Filters";
+                                if (root.activeTab === "categories") return "🏷️ Repository Categories & Classification Rules";
+                                if (root.activeTab === "aliases") return "👤 User Aliases & Identity Mapping";
+                                if (root.activeTab === "motivation") return "🏆 Team Motivation Point System & Gamification";
+                                if (root.activeTab === "general") return "⚙️ General Preferences & Application Tools";
+                                return "Project Settings";
+                            }
                             font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 15
+                            font.pixelSize: 18
                             font.weight: Font.Bold
                             color: "#f0f6fc"
                         }
 
-                        Item { Layout.fillWidth: true }
-
-                        // Active status pill
-                        Rectangle {
-                            implicitHeight: 22
-                            implicitWidth: activePillText.implicitWidth + 14
-                            radius: 11
-                            color: (backend && backend.dbPath) ? "#162b20" : "#3c1e1e"
-                            border.color: (backend && backend.dbPath) ? "#238636" : "#f85149"
-                            border.width: 1
-
-                            Text {
-                                id: activePillText
-                                anchors.centerIn: parent
-                                text: (backend && backend.dbPath) ? "● Connected" : "● Not Connected"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                        Text {
+                            text: {
+                                if (root.activeTab === "connection") return "Manage TFS server URLs, personal access tokens (PAT), SQLite cache databases, and background sync.";
+                                if (root.activeTab === "workitems") return "Configure Area Path filters, TFS Team names, custom deadline field names, and Sprint URL syntax templates.";
+                                if (root.activeTab === "reports") return "Configure reports output directory, auto-generation options, and Git change notification branch/category filters.";
+                                if (root.activeTab === "categories") return "Define custom repository categories, color branding, prefix-matching classification rules, and explicit overrides.";
+                                if (root.activeTab === "aliases") return "Map Git committer identities to Azure DevOps TFS accounts and exclude automated system bots from leaderboards.";
+                                if (root.activeTab === "motivation") return "Customize gamification point weights, activity rewards, penalties, and preset scoring profiles for team members.";
+                                if (root.activeTab === "general") return "UI display scaling, database backup & export, diagnostic logs, and application metadata.";
+                                return "Configure your project environment and preferences.";
                             }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: "#21262d"
-                    }
-
-                    // Database Path
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Text {
-                            text: "Database Path:"
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 12
-                            color: "#8b949e"
-                            Layout.preferredWidth: 130
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 30
-                            radius: 4
-                            color: "#0d1117"
-                            border.color: "#30363d"
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 8
-
-                                Text {
-                                    text: (backend && backend.dbPath) ? backend.dbPath : "No database selected"
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 11
-                                    color: "#58a6ff"
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideMiddle
-                                }
-
-                                Text {
-                                    text: "📋"
-                                    font.pixelSize: 11
-                                    opacity: copyDbMa.containsMouse ? 1.0 : 0.6
-                                    MouseArea {
-                                        id: copyDbMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (backend && backend.dbPath) {
-                                                backend.copy_to_clipboard(backend.dbPath);
-                                                root.bannerMsg = "Database path copied to clipboard!";
-                                                root.bannerType = "info";
-                                            }
-                                        }
-                                    }
-                                    ToolTip.visible: copyDbMa.containsMouse
-                                    ToolTip.text: "Copy full path to clipboard"
-                                }
-                            }
-                        }
-                    }
-
-                    // Active Project
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Text {
-                            text: "Active Project:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#8b949e"
-                            Layout.preferredWidth: 130
-                        }
-
-                        Text {
-                            text: (backend && backend.projectName) ? backend.projectName : "N/A"
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 12
-                            font.weight: Font.Bold
-                            color: "#f0f6fc"
-                        }
-                    }
-
-                    // TFS Server & Collection
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Text {
-                            text: "TFS Server URL:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#8b949e"
-                            Layout.preferredWidth: 130
-                        }
-
-                        Text {
-                            text: (backend && backend.tfsUrl) ? (backend.tfsUrl + "/" + backend.tfsCollection) : "N/A"
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 11
                             color: "#8b949e"
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                         }
                     }
-
-                    // Last Synced
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Text {
-                            text: "Last Synced:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#8b949e"
-                            Layout.preferredWidth: 130
-                        }
-
-                        Text {
-                            text: (backend && backend.lastSynced) ? backend.lastSynced : "Never"
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 12
-                            color: "#3fb950"
-                        }
-                    }
-
-                    // Action Buttons Bar
-                    RowLayout {
-                        spacing: 10
-                        Layout.topMargin: 4
-
-                        // Select / Switch Database File
-                        Button {
-                            text: "📁 Select / Switch Database File..."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 32
-                                implicitWidth: 230
-                                radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: parent.hovered ? "#58a6ff" : "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    var chosen = backend.browse_database_file();
-                                    if (chosen && chosen.trim() !== "") {
-                                        var success = backend.switch_database(chosen);
-                                        if (success) {
-                                            root.bannerMsg = "Switched to database: " + chosen;
-                                            root.bannerType = "success";
-                                            root.loadDatabasesList();
-                                        } else {
-                                            root.bannerMsg = "Failed to switch to database: " + chosen;
-                                            root.bannerType = "error";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Open DB Folder in Windows Explorer
-                        Button {
-                            text: "📂 Open Folder"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#c9d1d9"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 32
-                                implicitWidth: 110
-                                radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) backend.open_db_folder();
-                            }
-                        }
-
-                        // Reconnect & Refresh Cache
-                        Button {
-                            text: "🔄 Reconnect & Refresh"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#c9d1d9"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 32
-                                implicitWidth: 160
-                                radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    backend.reconnect_cache();
-                                    root.bannerMsg = "Database cache reconnected and reloaded.";
-                                    root.bannerType = "success";
-                                    root.loadDatabasesList();
-                                }
-                            }
-                        }
-                    }
                 }
-            }
 
-            // ==========================================
-            // Available / Discovered Databases in Workspace
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: discCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: discCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
+                // Notification / Feedback Banner (Full Width)
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    radius: 6
+                    visible: root.bannerMsg !== ""
+                    color: root.bannerType === "success" ? "#162b20" : (root.bannerType === "error" ? "#3c1e1e" : "#16243b")
+                    border.color: root.bannerType === "success" ? "#238636" : (root.bannerType === "error" ? "#f85149" : "#388bfd")
+                    border.width: 1
 
                     RowLayout {
-                        Layout.fillWidth: true
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
                         spacing: 8
 
                         Text {
-                            text: "Discovered Databases in Workspace"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 15
+                            text: root.bannerType === "success" ? "✓" : (root.bannerType === "error" ? "⚠️" : "ℹ️")
+                            font.pixelSize: 12
                             font.weight: Font.Bold
-                            color: "#f0f6fc"
+                            color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#58a6ff")
                         }
 
-                        Item { Layout.fillWidth: true }
-
-                        Button {
-                            text: "🔄 Rescan"
+                        Text {
+                            text: root.bannerMsg
+                            font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#8b949e"
-                            }
-                            background: Rectangle {
-                                implicitHeight: 26
-                                implicitWidth: 70
-                                radius: 4
-                                color: parent.hovered ? "#30363d" : "transparent"
-                                border.color: "#30363d"
-                            }
-                            onClicked: root.loadDatabasesList()
-                        }
-                    }
-
-                    Text {
-                        text: "All SQLite databases (.db) found in the project root and workspace folders:"
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 11
-                        color: "#8b949e"
-                    }
-
-                    // Databases Table Header
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 32
-                        color: "#0d1117"
-                        radius: 4
-                        border.color: "#30363d"
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
-                            spacing: 10
-
-                            Text { text: "DATABASE FILE"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 220 }
-                            Text { text: "PROJECT"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 150 }
-                            Text { text: "SIZE"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 80 }
-                            Text { text: "LAST MODIFIED"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.fillWidth: true }
-                            Text { text: "ACTION"; font.family: "Segoe UI, sans-serif"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight }
-                        }
-                    }
-
-                    // Repeater for Discovered Databases
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Repeater {
-                            model: root.discoveredDatabases
-
-                            delegate: Rectangle {
-                                Layout.fillWidth: true
-                                height: 40
-                                radius: 4
-                                color: modelData.is_active ? Qt.rgba(31/255, 111/255, 235/255, 0.12) : (dbItemMa.containsMouse ? "#21262d" : "#0d1117")
-                                border.color: modelData.is_active ? "#1f6feb" : "#30363d"
-                                border.width: 1
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 12
-                                    anchors.rightMargin: 12
-                                    spacing: 10
-
-                                    // Database Name
-                                    Row {
-                                        Layout.preferredWidth: 220
-                                        spacing: 6
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        Text { text: "💾"; font.pixelSize: 12 }
-                                        Text {
-                                            text: modelData.name
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: modelData.is_active ? Font.Bold : Font.DemiBold
-                                            color: modelData.is_active ? "#58a6ff" : "#f0f6fc"
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-
-                                    // Project
-                                    Text {
-                                        text: modelData.project || "Unknown"
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 11
-                                        color: "#c9d1d9"
-                                        Layout.preferredWidth: 150
-                                        elide: Text.ElideRight
-                                    }
-
-                                    // Size
-                                    Text {
-                                        text: modelData.size_mb
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 11
-                                        color: "#8b949e"
-                                        Layout.preferredWidth: 80
-                                    }
-
-                                    // Last Modified
-                                    Text {
-                                        text: modelData.modified
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 11
-                                        color: "#8b949e"
-                                        Layout.fillWidth: true
-                                    }
-
-                                    // Action (Active Pill or Switch Button)
-                                    Rectangle {
-                                        Layout.preferredWidth: 80
-                                        implicitHeight: 24
-                                        radius: 4
-                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                        color: modelData.is_active ? "#162b20" : (swMa.containsMouse ? "#1f6feb" : "#21262d")
-                                        border.color: modelData.is_active ? "#238636" : (swMa.containsMouse ? "#58a6ff" : "#30363d")
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.is_active ? "✓ Active" : "Switch"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 11
-                                            font.weight: Font.DemiBold
-                                            color: modelData.is_active ? "#3fb950" : (swMa.containsMouse ? "#ffffff" : "#c9d1d9")
-                                        }
-
-                                        MouseArea {
-                                            id: swMa
-                                            anchors.fill: parent
-                                            enabled: !modelData.is_active
-                                            hoverEnabled: true
-                                            cursorShape: modelData.is_active ? Qt.ArrowCursor : Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (backend) {
-                                                    var ok = backend.switch_database(modelData.path);
-                                                    if (ok) {
-                                                        root.bannerMsg = "Switched to database: " + modelData.name;
-                                                        root.bannerType = "success";
-                                                        root.loadDatabasesList();
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: dbItemMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    propagateComposedEvents: true
-                                    cursorShape: Qt.ArrowCursor
-                                }
-                            }
-                        }
-
-                        // Empty placeholder
-                        Item {
+                            color: root.bannerType === "success" ? "#3fb950" : (root.bannerType === "error" ? "#f85149" : "#79c0ff")
                             Layout.fillWidth: true
-                            height: 40
-                            visible: root.discoveredDatabases.length === 0
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "No databases detected in the workspace folder. Click 'Connect New Project...' above to create one."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 12
-                                color: "#8b949e"
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Scheduled Synchronization & Auto-Sync Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: autoSyncCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: autoSyncCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 14
-
-                    // Header Row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Text { text: "⏱️"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Scheduled Synchronization (Auto-Sync)"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Periodically synchronize TFS / Azure DevOps in the background. Manual syncs can still be triggered at any time."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
+                            elide: Text.ElideRight
                         }
 
-                        Item { Layout.fillWidth: true }
-
-                        // Enable / Disable Switch Pill
-                        Rectangle {
-                            implicitHeight: 28
-                            implicitWidth: autoSyncSwitchLayout.implicitWidth + 20
-                            radius: 14
-                            color: backend && backend.autoSyncEnabled ? "#162b20" : "#21262d"
-                            border.color: backend && backend.autoSyncEnabled ? "#238636" : "#30363d"
-                            border.width: 1
-
-                            RowLayout {
-                                id: autoSyncSwitchLayout
-                                anchors.centerIn: parent
-                                spacing: 8
-
-                                Rectangle {
-                                    width: 8
-                                    height: 8
-                                    radius: 4
-                                    color: backend && backend.autoSyncEnabled ? "#3fb950" : "#8b949e"
-                                }
-
-                                Text {
-                                    text: backend && backend.autoSyncEnabled ? "Auto-Sync Enabled" : "Auto-Sync Disabled"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    color: backend && backend.autoSyncEnabled ? "#3fb950" : "#8b949e"
-                                }
-                            }
-
+                        Text {
+                            text: "✕"
+                            font.pixelSize: 11
+                            color: "#8b949e"
                             MouseArea {
                                 anchors.fill: parent
-                                hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (backend) {
-                                        backend.setAutoSyncEnabled(!backend.autoSyncEnabled);
-                                        root.bannerMsg = backend.autoSyncEnabled
-                                            ? ("Scheduled synchronization enabled (every " + backend.autoSyncIntervalMinutes + " min).")
-                                            : "Scheduled synchronization disabled.";
-                                        root.bannerType = backend.autoSyncEnabled ? "success" : "info";
-                                    }
-                                }
+                                onClicked: root.bannerMsg = ""
                             }
                         }
                     }
+                }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+                // Scrollable Full-Width / Full-Height Tab Content Area
+                ScrollView {
+                    id: rightContentScroll
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: rightContentScroll.width
+                    clip: true
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                    // Sync Interval Selection
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                    Item {
+                        width: rightContentScroll.width - 12
+                        implicitHeight: activeTabStack.implicitHeight + 20
 
-                        Text {
-                            text: "Sync Interval:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: "#c9d1d9"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Repeater {
-                                model: [
-                                    { label: "1 min",  minutes: 1 },
-                                    { label: "2 min",  minutes: 2 },
-                                    { label: "5 min (Default)",  minutes: 5 },
-                                    { label: "10 min", minutes: 10 },
-                                    { label: "15 min", minutes: 15 },
-                                    { label: "30 min", minutes: 30 },
-                                    { label: "60 min", minutes: 60 }
-                                ]
-
-                                Rectangle {
-                                    property bool isCur: backend && backend.autoSyncIntervalMinutes === modelData.minutes
-                                    implicitHeight: 30
-                                    implicitWidth: intervalBtnText.implicitWidth + 16
-                                    radius: 5
-                                    color: isCur ? "#1f6feb" : (intMa.containsMouse ? "#21262d" : "#0d1117")
-                                    border.color: isCur ? "#58a6ff" : (intMa.containsMouse ? "#388bfd" : "#30363d")
-                                    border.width: 1
-
-                                    Text {
-                                        id: intervalBtnText
-                                        anchors.centerIn: parent
-                                        text: modelData.label
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        font.weight: parent.isCur ? Font.Bold : Font.Normal
-                                        color: parent.isCur ? "#ffffff" : "#c9d1d9"
-                                    }
-
-                                    MouseArea {
-                                        id: intMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (backend) {
-                                                backend.setAutoSyncInterval(modelData.minutes);
-                                                root.bannerMsg = "Auto-sync interval set to " + modelData.minutes + " minute(s).";
-                                                root.bannerType = "success";
-                                            }
-                                        }
-                                    }
-                                }
+                        StackLayout {
+                            id: activeTabStack
+                            width: parent.width
+                            currentIndex: {
+                                if (root.activeTab === "connection") return 0;
+                                if (root.activeTab === "workitems") return 1;
+                                if (root.activeTab === "reports") return 2;
+                                if (root.activeTab === "categories") return 3;
+                                if (root.activeTab === "aliases") return 4;
+                                if (root.activeTab === "motivation") return 5;
+                                if (root.activeTab === "general") return 6;
+                                return 0;
                             }
 
-                            Item { Layout.fillWidth: true }
-                        }
-                    }
-
-                    // Scope Selection
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text {
-                            text: "Sync Scope:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: "#c9d1d9"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            Repeater {
-                                model: [
-                                    { mode: "all",           label: "🔄 Full Sync (All Repos, WIQL & PRs)", desc: "Synchronizes git repos, work items, and pull requests" },
-                                    { mode: "work_items",    label: "⚡ Work Items (WIQL) Only",           desc: "Fast agile work items and query status sync" },
-                                    { mode: "pull_requests", label: "🔀 Pull Requests Only",               desc: "Lightweight pull requests status sync" }
-                                ]
-
-                                Rectangle {
-                                    property bool isCur: backend && backend.autoSyncScope === modelData.mode
-                                    implicitHeight: 34
-                                    implicitWidth: scopeBtnText.implicitWidth + 20
-                                    radius: 6
-                                    color: isCur ? Qt.rgba(31/255, 111/255, 235/255, 0.15) : (scopeMa.containsMouse ? "#21262d" : "#0d1117")
-                                    border.color: isCur ? "#1f6feb" : (scopeMa.containsMouse ? "#58a6ff" : "#30363d")
-                                    border.width: isCur ? 2 : 1
-
-                                    Text {
-                                        id: scopeBtnText
-                                        anchors.centerIn: parent
-                                        text: modelData.label
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        font.weight: parent.isCur ? Font.Bold : Font.Normal
-                                        color: parent.isCur ? "#58a6ff" : "#c9d1d9"
-                                    }
-
-                                    MouseArea {
-                                        id: scopeMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (backend) {
-                                                backend.setAutoSyncScope(modelData.mode);
-                                                root.bannerMsg = "Auto-sync scope updated.";
-                                                root.bannerType = "success";
-                                            }
-                                        }
-                                    }
-                                }
+                            // Tab 0: Connection & Sync
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "connection" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsConnectionTab.qml"
+                                onLoaded: _loaded = true
                             }
 
-                            Item { Layout.fillWidth: true }
-                        }
-                    }
-
-                    // Live Status & Quick Action Row
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 40
-                        radius: 6
-                        color: "#0d1117"
-                        border.color: "#21262d"
-                        border.width: 1
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
-                            spacing: 12
-
-                            Text {
-                                text: "Live Status:"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: "#8b949e"
+                            // Tab 1: Agile & Work Items
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "workitems" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsWorkItemsTab.qml"
+                                onLoaded: _loaded = true
                             }
 
-                            Text {
-                                text: backend ? backend.autoSyncStatusText : "N/A"
-                                font.family: "Consolas, monospace"
-                                font.pixelSize: 11
-                                font.weight: Font.Bold
-                                color: backend && backend.autoSyncEnabled ? "#58a6ff" : "#8b949e"
+                            // Tab 2: Reports & Git Filters
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "reports" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsReportsTab.qml"
+                                onLoaded: _loaded = true
                             }
 
-                            Item { Layout.fillWidth: true }
-
-                            Text {
-                                text: "Triggering a manual sync automatically resets the countdown timer."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#6e7681"
+                            // Tab 3: Repository Categories
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "categories" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsCategoriesTab.qml"
+                                onLoaded: _loaded = true
                             }
 
-                            Button {
-                                text: "⚡ Trigger Sync Now"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                enabled: backend ? !backend.isBusy : false
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: parent.parent.enabled ? "#ffffff" : "#8b949e"
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 26
-                                    implicitWidth: 135
-                                    radius: 4
-                                    color: parent.enabled ? (parent.hovered ? "#1f6feb" : "#238636") : "#21262d"
-                                    border.color: parent.enabled ? "#3fb950" : "#30363d"
-                                }
-                                onClicked: {
-                                    if (backend) {
-                                        backend.triggerAutoSyncNow();
-                                        root.bannerMsg = "Manual synchronization started.";
-                                        root.bannerType = "info";
-                                    }
-                                }
+                            // Tab 4: Users & Aliases
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "aliases" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsAliasesTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 5: Team Motivation
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "motivation" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsMotivationTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 6: General & Tools
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "general" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsGeneralTab.qml"
+                                onLoaded: _loaded = true
                             }
                         }
                     }
                 }
             }
-
-            // ==========================================
-            // Reports Target & Baseline Directory Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: reportsDirCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: reportsDirCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 14
-
-                    // Header Row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Text { text: "📊"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Reports Target & Baseline Directory"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Configure the target folder for reading baseline reports to extend (such as REVISION.md) and saving generated release reports (TAGDAY.md, REVISION.md/docx, SPRINT_REPORT, BUILD_ARTIFACTS)."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Status Pill
-                        Rectangle {
-                            implicitHeight: 22
-                            implicitWidth: reportsDirPillText.implicitWidth + 14
-                            radius: 11
-                            color: (backend && backend.reportsDir) ? "#16243b" : "#162b20"
-                            border.color: (backend && backend.reportsDir) ? "#388bfd" : "#238636"
-                            border.width: 1
-
-                            Text {
-                                id: reportsDirPillText
-                                anchors.centerIn: parent
-                                text: (backend && backend.reportsDir) ? "📁 Custom Directory" : "🏠 Default (Current Directory)"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                color: (backend && backend.reportsDir) ? "#58a6ff" : "#3fb950"
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // Path Input & Browse Row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        TextField {
-                            id: reportsDirInput
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 12
-                            text: backend ? (backend.reportsDir || backend.effectiveReportsDir) : ""
-                            placeholderText: "e.g. C:/Projects/Reports or relative path (empty for current directory)"
-                            placeholderTextColor: "#484f58"
-                            color: "#f0f6fc"
-                            background: Rectangle {
-                                color: "#0d1117"
-                                radius: 6
-                                border.color: reportsDirInput.activeFocus ? "#58a6ff" : "#30363d"
-                                border.width: 1
-                            }
-                        }
-
-                        Button {
-                            text: "📁 Browse..."
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#f0f6fc"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 105; radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: parent.hovered ? "#58a6ff" : "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    var chosen = backend.browse_reports_dir();
-                                    if (chosen) {
-                                        reportsDirInput.text = chosen;
-                                        root.bannerMsg = "Reports target directory set to: " + chosen;
-                                        root.bannerType = "success";
-                                    }
-                                }
-                            }
-                        }
-
-                        Button {
-                            text: "📂 Open Folder"
-                            font.pixelSize: 12
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#c9d1d9"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 110; radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: "#30363d"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) backend.open_reports_folder();
-                            }
-                        }
-
-                        Button {
-                            text: "💾 Save"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 80; radius: 6
-                                color: parent.hovered ? "#2ea043" : "#238636"
-                                border.color: "#3fb950"
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    backend.setReportsDir(reportsDirInput.text.trim());
-                                    root.bannerMsg = reportsDirInput.text.trim()
-                                        ? ("Reports directory saved: " + reportsDirInput.text.trim())
-                                        : "Reports directory reset to current working directory.";
-                                    root.bannerType = "success";
-                                }
-                            }
-                        }
-
-                        Button {
-                            text: "↺ Reset"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#8b949e"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 70; radius: 6
-                                color: parent.hovered ? "#30363d" : "#21262d"
-                                border.color: "#30363d"
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    backend.setReportsDir("");
-                                    reportsDirInput.text = backend.effectiveReportsDir;
-                                    root.bannerMsg = "Reports target directory reset to default (current directory).";
-                                    root.bannerType = "info";
-                                }
-                            }
-                        }
-                    }
-
-                    // Informational notes row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text { text: "ℹ️"; font.pixelSize: 12 }
-                        Text {
-                            text: "Effective path: " + (backend ? backend.effectiveReportsDir : "N/A") + "  •  Applies to TAGDAY.md, REVISION.md, REVISION.docx, SPRINT_REPORT_*.md, RESCHEDULING_REPORT.*, and BUILD_ARTIFACTS.*"
-                            font.family: "Consolas, Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                            elide: Text.ElideMiddle
-                            Layout.fillWidth: true
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Agile & Deadline Attribute Configuration Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: deadlineCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: deadlineCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
-
-                    RowLayout {
-                        spacing: 8
-                        Text { text: "🎯"; font.pixelSize: 16 }
-                        Text {
-                            text: "Work Item Deadline Attribute Configuration"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 15
-                            font.weight: Font.Bold
-                            color: "#f0f6fc"
-                        }
-                    }
-
-                    Text {
-                        text: "Specify a custom TFS / Azure DevOps field reference name used for milestone deadlines (e.g. Custom.MilestoneDeadline). If left empty, the application automatically inspects Microsoft.VSTS.Scheduling.TargetDate, DueDate, FinishDate, or weekly sprint milestone dates."
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 12
-                        color: "#8b949e"
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        TextField {
-                            id: deadlineFieldInput
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 12
-                            text: (backend && backend.customDeadlineField) ? backend.customDeadlineField : ""
-                            placeholderText: "e.g. Microsoft.VSTS.Scheduling.TargetDate or Custom.MilestoneDeadline"
-                            placeholderTextColor: "#484f58"
-                            color: "#f0f6fc"
-                            background: Rectangle {
-                                color: "#0d1117"
-                                radius: 6
-                                border.color: deadlineFieldInput.activeFocus ? "#58a6ff" : "#30363d"
-                                border.width: 1
-                            }
-                        }
-
-                        Button {
-                            text: "💾 Save Attribute"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 130; radius: 6
-                                color: parent.hovered ? "#1f6feb" : "#238636"
-                                border.color: "#3fb950"
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    backend.setCustomDeadlineField(deadlineFieldInput.text);
-                                    root.bannerMsg = "Custom deadline field updated to: " + (deadlineFieldInput.text.trim() || "Default (TargetDate / DueDate)");
-                                    root.bannerType = "success";
-                                }
-                            }
-                        }
-                    }
-
-                    // Divider
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: "#30363d"
-                        Layout.topMargin: 4
-                        Layout.bottomMargin: 4
-                    }
-
-                    // TFS / Azure DevOps Team Name & Sprint Taskboard URL Configuration
-                    RowLayout {
-                        spacing: 8
-                        Text { text: "🎯"; font.pixelSize: 18 }
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Azure DevOps / TFS Sprint Taskboard URL Configuration & Testing"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 14
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Configure team assignment, customize the URL template for your TFS/Azure DevOps server, and test sprint links in your browser."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                    }
-
-                    // 1. Team Name Assignment
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                text: "Team Name Assignment:"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                                color: "#c9d1d9"
-                            }
-
-                            Rectangle {
-                                visible: !(backend && backend.tfsTeamName)
-                                implicitHeight: 18
-                                implicitWidth: defaultBadgeTxt.implicitWidth + 12
-                                radius: 9
-                                color: "#1f2937"
-                                border.color: "#374151"
-                                border.width: 1
-
-                                Text {
-                                    id: defaultBadgeTxt
-                                    anchors.centerIn: parent
-                                    text: "Using Default: " + ((backend && backend.defaultTfsTeam) ? backend.defaultTfsTeam : "{Project} Team")
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    color: "#58a6ff"
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: "Specify the Team Name that sprint iterations are assigned to. When left empty, the application will use the Default Team ('" + ((backend && backend.defaultTfsTeam) ? backend.defaultTfsTeam : "{Project} Team") + "')."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            TextField {
-                                id: teamNameInput
-                                Layout.fillWidth: true
-                                implicitHeight: 34
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 12
-                                text: (backend && backend.tfsTeamName) ? backend.tfsTeamName : ""
-                                placeholderText: (backend && backend.defaultTfsTeam) ? ("Default: " + backend.defaultTfsTeam) : "Default: {Project} Team"
-                                placeholderTextColor: "#484f58"
-                                color: "#f0f6fc"
-                                background: Rectangle {
-                                    color: "#0d1117"
-                                    radius: 6
-                                    border.color: teamNameInput.activeFocus ? "#58a6ff" : "#30363d"
-                                    border.width: 1
-                                }
-                            }
-
-                            Button {
-                                text: "💾 Save Team"
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                                contentItem: Text {
-                                    text: parent.text; font: parent.font; color: "#ffffff"
-                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 34; implicitWidth: 130; radius: 6
-                                    color: parent.hovered ? "#2ea043" : "#238636"
-                                    border.color: "#3fb950"
-                                }
-                                onClicked: {
-                                    if (backend) {
-                                        backend.setTfsTeamName(teamNameInput.text);
-                                        var savedTeam = teamNameInput.text.trim();
-                                        root.bannerMsg = "TFS Team Name updated to: " + (savedTeam || ("Default Team (" + (backend.defaultTfsTeam || "Project Team") + ")"));
-                                        root.bannerType = "success";
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. Sprint URL Syntax Template & Presets
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Layout.topMargin: 4
-
-                        Text {
-                            text: "Sprint URL Syntax Template:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: "#c9d1d9"
-                        }
-
-                        Text {
-                            text: "Select a syntax preset matching your server environment, or craft a custom URL template using placeholders."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                        }
-
-                        // Presets Row
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: 6
-
-                            Repeater {
-                                model: [
-                                    { name: "⚡ Modern Hierarchical (Default)", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}" },
-                                    { name: "📁 Team Sprints Leaf", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/sprints/{iteration_leaf}" },
-                                    { name: "📋 TFS Boards Taskboard", tmpl: "{base_url}/{collection}/{project}/{team}/_boards/iteration/taskboard/{iteration_leaf}" },
-                                    { name: "🗂️ TFS Legacy Backlogs", tmpl: "{base_url}/{collection}/{project}/{team}/_backlogs/iteration/{iteration_leaf}" },
-                                    { name: "☁️ Azure Cloud Simple", tmpl: "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_leaf}" }
-                                ]
-
-                                Rectangle {
-                                    implicitHeight: 26
-                                    implicitWidth: presetLabel.implicitWidth + 16
-                                    radius: 13
-                                    color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#1f6feb22" : "#21262d"
-                                    border.color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#58a6ff" : "#30363d"
-                                    border.width: 1
-
-                                    Text {
-                                        id: presetLabel
-                                        anchors.centerIn: parent
-                                        text: modelData.name
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        font.weight: Font.Medium
-                                        color: (sprintUrlTemplateInput.text === modelData.tmpl || (!sprintUrlTemplateInput.text && modelData.tmpl.includes("{iteration_path}"))) ? "#58a6ff" : "#c9d1d9"
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            sprintUrlTemplateInput.text = modelData.tmpl;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Template input & save row
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            TextField {
-                                id: sprintUrlTemplateInput
-                                Layout.fillWidth: true
-                                implicitHeight: 34
-                                font.family: "Consolas, Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                text: (backend && backend.sprintUrlTemplate) ? backend.sprintUrlTemplate : "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
-                                placeholderText: "e.g. {base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}"
-                                placeholderTextColor: "#484f58"
-                                color: "#58a6ff"
-                                background: Rectangle {
-                                    color: "#0d1117"
-                                    radius: 6
-                                    border.color: sprintUrlTemplateInput.activeFocus ? "#58a6ff" : "#30363d"
-                                    border.width: 1
-                                }
-                            }
-
-                            Button {
-                                text: "💾 Save Syntax"
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                                contentItem: Text {
-                                    text: parent.text; font: parent.font; color: "#ffffff"
-                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 34; implicitWidth: 130; radius: 6
-                                    color: parent.hovered ? "#2ea043" : "#238636"
-                                    border.color: "#3fb950"
-                                }
-                                onClicked: {
-                                    if (backend) {
-                                        backend.setSprintUrlTemplate(sprintUrlTemplateInput.text);
-                                        root.bannerMsg = "Sprint URL Syntax Template updated!";
-                                        root.bannerType = "success";
-                                    }
-                                }
-                            }
-
-                            Button {
-                                text: "↺ Reset"
-                                font.pixelSize: 11
-                                contentItem: Text {
-                                    text: parent.text; font: parent.font; color: "#8b949e"
-                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 34; implicitWidth: 70; radius: 6
-                                    color: parent.hovered ? "#30363d" : "#21262d"
-                                    border.color: "#30363d"
-                                }
-                                onClicked: {
-                                    sprintUrlTemplateInput.text = "{base_url}/{collection}/{project}/_sprints/{view_mode}/{team}/{iteration_path}";
-                                    if (backend) {
-                                        backend.setSprintUrlTemplate("");
-                                        root.bannerMsg = "Sprint URL Syntax Template reset to default.";
-                                        root.bannerType = "info";
-                                    }
-                                }
-                            }
-                        }
-
-                        // Placeholder Tokens Chips
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Text {
-                                text: "Tokens (click to append):"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: 4
-                                Repeater {
-                                    model: [
-                                        "{base_url}", "{collection}", "{project}", "{team}", "{view_mode}", "{iteration_path}", "{iteration_leaf}", "{workitem_id}"
-                                    ]
-                                    Rectangle {
-                                        implicitHeight: 20
-                                        implicitWidth: tokenText.implicitWidth + 10
-                                        radius: 4
-                                        color: "#161b22"
-                                        border.color: "#30363d"
-                                        border.width: 1
-
-                                        Text {
-                                            id: tokenText
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 10
-                                            color: "#79c0ff"
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (!sprintUrlTemplateInput.text.includes(modelData)) {
-                                                    sprintUrlTemplateInput.text = sprintUrlTemplateInput.text + "/" + modelData;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 3. Interactive Testing Sandbox & Live URL Preview
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: testSandboxCol.implicitHeight + 24
-                        radius: 6
-                        color: "#0d1117"
-                        border.color: "#21262d"
-                        border.width: 1
-
-                        ColumnLayout {
-                            id: testSandboxCol
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 10
-
-                            RowLayout {
-                                spacing: 6
-                                Text { text: "🧪"; font.pixelSize: 14 }
-                                Text {
-                                    text: "Sprint URL Live Preview & Browser Test Sandbox"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Bold
-                                    color: "#f0f6fc"
-                                }
-                            }
-
-                            // Test Parameter Inputs
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-                                    Text { text: "Sample Sprint:"; font.pixelSize: 10; color: "#8b949e" }
-                                    TextField {
-                                        id: testSprintInput
-                                        Layout.fillWidth: true
-                                        implicitHeight: 28
-                                        font.pixelSize: 11
-                                        text: "week-2634"
-                                        color: "#f0f6fc"
-                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-                                    Text { text: "Sample Team:"; font.pixelSize: 10; color: "#8b949e" }
-                                    TextField {
-                                        id: testTeamInput
-                                        Layout.fillWidth: true
-                                        implicitHeight: 28
-                                        font.pixelSize: 11
-                                        text: teamNameInput.text.trim() || "Alpha Team"
-                                        color: "#f0f6fc"
-                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-                                    Text { text: "Sample Work Item ID:"; font.pixelSize: 10; color: "#8b949e" }
-                                    TextField {
-                                        id: testWiInput
-                                        Layout.fillWidth: true
-                                        implicitHeight: 28
-                                        font.pixelSize: 11
-                                        text: "5634858"
-                                        color: "#f0f6fc"
-                                        background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
-                                    }
-                                }
-                            }
-
-                            // Live Formatted URL Display & Test Button
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 32
-                                    radius: 4
-                                    color: "#161b22"
-                                    border.color: "#30363d"
-                                    border.width: 1
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        spacing: 6
-
-                                        Text { text: "🔗"; font.pixelSize: 12 }
-                                        Text {
-                                            id: livePreviewUrlText
-                                            Layout.fillWidth: true
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 11
-                                            color: "#58a6ff"
-                                            elide: Text.ElideMiddle
-                                            text: backend ? backend.preview_sprint_url(
-                                                testWiInput.text.trim(),
-                                                testSprintInput.text.trim(),
-                                                testTeamInput.text.trim(),
-                                                sprintUrlTemplateInput.text.trim()
-                                            ) : ""
-                                        }
-                                    }
-                                }
-
-                                Button {
-                                    text: "🌐 Open in Browser"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    contentItem: Text {
-                                        text: parent.text; font: parent.font; color: "#ffffff"
-                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        implicitHeight: 32; implicitWidth: 140; radius: 4
-                                        color: parent.hovered ? "#388bfd" : "#1f6feb"
-                                    }
-                                    onClicked: {
-                                        if (backend) {
-                                            backend.test_open_sprint_url(
-                                                testWiInput.text.trim(),
-                                                testSprintInput.text.trim(),
-                                                testTeamInput.text.trim(),
-                                                sprintUrlTemplateInput.text.trim()
-                                            );
-                                            root.bannerMsg = "Opened sprint URL in system browser for verification.";
-                                            root.bannerType = "info";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Work Item Tag Categories Card
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: tagCatCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                // Local state for the editable rules list and add-row
-                property var tagRules: []
-                property string newPattern: ""
-                property string newCategory: ""
-
-                id: tagCatCard
-
-                function loadRules() {
-                    if (backend && backend.tagCategories) {
-                        // Deep-copy so edits don't mutate the backend list directly
-                        var src = backend.tagCategories;
-                        var copy = [];
-                        for (var i = 0; i < src.length; i++) {
-                            copy.push({ pattern: src[i].pattern || "", category: src[i].category || "" });
-                        }
-                        tagRules = copy;
-                    }
-                }
-
-                function saveRules() {
-                    if (!backend) return;
-                    backend.save_tag_categories(JSON.stringify(tagRules));
-                    root.bannerMsg = "Tag categories saved (" + tagRules.length + " rules).";
-                    root.bannerType = "success";
-                }
-
-                function resetToDefaults() {
-                    tagRules = [
-                        { pattern: "Target:*",    category: "Milestone" },
-                        { pattern: "Subsystem:*", category: "PBS" },
-                        { pattern: "v*.*.*",      category: "Software Revision" },
-                        { pattern: "OI",          category: "Open Item" },
-                        { pattern: "MP",          category: "Merkpunkt" }
-                    ];
-                    saveRules();
-                }
-
-                Component.onCompleted: loadRules()
-
-                Connections {
-                    target: backend
-                    function onTagCategoriesChanged() { tagCatCard.loadRules(); }
-                }
-
-                ColumnLayout {
-                    id: tagCatCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 14
-
-                    // ---- Header ----
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text { text: "🏷️"; font.pixelSize: 18 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Work Item Tag Categories"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Map tag patterns to category names. Use * for wildcards (e.g. Target:* → Milestone). Rules are evaluated top-to-bottom; the first match wins."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Button {
-                            text: "↺ Reset to Defaults"
-                            font.pixelSize: 11
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Restore the five built-in rules"
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#8b949e"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 28; implicitWidth: 130; radius: 5
-                                color: parent.hovered ? "#30363d" : "transparent"
-                                border.color: "#30363d"
-                            }
-                            onClicked: tagCatCard.resetToDefaults()
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // ---- Table Header ----
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 28
-                        color: "#0d1117"
-                        radius: 4
-                        border.color: "#21262d"
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 10
-
-                            Text { text: "#";        font.pixelSize: 10; font.weight: Font.Bold; color: "#6e7681"; Layout.preferredWidth: 20 }
-                            Text { text: "PATTERN";  font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.fillWidth: true }
-                            Text { text: "CATEGORY"; font.pixelSize: 10; font.weight: Font.Bold; color: "#8b949e"; Layout.preferredWidth: 160 }
-                            Text { text: "";          font.pixelSize: 10; color: "transparent";   Layout.preferredWidth: 54 }
-                        }
-                    }
-
-                    // ---- Rules List ----
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Repeater {
-                            model: tagCatCard.tagRules
-
-                            delegate: Rectangle {
-                                id: ruleRow
-                                Layout.fillWidth: true
-                                implicitHeight: 36
-                                radius: 5
-                                color: ruleRowMa.containsMouse ? "#1c2128" : "#0d1117"
-                                border.color: "#21262d"
-
-                                property int ruleIndex: index
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    spacing: 10
-
-                                    // Row number
-                                    Text {
-                                        text: (ruleRow.ruleIndex + 1) + "."
-                                        font.pixelSize: 11
-                                        color: "#484f58"
-                                        Layout.preferredWidth: 20
-                                    }
-
-                                    // Pattern field (editable)
-                                    TextField {
-                                        id: patternField
-                                        Layout.fillWidth: true
-                                        implicitHeight: 26
-                                        text: modelData.pattern
-                                        font.family: "Consolas, monospace"
-                                        font.pixelSize: 11
-                                        color: "#58a6ff"
-                                        placeholderText: "e.g.  Target:*  or  v*.*.*"
-                                        placeholderTextColor: "#484f58"
-                                        background: Rectangle {
-                                            color: patternField.activeFocus ? "#0d2344" : "transparent"
-                                            radius: 4
-                                            border.color: patternField.activeFocus ? "#388bfd" : "transparent"
-                                        }
-                                        onEditingFinished: {
-                                            var rules = tagCatCard.tagRules.slice();
-                                            rules[ruleRow.ruleIndex] = { pattern: text.trim(), category: rules[ruleRow.ruleIndex].category };
-                                            tagCatCard.tagRules = rules;
-                                        }
-                                    }
-
-                                    // Category field (editable)
-                                    TextField {
-                                        id: categoryField
-                                        Layout.preferredWidth: 160
-                                        implicitHeight: 26
-                                        text: modelData.category
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        color: "#e6edf3"
-                                        placeholderText: "Category name"
-                                        placeholderTextColor: "#484f58"
-                                        background: Rectangle {
-                                            color: categoryField.activeFocus ? "#1a2a1a" : "transparent"
-                                            radius: 4
-                                            border.color: categoryField.activeFocus ? "#3fb950" : "transparent"
-                                        }
-                                        onEditingFinished: {
-                                            var rules = tagCatCard.tagRules.slice();
-                                            rules[ruleRow.ruleIndex] = { pattern: rules[ruleRow.ruleIndex].pattern, category: text.trim() };
-                                            tagCatCard.tagRules = rules;
-                                        }
-                                    }
-
-                                    // Move up / down / remove buttons
-                                    RowLayout {
-                                        spacing: 2
-                                        Layout.preferredWidth: 54
-
-                                        // ↑ Move up
-                                        Text {
-                                            text: "↑"
-                                            font.pixelSize: 13
-                                            color: upMa.containsMouse ? "#79c0ff" : "#484f58"
-                                            visible: ruleRow.ruleIndex > 0
-                                            MouseArea {
-                                                id: upMa
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    var rules = tagCatCard.tagRules.slice();
-                                                    var tmp = rules[ruleRow.ruleIndex - 1];
-                                                    rules[ruleRow.ruleIndex - 1] = rules[ruleRow.ruleIndex];
-                                                    rules[ruleRow.ruleIndex] = tmp;
-                                                    tagCatCard.tagRules = rules;
-                                                }
-                                            }
-                                            ToolTip.visible: upMa.containsMouse; ToolTip.text: "Move rule up"
-                                        }
-
-                                        // ↓ Move down
-                                        Text {
-                                            text: "↓"
-                                            font.pixelSize: 13
-                                            color: downMa.containsMouse ? "#79c0ff" : "#484f58"
-                                            visible: ruleRow.ruleIndex < tagCatCard.tagRules.length - 1
-                                            MouseArea {
-                                                id: downMa
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    var rules = tagCatCard.tagRules.slice();
-                                                    var tmp = rules[ruleRow.ruleIndex + 1];
-                                                    rules[ruleRow.ruleIndex + 1] = rules[ruleRow.ruleIndex];
-                                                    rules[ruleRow.ruleIndex] = tmp;
-                                                    tagCatCard.tagRules = rules;
-                                                }
-                                            }
-                                            ToolTip.visible: downMa.containsMouse; ToolTip.text: "Move rule down"
-                                        }
-
-                                        // ✕ Remove
-                                        Text {
-                                            text: "✕"
-                                            font.pixelSize: 12
-                                            color: removeMa.containsMouse ? "#f85149" : "#484f58"
-                                            MouseArea {
-                                                id: removeMa
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    var rules = tagCatCard.tagRules.slice();
-                                                    rules.splice(ruleRow.ruleIndex, 1);
-                                                    tagCatCard.tagRules = rules;
-                                                }
-                                            }
-                                            ToolTip.visible: removeMa.containsMouse; ToolTip.text: "Remove rule"
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: ruleRowMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    propagateComposedEvents: true
-                                    cursorShape: Qt.ArrowCursor
-                                }
-                            }
-                        }
-
-                        // Empty placeholder
-                        Text {
-                            visible: tagCatCard.tagRules.length === 0
-                            text: "No rules defined. Add a rule below or click '↺ Reset to Defaults'."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#484f58"
-                            Layout.topMargin: 4
-                        }
-                    }
-
-                    // ---- Add New Rule Row ----
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 36
-                        radius: 5
-                        color: "#0d1117"
-                        border.color: "#238636"
-                        border.width: 1
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 10
-
-                            Text {
-                                text: "+"
-                                font.pixelSize: 16
-                                font.weight: Font.Bold
-                                color: "#3fb950"
-                                Layout.preferredWidth: 20
-                            }
-
-                            TextField {
-                                id: newPatternField
-                                Layout.fillWidth: true
-                                implicitHeight: 26
-                                text: tagCatCard.newPattern
-                                font.family: "Consolas, monospace"
-                                font.pixelSize: 11
-                                color: "#58a6ff"
-                                placeholderText: "Pattern  (e.g. QA:*)"
-                                placeholderTextColor: "#484f58"
-                                background: Rectangle {
-                                    color: newPatternField.activeFocus ? "#0d2344" : "transparent"
-                                    radius: 4
-                                    border.color: newPatternField.activeFocus ? "#388bfd" : "transparent"
-                                }
-                                onTextChanged: tagCatCard.newPattern = text
-                                Keys.onReturnPressed: newCategoryField.forceActiveFocus()
-                            }
-
-                            TextField {
-                                id: newCategoryField
-                                Layout.preferredWidth: 160
-                                implicitHeight: 26
-                                text: tagCatCard.newCategory
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#e6edf3"
-                                placeholderText: "Category name"
-                                placeholderTextColor: "#484f58"
-                                background: Rectangle {
-                                    color: newCategoryField.activeFocus ? "#1a2a1a" : "transparent"
-                                    radius: 4
-                                    border.color: newCategoryField.activeFocus ? "#3fb950" : "transparent"
-                                }
-                                onTextChanged: tagCatCard.newCategory = text
-                                Keys.onReturnPressed: addRuleBtn.clicked()
-                            }
-
-                            Button {
-                                id: addRuleBtn
-                                text: "Add"
-                                enabled: tagCatCard.newPattern.trim() !== "" && tagCatCard.newCategory.trim() !== ""
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                                contentItem: Text {
-                                    text: parent.text; font: parent.font
-                                    color: parent.enabled ? "#ffffff" : "#484f58"
-                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 28; implicitWidth: 54; radius: 5
-                                    color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#21262d"
-                                    border.color: parent.enabled ? "#3fb950" : "#30363d"
-                                }
-                                onClicked: {
-                                    var p = tagCatCard.newPattern.trim();
-                                    var c = tagCatCard.newCategory.trim();
-                                    if (p && c) {
-                                        var rules = tagCatCard.tagRules.slice();
-                                        rules.push({ pattern: p, category: c });
-                                        tagCatCard.tagRules = rules;
-                                        tagCatCard.newPattern = "";
-                                        tagCatCard.newCategory = "";
-                                        newPatternField.text = "";
-                                        newCategoryField.text = "";
-                                        newPatternField.forceActiveFocus();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ---- Save Button ----
-                    RowLayout {
-                        Layout.topMargin: 4
-                        spacing: 10
-
-                        Item { Layout.fillWidth: true }
-
-                        Text {
-                            text: tagCatCard.tagRules.length + " rule(s) configured"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#484f58"
-                        }
-
-                        Button {
-                            text: "💾 Save Tag Categories"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 180; radius: 6
-                                color: parent.hovered ? "#1f6feb" : "#238636"
-                                border.color: "#3fb950"
-                            }
-                            onClicked: tagCatCard.saveRules()
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Change Notification & Tag Day Filters Card
-            // ==========================================
-            Rectangle {
-                id: changeFilterCard
-                Layout.fillWidth: true
-                implicitHeight: changeFilterCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                property var repoCatFilters: []
-                property var branchFilters: []
-                property string newRepoCatPattern: ""
-                property string newBranchPattern: ""
-
-                // Sandbox test state
-                property string testSampleText: ""
-                property string testSampleType: "branch" // "category" or "branch"
-
-                function loadFilters() {
-                    if (backend) {
-                        var c = backend.repoCategoryFilterPatterns || [];
-                        var b = backend.branchFilterPatterns || [];
-                        repoCatFilters = c.slice();
-                        branchFilters = b.slice();
-                    }
-                }
-
-                function saveFilters() {
-                    if (!backend) return;
-                    var ok = backend.save_change_filters(
-                        JSON.stringify(repoCatFilters),
-                        JSON.stringify(branchFilters)
-                    );
-                    if (ok) {
-                        root.bannerMsg = "Change notification filters saved successfully (" + repoCatFilters.length + " category rules, " + branchFilters.length + " branch rules).";
-                        root.bannerType = "success";
-                    } else {
-                        root.bannerMsg = "Failed to save change notification filters.";
-                        root.bannerType = "error";
-                    }
-                }
-
-                function resetFilters() {
-                    if (!backend) return;
-                    var ok = backend.reset_change_filters_to_defaults();
-                    if (ok) {
-                        loadFilters();
-                        root.bannerMsg = "Change notification filters reset to defaults.";
-                        root.bannerType = "info";
-                    }
-                }
-
-                Component.onCompleted: loadFilters()
-
-                Connections {
-                    target: backend
-                    function onChangeFiltersChanged() {
-                        changeFilterCard.loadFilters();
-                    }
-                }
-
-                ColumnLayout {
-                    id: changeFilterCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 16
-
-                    // Header
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text { text: "🔔"; font.pixelSize: 18 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Change Notification & Tag Day Filters"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Define wildcard filters (* and ?) to exclude non-relevant repository categories (e.g. *deprecated*) and branches (e.g. *archive*, *demo*, *test*) from change notifications and Tag Day tracking."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Button {
-                            text: "↺ Reset to Defaults"
-                            font.pixelSize: 11
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Restore default category (*deprecated*) and branch filters"
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#8b949e"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 28; implicitWidth: 130; radius: 5
-                                color: parent.hovered ? "#30363d" : "transparent"
-                                border.color: "#30363d"
-                            }
-                            onClicked: changeFilterCard.resetFilters()
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // SECTION 1: Repository Category Filters
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Text { text: "📁"; font.pixelSize: 14 }
-                            Text {
-                                text: "Repository Category Filters (Ignore for Change Notifications)"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 13
-                                font.weight: Font.Bold
-                                color: "#e6edf3"
-                            }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                text: changeFilterCard.repoCatFilters.length + " pattern(s)"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-
-                        Text {
-                            text: "Repositories whose category matches these patterns will be excluded from Tag Day change alerts, pending change badges, and the changes timeline."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                        }
-
-                        // Presets Row for Categories
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Text { text: "Suggested Presets (click to add):"; font.pixelSize: 10; color: "#6e7681" }
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: 4
-                                Repeater {
-                                    model: ["*deprecated*", "*archive*", "*legacy*", "*sandbox*", "*temp*"]
-                                    Rectangle {
-                                        implicitHeight: 20
-                                        implicitWidth: catChipTxt.implicitWidth + 12
-                                        radius: 10
-                                        color: "#0d1117"
-                                        border.color: "#30363d"
-                                        Text {
-                                            id: catChipTxt
-                                            anchors.centerIn: parent
-                                            text: "+ " + modelData
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 10
-                                            color: "#58a6ff"
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (changeFilterCard.repoCatFilters.indexOf(modelData) === -1) {
-                                                    var list = changeFilterCard.repoCatFilters.slice();
-                                                    list.push(modelData);
-                                                    changeFilterCard.repoCatFilters = list;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Category Patterns Table
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-
-                            Repeater {
-                                model: changeFilterCard.repoCatFilters
-
-                                delegate: Rectangle {
-                                    id: catFilterRow
-                                    Layout.fillWidth: true
-                                    implicitHeight: 34
-                                    radius: 4
-                                    color: catRowMa.containsMouse ? "#1c2128" : "#0d1117"
-                                    border.color: "#21262d"
-                                    property int rowIndex: index
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        spacing: 10
-
-                                        Text {
-                                            text: (catFilterRow.rowIndex + 1) + "."
-                                            font.pixelSize: 11
-                                            color: "#484f58"
-                                            Layout.preferredWidth: 20
-                                        }
-
-                                        TextField {
-                                            id: catPatField
-                                            Layout.fillWidth: true
-                                            implicitHeight: 26
-                                            text: modelData
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 11
-                                            color: "#e3b341"
-                                            background: Rectangle {
-                                                color: catPatField.activeFocus ? "#2d2305" : "transparent"
-                                                radius: 4
-                                                border.color: catPatField.activeFocus ? "#d29922" : "transparent"
-                                            }
-                                            onEditingFinished: {
-                                                var list = changeFilterCard.repoCatFilters.slice();
-                                                list[catFilterRow.rowIndex] = text.trim();
-                                                changeFilterCard.repoCatFilters = list;
-                                            }
-                                        }
-
-                                        // Move up / down / remove
-                                        RowLayout {
-                                            spacing: 4
-                                            Layout.preferredWidth: 54
-
-                                            Text {
-                                                text: "↑"
-                                                font.pixelSize: 13
-                                                color: upCatMa.containsMouse ? "#79c0ff" : "#484f58"
-                                                visible: catFilterRow.rowIndex > 0
-                                                MouseArea {
-                                                    id: upCatMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.repoCatFilters.slice();
-                                                        var tmp = list[catFilterRow.rowIndex - 1];
-                                                        list[catFilterRow.rowIndex - 1] = list[catFilterRow.rowIndex];
-                                                        list[catFilterRow.rowIndex] = tmp;
-                                                        changeFilterCard.repoCatFilters = list;
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                text: "↓"
-                                                font.pixelSize: 13
-                                                color: downCatMa.containsMouse ? "#79c0ff" : "#484f58"
-                                                visible: catFilterRow.rowIndex < changeFilterCard.repoCatFilters.length - 1
-                                                MouseArea {
-                                                    id: downCatMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.repoCatFilters.slice();
-                                                        var tmp = list[catFilterRow.rowIndex + 1];
-                                                        list[catFilterRow.rowIndex + 1] = list[catFilterRow.rowIndex];
-                                                        list[catFilterRow.rowIndex] = tmp;
-                                                        changeFilterCard.repoCatFilters = list;
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                text: "✕"
-                                                font.pixelSize: 12
-                                                color: remCatMa.containsMouse ? "#f85149" : "#484f58"
-                                                MouseArea {
-                                                    id: remCatMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.repoCatFilters.slice();
-                                                        list.splice(catFilterRow.rowIndex, 1);
-                                                        changeFilterCard.repoCatFilters = list;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: catRowMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        propagateComposedEvents: true
-                                        cursorShape: Qt.ArrowCursor
-                                    }
-                                }
-                            }
-
-                            Text {
-                                visible: changeFilterCard.repoCatFilters.length === 0
-                                text: "No category filters configured. All repository categories will be tracked for changes."
-                                font.pixelSize: 11
-                                color: "#484f58"
-                            }
-                        }
-
-                        // Add Category Pattern Row
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            radius: 4
-                            color: "#0d1117"
-                            border.color: "#30363d"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 6
-                                spacing: 8
-
-                                Text { text: "+"; font.pixelSize: 15; font.weight: Font.Bold; color: "#e3b341" }
-
-                                TextField {
-                                    id: addCatPatInput
-                                    Layout.fillWidth: true
-                                    implicitHeight: 26
-                                    text: changeFilterCard.newRepoCatPattern
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 11
-                                    color: "#e3b341"
-                                    placeholderText: "New category pattern (e.g. *deprecated* or ARCHIVE*)"
-                                    placeholderTextColor: "#484f58"
-                                    background: Rectangle { color: "transparent" }
-                                    onTextChanged: changeFilterCard.newRepoCatPattern = text
-                                    Keys.onReturnPressed: addCatBtn.clicked()
-                                }
-
-                                Button {
-                                    id: addCatBtn
-                                    text: "Add Pattern"
-                                    enabled: changeFilterCard.newRepoCatPattern.trim() !== ""
-                                    font.pixelSize: 11
-                                    contentItem: Text {
-                                        text: parent.text; font: parent.font; color: parent.enabled ? "#ffffff" : "#484f58"
-                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        implicitHeight: 24; implicitWidth: 85; radius: 4
-                                        color: parent.enabled ? (parent.hovered ? "#d29922" : "#9e6a03") : "#21262d"
-                                    }
-                                    onClicked: {
-                                        var p = changeFilterCard.newRepoCatPattern.trim();
-                                        if (p && changeFilterCard.repoCatFilters.indexOf(p) === -1) {
-                                            var list = changeFilterCard.repoCatFilters.slice();
-                                            list.push(p);
-                                            changeFilterCard.repoCatFilters = list;
-                                            changeFilterCard.newRepoCatPattern = "";
-                                            addCatPatInput.text = "";
-                                            addCatPatInput.forceActiveFocus();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // SECTION 2: Branch Change Filters
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Text { text: "🌿"; font.pixelSize: 14 }
-                            Text {
-                                text: "Git Branch Filters (Ignore for Ahead & Change Tracking)"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 13
-                                font.weight: Font.Bold
-                                color: "#e6edf3"
-                            }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                text: changeFilterCard.branchFilters.length + " pattern(s)"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-
-                        Text {
-                            text: "Branches matching these patterns will NOT be considered as changes (ignored in unmerged branches tables and timeline)."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                        }
-
-                        // Presets Row for Branches
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Text { text: "Suggested Presets (click to add):"; font.pixelSize: 10; color: "#6e7681" }
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: 4
-                                Repeater {
-                                    model: ["*archive*", "archive/*", "*demo*", "demo/*", "*deprecated*", "*test*", "test/*", "*backup*", "*poc*", "*temp*"]
-                                    Rectangle {
-                                        implicitHeight: 20
-                                        implicitWidth: brChipTxt.implicitWidth + 12
-                                        radius: 10
-                                        color: "#0d1117"
-                                        border.color: "#30363d"
-                                        Text {
-                                            id: brChipTxt
-                                            anchors.centerIn: parent
-                                            text: "+ " + modelData
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 10
-                                            color: "#58a6ff"
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (changeFilterCard.branchFilters.indexOf(modelData) === -1) {
-                                                    var list = changeFilterCard.branchFilters.slice();
-                                                    list.push(modelData);
-                                                    changeFilterCard.branchFilters = list;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Branch Patterns Table
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-
-                            Repeater {
-                                model: changeFilterCard.branchFilters
-
-                                delegate: Rectangle {
-                                    id: brFilterRow
-                                    Layout.fillWidth: true
-                                    implicitHeight: 34
-                                    radius: 4
-                                    color: brRowMa.containsMouse ? "#1c2128" : "#0d1117"
-                                    border.color: "#21262d"
-                                    property int rowIndex: index
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        spacing: 10
-
-                                        Text {
-                                            text: (brFilterRow.rowIndex + 1) + "."
-                                            font.pixelSize: 11
-                                            color: "#484f58"
-                                            Layout.preferredWidth: 20
-                                        }
-
-                                        TextField {
-                                            id: brPatField
-                                            Layout.fillWidth: true
-                                            implicitHeight: 26
-                                            text: modelData
-                                            font.family: "Consolas, monospace"
-                                            font.pixelSize: 11
-                                            color: "#58a6ff"
-                                            background: Rectangle {
-                                                color: brPatField.activeFocus ? "#0d2344" : "transparent"
-                                                radius: 4
-                                                border.color: brPatField.activeFocus ? "#388bfd" : "transparent"
-                                            }
-                                            onEditingFinished: {
-                                                var list = changeFilterCard.branchFilters.slice();
-                                                list[brFilterRow.rowIndex] = text.trim();
-                                                changeFilterCard.branchFilters = list;
-                                            }
-                                        }
-
-                                        // Move up / down / remove
-                                        RowLayout {
-                                            spacing: 4
-                                            Layout.preferredWidth: 54
-
-                                            Text {
-                                                text: "↑"
-                                                font.pixelSize: 13
-                                                color: upBrMa.containsMouse ? "#79c0ff" : "#484f58"
-                                                visible: brFilterRow.rowIndex > 0
-                                                MouseArea {
-                                                    id: upBrMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.branchFilters.slice();
-                                                        var tmp = list[brFilterRow.rowIndex - 1];
-                                                        list[brFilterRow.rowIndex - 1] = list[brFilterRow.rowIndex];
-                                                        list[brFilterRow.rowIndex] = tmp;
-                                                        changeFilterCard.branchFilters = list;
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                text: "↓"
-                                                font.pixelSize: 13
-                                                color: downBrMa.containsMouse ? "#79c0ff" : "#484f58"
-                                                visible: brFilterRow.rowIndex < changeFilterCard.branchFilters.length - 1
-                                                MouseArea {
-                                                    id: downBrMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.branchFilters.slice();
-                                                        var tmp = list[brFilterRow.rowIndex + 1];
-                                                        list[brFilterRow.rowIndex + 1] = list[brFilterRow.rowIndex];
-                                                        list[brFilterRow.rowIndex] = tmp;
-                                                        changeFilterCard.branchFilters = list;
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                text: "✕"
-                                                font.pixelSize: 12
-                                                color: remBrMa.containsMouse ? "#f85149" : "#484f58"
-                                                MouseArea {
-                                                    id: remBrMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var list = changeFilterCard.branchFilters.slice();
-                                                        list.splice(brFilterRow.rowIndex, 1);
-                                                        changeFilterCard.branchFilters = list;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: brRowMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        propagateComposedEvents: true
-                                        cursorShape: Qt.ArrowCursor
-                                    }
-                                }
-                            }
-
-                            Text {
-                                visible: changeFilterCard.branchFilters.length === 0
-                                text: "No branch filters configured. All branches with ahead commits will be shown as unmerged."
-                                font.pixelSize: 11
-                                color: "#484f58"
-                            }
-                        }
-
-                        // Add Branch Pattern Row
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 34
-                            radius: 4
-                            color: "#0d1117"
-                            border.color: "#30363d"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 6
-                                spacing: 8
-
-                                Text { text: "+"; font.pixelSize: 15; font.weight: Font.Bold; color: "#58a6ff" }
-
-                                TextField {
-                                    id: addBrPatInput
-                                    Layout.fillWidth: true
-                                    implicitHeight: 26
-                                    text: changeFilterCard.newBranchPattern
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 11
-                                    color: "#58a6ff"
-                                    placeholderText: "New branch pattern (e.g. *archive*, archive/*, or *demo*)"
-                                    placeholderTextColor: "#484f58"
-                                    background: Rectangle { color: "transparent" }
-                                    onTextChanged: changeFilterCard.newBranchPattern = text
-                                    Keys.onReturnPressed: addBrBtn.clicked()
-                                }
-
-                                Button {
-                                    id: addBrBtn
-                                    text: "Add Pattern"
-                                    enabled: changeFilterCard.newBranchPattern.trim() !== ""
-                                    font.pixelSize: 11
-                                    contentItem: Text {
-                                        text: parent.text; font: parent.font; color: parent.enabled ? "#ffffff" : "#484f58"
-                                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        implicitHeight: 24; implicitWidth: 85; radius: 4
-                                        color: parent.enabled ? (parent.hovered ? "#1f6feb" : "#238636") : "#21262d"
-                                    }
-                                    onClicked: {
-                                        var p = changeFilterCard.newBranchPattern.trim();
-                                        if (p && changeFilterCard.branchFilters.indexOf(p) === -1) {
-                                            var list = changeFilterCard.branchFilters.slice();
-                                            list.push(p);
-                                            changeFilterCard.branchFilters = list;
-                                            changeFilterCard.newBranchPattern = "";
-                                            addBrPatInput.text = "";
-                                            addBrPatInput.forceActiveFocus();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // SECTION 3: Interactive Pattern Matcher Sandbox
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: sandboxCol.implicitHeight + 20
-                        radius: 6
-                        color: "#0d1117"
-                        border.color: "#21262d"
-                        border.width: 1
-
-                        ColumnLayout {
-                            id: sandboxCol
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 8
-
-                            RowLayout {
-                                spacing: 6
-                                Text { text: "🧪"; font.pixelSize: 14 }
-                                Text {
-                                    text: "Filter Rule Test Sandbox"
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Bold
-                                    color: "#f0f6fc"
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-
-                                TextField {
-                                    id: testInput
-                                    Layout.fillWidth: true
-                                    implicitHeight: 30
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 11
-                                    placeholderText: "Type sample branch or category name (e.g. archive/feature-1 or Deprecated)"
-                                    placeholderTextColor: "#484f58"
-                                    color: "#f0f6fc"
-                                    background: Rectangle { color: "#161b22"; radius: 4; border.color: "#30363d" }
-                                    onTextChanged: changeFilterCard.testSampleText = text
-                                }
-
-                                // Match status badge
-                                Rectangle {
-                                    property bool isMatched: {
-                                        var val = testInput.text.trim();
-                                        if (!val) return false;
-                                        if (backend) {
-                                            for (var i = 0; i < changeFilterCard.repoCatFilters.length; i++) {
-                                                if (backend.test_pattern_match(changeFilterCard.repoCatFilters[i], val)) return true;
-                                            }
-                                            for (var j = 0; j < changeFilterCard.branchFilters.length; j++) {
-                                                if (backend.test_pattern_match(changeFilterCard.branchFilters[j], val)) return true;
-                                            }
-                                        }
-                                        return false;
-                                    }
-
-                                    implicitHeight: 30
-                                    implicitWidth: 140
-                                    radius: 4
-                                    color: testInput.text.trim() === "" ? "#21262d" : (isMatched ? "#3c1e1e" : "#162b20")
-                                    border.color: testInput.text.trim() === "" ? "#30363d" : (isMatched ? "#f85149" : "#238636")
-                                    border.width: 1
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: testInput.text.trim() === "" ? "Enter test text" : (parent.isMatched ? "🚫 Excluded (Ignored)" : "✓ Included (Active)")
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 11
-                                        font.weight: Font.Bold
-                                        color: testInput.text.trim() === "" ? "#8b949e" : (parent.isMatched ? "#f85149" : "#3fb950")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Bottom Save Row
-                    RowLayout {
-                        Layout.topMargin: 4
-                        spacing: 12
-
-                        Item { Layout.fillWidth: true }
-
-                        Text {
-                            text: (changeFilterCard.repoCatFilters.length + changeFilterCard.branchFilters.length) + " total rule(s) configured"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            color: "#8b949e"
-                        }
-
-                        Button {
-                            text: "💾 Save Filter Rules"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text; font: parent.font; color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34; implicitWidth: 160; radius: 6
-                                color: parent.hovered ? "#1f6feb" : "#238636"
-                                border.color: "#3fb950"
-                            }
-                            onClicked: changeFilterCard.saveFilters()
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Recent Projects History Card (if any)
-            // ==========================================
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: recentCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-                visible: backend && backend.recentProjects && backend.recentProjects.length > 0
-
-                ColumnLayout {
-                    id: recentCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
-
-                    Text {
-                        text: "Previously Connected Projects"
-                        font.family: "Segoe UI, sans-serif"
-                        font.pixelSize: 15
-                        font.weight: Font.Bold
-                        color: "#f0f6fc"
-                    }
-
-                    Repeater {
-                        model: backend ? backend.recentProjects : []
-
-                        delegate: Rectangle {
-                            Layout.fillWidth: true
-                            height: 38
-                            radius: 4
-                            color: isCurrentProj ? Qt.rgba(31/255, 111/255, 235/255, 0.12) : (recProjMa.containsMouse ? "#21262d" : "#0d1117")
-                            border.color: isCurrentProj ? "#1f6feb" : "#30363d"
-                            border.width: 1
-
-                            property bool isCurrentProj: backend && backend.projectName === modelData.name
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                spacing: 10
-
-                                Text { text: "📦"; font.pixelSize: 12 }
-
-                                Text {
-                                    text: modelData.name
-                                    font.family: "Segoe UI, sans-serif"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Bold
-                                    color: isCurrentProj ? "#58a6ff" : "#f0f6fc"
-                                    Layout.preferredWidth: 180
-                                }
-
-                                Text {
-                                    text: (modelData.url || "") + "/" + (modelData.collection || "")
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 11
-                                    color: "#8b949e"
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideMiddle
-                                }
-
-                                Text {
-                                    text: modelData.date || ""
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 10
-                                    color: "#6e7681"
-                                    Layout.preferredWidth: 110
-                                }
-
-                                Button {
-                                    text: isCurrentProj ? "Active" : "Switch Project"
-                                    enabled: !isCurrentProj
-                                    font.pixelSize: 11
-                                    background: Rectangle {
-                                        implicitHeight: 24
-                                        implicitWidth: 90
-                                        radius: 4
-                                        color: isCurrentProj ? "#162b20" : (parent.hovered ? "#1f6feb" : "#21262d")
-                                        border.color: isCurrentProj ? "#238636" : "#30363d"
-                                    }
-                                    onClicked: {
-                                        if (backend && modelData.db_path) {
-                                            backend.switch_database(modelData.db_path);
-                                            root.bannerMsg = "Switched to project: " + modelData.name;
-                                            root.bannerType = "success";
-                                            root.loadDatabasesList();
-                                        }
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                id: recProjMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                propagateComposedEvents: true
-                                cursorShape: Qt.ArrowCursor
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Display & Typography Sizing Card
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: fontSettingCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: fontSettingCol
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 14
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text { text: "🔤"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Display & Typography Scaling"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Adjust font size and interface scaling for high-DPI (2K/4K) monitors or compact viewing"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: 10
-                        columnSpacing: 10
-
-                        Repeater {
-                            model: [
-                                {
-                                    mode: "small",
-                                    title: "Small (90%)",
-                                    desc: "Compact view for dense data tables and smaller screens",
-                                    badge: "Compact"
-                                },
-                                {
-                                    mode: "medium",
-                                    title: "Medium (100% - Default)",
-                                    desc: "Standard balanced scale for regular 1080p monitors",
-                                    badge: "Standard"
-                                },
-                                {
-                                    mode: "large",
-                                    title: "Large (115%)",
-                                    desc: "Enhanced readability for larger displays and text clarity",
-                                    badge: "Enhanced"
-                                },
-                                {
-                                    mode: "xlarge",
-                                    title: "Extra Large (130%)",
-                                    desc: "High-DPI / 4K monitors and high-accessibility viewing",
-                                    badge: "4K / HiDPI"
-                                }
-                            ]
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: 68
-                                radius: 6
-                                property bool isSelected: backend && backend.fontSizeMode === modelData.mode
-                                color: isSelected ? "#0d2344" : (optMa.containsMouse ? "#21262d" : "#0d1117")
-                                border.color: isSelected ? "#1f6feb" : (optMa.containsMouse ? "#388bfd" : "#30363d")
-                                border.width: isSelected ? 2 : 1
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
-
-                                    // Radio Indicator
-                                    Rectangle {
-                                        width: 18
-                                        height: 18
-                                        radius: 9
-                                        color: parent.parent.isSelected ? "#1f6feb" : "#161b22"
-                                        border.color: parent.parent.isSelected ? "#58a6ff" : "#30363d"
-                                        border.width: 1
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 8
-                                            height: 8
-                                            radius: 4
-                                            color: "#ffffff"
-                                            visible: parent.parent.parent.isSelected
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 2
-
-                                        RowLayout {
-                                            spacing: 8
-                                            Text {
-                                                text: modelData.title
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 12
-                                                font.weight: Font.Bold
-                                                color: parent.parent.parent.parent.isSelected ? "#f0f6fc" : "#e6edf3"
-                                            }
-
-                                            Rectangle {
-                                                implicitHeight: 16
-                                                implicitWidth: bLabel.implicitWidth + 8
-                                                radius: 8
-                                                color: parent.parent.parent.parent.isSelected ? "#1f6feb" : "#21262d"
-                                                Text {
-                                                    id: bLabel
-                                                    anchors.centerIn: parent
-                                                    text: modelData.badge
-                                                    font.pixelSize: 9
-                                                    font.weight: Font.DemiBold
-                                                    color: parent.parent.parent.parent.parent.isSelected ? "#ffffff" : "#8b949e"
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            text: modelData.desc
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                            Layout.fillWidth: true
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: optMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (backend) {
-                                            backend.setFontSizeMode(modelData.mode);
-                                            root.bannerMsg = "Font size updated to " + modelData.title;
-                                            root.bannerType = "success";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // Export & Import Specific User Settings Card
-            // ==========================================
-            Rectangle {
-                id: exportImportCard
-                Layout.fillWidth: true
-                implicitHeight: exportImportCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                function getSelectedSections() {
-                    var secs = [];
-                    if (chkRepoCats.checked) secs.push("repo_categories");
-                    if (chkBranchFilters.checked) secs.push("git_branch_filters");
-                    if (chkMilestones.checked) secs.push("milestones");
-                    if (chkWorkItemCats.checked) secs.push("work_item_categories");
-                    if (chkTeamSprint.checked) secs.push("team_and_sprint_url");
-                    return secs;
-                }
-
-                function selectAllSections(enable) {
-                    chkRepoCats.checked = enable;
-                    chkBranchFilters.checked = enable;
-                    chkMilestones.checked = enable;
-                    chkWorkItemCats.checked = enable;
-                    chkTeamSprint.checked = enable;
-                }
-
-                ColumnLayout {
-                    id: exportImportCol
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 14
-
-                    // Card Title & Icon
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Text { text: "📦"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "Export & Import Specific User Settings"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Backup, share, or restore specific user configuration sections in YAML or JSON format."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Rectangle {
-                            implicitHeight: 22
-                            implicitWidth: formatPillText.implicitWidth + 14
-                            radius: 11
-                            color: "#1f6feb22"
-                            border.color: "#58a6ff"
-                            border.width: 1
-
-                            Text {
-                                id: formatPillText
-                                anchors.centerIn: parent
-                                text: "YAML / JSON Supported"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 10
-                                font.weight: Font.DemiBold
-                                color: "#58a6ff"
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // Section Selection Controls
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Text {
-                            text: "Select Sections to Include:"
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            color: "#c9d1d9"
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        Button {
-                            text: "Select All"
-                            font.pixelSize: 11
-                            background: Rectangle {
-                                color: parent.hovered ? "#21262d" : "transparent"
-                                radius: 4
-                                border.color: "#30363d"
-                                border.width: 1
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#79c0ff"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: exportImportCard.selectAllSections(true)
-                        }
-
-                        Button {
-                            text: "Deselect All"
-                            font.pixelSize: 11
-                            background: Rectangle {
-                                color: parent.hovered ? "#21262d" : "transparent"
-                                radius: 4
-                                border.color: "#30363d"
-                                border.width: 1
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#8b949e"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: exportImportCard.selectAllSections(false)
-                        }
-                    }
-
-                    // Checkbox Pills Grid
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: 10
-                        columnSpacing: 16
-
-                        CheckBox {
-                            id: chkRepoCats
-                            text: "Repository Categories (rules, colors, overrides, default category)"
-                            checked: true
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-
-                        CheckBox {
-                            id: chkBranchFilters
-                            text: "Git Branch & Category Filters (branch_filter_patterns, notifications)"
-                            checked: true
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-
-                        CheckBox {
-                            id: chkMilestones
-                            text: "Milestones (categories, target dates, end dates, team assignment, descriptions)"
-                            checked: true
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-
-                        CheckBox {
-                            id: chkWorkItemCats
-                            text: "Work Item Categories & Deadlines (tag pattern mapping, custom deadline field, reports directory)"
-                            checked: true
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-
-                        CheckBox {
-                            id: chkTeamSprint
-                            text: "Team Assignment & Sprint URL (tfs_team_name, sprint_url_template, default_tfs_team)"
-                            checked: true
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#f0f6fc"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // Options & Action Buttons Row
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        CheckBox {
-                            id: chkClearExisting
-                            text: "Clear existing records on import (Full replace instead of merge)"
-                            checked: false
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 11
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: parent.checked ? "#f85149" : "#8b949e"
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: parent.indicator.width + parent.spacing
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Export Button
-                        Button {
-                            text: "📤 Export Settings..."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34
-                                implicitWidth: 155
-                                radius: 6
-                                color: parent.hovered ? "#1f6feb" : "#238636"
-                                border.color: parent.hovered ? "#58a6ff" : "#2ea043"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    var secs = exportImportCard.getSelectedSections();
-                                    if (secs.length === 0) {
-                                        root.bannerMsg = "Please select at least one settings section to export.";
-                                        root.bannerType = "error";
-                                        return;
-                                    }
-                                    var res = backend.exportAllUserSettings("", JSON.stringify(secs));
-                                    if (res && res.success) {
-                                        root.bannerMsg = res.message || ("Settings exported to: " + res.file_path);
-                                        root.bannerType = "success";
-                                    } else if (res && res.error) {
-                                        root.bannerMsg = "Export failed: " + res.error;
-                                        root.bannerType = "error";
-                                    }
-                                }
-                            }
-                        }
-
-                        // Import Button
-                        Button {
-                            text: "📥 Import Settings..."
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            font.weight: Font.DemiBold
-                            contentItem: Text {
-                                text: parent.text
-                                font: parent.font
-                                color: "#ffffff"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                implicitHeight: 34
-                                implicitWidth: 155
-                                radius: 6
-                                color: parent.hovered ? "#388bfd" : "#1f6feb"
-                                border.color: "#58a6ff"
-                                border.width: 1
-                            }
-                            onClicked: {
-                                if (backend) {
-                                    var secs = exportImportCard.getSelectedSections();
-                                    if (secs.length === 0) {
-                                        root.bannerMsg = "Please select at least one settings section to import.";
-                                        root.bannerType = "error";
-                                        return;
-                                    }
-                                    var res = backend.importAllUserSettings("", chkClearExisting.checked, JSON.stringify(secs));
-                                    if (res && res.success) {
-                                        root.bannerMsg = res.message || "User settings imported successfully.";
-                                        root.bannerType = "success";
-                                    } else if (res && res.error) {
-                                        root.bannerMsg = "Import failed: " + res.error;
-                                        root.bannerType = "error";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // About Application & Version Information Card
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: aboutAppCol.implicitHeight + 36
-                color: "#161b22"
-                radius: 8
-                border.color: "#30363d"
-                border.width: 1
-
-                ColumnLayout {
-                    id: aboutAppCol
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 12
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Text { text: "ℹ️"; font.pixelSize: 20 }
-
-                        ColumnLayout {
-                            spacing: 2
-                            Text {
-                                text: "About DevOps Manager"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
-                                color: "#f0f6fc"
-                            }
-                            Text {
-                                text: "Desktop interface for managing multi-repository Azure DevOps (TFS) pipelines, Work Item WIQL sync, Tag Day releases, and Workload Planning."
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
-
-                    // Version & Git Describe Information Grid
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: 10
-                        columnSpacing: 16
-
-                        // Application Display Version
-                        ColumnLayout {
-                            spacing: 3
-                            Text { text: "Display Version:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                            RowLayout {
-                                spacing: 8
-                                Text {
-                                    text: backend ? backend.appVersion : "v0.01.2637"
-                                    font.family: "Consolas, Segoe UI, monospace"
-                                    font.pixelSize: 13
-                                    font.weight: Font.Bold
-                                    color: "#f0f6fc"
-                                }
-                                Rectangle {
-                                    implicitHeight: 20
-                                    implicitWidth: statusPillText.implicitWidth + 12
-                                    radius: 10
-                                    color: (backend && backend.isExactTagVersion) ? "#23863622" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d2992222" : "#1f6feb22")
-                                    border.color: (backend && backend.isExactTagVersion) ? "#3fb950" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d29922" : "#58a6ff")
-                                    border.width: 1
-                                    Text {
-                                        id: statusPillText
-                                        anchors.centerIn: parent
-                                        text: backend && backend.appVersionInfo ? backend.appVersionInfo.status_label : "Release"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 10
-                                        font.weight: Font.DemiBold
-                                        color: (backend && backend.isExactTagVersion) ? "#3fb950" : (backend && backend.appVersionInfo && backend.appVersionInfo.is_dirty ? "#d29922" : "#58a6ff")
-                                    }
-                                }
-                            }
-                        }
-
-                        // Pip / PyPI Package Version
-                        ColumnLayout {
-                            spacing: 3
-                            Text { text: "Pip / Wheel Version (PEP 440):"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                            Text {
-                                text: backend && backend.appVersionInfo ? backend.appVersionInfo.pep440_version : "0.1.2637"
-                                font.family: "Consolas, monospace"
-                                font.pixelSize: 12
-                                color: "#79c0ff"
-                            }
-                        }
-
-                        // Git Describe Raw
-                        ColumnLayout {
-                            spacing: 3
-                            Text { text: "Git Describe:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                            Text {
-                                text: backend && backend.appVersionInfo ? backend.appVersionInfo.raw_describe : "v0.01.2637-0-gb95f88e"
-                                font.family: "Consolas, monospace"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-
-                        // Metadata Source
-                        ColumnLayout {
-                            spacing: 3
-                            Text { text: "Version Resolution Source:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
-                            Text {
-                                text: backend && backend.appVersionInfo ? (backend.appVersionInfo.source === "git" ? "Live Git Worktree" : (backend.appVersionInfo.source === "scm_cache" ? "Build SCM Cache" : "Installed Package Metadata")) : "Git"
-                                font.family: "Segoe UI, sans-serif"
-                                font.pixelSize: 11
-                                color: "#8b949e"
-                            }
-                        }
-                    }
-                }
-            }
-
-            Item { height: 20 }
         }
     }
 

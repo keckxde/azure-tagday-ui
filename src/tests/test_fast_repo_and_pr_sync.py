@@ -351,7 +351,43 @@ class TestFastRepoAndPRSync(unittest.TestCase):
         # Should preserve all 15 tags, not truncate to 10
         self.assertEqual(len(tags_filtered), 15)
 
+    def test_sync_commits_parallel(self):
+        """
+        Verifies that sync_commits queries all repositories concurrently and writes them to SQLite cache.
+        """
+        repos = [
+            {"id": "repo-1", "name": "RepoOne"},
+            {"id": "repo-2", "name": "RepoTwo"}
+        ]
+        self.handler.get_repositories = MagicMock(return_value=repos)
+        self.handler._should_skip_repo = MagicMock(return_value=False)
+
+        def fake_get_commits(proj, repo_id, limit=200):
+            return [
+                {
+                    "commitId": f"{repo_id}-c1",
+                    "committer": {"name": "Alice Developer", "date": "2026-09-28T10:00:00Z"},
+                    "comment": f"Commit in {repo_id}"
+                }
+            ]
+
+        self.handler.get_commits = MagicMock(side_effect=fake_get_commits)
+
+        progress_calls = []
+        summary = self.handler.sync_commits(
+            self.cache_db,
+            project_id="ProjA",
+            progress_callback=lambda pct, msg: progress_calls.append((pct, msg))
+        )
+
+        self.assertEqual(summary["synced"], 2)
+        self.assertEqual(summary["repos_scanned"], 2)
+        self.assertEqual(summary["errors"], 0)
+        self.assertEqual(self.cache_db.get_commit_count(), 2)
+        self.assertTrue(len(progress_calls) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

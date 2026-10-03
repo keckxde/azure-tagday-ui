@@ -20,12 +20,11 @@ from azure import AzureInfoHandler, AzureDevOpsCache, AzureServerConnectionError
 logger = logging.getLogger(__name__)
 
 def get_reports_dir(default=None) -> str:
-    """Returns the currently configured reports target/baseline directory, defaulting to cwd."""
-    return utils.get_reports_dir(default or os.getcwd())
+    """Returns the currently configured reports target/baseline directory, defaulting to reports folder."""
+    return utils.get_reports_dir(default)
 
-# Determine BASE_FOLDER based on configuration or cwd
-cwd = os.getcwd()
-BASE_FOLDER = utils.get_reports_dir(cwd)
+# Determine BASE_FOLDER based on configuration or reports folder
+BASE_FOLDER = utils.get_reports_dir()
 
 logger.info("Use BASE_FOLDER: %s", BASE_FOLDER)
 
@@ -740,6 +739,27 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
             logger.error(f"Synchronization stopped: lost connection to repository server during pull requests sync: {e}")
             raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
         logger.warning(f"Error reconciling pull request statuses: {e}")
+
+    if _is_cancelled():
+        logger.info("Sync aborted by user before commits sync.")
+        return
+
+    # Synchronize recent Git repository commits for team metrics and activity analytics
+    try:
+        if azHandler and hasattr(azHandler, "sync_commits"):
+            logger.info("Synchronizing recent Git commits for all repositories...")
+            azHandler.sync_commits(
+                cache_db,
+                project_id=AZURE_PROJECT_ID,
+                filter_repos=FILTER_REPOS,
+                progress_callback=progress_callback,
+                cancel_token=cancel_token
+            )
+    except Exception as e:
+        if is_connection_error(e):
+            logger.error(f"Synchronization stopped: lost connection to repository server during commits sync: {e}")
+            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+        logger.warning(f"Error synchronizing Git commits: {e}")
 
     try:
         cache_db.update_project_last_synced(AZURE_PROJECT_ID, AZURE_PROJECT_ID)

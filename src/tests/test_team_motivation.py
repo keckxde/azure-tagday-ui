@@ -1,0 +1,1150 @@
+# -*- coding: UTF-8 -*-
+"""
+Unit tests for Team Motivation, Leaderboard, Badges, and Streaks Engine.
+Tests PRs, Work Items, Commits, Feature Branches, Tags, and CI Builds.
+"""
+
+import os
+import sys
+import unittest
+import tempfile
+import json
+from datetime import datetime, timedelta
+
+# Ensure src directory is in path
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+from azure import AzureDevOpsCache
+import team_motivation
+from team_motivation import (
+    compute_team_motivation_data,
+    generate_motivation_markdown_summary,
+    BADGE_DEFINITIONS
+)
+
+
+class TestTeamMotivation(unittest.TestCase):
+    def setUp(self):
+        self.tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp_db.close()
+        self.cache = AzureDevOpsCache(self.tmp_db.name)
+
+        now = datetime.now()
+        cur_year, cur_week, _ = now.isocalendar()
+        self.cur_sprint = f"week-{str(cur_year)[-2:]}{cur_week:02d}"
+
+        last_dt = now - timedelta(days=7)
+        ly, lw, _ = last_dt.isocalendar()
+        self.last_sprint = f"week-{str(ly)[-2:]}{lw:02d}"
+
+        # Populate sample PRs
+        prs_sample = [
+            {
+                "pullRequestId": 101,
+                "title": "Feature: Add telemetry",
+                "status": "completed",
+                "createdBy": {"displayName": "Alice Smith", "id": "1"},
+                "closedBy": {"displayName": "Alice Smith", "id": "1"},
+                "creationDate": (now - timedelta(days=5)).isoformat(),
+                "closedDate": (now - timedelta(days=4)).isoformat(),
+                "sourceRefName": "refs/heads/feature/telemetry",
+                "reviewers": [
+                    {"displayName": "Bob Jones", "id": "2", "vote": 10}
+                ]
+            },
+            {
+                "pullRequestId": 102,
+                "title": "Fix: Critical crash",
+                "status": "completed",
+                "createdBy": {"displayName": "Alice Smith", "id": "1"},
+                "closedBy": {"displayName": "Alice Smith", "id": "1"},
+                "creationDate": (now - timedelta(days=6)).isoformat(),
+                "closedDate": (now - timedelta(days=5, hours=20)).isoformat(),
+                "sourceRefName": "refs/heads/bugfix/crash",
+                "reviewers": [
+                    {"displayName": "Charlie Brown", "id": "3", "vote": 10}
+                ]
+            },
+            {
+                "pullRequestId": 103,
+                "title": "Refactor: Engine sync",
+                "status": "completed",
+                "createdBy": {"displayName": "Bob Jones", "id": "2"},
+                "closedBy": {"displayName": "Bob Jones", "id": "2"},
+                "creationDate": (now - timedelta(days=4)).isoformat(),
+                "closedDate": (now - timedelta(days=3)).isoformat(),
+                "sourceRefName": "refs/heads/feature/engine-sync",
+                "reviewers": [
+                    {"displayName": "Alice Smith", "id": "1", "vote": 10}
+                ]
+            }
+        ]
+        self.cache.save_pull_requests("repo1", prs_sample)
+
+        # Populate sample Work Items
+        wis_sample = [
+            (201, "Implement auth module", "Task", "Closed", "Alice Smith", (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),
+             {"fields": {"System.Title": "Implement auth module", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Closed", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Alice Smith"}}}),
+            (202, "Fix memory leak in parser", "Bug", "Resolved", "Alice Smith", (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"),
+             {"fields": {"System.Title": "Fix memory leak in parser", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Resolved", "System.WorkItemType": "Bug", "System.AssignedTo": {"displayName": "Alice Smith"}}}),
+            (203, "Design new dashboard", "User Story", "Closed", "Bob Jones", (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),
+             {"fields": {"System.Title": "Design new dashboard", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Closed", "System.WorkItemType": "User Story", "System.AssignedTo": {"displayName": "Bob Jones"}}}),
+        ]
+        for wid, title, wtype, state, assigned, cdate, raw_obj in wis_sample:
+            self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
+
+        # Populate sample Tags & Branches
+        self.cache.save_single_tag("repo1", "v1.0.0", "commit1", commit_date=(now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"), committer="Alice Smith")
+        
+        with self.cache._connection() as conn:
+            conn.execute("""
+                INSERT INTO branches (repo_id, name, commit_id, commit_date, committer_name, comment)
+                VALUES ('repo1', 'feature/new-ui', 'c101', ?, 'Alice Smith', 'Initial UI draft')
+            """, ((now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),))
+
+            # Populate sample Builds
+            conn.execute("""
+                INSERT INTO builds (id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result, start_time, finish_time, requested_by)
+                VALUES (1, 'p1', 'repo1', 10, 'CI Build', '1.0.1', 'completed', 'succeeded', ?, ?, 'Alice Smith')
+            """, ((now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"), (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")))
+
+            conn.execute("""
+                INSERT INTO builds (id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result, start_time, finish_time, requested_by)
+                VALUES (2, 'p1', 'repo1', 10, 'CI Build', '1.0.2', 'completed', 'succeeded', ?, ?, 'Alice Smith')
+            """, ((now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"), (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")))
+
+        # Populate sample Commits
+        commits_sample = [
+            {
+                "commitId": "sha101",
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
+                "comment": "Feature: Implement high-performance buffer",
+                "changeCounts": {"Add": 15, "Edit": 20, "Delete": 2}
+            },
+            {
+                "commitId": "sha102",
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
+                "comment": "Fix: Handle null pointer on empty input",
+                "changeCounts": {"Add": 2, "Edit": 5, "Delete": 0}
+            },
+            {
+                "commitId": "sha103",
+                "author": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
+                "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
+                "comment": "Refactor: Modularize DB connection pool",
+                "changeCounts": {"Add": 40, "Edit": 10, "Delete": 30}
+            }
+        ]
+        self.cache.save_commits("repo1", commits_sample)
+
+    def tearDown(self):
+        if os.path.exists(self.tmp_db.name):
+            try:
+                os.remove(self.tmp_db.name)
+            except Exception:
+                pass
+
+    def test_compute_team_motivation_all_time(self):
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        self.assertIn("team_summary", data)
+        self.assertIn("members", data)
+        self.assertIn("leaderboards", data)
+        self.assertIn("all_badges", data)
+
+        ts = data["team_summary"]
+        self.assertGreaterEqual(ts["prs_created"], 3)
+        self.assertGreaterEqual(ts["prs_closed"], 3)
+        self.assertGreaterEqual(ts["tasks_completed"], 3)
+        self.assertGreaterEqual(ts["commits_count"], 3)
+        self.assertGreaterEqual(ts["branches_started"], 3)
+        self.assertGreaterEqual(ts["branches_closed"], 3)
+        self.assertGreaterEqual(ts["tags_pushed"], 1)
+        self.assertGreaterEqual(ts["builds_total"], 2)
+        self.assertGreaterEqual(ts["builds_succeeded"], 2)
+        self.assertEqual(ts["build_success_rate"], 100.0)
+        self.assertGreaterEqual(ts["active_contributors"], 2)
+
+        # Verify leaderboard entries
+        overall_lb = data["leaderboards"]["overall"]
+        self.assertIsNotNone(overall_lb["leader"])
+        self.assertIn(overall_lb["leader"]["name"], ["Alice Smith", "Bob Jones"])
+
+        commits_lb = data["leaderboards"]["commits"]
+        self.assertIsNotNone(commits_lb["leader"])
+
+        builds_lb = data["leaderboards"]["builds"]
+        self.assertIsNotNone(builds_lb["leader"])
+        self.assertEqual(builds_lb["leader"]["name"], "Alice Smith")
+
+    def test_badges_assignment(self):
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        self.assertIn("Alice Smith", members)
+        alice = members["Alice Smith"]
+        self.assertGreater(alice["score"], 0)
+        self.assertIsInstance(alice["badges"], list)
+
+        # Check Speed Demon badge (fast turnaround under 24h)
+        speed_badge = any(b["id"] == "speed_demon" for b in alice["badges"])
+        self.assertTrue(speed_badge, "Alice should receive the Speed Demon badge for PR closed <24h")
+
+        # Check CI Hero badge
+        ci_badge = any(b["id"] == "ci_hero" for b in alice["badges"])
+        self.assertTrue(ci_badge, "Alice should receive the CI Hero badge for successful builds")
+
+    def test_markdown_summary_generation(self):
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        md = generate_motivation_markdown_summary(data)
+        self.assertIn("Team Sprint Motivation & Hall of Fame", md)
+        self.assertIn("Pull Requests Started / Merged", md)
+        self.assertIn("Code Commits", md)
+        self.assertIn("Feature Branches", md)
+        self.assertIn("CI Pipeline Builds", md)
+        self.assertIn("Leaderboard & Badges", md)
+        self.assertIn("Alice Smith", md)
+
+    def test_time_based_analytics_and_badges(self):
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        ts = data["team_summary"]
+        self.assertIn("time_analytics", ts)
+        ta = ts["time_analytics"]
+        self.assertIn("daytime_pct", ta)
+        self.assertIn("night_pct", ta)
+        self.assertIn("weekend_pct", ta)
+        self.assertIn("hourly_distribution", ta)
+        self.assertEqual(len(ta["hourly_distribution"]), 24)
+        self.assertEqual(len(ta["daily_distribution"]), 7)
+
+        # Leaderboards check
+        self.assertIn("night_owls", data["leaderboards"])
+        self.assertIn("early_birds", data["leaderboards"])
+        self.assertIn("weekend_warriors", data["leaderboards"])
+        self.assertIn("daytime", data["leaderboards"])
+
+        # Check badges list
+        badge_ids = [b["id"] for b in data["all_badges"]]
+        self.assertIn("night_owl", badge_ids)
+        self.assertIn("early_bird", badge_ids)
+        self.assertIn("weekend_warrior", badge_ids)
+        self.assertIn("zen_balancer", badge_ids)
+        self.assertIn("friday_hero", badge_ids)
+
+        # Check member time stats and persona
+        members = {m["name"]: m for m in data["members"]}
+        for name, m in members.items():
+            self.assertIn("time_stats", m)
+            self.assertIn("persona", m["time_stats"])
+            self.assertIn("hourly_distribution", m["time_stats"])
+            self.assertEqual(len(m["time_stats"]["hourly_distribution"]), 24)
+
+    def test_badge_categories_and_individual_badges(self):
+        """Verify that badge_categories and all_badges are returned with enriched categories and individual badges."""
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        self.assertIn("badge_categories", data)
+        self.assertIn("all_badges", data)
+
+        categories = data["badge_categories"]
+        self.assertGreaterEqual(len(categories), 4)
+
+        total_badges_sum = sum(len(c.get("badges", [])) for c in categories)
+        self.assertEqual(total_badges_sum, len(data["all_badges"]))
+
+        for cat in categories:
+            self.assertIn("id", cat)
+            self.assertIn("name", cat)
+            self.assertIn("icon", cat)
+            self.assertIn("badges", cat)
+            self.assertGreater(len(cat["badges"]), 0)
+            for b in cat["badges"]:
+                self.assertIn("id", b)
+                self.assertIn("name", b)
+                self.assertIn("achievers", b)
+                self.assertIn("tiers", b)
+
+    def test_work_item_closed_date_gating_and_attribution(self):
+        """
+        Verify that:
+        1. An old task closed a year ago, but touched/changed last week, is NOT credited as completed last week.
+        2. An old task assigned to an inactive employee, but closed last week by an active employee,
+           credits the active employee (ClosedBy) and NOT the inactive employee.
+        """
+        now = datetime.now()
+        one_year_ago = now - timedelta(days=365)
+        # Ensure last_week timestamp reliably falls in the previous calendar week (7 to 13 days ago)
+        last_week = now - timedelta(days=now.weekday() + 4)
+
+        # 1. Old task closed 1 year ago, but System.ChangedDate updated last week (e.g. tag/bulk edit)
+        self.cache.save_work_item(
+            301, "Old legacy task", "Task", "Closed", "Inactive Colleague",
+            last_week.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Old legacy task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "Inactive Colleague"},
+                    "Microsoft.VSTS.Common.ClosedDate": one_year_ago.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Inactive Colleague"},
+                    "System.ChangedDate": last_week.isoformat(),
+                }
+            }
+        )
+
+        # 2. Old task assigned to Inactive Colleague, but closed last week by Alice Smith
+        self.cache.save_work_item(
+            302, "Cleaned up old bug", "Bug", "Closed", "Inactive Colleague",
+            last_week.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Cleaned up old bug",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Bug",
+                    "System.AssignedTo": {"displayName": "Inactive Colleague"},
+                    "Microsoft.VSTS.Common.ClosedDate": last_week.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Alice Smith"},
+                    "System.ChangedDate": last_week.isoformat(),
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="last_week")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Inactive Colleague should NOT have tasks_completed in last_week
+        if "Inactive Colleague" in members:
+            self.assertEqual(members["Inactive Colleague"]["tasks_completed"], 0,
+                             "Inactive colleague must not be credited for old tasks touched last week")
+
+        # Alice Smith should receive credit for closing task 302
+        self.assertIn("Alice Smith", members)
+        # Alice already had tasks from setUp plus this 1 bug
+        self.assertGreaterEqual(members["Alice Smith"]["tasks_completed"], 1)
+
+    def test_commits_caching_and_sync(self):
+        """
+        Verify that commits saved to SQLite cache are retrieved correctly,
+        and accurately aggregated into member commit metrics and motivation leaderboards.
+        """
+        all_commits = self.cache.get_all_commits()
+        self.assertGreaterEqual(len(all_commits), 3)
+        self.assertEqual(self.cache.get_commit_count(), len(all_commits))
+
+        repo_commits = self.cache.get_commits_for_repo("repo1")
+        self.assertGreaterEqual(len(repo_commits), 3)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        self.assertIn("Alice Smith", members)
+        self.assertGreaterEqual(members["Alice Smith"]["commits_count"], 2)
+
+        self.assertIn("Bob Jones", members)
+        self.assertGreaterEqual(members["Bob Jones"]["commits_count"], 1)
+
+        ts = data["team_summary"]
+        self.assertGreaterEqual(ts["commits_count"], 3)
+
+    def test_state_transition_recording_and_cleaner_decliner_badges(self):
+        """
+        Verify that state transition events (forward cleaning and backward pushbacks)
+        are properly detected and recorded, and award 'The Cleaner' and 'The Decliner' badges.
+        """
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+
+        # 1. Cleaner: Charlie cleans up 4 tasks to Resolved / Closed
+        for i in range(1, 5):
+            self.cache.record_state_event(
+                work_item_id=400 + i,
+                old_state="Active",
+                new_state="Closed",
+                changed_by="Charlie Brown",
+                recorded_at=yesterday.isoformat(),
+                is_pushback=0
+            )
+
+        # 2. Decliner: Diana pushes back 2 tasks from Resolved/Done back to Active/ToDo
+        for i in range(1, 3):
+            self.cache.record_state_event(
+                work_item_id=500 + i,
+                old_state="Resolved",
+                new_state="Active",
+                changed_by="Diana Prince",
+                recorded_at=yesterday.isoformat(),
+                is_pushback=1
+            )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Charlie Brown check
+        self.assertIn("Charlie Brown", members)
+        charlie = members["Charlie Brown"]
+        self.assertGreaterEqual(charlie["tasks_cleaned"], 4)
+        self.assertTrue(charlie["is_cleaner"])
+        has_cleaner_badge = any(b["id"] == "the_cleaner" for b in charlie["badges"])
+        self.assertTrue(has_cleaner_badge, "Charlie should earn the 'The Cleaner' badge")
+
+        # Diana Prince check
+        self.assertIn("Diana Prince", members)
+        diana = members["Diana Prince"]
+        self.assertGreaterEqual(diana["pushbacks_count"], 2)
+        self.assertTrue(diana["is_decliner"])
+        has_decliner_badge = any(b["id"] == "the_decliner" for b in diana["badges"])
+        self.assertTrue(has_decliner_badge, "Diana should earn the 'The Decliner' badge")
+        self.assertEqual(diana["time_stats"]["persona"], "🛡️ The Gatekeeper")
+
+        # Check leaderboards
+        self.assertIn("cleaners", data["leaderboards"])
+        self.assertIn("decliners", data["leaderboards"])
+        self.assertIn("state_movers", data["leaderboards"])
+        self.assertEqual(data["leaderboards"]["cleaners"]["leader"]["name"], "Charlie Brown")
+        self.assertEqual(data["leaderboards"]["decliners"]["leader"]["name"], "Diana Prince")
+
+    def test_stale_task_radar_and_ignorer_detection(self):
+        """
+        Verify that open work items with >=14 days of inactivity are captured in the Stale Radar,
+        and contributors with multiple stale tasks and zero transitions receive the 'Backlog Stasher' persona.
+        """
+        now = datetime.now()
+        twenty_days_ago = now - timedelta(days=20)
+
+        # Create 3 stale tasks assigned to "Edward Stasher"
+        for i in range(1, 4):
+            self.cache.save_work_item(
+                600 + i, f"Unattended task {i}", "Task", "Active", "Edward Stasher",
+                twenty_days_ago.strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": f"Unattended task {i}",
+                        "System.State": "Active",
+                        "System.WorkItemType": "Task",
+                        "System.AssignedTo": {"displayName": "Edward Stasher"},
+                        "System.ChangedDate": twenty_days_ago.isoformat(),
+                    }
+                }
+            )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        stale_radar = data.get("stale_radar", [])
+
+        # Verify Stale Radar contains Edward's items
+        stale_ids = [item["id"] for item in stale_radar]
+        self.assertIn(601, stale_ids)
+        self.assertIn(602, stale_ids)
+        self.assertIn(603, stale_ids)
+
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Edward Stasher", members)
+        edward = members["Edward Stasher"]
+        self.assertGreaterEqual(edward["stale_tasks_count"], 3)
+        self.assertTrue(edward["is_ignorer"])
+        self.assertEqual(edward["time_stats"]["persona"], "💤 Backlog Stasher")
+
+    def test_current_week_activity_aggregation(self):
+        """
+        Verify that commits, PRs, work items, and branch updates performed during the current week
+        are properly aggregated and score positive points under timeframe='current_week'.
+        """
+        now = datetime.now()
+
+        # Save a fresh commit today in the current sprint
+        self.cache.save_commits("repo1", [{
+            "commitId": "today_sha_1",
+            "author": {"name": "Alice Smith", "email": "alice@company.com", "date": now.isoformat()},
+            "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": now.isoformat()},
+            "comment": "Current sprint progress",
+            "changeCounts": {"Add": 5, "Edit": 10, "Delete": 1}
+        }])
+
+        # Save an active task updated today
+        self.cache.save_work_item(
+            701, "Current sprint active task", "Task", "Closed", "Alice Smith",
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Current sprint active task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "Alice Smith"},
+                    "Microsoft.VSTS.Common.ClosedDate": now.isoformat(),
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Alice Smith"},
+                    "System.ChangedDate": now.isoformat(),
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="current_week")
+        self.assertIn("team_summary", data)
+        self.assertIn("members", data)
+
+        ts = data["team_summary"]
+        self.assertGreaterEqual(ts["commits_count"], 1)
+        self.assertGreaterEqual(ts["tasks_completed"], 1)
+        self.assertGreaterEqual(ts["active_contributors"], 1)
+
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Alice Smith", members)
+        self.assertGreaterEqual(members["Alice Smith"]["commits_count"], 1)
+        self.assertGreaterEqual(members["Alice Smith"]["tasks_completed"], 1)
+        self.assertGreater(members["Alice Smith"]["score"], 0)
+
+    def test_pr_closer_and_reviewer_tracking(self):
+        """Tests that PR closers, approvers, and reviewers are all accurately credited."""
+        now = datetime.now()
+        # Create completed PR merged by Bob, created by Alice, approved by Charlie
+        pr_data = [
+            {
+                "pullRequestId": 801,
+                "title": "PR: Engine Optimizations",
+                "status": "completed",
+                "createdBy": {"displayName": "Alice Smith"},
+                "closedBy": {"displayName": "Bob Jones"},
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "reviewers": [
+                    {"displayName": "Charlie Brown", "vote": 10},
+                    {"displayName": "Diana Prince", "vote": 5},
+                ]
+            },
+            {
+                "pullRequestId": 802,
+                "title": "PR: Auto-completed bugfix",
+                "status": "3",  # enum for completed
+                "createdBy": {"displayName": "Bob Jones"},
+                "closedBy": "",  # empty closedBy fallback to approver
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "reviewers": [
+                    {"displayName": "Diana Prince", "vote": 10},
+                ]
+            }
+        ]
+        self.cache.save_pull_requests("repo1", pr_data)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+        
+        # Bob Jones closed PR 801
+        self.assertGreaterEqual(members["Bob Jones"]["prs_closed"], 1)
+        # Diana Prince approved PR 801 and 802
+        self.assertGreaterEqual(members["Diana Prince"]["prs_approved"], 2)
+        self.assertGreaterEqual(members["Diana Prince"]["prs_reviewed"], 2)
+        # Charlie Brown approved PR 801
+        self.assertGreaterEqual(members["Charlie Brown"]["prs_approved"], 1)
+        self.assertGreaterEqual(members["Charlie Brown"]["prs_reviewed"], 1)
+
+        # Leaderboards check
+        lb = data["leaderboards"]
+        self.assertIn("prs_closed", lb)
+        self.assertIn("prs_approved", lb)
+        self.assertIn("prs_reviewed", lb)
+        self.assertGreater(lb["prs_closed"]["total_contributors"], 0)
+        self.assertGreater(lb["prs_approved"]["total_contributors"], 0)
+
+    def test_oldest_task_fastest_closer_evidences_and_syntax_bonus(self):
+        now = datetime.now()
+        work_items = [
+            # 1. Oldest open task (assigned to Old Timer, created 120 days ago)
+            (
+                9001,
+                "[Task_9001] Legacy Migration Architecture",
+                "Task",
+                "Active",
+                "Old Timer",
+                (now - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Task_9001] Legacy Migration Architecture",
+                        "System.State": "Active",
+                        "System.WorkItemType": "Task",
+                        "System.AssignedTo": {"displayName": "Old Timer"},
+                        "System.CreatedDate": (now - timedelta(days=120)).isoformat(),
+                        "System.ChangedDate": (now - timedelta(days=5)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/abc12345"},
+                        {"rel": "Hyperlink", "url": "https://wiki.internal/docs"},
+                    ]
+                }
+            ),
+            # 2. Fast closer with syntax convention [Bug_9002] (created 2h before closed, closed by Speedy Sam)
+            (
+                9002,
+                "[Bug_9002] Fix memory leak in auth module",
+                "Bug",
+                "Closed",
+                "Speedy Sam",
+                (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Bug_9002] Fix memory leak in auth module",
+                        "System.State": "Closed",
+                        "System.WorkItemType": "Bug",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(hours=3)).isoformat(),
+                        "Microsoft.VSTS.Common.ActivatedDate": (now - timedelta(hours=2)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=1)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/777"},
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/def67890"},
+                        {"rel": "Hyperlink", "url": "https://issue.tracker/9002"},
+                    ]
+                }
+            ),
+            # 3. Second fast close for Speedy Sam with structured syntax [Feature_9003]
+            (
+                9003,
+                "[Feature_9003] Add dark mode theme switch",
+                "Feature",
+                "Done",
+                "Speedy Sam",
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[Feature_9003] Add dark mode theme switch",
+                        "System.State": "Done",
+                        "System.WorkItemType": "Feature",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(hours=5)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/feedface"},
+                    ]
+                }
+            ),
+            # 4. Third structured syntax close for Speedy Sam [UserStory_9004]
+            (
+                9004,
+                "[UserStory_9004] Real-time activity pulse",
+                "User Story",
+                "Resolved",
+                "Speedy Sam",
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                {
+                    "fields": {
+                        "System.Title": "[UserStory_9004] Real-time activity pulse",
+                        "System.State": "Resolved",
+                        "System.WorkItemType": "User Story",
+                        "System.AssignedTo": {"displayName": "Speedy Sam"},
+                        "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Speedy Sam"},
+                        "System.CreatedDate": (now - timedelta(days=1)).isoformat(),
+                        "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    },
+                    "relations": [
+                        {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/12345678"},
+                    ]
+                }
+            )
+        ]
+        for wid, title, wtype, state, assigned, cdate, raw_obj in work_items:
+            self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["members"]}
+
+        # Check Old Timer metrics (oldest open task >= 120 days, relic_keeper badge)
+        old_timer = members.get("Old Timer")
+        self.assertIsNotNone(old_timer)
+        self.assertGreaterEqual(old_timer["oldest_open_task_days"], 119)
+        self.assertIsNotNone(old_timer["oldest_open_task"])
+        self.assertEqual(old_timer["oldest_open_task"]["id"], 9001)
+        self.assertTrue(any(b["id"] == "relic_keeper" for b in old_timer["badges"]))
+
+        # Check Speedy Sam metrics (fastest closer, syntax master, evidences)
+        speedy = members.get("Speedy Sam")
+        self.assertIsNotNone(speedy)
+        self.assertGreaterEqual(speedy["tasks_fast_closed"], 2)
+        self.assertGreaterEqual(speedy["structured_syntax_completed"], 3)
+        self.assertGreaterEqual(speedy["task_evidences_count"], 5)
+        self.assertGreater(speedy["avg_task_turnaround_hours"], 0)
+        self.assertLessEqual(speedy["fastest_task_hours"], 2.0)
+
+        # Check badges awarded
+        self.assertTrue(any(b["id"] == "speedy_task_closer" for b in speedy["badges"]))
+        self.assertTrue(any(b["id"] == "syntax_master" for b in speedy["badges"]))
+        self.assertTrue(any(b["id"] == "evidence_master" for b in speedy["badges"]))
+
+        # Check leaderboards exist and are populated
+        lb = data["leaderboards"]
+        self.assertIn("oldest_task", lb)
+        self.assertIn("fast_closer", lb)
+        self.assertIn("evidences", lb)
+        self.assertIn("syntax_master", lb)
+        self.assertEqual(lb["oldest_task"]["leader"]["name"], "Old Timer")
+        self.assertEqual(lb["fast_closer"]["leader"]["name"], "Speedy Sam")
+
+    def test_timeframe_filtered_scores_and_inactive_contributors(self):
+        """
+        Verify that when a specific timeframe filter (e.g., last_week or specific sprint)
+        is applied, only contributions and achievements within that window are counted.
+        Inactive contributors in that timeframe receive a score of 0 and no badges.
+        """
+        now = datetime.now()
+        
+        # Add a contributor who only did work 60 days ago
+        old_wis = [
+            (301, "Old completed project", "Task", "Closed", "Historic Contributor", (now - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S"),
+             {"fields": {"System.Title": "Old completed project", "System.State": "Closed", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Historic Contributor"}}}),
+        ]
+        for wid, title, wtype, state, assigned, cdate, raw_obj in old_wis:
+            self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
+        
+        # In all_time, Historic Contributor has score and badges
+        all_data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        all_members = {m["name"]: m for m in all_data["members"]}
+        historic = all_members.get("Historic Contributor")
+        self.assertIsNotNone(historic)
+        self.assertGreater(historic["score"], 0)
+
+        # Now compute data for last_week (last 7 days) where Historic Contributor did nothing
+        data_last_week = compute_team_motivation_data(self.cache, timeframe="last_week")
+        members_last_week = {m["name"]: m for m in data_last_week["members"]}
+        
+        # Historic Contributor had 0 events in the last 7 days, so score must be 0 and badges empty
+        historic_last_week = members_last_week.get("Historic Contributor")
+        if historic_last_week:
+            self.assertEqual(historic_last_week["score"], 0)
+            self.assertEqual(len(historic_last_week["badges"]), 0)
+
+        # Alice had PRs and work items in the last 7 days, so Alice should have a positive score
+        alice = members_last_week.get("Alice Smith")
+        self.assertIsNotNone(alice)
+        self.assertGreater(alice["score"], 0)
+
+    def test_user_alias_normalization_and_resolution(self):
+        """Verify alias normalization and canonical user resolution with case-insensitivity."""
+        from team_motivation import normalize_user_aliases, resolve_canonical_user
+
+        # 1. Dict format
+        config_dict = {
+            "Alice Smith": ["asmith", "alice.smith@corp.com", "asmith_git"],
+            "Bob Jones": ["bjones", "bob@example.com"]
+        }
+        lookup = normalize_user_aliases(config_dict)
+        self.assertEqual(resolve_canonical_user("asmith", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user("ASMITH", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user("alice.smith@corp.com", lookup), "Alice Smith")
+        self.assertEqual(resolve_canonical_user({"displayName": "bjones"}, lookup), "Bob Jones")
+        self.assertEqual(resolve_canonical_user("Unknown User", lookup), "Unknown User")
+        self.assertEqual(resolve_canonical_user("", lookup), "Unassigned")
+
+        # 2. List format [{"canonical": ..., "aliases": [...]}]
+        config_list = [
+            {"canonical": "Charlie Brown", "aliases": ["cbrown", "charlie@peanuts.org"]}
+        ]
+        lookup_list = normalize_user_aliases(config_list)
+        self.assertEqual(resolve_canonical_user("cbrown", lookup_list), "Charlie Brown")
+        self.assertEqual(resolve_canonical_user("CHARLIE@PEANUTS.ORG", lookup_list), "Charlie Brown")
+
+    def test_user_alias_profile_combination_and_metrics(self):
+        """
+        Verify that commits, PRs, and work items created under various aliases
+        are combined into a single canonical user profile, avoiding duplicate user cards.
+        """
+        now = datetime.now()
+
+        # Add commit by git username 'asmith'
+        self.cache.save_commits("repo1", [{
+            "commitId": "alias_commit_1",
+            "author": {"name": "asmith", "email": "asmith@dev.local", "date": (now - timedelta(hours=3)).isoformat()},
+            "committer": {"name": "asmith", "email": "asmith@dev.local", "date": (now - timedelta(hours=3)).isoformat()},
+            "comment": "Optimized database caching logic",
+            "changeCounts": {"Add": 10, "Edit": 5, "Delete": 0}
+        }])
+
+        # Add work item assigned to email alias 'alice.smith@corp.com'
+        self.cache.save_work_item(
+            9901, "Unified profile task", "Task", "Closed", "alice.smith@corp.com",
+            (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Unified profile task",
+                    "System.State": "Closed",
+                    "System.WorkItemType": "Task",
+                    "System.AssignedTo": {"displayName": "alice.smith@corp.com"},
+                    "Microsoft.VSTS.Common.ClosedBy": {"displayName": "alice.smith@corp.com"},
+                    "Microsoft.VSTS.Common.ClosedDate": (now - timedelta(hours=2)).isoformat(),
+                    "System.ChangedDate": (now - timedelta(hours=2)).isoformat(),
+                }
+            }
+        )
+
+        aliases_cfg = {
+            "Alice Smith": ["asmith", "alice.smith@corp.com", "asmith@dev.local"]
+        }
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time", user_aliases=aliases_cfg)
+        member_names = [m["name"] for m in data["members"]]
+        members_map = {m["name"]: m for m in data["members"]}
+
+        # 'asmith' and 'alice.smith@corp.com' must NOT be separate members
+        self.assertNotIn("asmith", member_names)
+        self.assertNotIn("alice.smith@corp.com", member_names)
+        self.assertIn("Alice Smith", member_names)
+
+        alice = members_map["Alice Smith"]
+        # Alice should have aliases recorded
+        self.assertIn("aliases", alice)
+        self.assertIn("asmith", alice["aliases"])
+
+        # Check metrics combined: from setUp (2 commits) + alias_commit_1 (1 commit) = >= 3 commits
+        self.assertGreaterEqual(alice["commits_count"], 3)
+        # Check task 9901 combined into Alice
+        self.assertGreaterEqual(alice["tasks_completed"], 3)
+
+    def test_last_activity_tracking_and_timeline(self):
+        """Verify that the last activity timestamp and recent activity timeline are accurately tracked."""
+        now = datetime.now()
+
+        # Add a very recent commit for Bob Jones
+        self.cache.save_commits("repo1", [{
+            "commitId": "recent_bob_sha",
+            "author": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(minutes=15)).isoformat()},
+            "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(minutes=15)).isoformat()},
+            "comment": "Hotfix: resolve auth deadlock",
+            "changeCounts": {"Add": 2, "Edit": 4, "Delete": 1}
+        }])
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members_map = {m["name"]: m for m in data["members"]}
+
+        bob = members_map.get("Bob Jones")
+        self.assertIsNotNone(bob)
+        self.assertIsNotNone(bob["last_activity"])
+        self.assertEqual(bob["last_activity"]["type"], "commit")
+        self.assertIn("Hotfix: resolve auth deadlock", bob["last_activity"]["title"])
+        self.assertIsNotNone(bob["last_active_date"])
+        self.assertGreater(len(bob["recent_activities"]), 0)
+
+        # Check relative time formatting
+        self.assertIn("last_active_relative", bob)
+        self.assertTrue(any(unit in bob["last_active_relative"] for unit in ["min", "m ago", "just now", "hour", "h ago"]))
+
+    def test_auto_detect_aliases(self):
+        """Verify that potential user aliases are detected from commits and PRs."""
+        from team_motivation import detect_potential_user_aliases
+
+        now = datetime.now()
+        # Add a commit with git username 'asmith'
+        self.cache.save_commits("repo1", [{
+            "commitId": "autodetect_commit_1",
+            "author": {"name": "asmith", "email": "asmith@dev.local", "date": now.isoformat()},
+            "committer": {"name": "asmith", "email": "asmith@dev.local", "date": now.isoformat()},
+            "comment": "Detect me",
+            "changeCounts": {"Add": 1, "Edit": 1, "Delete": 0}
+        }])
+
+        suggestions = detect_potential_user_aliases(self.cache, existing_aliases={})
+        self.assertIsInstance(suggestions, list)
+
+        # Should suggest linking 'asmith' to 'Alice Smith'
+        found = any(s["canonical"] == "Alice Smith" and s["alias"] == "asmith" for s in suggestions)
+        self.assertTrue(found, f"Should suggest linking asmith to Alice Smith, got: {suggestions}")
+
+    def test_zero_activity_exclusion_from_podium_and_points(self):
+        """Verify that members with zero activity in a timeframe get 0 points, no badges, and are not placed on the podium."""
+        now = datetime.now()
+        # Add a work item assigned to Inactive User that was created 100 days ago and is still active (no activity in sprint)
+        self.cache.save_work_item(
+            999, "Ancient Backlog Item", "Task", "Active", "Inactive User",
+            (now - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S"),
+            {"fields": {"System.Title": "Ancient Backlog Item", "System.State": "Active", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Inactive User"}}}
+        )
+
+        # Compute for current sprint (where Inactive User has 0 commits, 0 PRs, 0 completed tasks, 0 activity)
+        data = compute_team_motivation_data(self.cache, timeframe="this_sprint")
+        members_map = {m["name"]: m for m in data["members"]}
+
+        inactive_member = members_map.get("Inactive User")
+        self.assertIsNotNone(inactive_member)
+        self.assertEqual(inactive_member["score"], 0)
+        self.assertFalse(inactive_member.get("has_activity", True))
+        self.assertEqual(len(inactive_member["badges"]), 0)
+        self.assertIsNone(inactive_member["rank"])
+
+        # Podium should NOT include Inactive User
+        podium_members = [p["member"]["name"] for p in data.get("podium", [])]
+        self.assertNotIn("Inactive User", podium_members)
+
+        # All podium members must have score > 0
+        for p in data.get("podium", []):
+            self.assertGreater(p["member"]["score"], 0)
+            self.assertTrue(p["member"].get("has_activity"))
+
+    def test_default_score_config_and_presets(self):
+        """Verify that DEFAULT_SCORE_CONFIG and SCORE_PRESETS have all required activity keys and positive multipliers."""
+        from team_motivation import DEFAULT_SCORE_CONFIG, SCORE_PRESETS, get_default_score_config, get_score_presets
+
+        default_cfg = get_default_score_config()
+        self.assertIsInstance(default_cfg, dict)
+        required_keys = [
+            "prs_closed", "prs_created", "prs_approved", "prs_reviewed",
+            "commits_count", "branches_closed", "tags_pushed",
+            "tasks_completed", "tasks_created", "bugs_resolved",
+            "stories_completed", "tasks_cleaned", "pushbacks_count",
+            "tasks_fast_closed", "task_evidences_count", "structured_syntax_completed",
+            "builds_succeeded", "badge_bonus", "streak_week_bonus",
+            "delay_week_penalty", "build_failed_penalty", "stale_task_penalty"
+        ]
+        for rk in required_keys:
+            self.assertIn(rk, default_cfg)
+            self.assertGreater(default_cfg[rk], 0)
+
+        presets = get_score_presets()
+        self.assertIn("balanced", presets)
+        self.assertIn("code_pr_focused", presets)
+        self.assertIn("agile_quality_focused", presets)
+        self.assertIn("high_velocity", presets)
+
+        for p_key, p_val in presets.items():
+            self.assertIn("id", p_val)
+            self.assertIn("name", p_val)
+            self.assertIn("config", p_val)
+            for rk in required_keys:
+                self.assertIn(rk, p_val["config"])
+
+    def test_custom_score_config_calculation(self):
+        """Verify that passing a custom score_config correctly alters computed scores."""
+        # Standard score with default config
+        data_default = compute_team_motivation_data(self.cache, timeframe="last_week")
+        alice_default = next((m for m in data_default["members"] if m["name"] == "Alice Smith"), None)
+        self.assertIsNotNone(alice_default)
+        score_default = alice_default["score"]
+        self.assertGreater(score_default, 0)
+
+        # Custom score with huge PR weight (e.g. 100 pts per PR closed instead of 15)
+        custom_cfg = {
+            "prs_closed": 100,
+            "prs_created": 50,
+            "commits_count": 10,
+        }
+        data_custom = compute_team_motivation_data(self.cache, timeframe="last_week", score_config=custom_cfg)
+        alice_custom = next((m for m in data_custom["members"] if m["name"] == "Alice Smith"), None)
+        self.assertIsNotNone(alice_custom)
+        score_custom = alice_custom["score"]
+
+        # Since Alice closed PRs, her score should be significantly higher with custom_cfg
+        self.assertGreater(score_custom, score_default)
+        self.assertEqual(data_custom["score_config"]["prs_closed"], 100)
+        self.assertEqual(data_custom["score_config"]["prs_created"], 50)
+
+    def test_normalize_system_users(self):
+        """Verify normalization of system users handles defaults, strings, dicts, and casing."""
+        from team_motivation import normalize_system_users, DEFAULT_SYSTEM_USERS
+
+        # Default system users
+        sys_set, sys_list = normalize_system_users([])
+        for d in DEFAULT_SYSTEM_USERS:
+            self.assertIn(d.lower(), sys_set)
+
+        # Custom user list with string & dict
+        custom = ["CustomBot", {"name": "TFS_Service_User", "note": "Internal CI"}]
+        sys_set2, sys_list2 = normalize_system_users(custom)
+        self.assertIn("custombot", sys_set2)
+        self.assertIn("tfs_service_user", sys_set2)
+        self.assertIn("github-actions[bot]", sys_set2)
+
+        # Check sys_list items have metadata
+        bot_entry = next((item for item in sys_list2 if item["name"].lower() == "tfs_service_user"), None)
+        self.assertIsNotNone(bot_entry)
+        self.assertFalse(bot_entry["is_builtin"])
+        self.assertEqual(bot_entry["note"], "Internal CI")
+        self.assertEqual(bot_entry["name"], "TFS_Service_User")
+
+    def test_system_user_exclusion_from_hall_of_fame(self):
+        """Verify that configured system users are completely excluded from Hall of Fame rankings and scores."""
+        now = datetime.now()
+        # Add a bot user with lots of PRs and work items
+        bot_prs = [
+            {
+                "pullRequestId": 999,
+                "title": "Automated dependency update",
+                "status": "completed",
+                "createdBy": {"displayName": "AutoBot Service", "id": "99"},
+                "closedBy": {"displayName": "AutoBot Service", "id": "99"},
+                "creationDate": (now - timedelta(days=2)).isoformat(),
+                "closedDate": (now - timedelta(days=1)).isoformat(),
+                "sourceRefName": "refs/heads/autobot/deps",
+                "reviewers": []
+            }
+        ]
+        self.cache.save_pull_requests("repo1", bot_prs)
+
+        # 1. Without configuring AutoBot as system user, it might appear
+        data_without = compute_team_motivation_data(self.cache, timeframe="last_week", system_users=[])
+        member_names_without = [m["name"] for m in data_without["members"]]
+        self.assertIn("AutoBot Service", member_names_without)
+
+        # 2. When configuring AutoBot as a system user, it MUST be excluded
+        data_with = compute_team_motivation_data(self.cache, timeframe="last_week", system_users=["AutoBot Service"])
+        member_names_with = [m["name"] for m in data_with["members"]]
+        self.assertNotIn("AutoBot Service", member_names_with)
+
+        # Check payload metadata
+        self.assertIn("system_users", data_with)
+        self.assertGreaterEqual(data_with.get("system_users_count", 0), 1)
+
+    def test_work_item_creation_and_state_change_in_recent_activities(self):
+        """Verify that work item creation, state changes, and updates are tracked in recent activities timeline."""
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+        two_hours_ago = now - timedelta(hours=2)
+
+        # 1. Save work item created yesterday and updated 2 hours ago
+        self.cache.save_work_item(
+            888, "Implement real-time activity stream", "User Story", "Active", "Fiona Developer",
+            two_hours_ago.strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Implement real-time activity stream",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.CreatedBy": {"displayName": "Fiona Developer"},
+                    "System.CreatedDate": yesterday.isoformat(),
+                    "System.ChangedBy": {"displayName": "Fiona Developer"},
+                    "System.ChangedDate": two_hours_ago.isoformat(),
+                    "System.AssignedTo": {"displayName": "Fiona Developer"}
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="current_week")
+        members = {m["name"]: m for m in data["members"]}
+        self.assertIn("Fiona Developer", members)
+        fiona = members["Fiona Developer"]
+
+        # Fiona should have recent activities
+        self.assertGreaterEqual(len(fiona["recent_activities"]), 1)
+        act_types = [a["type"] for a in fiona["recent_activities"]]
+        self.assertTrue("task_create" in act_types or "state_change" in act_types)
+
+        # Activity should contain task id and title
+        titles = [a["title"] for a in fiona["recent_activities"]]
+        has_expected_title = any("888" in t for t in titles)
+        self.assertTrue(has_expected_title)
+
+    def test_assigned_bugs_and_user_stories_with_subtasks_and_sprint_sorting(self):
+        """
+        Verify that assigned open bugs and user stories are properly categorized,
+        include child subtasks, display the sprint name, and are sorted by sprint number ascending.
+        """
+        # Save User Stories in different sprints (unsorted insertion)
+        # Story 1 in week-2635
+        self.cache.save_work_item(
+            701, "Story in sprint 35", "User Story", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Story in sprint 35",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2635"
+                }
+            }
+        )
+
+        # Story 2 in week-2630 (earlier sprint)
+        self.cache.save_work_item(
+            702, "Story in sprint 30", "User Story", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Story in sprint 30",
+                    "System.WorkItemType": "User Story",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2630"
+                }
+            }
+        )
+
+        # Child Subtask under Story 702
+        self.cache.save_work_item(
+            703, "Subtask of Story 702", "Task", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Subtask of Story 702",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.Parent": 702,
+                    "System.IterationPath": "Project\\TeamA\\week-2630"
+                }
+            }
+        )
+
+        # Bug 1 in week-2633
+        self.cache.save_work_item(
+            704, "Bug in sprint 33", "Bug", "Active", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Bug in sprint 33",
+                    "System.WorkItemType": "Bug",
+                    "System.State": "Active",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.IterationPath": "Project\\TeamA\\week-2633"
+                }
+            }
+        )
+
+        # Child Subtask under Bug 704
+        self.cache.save_work_item(
+            705, "Investigate bug crash log", "Task", "In Progress", "Gina Developer",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            {
+                "fields": {
+                    "System.Title": "Investigate bug crash log",
+                    "System.WorkItemType": "Task",
+                    "System.State": "In Progress",
+                    "System.AssignedTo": {"displayName": "Gina Developer"},
+                    "System.Parent": 704,
+                    "System.IterationPath": "Project\\TeamA\\week-2633"
+                }
+            }
+        )
+
+        data = compute_team_motivation_data(self.cache, timeframe="all_time")
+        members = {m["name"]: m for m in data["all_user_profiles"]}
+        self.assertIn("Gina Developer", members)
+        gina = members["Gina Developer"]
+
+        # Check assigned bugs
+        self.assertEqual(len(gina["assigned_bugs"]), 1)
+        bug = gina["assigned_bugs"][0]
+        self.assertEqual(bug["id"], 704)
+        self.assertEqual(bug["sprint"], "week-2633")
+        self.assertEqual(len(bug["subtasks"]), 1)
+        self.assertEqual(bug["subtasks"][0]["id"], 705)
+        self.assertEqual(bug["subtasks"][0]["title"], "Investigate bug crash log")
+
+        # Check assigned user stories & sprint ordering
+        self.assertEqual(len(gina["assigned_user_stories"]), 2)
+        # 702 (week-2630) must be first before 701 (week-2635)
+        self.assertEqual(gina["assigned_user_stories"][0]["id"], 702)
+        self.assertEqual(gina["assigned_user_stories"][0]["sprint"], "week-2630")
+        self.assertEqual(len(gina["assigned_user_stories"][0]["subtasks"]), 1)
+        self.assertEqual(gina["assigned_user_stories"][0]["subtasks"][0]["id"], 703)
+
+        self.assertEqual(gina["assigned_user_stories"][1]["id"], 701)
+        self.assertEqual(gina["assigned_user_stories"][1]["sprint"], "week-2635")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+

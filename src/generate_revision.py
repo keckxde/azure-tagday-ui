@@ -222,9 +222,10 @@ def generate_revision_md(db_path, revision_md_path=None):
         for trow in tags_rows:
             tag_date = safe_iso_parse(trow["commit_date"])
             if not tag_date:
-                if trow.get("raw_json"):
+                raw_json_str = trow["raw_json"] if "raw_json" in trow.keys() else None
+                if raw_json_str:
                     try:
-                        meta = json.loads(trow["raw_json"])
+                        meta = json.loads(raw_json_str)
                         c_date = (meta.get("addinfo") or {}).get("taggedBy", {}).get("date") or meta.get("CommitDate")
                         if c_date:
                             tag_date = safe_iso_parse(c_date)
@@ -447,122 +448,6 @@ def generate_revision_md(db_path, revision_md_path=None):
 
     logger.info(f"Successfully generated and updated {revision_md_path} from TFS database cache!")
     conn.close()
-
-    # Export to DOCX
-    docx_path = os.path.splitext(revision_md_path)[0] + ".docx"
-    try:
-        export_to_docx(revision_md_path, docx_path)
-        logger.info(f"Successfully exported {docx_path}!")
-    except Exception as e:
-        logger.error(f"Error exporting Word document: {e}")
-
     return True
 
-def export_to_docx(md_path, docx_path):
-    from docx import Document
-    from docx.shared import Inches, Pt
-    
-    doc = Document()
-    
-    # Set standard page margins (1 inch)
-    for section in doc.sections:
-        section.top_margin = Inches(1)
-        section.bottom_margin = Inches(1)
-        section.left_margin = Inches(1)
-        section.right_margin = Inches(1)
-
-    with open(md_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-        
-    in_table = False
-    table_headers = []
-    table_rows = []
-    
-    def flush_table():
-        nonlocal in_table, table_headers, table_rows
-        if not in_table:
-            return
-        if not table_headers:
-            in_table = False
-            table_rows = []
-            return
-            
-        num_cols = len(table_headers)
-        num_rows = len(table_rows) + 1
-        table = doc.add_table(rows=num_rows, cols=num_cols)
-        # Apply standard clean styling
-        table.style = "Light Shading Accent 1"
-        
-        # Populate headers
-        hdr_cells = table.rows[0].cells
-        for idx, header in enumerate(table_headers):
-            hdr_cells[idx].text = header
-            for paragraph in hdr_cells[idx].paragraphs:
-                for run in paragraph.runs:
-                    run.font.bold = True
-                    
-        # Populate data rows
-        for r_idx, row_data in enumerate(table_rows):
-            row_cells = table.rows[r_idx + 1].cells
-            for c_idx, val in enumerate(row_data):
-                if c_idx < len(row_cells):
-                    row_cells[c_idx].text = val
-                    
-        doc.add_paragraph()
-        in_table = False
-        table_headers = []
-        table_rows = []
-
-    idx = 0
-    while idx < len(lines):
-        line = lines[idx]
-        stripped = line.strip()
-        
-        if stripped.startswith("|"):
-            if "---" in stripped:
-                idx += 1
-                continue
-            cols = [c.strip() for c in stripped.split("|")[1:-1]]
-            if not in_table:
-                in_table = True
-                table_headers = cols
-            else:
-                table_rows.append(cols)
-            idx += 1
-            continue
-        else:
-            if in_table:
-                flush_table()
-                
-        if not stripped:
-            idx += 1
-            continue
-            
-        if stripped.startswith("# "):
-            doc.add_heading(stripped[2:], level=1)
-        elif stripped.startswith("## "):
-            doc.add_heading(stripped[3:], level=2)
-        elif stripped.startswith("### "):
-            doc.add_heading(stripped[4:], level=3)
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            doc.add_paragraph(stripped[2:], style="List Bullet")
-        else:
-            p = doc.add_paragraph()
-            parts = re.split(r"(\*\*.*?\*\*)", stripped)
-            for part in parts:
-                if part.startswith("**") and part.endswith("**"):
-                    run = p.add_run(part[2:-2])
-                    run.font.bold = True
-                else:
-                    p.add_run(part)
-        idx += 1
-        
-    if in_table:
-        flush_table()
-
-    target_dir = os.path.dirname(os.path.abspath(docx_path))
-    if target_dir:
-        os.makedirs(target_dir, exist_ok=True)
-
-    doc.save(docx_path)
 

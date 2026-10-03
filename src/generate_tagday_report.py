@@ -23,6 +23,7 @@ if py_dir not in sys.path:
     sys.path.insert(0, py_dir)
 
 import devops_helper
+import utils
 try:
     from devops_helper import patch_pr_title_for_release_notes
 except ImportError:
