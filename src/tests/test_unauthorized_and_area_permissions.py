@@ -90,6 +90,33 @@ class TestAzureUnauthorizedAndAreaPermissions(unittest.TestCase):
         # Unrelated path
         self.assertFalse(is_work_item_in_area_path("MyProject\\TeamBeta", manual_rules))
 
+    def test_delete_and_clear_area_path_rules(self):
+        from PySide6.QtCore import QCoreApplication
+        if not QCoreApplication.instance():
+            _app = QCoreApplication([])
+        from gui.backend import DevOpsBackend
+
+        backend = DevOpsBackend()
+        backend._area_path_rules = [
+            {"path": "MyProject\\Alpha", "include_children": True},
+            {"path": "MyProject\\Beta", "include_children": False},
+            {"path": "MyProject\\Gamma", "include_children": True}
+        ]
+
+        # Delete single rule
+        ok = backend.delete_area_path_rule("MyProject\\Beta")
+        self.assertTrue(ok)
+        self.assertEqual(len(backend._area_path_rules), 2)
+        paths = [r["path"] for r in backend._area_path_rules]
+        self.assertIn("MyProject\\Alpha", paths)
+        self.assertIn("MyProject\\Gamma", paths)
+        self.assertNotIn("MyProject\\Beta", paths)
+
+        # Clear all rules
+        clear_ok = backend.clear_area_path_rules()
+        self.assertTrue(clear_ok)
+        self.assertEqual(len(backend._area_path_rules), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

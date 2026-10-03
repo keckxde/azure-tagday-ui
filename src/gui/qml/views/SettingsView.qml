@@ -9,6 +9,7 @@ Item {
     property var discoveredDatabases: []
     property string bannerMsg: ""
     property string bannerType: "info" // "info", "success", "error"
+    property string activeTab: "connection" // "connection", "workitems", "reports", "general"
 
     function loadDatabasesList() {
         if (backend) {
@@ -41,7 +42,7 @@ Item {
         ColumnLayout {
             width: Math.min(1080, parent.width - 48)
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 20
+            spacing: 16
 
             Item { height: 6 }
 
@@ -65,7 +66,7 @@ Item {
                     }
 
                     Text {
-                        text: "Select a different SQLite cache database, switch active projects, or connect to a new TFS instance"
+                        text: "Manage TFS connections, background sync, Work Item filters, Area Paths, reports directory, and UI preferences."
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 12
                         color: "#8b949e"
@@ -143,9 +144,145 @@ Item {
             }
 
             // ==========================================
+            // Settings Category Tab Navigation Bar
+            // ==========================================
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: tabNavLayout.implicitHeight + 16
+                radius: 8
+                color: "#161b22"
+                border.color: "#30363d"
+                border.width: 1
+
+                RowLayout {
+                    id: tabNavLayout
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 8
+
+                    Repeater {
+                        model: [
+                            {
+                                id: "connection",
+                                icon: "🌐",
+                                label: "Connection & Sync",
+                                desc: "TFS, Database & Auto-Sync",
+                                badge: (backend && backend.dbPath) ? "Connected" : "Not Connected",
+                                badgeColor: (backend && backend.dbPath) ? "#3fb950" : "#f85149"
+                            },
+                            {
+                                id: "workitems",
+                                icon: "📋",
+                                label: "Agile & Work Items",
+                                desc: "Area Paths, Tags & Sprints",
+                                badge: (backend && backend.areaPathFilterEnabled && backend.areaPathRules && backend.areaPathRules.length > 0) ? (backend.areaPathRules.length + " Area Rules") : "",
+                                badgeColor: "#58a6ff"
+                            },
+                            {
+                                id: "reports",
+                                icon: "📊",
+                                label: "Reports & Git Filters",
+                                desc: "Reports Path & Branch Filters",
+                                badge: (backend && backend.branchFilterPatterns && backend.branchFilterPatterns.length > 0) ? (backend.branchFilterPatterns.length + " Branch Filters") : "",
+                                badgeColor: "#d29922"
+                            },
+                            {
+                                id: "general",
+                                icon: "⚙️",
+                                label: "General & Tools",
+                                desc: "Display, Backup & About",
+                                badge: backend ? backend.appVersion : "",
+                                badgeColor: "#8b949e"
+                            }
+                        ]
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 50
+                            radius: 6
+                            property bool isSelected: root.activeTab === modelData.id
+                            color: isSelected 
+                                ? Qt.rgba(31/255, 111/255, 235/255, 0.18) 
+                                : (tabMa.containsMouse ? "#21262d" : "#0d1117")
+                            border.color: isSelected 
+                                ? "#58a6ff" 
+                                : (tabMa.containsMouse ? "#388bfd" : "#30363d")
+                            border.width: isSelected ? 2 : 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 10
+
+                                Text {
+                                    text: modelData.icon
+                                    font.pixelSize: 18
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    RowLayout {
+                                        spacing: 6
+                                        Text {
+                                            text: modelData.label
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: parent.parent.parent.parent.isSelected ? Font.Bold : Font.DemiBold
+                                            color: parent.parent.parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
+                                        }
+
+                                        Rectangle {
+                                            visible: modelData.badge !== ""
+                                            implicitHeight: 16
+                                            implicitWidth: tabBadgeTxt.implicitWidth + 8
+                                            radius: 8
+                                            color: "#161b22"
+                                            border.color: modelData.badgeColor
+                                            border.width: 1
+
+                                            Text {
+                                                id: tabBadgeTxt
+                                                anchors.centerIn: parent
+                                                text: modelData.badge
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: modelData.badgeColor
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: modelData.desc
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        color: parent.parent.parent.isSelected ? "#79c0ff" : "#8b949e"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: tabMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.activeTab = modelData.id
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // Active Database & Connection Card
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "connection"
                 Layout.fillWidth: true
                 implicitHeight: activeDbCol.implicitHeight + 36
                 color: "#161b22"
@@ -479,6 +616,7 @@ Item {
             // Available / Discovered Databases in Workspace
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "connection"
                 Layout.fillWidth: true
                 implicitHeight: discCol.implicitHeight + 36
                 color: "#161b22"
@@ -691,6 +829,7 @@ Item {
             // Scheduled Synchronization & Auto-Sync Card
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "connection"
                 Layout.fillWidth: true
                 implicitHeight: autoSyncCol.implicitHeight + 36
                 color: "#161b22"
@@ -985,6 +1124,7 @@ Item {
             // Reports Target & Baseline Directory Card
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "reports"
                 Layout.fillWidth: true
                 implicitHeight: reportsDirCol.implicitHeight + 36
                 color: "#161b22"
@@ -1185,6 +1325,7 @@ Item {
             // Agile & Deadline Attribute Configuration Card
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "workitems"
                 Layout.fillWidth: true
                 implicitHeight: deadlineCol.implicitHeight + 36
                 color: "#161b22"
@@ -1722,6 +1863,7 @@ Item {
             // ==========================================
             Rectangle {
                 id: areaPathCard
+                visible: root.activeTab === "workitems"
                 Layout.fillWidth: true
                 implicitHeight: areaPathCol.implicitHeight + 36
                 color: "#161b22"
@@ -1771,6 +1913,30 @@ Item {
                             root.bannerType = res.is_permission_error ? "warning" : "error";
                         }
                     }
+                }
+
+                function deleteRule(idx) {
+                    if (idx >= 0 && idx < rulesList.length) {
+                        var removed = rulesList[idx];
+                        var updated = [];
+                        for (var i = 0; i < rulesList.length; i++) {
+                            if (i !== idx) {
+                                updated.push(rulesList[i]);
+                            }
+                        }
+                        rulesList = updated;
+                        root.bannerMsg = "Deleted Area Path rule: " + (removed ? removed.path : "");
+                        root.bannerType = "info";
+                    }
+                }
+
+                function clearAllRules() {
+                    rulesList = [];
+                    if (backend) {
+                        backend.clear_area_path_rules();
+                    }
+                    root.bannerMsg = "Cleared all Area Path filter rules.";
+                    root.bannerType = "info";
                 }
 
                 function resetDefaults() {
@@ -2077,15 +2243,7 @@ Item {
                                         color: parent.hovered ? "#3c1e1e" : "transparent"
                                         border.color: parent.hovered ? "#f85149" : "#30363d"
                                     }
-                                    onClicked: {
-                                        var updated = [];
-                                        for (var i = 0; i < areaPathCard.rulesList.length; i++) {
-                                            if (i !== index) {
-                                                updated.push(areaPathCard.rulesList[i]);
-                                            }
-                                        }
-                                        areaPathCard.rulesList = updated;
-                                    }
+                                    onClicked: areaPathCard.deleteRule(index)
                                 }
                             }
 
@@ -2354,6 +2512,21 @@ Item {
                             onClicked: areaPathCard.resetDefaults()
                         }
 
+                        Button {
+                            text: "🗑️ Clear All Rules"
+                            font.pixelSize: 11
+                            contentItem: Text {
+                                text: parent.text; font: parent.font; color: "#f85149"
+                                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 34; implicitWidth: 130; radius: 6
+                                color: parent.hovered ? "#3c1e1e" : "transparent"
+                                border.color: parent.hovered ? "#f85149" : "#30363d"
+                            }
+                            onClicked: areaPathCard.clearAllRules()
+                        }
+
                         Item { Layout.fillWidth: true }
 
                         Text {
@@ -2386,6 +2559,7 @@ Item {
             // Work Item Tag Categories Card
             // ==========================================
             Rectangle {
+                visible: root.activeTab === "workitems"
                 Layout.fillWidth: true
                 implicitHeight: tagCatCol.implicitHeight + 36
                 color: "#161b22"
@@ -2814,6 +2988,7 @@ Item {
             // ==========================================
             Rectangle {
                 id: changeFilterCard
+                visible: root.activeTab === "reports"
                 Layout.fillWidth: true
                 implicitHeight: changeFilterCol.implicitHeight + 36
                 color: "#161b22"
@@ -3580,7 +3755,7 @@ Item {
                 radius: 8
                 border.color: "#30363d"
                 border.width: 1
-                visible: backend && backend.recentProjects && backend.recentProjects.length > 0
+                visible: root.activeTab === "connection" && (backend && backend.recentProjects && backend.recentProjects.length > 0)
 
                 ColumnLayout {
                     id: recentCol
@@ -3679,6 +3854,7 @@ Item {
 
             // Display & Typography Sizing Card
             Rectangle {
+                visible: root.activeTab === "general"
                 Layout.fillWidth: true
                 implicitHeight: fontSettingCol.implicitHeight + 36
                 color: "#161b22"
@@ -3850,6 +4026,7 @@ Item {
             // ==========================================
             Rectangle {
                 id: exportImportCard
+                visible: root.activeTab === "general"
                 Layout.fillWidth: true
                 implicitHeight: exportImportCol.implicitHeight + 36
                 color: "#161b22"
@@ -4194,6 +4371,7 @@ Item {
 
             // About Application & Version Information Card
             Rectangle {
+                visible: root.activeTab === "general"
                 Layout.fillWidth: true
                 implicitHeight: aboutAppCol.implicitHeight + 36
                 color: "#161b22"

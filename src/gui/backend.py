@@ -837,6 +837,51 @@ class DevOpsBackend(QObject):
         self.refresh_all_data()
         return True
 
+    @Slot(str, result=bool)
+    def delete_area_path_rule(self, area_path):
+        """Deletes a specific Area Path rule by its path string."""
+        try:
+            target = (area_path or "").strip().replace("/", "\\").lower()
+            if not target:
+                return False
+            initial_count = len(self._area_path_rules)
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or "").strip().replace("/", "\\").lower() != target
+            ]
+            if len(self._area_path_rules) != initial_count:
+                if self._cache_db:
+                    self._cache_db.set_area_path_settings(
+                        enabled=self._area_path_filter_enabled,
+                        rules=self._area_path_rules
+                    )
+                self.areaPathSettingsChanged.emit()
+                self.refresh_all_data()
+                self.logMessage.emit(f"🗑️ Deleted Area Path filter rule: {area_path}")
+                return True
+            return False
+        except Exception as e:
+            logger.error("Error deleting area path rule: %s", e)
+            return False
+
+    @Slot(result=bool)
+    def clear_area_path_rules(self):
+        """Clears all configured Area Path filter rules."""
+        try:
+            self._area_path_rules = []
+            if self._cache_db:
+                self._cache_db.set_area_path_settings(
+                    enabled=self._area_path_filter_enabled,
+                    rules=[]
+                )
+            self.areaPathSettingsChanged.emit()
+            self.refresh_all_data()
+            self.logMessage.emit("🗑️ Cleared all Area Path filter rules.")
+            return True
+        except Exception as e:
+            logger.error("Error clearing area path rules: %s", e)
+            return False
+
     @Slot(str, result='QVariantMap')
     def test_area_path_match(self, test_path):
         """Tests if a sample Area Path string matches the active Area Path filter rules."""
