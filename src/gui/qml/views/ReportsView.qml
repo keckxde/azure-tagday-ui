@@ -149,8 +149,8 @@ Item {
     }
 
     onActiveReportTabChanged: {
+        root.isTdSidebarOpen = true;
         if (root.activeReportTab === 1) {
-            root.isTdSidebarOpen = true;
             if (!root.selectedRepoName && backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0) {
                 var found = null;
                 for (var i = 0; i < backend.tagDayData.repos_summary.length; i++) {
@@ -161,6 +161,8 @@ Item {
                 }
                 root.selectedRepoName = found ? found.name : backend.tagDayData.repos_summary[0].name;
             }
+        } else if (root.activeReportTab === 4) {
+            root.refreshSprintReport();
         }
     }
 

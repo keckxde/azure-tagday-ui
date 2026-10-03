@@ -7,9 +7,11 @@ import "../../components"
     property var root: null
 
             id: tdSidebarRect
-            Layout.preferredWidth: (root.activeReportTab === 1 && root.isTdSidebarOpen) ? root.tdSidebarWidth : 0
+            Layout.preferredWidth: (root && root.isTdSidebarOpen) ? root.tdSidebarWidth : 0
+            Layout.minimumWidth: (root && root.isTdSidebarOpen) ? root.minTdSidebarWidth : 0
+            Layout.maximumWidth: (root && root.isTdSidebarOpen) ? root.maxTdSidebarWidth : 0
             Layout.fillHeight: true
-            visible: root.activeReportTab === 1 && (root.isTdSidebarOpen || Layout.preferredWidth > 0)
+            visible: (root && root.isTdSidebarOpen) || Layout.preferredWidth > 0
             color: "#161b22"
             border.color: "#30363d"
             border.width: 1
@@ -66,6 +68,7 @@ import "../../components"
                 }
             }
 
+            // MODE 1: Tag Day Inspector & Changes Timeline
             ColumnLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
@@ -73,6 +76,7 @@ import "../../components"
                 anchors.topMargin: 12
                 anchors.bottomMargin: 12
                 spacing: 10
+                visible: root && root.activeReportTab === 1
 
                 // Top Header Bar: Switch between Selected Repo Inspector & Global Timeline + Close
                 Rectangle {
@@ -1792,4 +1796,80 @@ Click to open in TFS"
                     }
                 }
             }
+
+        // ============================================================
+        // MODE 2: Storage & Build Artifacts Report Preview (Tab 2)
+        // ============================================================
+        ReportPreviewPane {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 2
+            root: root
+            reportType: "storage"
+            customTitle: "📦 Storage & Build Artifacts Preview"
         }
+
+        // ============================================================
+        // MODE 3: Release Notes & Version Tracking Preview (Tab 3)
+        // ============================================================
+        ReportPreviewPane {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 3
+            root: root
+            reportType: "revision"
+            customTitle: "📝 Release Notes (REVISION.md)"
+        }
+
+        // ============================================================
+        // MODE 4: Agile Sprint Report Preview (Tab 4)
+        // ============================================================
+        ReportPreviewPane {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 4
+            root: root
+            reportType: "sprint"
+            reportParam: (root && root.selectedSprintReport) ? root.selectedSprintReport : ""
+            customTitle: "🚀 Sprint Report: " + ((root && root.selectedSprintReport) ? root.selectedSprintReport : "Active")
+        }
+
+        // ============================================================
+        // MODE 5: Sprint Rescheduling & Shifts Preview (Tab 5)
+        // ============================================================
+        ReportPreviewPane {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 5
+            root: root
+            reportType: "rescheduling"
+            customTitle: "⏱️ Rescheduling & Shifts Preview"
+        }
+
+        // ============================================================
+        // MODE 0: Reports Overview Live Draft Preview (Tab 0)
+        // ============================================================
+        ReportPreviewPane {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 0
+            root: root
+            reportType: "tagday"
+            customTitle: "📊 Tag Day Release Preview"
+        }
+    }

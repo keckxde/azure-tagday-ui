@@ -3351,18 +3351,16 @@ class DevOpsBackend(QObject):
             success_msg = f"Successfully created tag '{actual_tag}' on repository '{actual_repo}' (branch '{res.get('branch_name', target_branch)}', commit {cid})"
             worker.log_message.emit(success_msg)
             logger.info(success_msg)
-
-            try:
-                self.load_interactive_reports()
-                self.refresh_all_data()
-            except Exception as ref_err:
-                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
-
             return success_msg
 
         def _on_success(result_msg):
             self.logMessage.emit(f"✅ {result_msg}")
             self.tagCreated.emit(str(repo_name_or_id), str(tag_name), True, str(result_msg))
+            try:
+                self.load_interactive_reports()
+                self.refresh_all_data()
+            except Exception as ref_err:
+                logger.debug(f"Could not refresh interactive reports after tag creation: {ref_err}")
 
         def _on_error(err_msg):
             self.logMessage.emit(f"❌ Failed to create tag '{tag_name}' on '{repo_name_or_id}': {err_msg}")
@@ -7692,6 +7690,44 @@ class DevOpsBackend(QObject):
                 "size_bytes": len(content.encode("utf-8")),
                 "modified_at": "Live snapshot"
             }
+
+        elif r_type in ("rescheduling", "shifts", "iteration_shifts", "moved_items"):
+            fpath = os.path.join(eff_dir, "RESCHEDULING_REPORT.md")
+            if os.path.isfile(fpath):
+                res = self.get_file_content(fpath)
+                if res.get("success"):
+                    res["title"] = "Iteration Shifts & Rescheduling Report"
+                    res["format"] = "markdown"
+                    return res
+            # Fallback draft generation
+            try:
+                import generate_rescheduling_report
+                temp_res = generate_rescheduling_report.generate_rescheduling_report(
+                    self._cache_db,
+                    output_md=None,
+                    output_csv=None,
+                    review_status=None
+                )
+                md_text = temp_res.get("markdown", "")
+                if md_text:
+                    return {
+                        "success": True,
+                        "title": "Iteration Shifts & Rescheduling Report (Live)",
+                        "format": "markdown",
+                        "file_path": fpath,
+                        "file_name": "RESCHEDULING_REPORT.md",
+                        "content": md_text,
+                        "line_count": len(md_text.splitlines()),
+                        "word_count": len(re.findall(r"\b\w+\b", md_text)),
+                        "size_bytes": len(md_text.encode("utf-8")),
+                        "modified_at": "Live generated"
+                    }
+            except Exception as e:
+                logger.debug(f"Could not build draft rescheduling markdown: {e}")
+            res = self.get_file_content(fpath)
+            res["title"] = "Iteration Shifts & Rescheduling Report"
+            res["format"] = "markdown"
+            return res
 
         elif r_type in ("team_motivation", "motivation"):
             content = self.get_team_motivation_markdown_summary()
