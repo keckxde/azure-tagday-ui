@@ -827,6 +827,36 @@ class TestTeamMotivation(unittest.TestCase):
         found = any(s["canonical"] == "Alice Smith" and s["alias"] == "asmith" for s in suggestions)
         self.assertTrue(found, f"Should suggest linking asmith to Alice Smith, got: {suggestions}")
 
+    def test_zero_activity_exclusion_from_podium_and_points(self):
+        """Verify that members with zero activity in a timeframe get 0 points, no badges, and are not placed on the podium."""
+        now = datetime.now()
+        # Add a work item assigned to Inactive User that was created 100 days ago and is still active (no activity in sprint)
+        self.cache.save_work_item(
+            999, "Ancient Backlog Item", "Task", "Active", "Inactive User",
+            (now - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S"),
+            {"fields": {"System.Title": "Ancient Backlog Item", "System.State": "Active", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Inactive User"}}}
+        )
+
+        # Compute for current sprint (where Inactive User has 0 commits, 0 PRs, 0 completed tasks, 0 activity)
+        data = compute_team_motivation_data(self.cache, timeframe="this_sprint")
+        members_map = {m["name"]: m for m in data["members"]}
+
+        inactive_member = members_map.get("Inactive User")
+        self.assertIsNotNone(inactive_member)
+        self.assertEqual(inactive_member["score"], 0)
+        self.assertFalse(inactive_member.get("has_activity", True))
+        self.assertEqual(len(inactive_member["badges"]), 0)
+        self.assertIsNone(inactive_member["rank"])
+
+        # Podium should NOT include Inactive User
+        podium_members = [p["member"]["name"] for p in data.get("podium", [])]
+        self.assertNotIn("Inactive User", podium_members)
+
+        # All podium members must have score > 0
+        for p in data.get("podium", []):
+            self.assertGreater(p["member"]["score"], 0)
+            self.assertTrue(p["member"].get("has_activity"))
+
 
 if __name__ == "__main__":
     unittest.main()

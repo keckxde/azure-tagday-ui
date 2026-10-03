@@ -26,9 +26,9 @@ Item {
         var maxLen = Math.min(10, membersList.length);
         for (var i = 3; i < maxLen; i++) {
             var mem = membersList[i];
-            if (mem && ((mem.score || 0) > 0 || root.selectedTimeframe === "all_time")) {
+            if (mem && (mem.score || 0) > 0 && mem.rank) {
                 result.push({
-                    rank: i + 1,
+                    rank: mem.rank || (i + 1),
                     member: mem
                 });
             }
@@ -428,7 +428,7 @@ Item {
                                 icon: "🏆",
                                 label: "Overview & Podium",
                                 desc: "Sprint KPIs, Top 10 & Radar",
-                                badge: (podiumList && podiumList.length > 0) ? (Math.min(10, membersList.length) + " Ranked") : "",
+                                badge: (podiumList && podiumList.length > 0) ? (Math.min(10, membersList.filter(function(m) { return m && (m.score || 0) > 0; }).length) + " Ranked") : "",
                                 badgeColor: "#ffd700"
                             },
                             {

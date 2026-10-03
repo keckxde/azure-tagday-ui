@@ -2129,7 +2129,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             or m["branches_started"] > 0
             or m["branches_closed"] > 0
             or m["tasks_completed"] > 0
+            or m["tasks_created"] > 0
             or m["bugs_resolved"] > 0
+            or m["stories_completed"] > 0
             or m["prs_reviewed"] > 0
             or m["prs_approved"] > 0
             or m["tags_pushed"] > 0
@@ -2169,9 +2171,9 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 "points": t_info.get("points", 10)
             }
 
-        # Compute Badges - only awarded if active in timeframe (or if all_time)
+        # Compute Badges - strictly only awarded if member had actual activity in the timeframe
         badges = []
-        if has_current_activity or timeframe == "all_time":
+        if has_current_activity:
             # 1. PRs & Reviews
             if m["prs_created"] >= 6:
                 badges.append(_build_awarded_badge("pr_dynamo", "gold", times=m["prs_created"], metric_label=f"{m['prs_created']} PRs"))
@@ -2382,15 +2384,18 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         m.pop("_last_activity_dt", None)
 
         # Composite Motivation Score Formula:
-        # Only calculated if member has actual activity in timeframe (or if all_time)
-        if has_current_activity or timeframe == "all_time":
+        # Strictly only calculated if member has actual activity in timeframe
+        if has_current_activity:
+            m["has_activity"] = True
             pos_score = (
                 m["prs_closed"] * 15
                 + m["prs_created"] * 10
                 + m["commits_count"] * 3
                 + m["branches_closed"] * 5
                 + m["tasks_completed"] * 8
+                + m["tasks_created"] * 3
                 + m["bugs_resolved"] * 10
+                + m["stories_completed"] * 10
                 + m["prs_approved"] * 8
                 + m["prs_reviewed"] * 6
                 + m["tags_pushed"] * 12
@@ -2409,24 +2414,28 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
                 + (min(m["stale_tasks_count"], 4) * 2)
             )
             raw_final = pos_score - neg_score
-            m["score"] = max(1, raw_final)
+            m["score"] = max(0, raw_final)
         else:
+            m["has_activity"] = False
             m["score"] = 0
+            m["badges"] = []
+            m["badges_count"] = 0
 
-    # Award Sprint MVP badges to podium scorers
-    sorted_by_score = sorted(member_list, key=lambda x: x["score"], reverse=True)
+    # Award Sprint MVP badges to podium scorers (strictly only members with score > 0 and activity)
+    sorted_by_score = [m for m in member_list if not m.get("is_aliased") and m.get("has_activity") and m.get("score", 0) > 0]
+    sorted_by_score.sort(key=lambda x: x["score"], reverse=True)
     if sorted_by_score:
-        if len(sorted_by_score) > 0 and sorted_by_score[0]["score"] > 0:
+        if len(sorted_by_score) > 0:
             mvp1 = sorted_by_score[0]
             if not any(b["id"] == "sprint_mvp" for b in mvp1["badges"]):
                 mvp1["badges"].insert(0, _build_awarded_badge("sprint_mvp", "gold", times=1, metric_label=f"Rank #1 ({mvp1['score']} pts)"))
                 mvp1["badges_count"] = len(mvp1["badges"])
-        if len(sorted_by_score) > 1 and sorted_by_score[1]["score"] > 0:
+        if len(sorted_by_score) > 1:
             mvp2 = sorted_by_score[1]
             if not any(b["id"] == "sprint_mvp" for b in mvp2["badges"]):
                 mvp2["badges"].insert(0, _build_awarded_badge("sprint_mvp", "silver", times=1, metric_label=f"Rank #2 ({mvp2['score']} pts)"))
                 mvp2["badges_count"] = len(mvp2["badges"])
-        if len(sorted_by_score) > 2 and sorted_by_score[2]["score"] > 0:
+        if len(sorted_by_score) > 2:
             mvp3 = sorted_by_score[2]
             if not any(b["id"] == "sprint_mvp" for b in mvp3["badges"]):
                 mvp3["badges"].insert(0, _build_awarded_badge("sprint_mvp", "bronze", times=1, metric_label=f"Rank #3 ({mvp3['score']} pts)"))
@@ -2487,7 +2496,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
 
     # 8. Generate Category Leaderboards (Top performers per category - excluding aliased profiles)
     def _make_leaderboard(key, title, icon, unit="items", reverse_sort=True):
-        filtered = [m for m in member_list if not m.get("is_aliased") and m.get(key, 0) > 0]
+        filtered = [m for m in member_list if not m.get("is_aliased") and m.get(key, 0) > 0 and (m.get("has_activity") if key == "score" else True)]
         sorted_m = sorted(filtered, key=lambda x: x.get(key, 0), reverse=reverse_sort)
         entries = []
         for rank, item in enumerate(sorted_m[:10], start=1):
@@ -2562,7 +2571,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
     team_total_evidences = sum(m["task_evidences_count"] for m in active_members)
     team_oldest_task_days = max((m["oldest_open_task_days"] for m in active_members), default=0)
     team_build_success_rate = round((team_total_builds_succeeded / team_total_builds * 100.0), 1) if team_total_builds > 0 else 100.0
-    active_contributors_count = sum(1 for m in active_members if m["score"] > 0)
+    active_contributors_count = sum(1 for m in active_members if m.get("has_activity") and m.get("score", 0) > 0)
+    team_total_score_sum = sum(m["score"] for m in active_members if m.get("has_activity"))
 
     # Compute Team Time Analytics
     def _format_breakdown_label(commits, prs, tasks, builds):
@@ -2735,21 +2745,37 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         m["recent_achievements"] = highlights
 
     # Top 3 Podium and overall rankings (active canonical members only)
-    sorted_active = sorted(active_members, key=lambda x: x["score"], reverse=True)
-    for idx, m in enumerate(sorted_active, start=1):
-        m["rank"] = idx
+    sorted_active = sorted(
+        active_members,
+        key=lambda x: (
+            1 if (x.get("has_activity") and x.get("score", 0) > 0) else 0,
+            x.get("score", 0),
+            x.get("commits_count", 0) + x.get("prs_closed", 0) + x.get("tasks_completed", 0)
+        ),
+        reverse=True
+    )
+
+    rank = 1
+    for m in sorted_active:
+        if m.get("has_activity") and m.get("score", 0) > 0:
+            m["rank"] = rank
+            rank += 1
+        else:
+            m["rank"] = None
 
     for m in aliased_members:
         m["rank"] = None
         m["score"] = 0
+        m["has_activity"] = False
 
     podium = []
-    if len(sorted_active) >= 1 and sorted_active[0]["score"] > 0:
-        podium.append({"rank": 1, "medal": "🥇", "title": "1st Place", "member": sorted_active[0]})
-    if len(sorted_active) >= 2 and sorted_active[1]["score"] > 0:
-        podium.append({"rank": 2, "medal": "🥈", "title": "2nd Place", "member": sorted_active[1]})
-    if len(sorted_active) >= 3 and sorted_active[2]["score"] > 0:
-        podium.append({"rank": 3, "medal": "🥉", "title": "3rd Place", "member": sorted_active[2]})
+    active_scorers = [m for m in sorted_active if m.get("has_activity") and m.get("score", 0) > 0]
+    if len(active_scorers) >= 1:
+        podium.append({"rank": 1, "medal": "🥇", "title": "1st Place", "member": active_scorers[0]})
+    if len(active_scorers) >= 2:
+        podium.append({"rank": 2, "medal": "🥈", "title": "2nd Place", "member": active_scorers[1]})
+    if len(active_scorers) >= 3:
+        podium.append({"rank": 3, "medal": "🥉", "title": "3rd Place", "member": active_scorers[2]})
 
     sorted_all = sorted_active + sorted(aliased_members, key=lambda x: x["name"].lower())
 
@@ -2787,7 +2813,7 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
             "structured_syntax_completed": sum(m["structured_syntax_completed"] for m in member_list),
             "oldest_open_task_days": team_oldest_task_days,
             "active_contributors": active_contributors_count,
-            "total_points": sum(m["score"] for m in member_list),
+            "total_points": team_total_score_sum,
             "time_analytics": team_time_analytics,
             "cleaner_leader": leaderboard_cleaners.get("leader"),
             "decliner_leader": leaderboard_decliners.get("leader"),
