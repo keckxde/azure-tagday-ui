@@ -311,10 +311,8 @@ Item {
                     }
                     clickable: true
                     onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("ALL");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
+                        if (typeof window !== "undefined" && window.navigateToTagDayRepo) {
+                            window.navigateToTagDayRepo("");
                         }
                     }
                     onOpenPillClicked: {
@@ -355,10 +353,8 @@ Item {
                     }
                     clickable: true
                     onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            window.navigateToRepos("ALL");
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
+                        if (typeof window !== "undefined" && window.navigateToTagDayRepo) {
+                            window.navigateToTagDayRepo("");
                         }
                     }
                 }
@@ -391,14 +387,8 @@ Item {
                     }
                     clickable: true
                     onClicked: {
-                        if (typeof window !== "undefined" && window.navigateToRepos) {
-                            if (backend && backend.stats && backend.stats.untagged_prs_repos_count > 0) {
-                                window.navigateToRepos("🏷️ PENDING PRs");
-                            } else {
-                                window.navigateToRepos("ALL");
-                            }
-                        } else if (typeof window !== "undefined") {
-                            window.currentTabIndex = 1;
+                        if (typeof window !== "undefined" && window.navigateToTagDayRepo) {
+                            window.navigateToTagDayRepo("");
                         }
                     }
                 }
@@ -1707,8 +1697,7 @@ Item {
                             border.color: "#30363d"
                         }
                         onClicked: {
-                            if (typeof window !== "undefined" && window.navigateToRepos) window.navigateToRepos("ALL");
-                            else window.currentTabIndex = 1;
+                            if (typeof window !== "undefined" && window.navigateToTagDayRepo) window.navigateToTagDayRepo("");
                         }
                     }
 
@@ -1730,8 +1719,7 @@ Item {
                             border.color: "#30363d"
                         }
                         onClicked: {
-                            if (typeof window !== "undefined" && window.navigateToRepos) window.navigateToRepos("⚠️ PENDING");
-                            else window.currentTabIndex = 1;
+                            if (typeof window !== "undefined" && window.navigateToTagDayRepo) window.navigateToTagDayRepo("");
                         }
                     }
 
@@ -1753,8 +1741,7 @@ Item {
                             border.color: "#30363d"
                         }
                         onClicked: {
-                            if (typeof window !== "undefined" && window.navigateToPullRequests) window.navigateToPullRequests();
-                            else window.currentTabIndex = 2;
+                            if (typeof window !== "undefined" && window.navigateToPullRequests) window.navigateToPullRequests("ALL", false);
                         }
                     }
 
