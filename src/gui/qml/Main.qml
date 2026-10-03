@@ -759,40 +759,10 @@ ApplicationWindow {
 
                             NavItem {
                                 iconText: "⚙️"
-                                label: "Settings Page"
+                                label: "Settings"
                                 active: window.currentTabIndex === 5
                                 isCollapsed: window.isSidebarCollapsed
                                 onClicked: window.currentTabIndex = 5
-                            }
-
-                            NavItem {
-                                iconText: "🔤"
-                                label: "Font"
-                                badgeText: backend ? backend.fontSizeMode.toUpperCase() : "M"
-                                active: false
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    if (backend) {
-                                        var cur = backend.fontSizeMode;
-                                        var next = "medium";
-                                        if (cur === "small") next = "medium";
-                                        else if (cur === "medium") next = "large";
-                                        else if (cur === "large") next = "xlarge";
-                                        else if (cur === "xlarge") next = "small";
-                                        backend.setFontSizeMode(next);
-                                    }
-                                }
-                            }
-
-                            NavItem {
-                                iconText: "⏱️"
-                                label: "Sync Settings"
-                                badgeText: backend && backend.autoSyncEnabled ? "AUTO" : ""
-                                active: false
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.openSettingsPage("connection");
-                                }
                             }
 
                             Item {
