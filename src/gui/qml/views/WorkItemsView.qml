@@ -678,12 +678,14 @@ Item {
         Rectangle {
             id: filtersGroupBox
             Layout.fillWidth: true
+            implicitHeight: filtersGroupCol.implicitHeight + 20
             radius: 8
             color: "#161b22"
             border.color: root.hasActiveFilters ? "#388bfd" : "#30363d"
             border.width: 1
 
             ColumnLayout {
+                id: filtersGroupCol
                 anchors.fill: parent
                 anchors.margins: 10
                 spacing: 8
@@ -2940,7 +2942,6 @@ Item {
                                             font.pixelSize: 11
                                             font.italic: true
                                             color: "#484f58"
-                                            anchors.verticalCenter: parent.verticalCenter
                                         }
                                     }
                                 }
