@@ -1756,14 +1756,25 @@ Item {
             }
 
             delegate: Item {
+                id: wiDelegateRoot
                 width: wiListView.width - 14
                 height: expanded ? expandedHeight + 52 : 52
 
                 property bool expanded: false
+                property var wiTagList: {
+                    if (typeof model === "undefined" || !model) return [];
+                    if (model.tag_list && model.tag_list.length > 0) return model.tag_list;
+                    if (model.tags && model.tags.trim() !== "") {
+                        return model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
+                    }
+                    return [];
+                }
+                property var wiLinkedPrs: (typeof model !== "undefined" && model && model.linked_prs) ? model.linked_prs : []
+                property var wiLinkedRepos: (typeof model !== "undefined" && model && model.linked_repos) ? model.linked_repos : []
                 property int expandedHeight: {
                     if (typeof model === "undefined" || !model) return 120;
-                    var prs = model.linked_prs || [];
-                    var repos = model.linked_repos || [];
+                    var prs = wiLinkedPrs;
+                    var repos = wiLinkedRepos;
                     return Math.max(120, 115 + prs.length * 22 + repos.length * 18 + 36);
                 }
 
@@ -1951,17 +1962,7 @@ Item {
 
                             // Tag Badges in Main Row (First 2-3 tags)
                             Repeater {
-                                model: {
-                                    var list = [];
-                                    if (typeof model !== "undefined" && model) {
-                                        if (model.tag_list && model.tag_list.length > 0) {
-                                            list = model.tag_list;
-                                        } else if (model.tags && model.tags.trim() !== "") {
-                                            list = model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
-                                        }
-                                    }
-                                    return list.slice(0, 3);
-                                }
+                                model: wiDelegateRoot.wiTagList ? wiDelegateRoot.wiTagList.slice(0, 3) : []
 
                                 Rectangle {
                                     implicitHeight: 18
@@ -2523,15 +2524,7 @@ Item {
                                         spacing: 5
 
                                         Repeater {
-                                            model: {
-                                                if (typeof model === "undefined" || !model) return [];
-                                                if (model.tag_list && model.tag_list.length > 0) {
-                                                    return model.tag_list;
-                                                } else if (model.tags && model.tags.trim() !== "") {
-                                                    return model.tags.split(";").map(function(t){ return t.trim(); }).filter(function(t){ return t.length > 0; });
-                                                }
-                                                return [];
-                                            }
+                                            model: wiDelegateRoot.wiTagList || []
 
                                             Rectangle {
                                                 implicitHeight: 20
@@ -2594,7 +2587,7 @@ Item {
                                         }
 
                                         Text {
-                                            visible: (typeof model !== "undefined" && model) ? ((!model.tag_list || model.tag_list.length === 0) && (!model.tags || model.tags.trim() === "")) : false
+                                            visible: !wiDelegateRoot.wiTagList || wiDelegateRoot.wiTagList.length === 0
                                             text: "No tags assigned"
                                             font.pixelSize: 11
                                             font.italic: true
@@ -2609,7 +2602,7 @@ Item {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                visible: (typeof model !== "undefined" && model && model.linked_pr_count) ? (model.linked_pr_count > 0) : false
+                                visible: wiDelegateRoot.wiLinkedPrs && wiDelegateRoot.wiLinkedPrs.length > 0
 
                                 Text {
                                     text: "🔀 Referenced Pull Requests"
@@ -2620,7 +2613,7 @@ Item {
                                 }
 
                                 Repeater {
-                                    model: (typeof model !== "undefined" && model && model.linked_prs) ? model.linked_prs : []
+                                    model: wiDelegateRoot.wiLinkedPrs || []
                                     Rectangle {
                                         Layout.fillWidth: true
                                         height: 20
@@ -2679,7 +2672,7 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 6
-                                visible: (typeof model !== "undefined" && model && model.linked_repo_count) ? (model.linked_repo_count > 0) : false
+                                visible: wiDelegateRoot.wiLinkedRepos && wiDelegateRoot.wiLinkedRepos.length > 0
 
                                 Text {
                                     text: "📦 Repositories:"
@@ -2693,7 +2686,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 4
                                     Repeater {
-                                        model: (typeof model !== "undefined" && model && model.linked_repos) ? model.linked_repos : []
+                                        model: wiDelegateRoot.wiLinkedRepos || []
                                         Rectangle {
                                             implicitHeight: 18
                                             implicitWidth: repoTagText.implicitWidth + 8
