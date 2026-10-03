@@ -147,6 +147,22 @@ Item {
         }
     }
 
+    onActiveReportTabChanged: {
+        if (root.activeReportTab === 1) {
+            root.isTdSidebarOpen = true;
+            if (!root.selectedRepoName && backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0) {
+                var found = null;
+                for (var i = 0; i < backend.tagDayData.repos_summary.length; i++) {
+                    if ((backend.tagDayData.repos_summary[i].prs_count || 0) > 0) {
+                        found = backend.tagDayData.repos_summary[i];
+                        break;
+                    }
+                }
+                root.selectedRepoName = found ? found.name : backend.tagDayData.repos_summary[0].name;
+            }
+        }
+    }
+
     Connections {
         target: backend
         function onWorkItemsChanged() {
@@ -154,6 +170,18 @@ Item {
         }
         function onSprintReportGenerated(data, mdText) {
             root.refreshSprintReport();
+        }
+        function onTagDayDataChanged() {
+            if (root.activeReportTab === 1 && !root.selectedRepoName && backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0) {
+                var found = null;
+                for (var i = 0; i < backend.tagDayData.repos_summary.length; i++) {
+                    if ((backend.tagDayData.repos_summary[i].prs_count || 0) > 0) {
+                        found = backend.tagDayData.repos_summary[i];
+                        break;
+                    }
+                }
+                root.selectedRepoName = found ? found.name : backend.tagDayData.repos_summary[0].name;
+            }
         }
     }
 
@@ -1501,7 +1529,7 @@ Item {
                                 delegate: Rectangle {
                                     id: repoCard
                                     width: tdReposList.width - 8
-                                    height: 54
+                                    height: 58
                                     radius: 6
                                     readonly property bool isSelected: root.selectedRepoName === modelData.name
                                     color: isSelected ? "#1f293d" : (cardMouse.containsMouse ? "#21262d" : "#0d1117")
@@ -1520,79 +1548,162 @@ Item {
                                         visible: repoCard.isSelected
                                     }
 
-                                    RowLayout {
+                                    ColumnLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: repoCard.isSelected ? 14 : 12
                                         anchors.rightMargin: 12
-                                        spacing: 12
+                                        anchors.topMargin: 7
+                                        anchors.bottomMargin: 7
+                                        spacing: 4
 
-                                        // Section 1: Repo Name & Category Chip & Branch
-                                        ColumnLayout {
+                                        // Line 1: Repo Name, Category Chip, Branch Pill, Spacer, Status Badges
+                                        RowLayout {
                                             Layout.fillWidth: true
-                                            Layout.minimumWidth: 200
-                                            spacing: 3
+                                            spacing: 6
 
-                                            RowLayout {
-                                                spacing: 8
+                                            Text {
+                                                text: "📦"
+                                                font.pixelSize: 11
+                                            }
+
+                                            Text {
+                                                text: modelData.name || ""
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 12
+                                                font.weight: repoCard.isSelected ? Font.Bold : Font.DemiBold
+                                                color: repoCard.isSelected ? "#58a6ff" : "#f0f6fc"
+                                                elide: Text.ElideRight
+                                                Layout.maximumWidth: 220
+                                            }
+
+                                            // Category Chip
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: catTxt.implicitWidth + 8
+                                                radius: 3
+                                                color: (backend && modelData.category) ? backend.get_category_color(modelData.category) : "#8957e5"
+                                                opacity: 0.85
 
                                                 Text {
-                                                    text: "📦"
-                                                    font.pixelSize: 12
-                                                }
-
-                                                Text {
-                                                    text: modelData.name || ""
+                                                    id: catTxt
+                                                    anchors.centerIn: parent
+                                                    text: modelData.category || "OTHERS"
                                                     font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 13
-                                                    font.weight: repoCard.isSelected ? Font.Bold : Font.DemiBold
-                                                    color: repoCard.isSelected ? "#58a6ff" : "#f0f6fc"
-                                                    elide: Text.ElideRight
-                                                    Layout.maximumWidth: 260
+                                                    font.pixelSize: 9
+                                                    font.weight: Font.Bold
+                                                    color: "#ffffff"
+                                                }
+                                            }
+
+                                            // Default Branch Pill
+                                            Rectangle {
+                                                implicitHeight: 16
+                                                implicitWidth: brPillTxt.implicitWidth + 8
+                                                radius: 3
+                                                color: "#21262d"
+                                                border.color: "#30363d"
+
+                                                Row {
+                                                    id: brPillTxt
+                                                    anchors.centerIn: parent
+                                                    spacing: 3
+                                                    Text {
+                                                        text: "🌿"
+                                                        font.pixelSize: 8
+                                                    }
+                                                    Text {
+                                                        text: modelData.default_branch || "main"
+                                                        font.family: "Consolas, monospace"
+                                                        font.pixelSize: 9
+                                                        color: "#8b949e"
+                                                    }
+                                                }
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+
+                                            // Status Badges (PRs, Branches, Active) on right side of Line 1
+                                            RowLayout {
+                                                spacing: 4
+                                                Layout.alignment: Qt.AlignVCenter
+
+                                                StatusBadge {
+                                                    visible: (modelData.prs_count || 0) > 0
+                                                    text: modelData.prs_count + " PR" + (modelData.prs_count > 1 ? "s" : "")
+                                                    badgeColor: "#d29922"
                                                 }
 
-                                                // Category Chip
+                                                StatusBadge {
+                                                    visible: (modelData.branches_count || 0) > 0
+                                                    text: modelData.branches_count + " branch" + (modelData.branches_count > 1 ? "es" : "")
+                                                    badgeColor: "#8957e5"
+                                                }
+
+                                                StatusBadge {
+                                                    visible: (modelData.active_prs_count || 0) > 0
+                                                    text: modelData.active_prs_count + " active"
+                                                    badgeColor: "#1f6feb"
+                                                }
+                                            }
+                                        }
+
+                                        // Line 2: Version badges rendered below repo name + Baseline Commit Subtitle
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            // Latest Tag Badge
+                                            Rectangle {
+                                                implicitHeight: 18
+                                                implicitWidth: latestTagTxt.implicitWidth + 10
+                                                radius: 3
+                                                color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#12261a" : "#161b22"
+                                                border.color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#238636" : "#30363d"
+
+                                                Text {
+                                                    id: latestTagTxt
+                                                    anchors.centerIn: parent
+                                                    text: (modelData.latest_tag && modelData.latest_tag !== "-") ? ("🏷️ " + modelData.latest_tag) : "No Tag"
+                                                    font.family: "Consolas, monospace"
+                                                    font.pixelSize: 10
+                                                    color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#3fb950" : "#8b949e"
+                                                }
+                                            }
+
+                                            // Proposed Tag Arrow & Badge (below repo name)
+                                            RowLayout {
+                                                spacing: 4
+                                                visible: !!modelData.proposed_tag
+
+                                                Text {
+                                                    text: "➔"
+                                                    font.pixelSize: 9
+                                                    color: "#58a6ff"
+                                                }
+
                                                 Rectangle {
                                                     implicitHeight: 18
-                                                    implicitWidth: catTxt.implicitWidth + 8
+                                                    implicitWidth: propTagTxt.implicitWidth + 10
                                                     radius: 3
-                                                    color: (backend && modelData.category) ? backend.get_category_color(modelData.category) : "#8957e5"
-                                                    opacity: 0.85
+                                                    color: "#0d1f33"
+                                                    border.color: "#1f6feb"
 
                                                     Text {
-                                                        id: catTxt
+                                                        id: propTagTxt
                                                         anchors.centerIn: parent
-                                                        text: modelData.category || "OTHERS"
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 9
+                                                        text: "🚀 " + (modelData.proposed_tag || "")
+                                                        font.family: "Consolas, monospace"
+                                                        font.pixelSize: 10
                                                         font.weight: Font.Bold
-                                                        color: "#ffffff"
+                                                        color: "#58a6ff"
                                                     }
                                                 }
+                                            }
 
-                                                // Default Branch Pill
-                                                Rectangle {
-                                                    implicitHeight: 18
-                                                    implicitWidth: brPillTxt.implicitWidth + 8
-                                                    radius: 3
-                                                    color: "#21262d"
-                                                    border.color: "#30363d"
-
-                                                    Row {
-                                                        id: brPillTxt
-                                                        anchors.centerIn: parent
-                                                        spacing: 3
-                                                        Text {
-                                                            text: "🌿"
-                                                            font.pixelSize: 8
-                                                        }
-                                                        Text {
-                                                            text: modelData.default_branch || "main"
-                                                            font.family: "Consolas, monospace"
-                                                            font.pixelSize: 9
-                                                            color: "#8b949e"
-                                                        }
-                                                    }
-                                                }
+                                            Text {
+                                                text: "•"
+                                                font.pixelSize: 9
+                                                color: "#30363d"
                                             }
 
                                             // Baseline / Commit Subtitle
@@ -1607,87 +1718,10 @@ Item {
                                                 font.pixelSize: 10
                                                 color: "#6e7681"
                                                 elide: Text.ElideRight
-                                                Layout.maximumWidth: 320
+                                                Layout.fillWidth: true
                                             }
                                         }
-
-                                        // Section 2: Latest Tag & Proposed Tag Progression
-                                        RowLayout {
-                                            spacing: 8
-                                            Layout.alignment: Qt.AlignVCenter
-
-                                            // Latest Tag
-                                            Rectangle {
-                                                implicitHeight: 22
-                                                implicitWidth: latestTagTxt.implicitWidth + 12
-                                                radius: 4
-                                                color: "#161b22"
-                                                border.color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#238636" : "#30363d"
-
-                                                Text {
-                                                    id: latestTagTxt
-                                                    anchors.centerIn: parent
-                                                    text: (modelData.latest_tag && modelData.latest_tag !== "-") ? ("🏷️ " + modelData.latest_tag) : "No Tag"
-                                                    font.family: "Consolas, monospace"
-                                                    font.pixelSize: 11
-                                                    color: (modelData.latest_tag && modelData.latest_tag !== "-") ? "#3fb950" : "#8b949e"
-                                                }
-                                            }
-
-                                            // Proposed Tag Arrow & Badge
-                                            RowLayout {
-                                                spacing: 6
-                                                visible: !!modelData.proposed_tag
-
-                                                Text {
-                                                    text: "➔"
-                                                    font.pixelSize: 10
-                                                    color: "#58a6ff"
-                                                }
-
-                                                Rectangle {
-                                                    implicitHeight: 22
-                                                    implicitWidth: propTagTxt.implicitWidth + 12
-                                                    radius: 4
-                                                    color: "#0d1f33"
-                                                    border.color: "#1f6feb"
-
-                                                    Text {
-                                                        id: propTagTxt
-                                                        anchors.centerIn: parent
-                                                        text: "🚀 " + (modelData.proposed_tag || "")
-                                                        font.family: "Consolas, monospace"
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.Bold
-                                                        color: "#58a6ff"
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Section 3: Status Badges (PRs, Branches, Active)
-                                        RowLayout {
-                                            spacing: 6
-                                            Layout.alignment: Qt.AlignVCenter
-
-                                            StatusBadge {
-                                                visible: (modelData.prs_count || 0) > 0
-                                                text: modelData.prs_count + " PR" + (modelData.prs_count > 1 ? "s" : "")
-                                                badgeColor: "#d29922"
-                                            }
-
-                                            StatusBadge {
-                                                visible: (modelData.branches_count || 0) > 0
-                                                text: modelData.branches_count + " branch" + (modelData.branches_count > 1 ? "es" : "")
-                                                badgeColor: "#8957e5"
-                                            }
-
-                                            StatusBadge {
-                                                visible: (modelData.active_prs_count || 0) > 0
-                                                text: modelData.active_prs_count + " active"
-                                                badgeColor: "#1f6feb"
-                                            }
-                                        }
+                                    }
 
                                     MouseArea {
                                         id: cardMouse
@@ -4223,6 +4257,7 @@ Item {
             }
         }
     }
+        }
 
     // ============================================================
     // RIGHT: Tag Day Complete Right Sidebar (Full Page Height)
@@ -6017,7 +6052,6 @@ Click to open in TFS"
             }
         }
     }
-}
 
     // Tagging Dialog Modal
     // =========================================================================
@@ -6401,4 +6435,5 @@ Click to open in TFS"
         }
     }
 }
-}
+
+
