@@ -21,10 +21,10 @@ Item {
     // ==========================================
     // Pull Requests Right Sidebar State & Properties
     // ==========================================
-    property bool isPrSidebarOpen: false
-    property real prSidebarWidth: (backend && backend.rightSidebarWidth) ? Math.max(380, Math.min(900, backend.rightSidebarWidth)) : 520
-    property real minPrSidebarWidth: 380
-    property real maxPrSidebarWidth: 900
+    property bool isPrSidebarOpen: true
+    property real prSidebarWidth: (backend && backend.rightSidebarWidth) ? Math.max(320, Math.min(800, backend.rightSidebarWidth)) : 440
+    property real minPrSidebarWidth: 320
+    property real maxPrSidebarWidth: 800
 
     property string prSearchQuery: ""
     property string prSelectedRepo: "ALL"
@@ -181,10 +181,10 @@ Item {
     onPendingCountChanged: validateSelectedCategory()
 
     // Shared Column Widths for pixel-perfect alignment across Header and Rows
-    readonly property int colRepoWidth: 220
-    readonly property int colStableWidth: 130
-    readonly property int colUnstableWidth: 130
-    readonly property int colBranchWidth: 110
+    readonly property int colRepoWidth: 180
+    readonly property int colStableWidth: 110
+    readonly property int colUnstableWidth: 110
+    readonly property int colBranchWidth: 95
 
     // ==========================================
     // Filtered & Paged Pull Requests Computation

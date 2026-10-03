@@ -550,20 +550,9 @@ ApplicationWindow {
                             NavItem {
                                 iconText: "📦"
                                 label: "Repositories"
-                                active: window.currentTabIndex === 1 && (reposView ? !reposView.isPrSidebarOpen : true)
+                                active: window.currentTabIndex === 1
                                 isCollapsed: window.isSidebarCollapsed
-                                onClicked: {
-                                    window.currentTabIndex = 1;
-                                    if (reposView) reposView.isPrSidebarOpen = false;
-                                }
-                            }
-
-                            NavItem {
-                                iconText: "🔀"
-                                label: "Pull Requests"
-                                active: window.currentTabIndex === 1 && (reposView ? reposView.isPrSidebarOpen : false)
-                                isCollapsed: window.isSidebarCollapsed
-                                onClicked: window.openPullRequestsPage()
+                                onClicked: window.currentTabIndex = 1
                             }
 
                             NavItem {
