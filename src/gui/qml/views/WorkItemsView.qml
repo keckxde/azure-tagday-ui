@@ -2141,16 +2141,43 @@ Item {
                             MouseArea { id: deadMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: deadlineDialog.openForWorkItem(model.id, model.title, model.deadline_str, ""); }
                         }
 
-                        // Assigned To
-                        Text {
-                            text: model.assigned_to || "Unassigned"
+                        // Assigned To (Interactive chip that opens Right Sidebar)
+                        Rectangle {
                             Layout.preferredWidth: 115
                             Layout.minimumWidth: 115
                             Layout.maximumWidth: 115
-                            font.family: "Segoe UI, sans-serif"
-                            font.pixelSize: 12
-                            color: "#8b949e"
-                            elide: Text.ElideRight
+                            height: 22
+                            radius: 4
+                            color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#21262d" : "transparent"
+                            border.color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#58a6ff" : "transparent"
+                            border.width: 1
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 4
+                                anchors.right: parent.right
+                                text: model.assigned_to || "Unassigned"
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                color: assignedMa.containsMouse && model.assigned_to && model.assigned_to !== "Unassigned" ? "#58a6ff" : "#8b949e"
+                                elide: Text.ElideRight
+                            }
+
+                            MouseArea {
+                                id: assignedMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: (model.assigned_to && model.assigned_to !== "Unassigned") ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                ToolTip.visible: containsMouse && model.assigned_to && model.assigned_to !== "Unassigned"
+                                ToolTip.text: "Click to open " + model.assigned_to + " workload details in Right Sidebar"
+                                onClicked: {
+                                    if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend && model.assigned_to && model.assigned_to !== "Unassigned") {
+                                        var details = backend.get_member_workload_details(model.assigned_to);
+                                        window.openRightSidebar("workload_member", model.assigned_to, "Member Workload Breakdown", details);
+                                    }
+                                }
+                            }
                         }
 
                         // References pill
@@ -2342,6 +2369,46 @@ Item {
                                             onClicked: {
                                                 if (window && typeof window.navigateToWorkloadSprint === "function") {
                                                     window.navigateToWorkloadSprint(model.assigned_to, model.sprint_week_name || model.iteration_name);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Open Member Workload Breakdown in Right Sidebar
+                                    Rectangle {
+                                        height: 22
+                                        implicitWidth: wiSidebarBtnRow.implicitWidth + 14
+                                        radius: 11
+                                        visible: (model.assigned_to || "") !== "" && model.assigned_to !== "Unassigned"
+                                        color: wiSidebarMa.containsMouse ? "#1f6feb" : "#21262d"
+                                        border.color: wiSidebarMa.containsMouse ? "#58a6ff" : "#30363d"
+                                        border.width: 1
+
+                                        Row {
+                                            id: wiSidebarBtnRow
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Text { text: "📊"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: "Sidebar Workload"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: wiSidebarMa.containsMouse ? "#ffffff" : "#c9d1d9"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: wiSidebarMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: "Open " + model.assigned_to + " Workload Breakdown in Right Sidebar"
+                                            onClicked: {
+                                                if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend && model.assigned_to && model.assigned_to !== "Unassigned") {
+                                                    var details = backend.get_member_workload_details(model.assigned_to);
+                                                    window.openRightSidebar("workload_member", model.assigned_to, "Member Workload Breakdown", details);
                                                 }
                                             }
                                         }

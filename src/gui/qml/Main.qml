@@ -1657,20 +1657,20 @@ ApplicationWindow {
                     }
                 }
             }
+        }
 
-            // =========================================
-            // Dynamic Right Sidebar
-            // =========================================
-            RightSidebar {
-                id: globalRightSidebar
-                isOpen: window.isRightSidebarOpen
-                mode: window.rightSidebarMode
-                sidebarTitle: window.rightSidebarTitle
-                sidebarSubtitle: window.rightSidebarSubtitle
-                sidebarData: window.rightSidebarData
-                preferredWidth: window.rightSidebarWidth
-                onCloseRequested: window.closeRightSidebar()
-            }
+        // =========================================
+        // Dynamic Right Sidebar
+        // =========================================
+        RightSidebar {
+            id: globalRightSidebar
+            isOpen: window.isRightSidebarOpen
+            mode: window.rightSidebarMode
+            sidebarTitle: window.rightSidebarTitle
+            sidebarSubtitle: window.rightSidebarSubtitle
+            sidebarData: window.rightSidebarData
+            preferredWidth: window.rightSidebarWidth
+            onCloseRequested: window.closeRightSidebar()
         }
     }
 }
