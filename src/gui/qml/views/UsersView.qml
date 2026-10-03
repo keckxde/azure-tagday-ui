@@ -747,46 +747,44 @@ Item {
                                             }
 
                                             // Rank Badge
-                                            if (modelData.rank && modelData.rank <= 10) {
-                                                Rectangle {
-                                                    implicitWidth: rankText.implicitWidth + 10
-                                                    implicitHeight: 18
-                                                    radius: 9
-                                                    color: modelData.rank === 1 ? Qt.rgba(242 / 255, 204 / 255, 17 / 255, 0.2) : (modelData.rank === 2 ? Qt.rgba(160 / 255, 174 / 255, 192 / 255, 0.2) : Qt.rgba(205 / 255, 127 / 255, 50 / 255, 0.2))
-                                                    border.color: modelData.rank === 1 ? "#f2cc11" : (modelData.rank === 2 ? "#a0aec0" : "#cd7f32")
-                                                    border.width: 1
+                                            Rectangle {
+                                                visible: !!(modelData.rank && modelData.rank <= 10)
+                                                implicitWidth: rankText.implicitWidth + 10
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: modelData.rank === 1 ? Qt.rgba(242 / 255, 204 / 255, 17 / 255, 0.2) : (modelData.rank === 2 ? Qt.rgba(160 / 255, 174 / 255, 192 / 255, 0.2) : Qt.rgba(205 / 255, 127 / 255, 50 / 255, 0.2))
+                                                border.color: modelData.rank === 1 ? "#f2cc11" : (modelData.rank === 2 ? "#a0aec0" : "#cd7f32")
+                                                border.width: 1
 
-                                                    Text {
-                                                        id: rankText
-                                                        anchors.centerIn: parent
-                                                        text: modelData.rank === 1 ? "🥇 #1 MVP" : (modelData.rank === 2 ? "🥈 #2" : (modelData.rank === 3 ? "🥉 #3" : "#" + modelData.rank))
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 10
-                                                        font.weight: Font.Bold
-                                                        color: modelData.rank === 1 ? "#f2cc11" : (modelData.rank === 2 ? "#e2e8f0" : "#f6ad55")
-                                                    }
+                                                Text {
+                                                    id: rankText
+                                                    anchors.centerIn: parent
+                                                    text: modelData.rank === 1 ? "🥇 #1 MVP" : (modelData.rank === 2 ? "🥈 #2" : (modelData.rank === 3 ? "🥉 #3" : "#" + modelData.rank))
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: modelData.rank === 1 ? "#f2cc11" : (modelData.rank === 2 ? "#e2e8f0" : "#f6ad55")
                                                 }
                                             }
 
                                             // Streak flame pill
-                                            if (modelData.current_streak_weeks && modelData.current_streak_weeks >= 2) {
-                                                Rectangle {
-                                                    implicitWidth: streakText.implicitWidth + 8
-                                                    implicitHeight: 18
-                                                    radius: 9
-                                                    color: Qt.rgba(240 / 255, 136 / 255, 62 / 255, 0.2)
-                                                    border.color: "#f0883e"
-                                                    border.width: 1
+                                            Rectangle {
+                                                visible: !!(modelData.current_streak_weeks && modelData.current_streak_weeks >= 2)
+                                                implicitWidth: streakText.implicitWidth + 8
+                                                implicitHeight: 18
+                                                radius: 9
+                                                color: Qt.rgba(240 / 255, 136 / 255, 62 / 255, 0.2)
+                                                border.color: "#f0883e"
+                                                border.width: 1
 
-                                                    Text {
-                                                        id: streakText
-                                                        anchors.centerIn: parent
-                                                        text: "🔥 " + modelData.current_streak_weeks + "w"
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 10
-                                                        font.weight: Font.Bold
-                                                        color: "#ff9b57"
-                                                    }
+                                                Text {
+                                                    id: streakText
+                                                    anchors.centerIn: parent
+                                                    text: "🔥 " + modelData.current_streak_weeks + "w"
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.Bold
+                                                    color: "#ff9b57"
                                                 }
                                             }
                                         }
@@ -1158,65 +1156,64 @@ Item {
                         Item { height: 4 }
 
                         // User Hero Card
-                        if (root.selectedUser) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: heroCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#30363d"
+                        Rectangle {
+                            visible: !!root.selectedUser
+                            Layout.fillWidth: true
+                            implicitHeight: heroCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
 
-                                ColumnLayout {
-                                    id: heroCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 10
+                            ColumnLayout {
+                                id: heroCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
 
-                                    RowLayout {
-                                        spacing: 12
-                                        Rectangle {
-                                            width: 52
-                                            height: 52
-                                            radius: 26
-                                            color: "#1f6feb"
-                                            border.color: "#58a6ff"
-                                            border.width: 2
+                                RowLayout {
+                                    spacing: 12
+                                    Rectangle {
+                                        width: 52
+                                        height: 52
+                                        radius: 26
+                                        color: "#1f6feb"
+                                        border.color: "#58a6ff"
+                                        border.width: 2
 
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: root.selectedUser.initials || "??"
-                                                font.pixelSize: 18
-                                                font.weight: Font.Bold
-                                                color: "#ffffff"
-                                            }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: (root.selectedUser && root.selectedUser.initials) ? root.selectedUser.initials : "??"
+                                            font.pixelSize: 18
+                                            font.weight: Font.Bold
+                                            color: "#ffffff"
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        Text {
+                                            text: (root.selectedUser && root.selectedUser.name) ? root.selectedUser.name : ""
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 16
+                                            font.weight: Font.Bold
+                                            color: "#ffffff"
                                         }
 
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 2
+                                        Text {
+                                            text: (root.selectedUser && root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor"
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#58a6ff"
+                                        }
 
-                                            Text {
-                                                text: root.selectedUser.name
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 16
-                                                font.weight: Font.Bold
-                                                color: "#ffffff"
-                                            }
-
-                                            Text {
-                                                text: (root.selectedUser.time_stats && root.selectedUser.time_stats.persona) ? root.selectedUser.time_stats.persona : "☀️ Team Contributor"
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
-                                                color: "#58a6ff"
-                                            }
-
-                                            Text {
-                                                text: "👑 " + (root.selectedUser.score || 0) + " pts • Rank #" + (root.selectedUser.rank || "—")
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 11
-                                                font.weight: Font.Bold
-                                                color: "#e3b341"
-                                            }
+                                        Text {
+                                            text: "👑 " + ((root.selectedUser && root.selectedUser.score) ? root.selectedUser.score : 0) + " pts • Rank #" + ((root.selectedUser && root.selectedUser.rank) ? root.selectedUser.rank : "—")
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Bold
+                                            color: "#e3b341"
                                         }
                                     }
                                 }
@@ -1224,200 +1221,198 @@ Item {
                         }
 
                         // Section 1: Alias Manager
-                        if (root.selectedUser) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: aliasMgrCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#30363d"
+                        Rectangle {
+                            visible: !!root.selectedUser
+                            Layout.fillWidth: true
+                            implicitHeight: aliasMgrCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
 
-                                ColumnLayout {
-                                    id: aliasMgrCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 8
+                            ColumnLayout {
+                                id: aliasMgrCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
 
-                                    RowLayout {
-                                        Text {
-                                            text: "🔗 Configured Aliases"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#f0f6fc"
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: (root.selectedUser.aliases ? root.selectedUser.aliases.length : 0) + " mapped"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                        }
-                                    }
-
+                                RowLayout {
                                     Text {
-                                        text: "Commits, PRs, and tickets with these names are combined into this profile."
+                                        text: "🔗 Configured Aliases"
                                         font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: ((root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases.length : 0) + " mapped"
                                         font.pixelSize: 10
                                         color: "#8b949e"
                                     }
+                                }
 
-                                    // List of aliases with unlink button
-                                    Repeater {
-                                        model: root.selectedUser.aliases || []
+                                Text {
+                                    text: "Commits, PRs, and tickets with these names are combined into this profile."
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 10
+                                    color: "#8b949e"
+                                }
 
-                                        Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: 28
-                                            radius: 4
-                                            color: "#161b22"
-                                            border.color: "#30363d"
+                                // List of aliases with unlink button
+                                Repeater {
+                                    model: (root.selectedUser && root.selectedUser.aliases) ? root.selectedUser.aliases : []
 
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                spacing: 6
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: 28
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: "#30363d"
 
-                                                Text { text: "🏷️"; font.pixelSize: 10 }
-                                                Text {
-                                                    text: "@" + modelData
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 11
-                                                    color: "#a371f7"
-                                                    Layout.fillWidth: true
-                                                }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            spacing: 6
 
-                                                Text {
-                                                    text: "✕ Remove"
-                                                    font.pixelSize: 10
-                                                    color: "#f85149"
-                                                    MouseArea {
-                                                        anchors.fill: parent
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: root.removeAliasFromSelectedUser(modelData)
-                                                    }
+                                            Text { text: "🏷️"; font.pixelSize: 10 }
+                                            Text {
+                                                text: "@" + modelData
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 11
+                                                color: "#a371f7"
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Text {
+                                                text: "✕ Remove"
+                                                font.pixelSize: 10
+                                                color: "#f85149"
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.removeAliasFromSelectedUser(modelData)
                                                 }
                                             }
                                         }
                                     }
+                                }
 
-                                    // Inline Add Alias Input Form
-                                    RowLayout {
+                                // Inline Add Alias Input Form
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+
+                                    Rectangle {
                                         Layout.fillWidth: true
-                                        spacing: 6
+                                        implicitHeight: 30
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
 
-                                        Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: 30
-                                            radius: 4
-                                            color: "#161b22"
-                                            border.color: addAliasInputBox.activeFocus ? "#58a6ff" : "#30363d"
+                                        TextInput {
+                                            id: addAliasInputBox
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            text: root.newAliasInput
+                                            color: "#c9d1d9"
+                                            font.pixelSize: 11
+                                            onTextChanged: root.newAliasInput = text
+                                            onAccepted: {
+                                                root.addAliasToSelectedUser(text);
+                                            }
 
-                                            TextInput {
-                                                id: addAliasInputBox
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                verticalAlignment: TextInput.AlignVCenter
-                                                text: root.newAliasInput
-                                                color: "#c9d1d9"
+                                            Text {
+                                                text: "Enter new alias (e.g. asmith)..."
                                                 font.pixelSize: 11
-                                                onTextChanged: root.newAliasInput = text
-                                                onAccepted: {
-                                                    root.addAliasToSelectedUser(text);
-                                                }
-
-                                                Text {
-                                                    text: "Enter new alias (e.g. asmith)..."
-                                                    font.pixelSize: 11
-                                                    color: "#6e7681"
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
-                                                }
+                                                color: "#6e7681"
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                visible: !addAliasInputBox.text && !addAliasInputBox.activeFocus
                                             }
                                         }
+                                    }
 
-                                        Button {
-                                            text: "+ Link"
-                                            font.pixelSize: 10
-                                            font.weight: Font.Bold
-                                            contentItem: Text {
-                                                text: parent.text
-                                                font: parent.font
-                                                color: "#ffffff"
-                                                horizontalAlignment: Text.AlignHCenter
-                                                verticalAlignment: Text.AlignVCenter
-                                            }
-                                            background: Rectangle {
-                                                implicitHeight: 30
-                                                implicitWidth: 60
-                                                radius: 4
-                                                color: parent.hovered ? "#2ea043" : "#238636"
-                                            }
-                                            onClicked: root.addAliasToSelectedUser(root.newAliasInput)
+                                    Button {
+                                        text: "+ Link"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        contentItem: Text {
+                                            text: parent.text
+                                            font: parent.font
+                                            color: "#ffffff"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
                                         }
+                                        background: Rectangle {
+                                            implicitHeight: 30
+                                            implicitWidth: 60
+                                            radius: 4
+                                            color: parent.hovered ? "#2ea043" : "#238636"
+                                        }
+                                        onClicked: root.addAliasToSelectedUser(root.newAliasInput)
                                     }
                                 }
                             }
                         }
 
                         // Section 2: Last Activity Spotlight
-                        if (root.selectedUser && root.selectedUser.last_activity) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: lastActCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#1f6feb"
-                                border.width: 1
+                        Rectangle {
+                            visible: !!(root.selectedUser && root.selectedUser.last_activity)
+                            Layout.fillWidth: true
+                            implicitHeight: lastActCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#1f6feb"
+                            border.width: 1
 
-                                ColumnLayout {
-                                    id: lastActCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 6
+                            ColumnLayout {
+                                id: lastActCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 6
 
-                                    RowLayout {
-                                        Text { text: "⏱️"; font.pixelSize: 12 }
-                                        Text {
-                                            text: "LATEST ACTIVITY TRACKED"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 10
-                                            font.weight: Font.Bold
-                                            color: "#58a6ff"
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: root.selectedUser.last_activity.relative
-                                            font.pixelSize: 10
-                                            font.weight: Font.Bold
-                                            color: "#79c0ff"
-                                        }
+                                RowLayout {
+                                    Text { text: "⏱️"; font.pixelSize: 12 }
+                                    Text {
+                                        text: "LATEST ACTIVITY TRACKED"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: "#58a6ff"
                                     }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: (root.selectedUser && root.selectedUser.last_activity) ? root.selectedUser.last_activity.relative : ""
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: "#79c0ff"
+                                    }
+                                }
 
-                                    RowLayout {
-                                        spacing: 8
+                                RowLayout {
+                                    spacing: 8
+                                    Text {
+                                        text: (root.selectedUser && root.selectedUser.last_activity && root.selectedUser.last_activity.icon) ? root.selectedUser.last_activity.icon : "📌"
+                                        font.pixelSize: 16
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
                                         Text {
-                                            text: root.selectedUser.last_activity.icon || "📌"
-                                            font.pixelSize: 16
-                                        }
-                                        ColumnLayout {
+                                            text: (root.selectedUser && root.selectedUser.last_activity) ? root.selectedUser.last_activity.title : ""
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#f0f6fc"
+                                            wrapMode: Text.Wrap
                                             Layout.fillWidth: true
-                                            spacing: 2
-                                            Text {
-                                                text: root.selectedUser.last_activity.title
-                                                font.family: "Segoe UI, sans-serif"
-                                                font.pixelSize: 12
-                                                font.weight: Font.Bold
-                                                color: "#f0f6fc"
-                                                wrapMode: Text.Wrap
-                                                Layout.fillWidth: true
-                                            }
-                                            Text {
-                                                text: "Timestamp: " + root.selectedUser.last_activity.timestamp + (root.selectedUser.last_activity.repo_or_id ? " • " + root.selectedUser.last_activity.repo_or_id : "")
-                                                font.pixelSize: 10
-                                                color: "#8b949e"
-                                            }
+                                        }
+                                        Text {
+                                            text: "Timestamp: " + ((root.selectedUser && root.selectedUser.last_activity) ? root.selectedUser.last_activity.timestamp : "") + ((root.selectedUser && root.selectedUser.last_activity && root.selectedUser.last_activity.repo_or_id) ? " • " + root.selectedUser.last_activity.repo_or_id : "")
+                                            font.pixelSize: 10
+                                            color: "#8b949e"
                                         }
                                     }
                                 }
@@ -1425,77 +1420,76 @@ Item {
                         }
 
                         // Section 3: Activity Timeline History
-                        if (root.selectedUser) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: actStreamCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#30363d"
+                        Rectangle {
+                            visible: !!root.selectedUser
+                            Layout.fillWidth: true
+                            implicitHeight: actStreamCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
 
-                                ColumnLayout {
-                                    id: actStreamCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 8
+                            ColumnLayout {
+                                id: actStreamCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
 
-                                    RowLayout {
-                                        Text {
-                                            text: "📜 Recent Activity Timeline"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#f0f6fc"
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: (root.selectedUser.recent_activities ? root.selectedUser.recent_activities.length : 0) + " events"
-                                            font.pixelSize: 10
-                                            color: "#8b949e"
-                                        }
+                                RowLayout {
+                                    Text {
+                                        text: "📜 Recent Activity Timeline"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
                                     }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: ((root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities.length : 0) + " events"
+                                        font.pixelSize: 10
+                                        color: "#8b949e"
+                                    }
+                                }
 
-                                    Repeater {
-                                        model: root.selectedUser.recent_activities || []
+                                Repeater {
+                                    model: (root.selectedUser && root.selectedUser.recent_activities) ? root.selectedUser.recent_activities : []
 
-                                        Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: actEntryCol.implicitHeight + 12
-                                            radius: 4
-                                            color: "#161b22"
-                                            border.color: "#21262d"
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: actEntryCol.implicitHeight + 12
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: "#21262d"
 
-                                            ColumnLayout {
-                                                id: actEntryCol
-                                                anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 2
+                                        ColumnLayout {
+                                            id: actEntryCol
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 2
 
-                                                RowLayout {
-                                                    spacing: 6
-                                                    Text { text: modelData.icon || "📌"; font.pixelSize: 11 }
-                                                    Text {
-                                                        text: modelData.title
-                                                        font.family: "Segoe UI, sans-serif"
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.DemiBold
-                                                        color: "#c9d1d9"
-                                                        elide: Text.ElideRight
-                                                        Layout.fillWidth: true
-                                                    }
-                                                    Text {
-                                                        text: modelData.relative
-                                                        font.pixelSize: 9
-                                                        color: "#58a6ff"
-                                                    }
-                                                }
-
+                                            RowLayout {
+                                                spacing: 6
+                                                Text { text: modelData.icon || "📌"; font.pixelSize: 11 }
                                                 Text {
-                                                    text: modelData.timestamp + (modelData.repo_or_id ? " • " + modelData.repo_or_id : "")
-                                                    font.pixelSize: 9
-                                                    color: "#6e7681"
-                                                    anchors.leftMargin: 18
+                                                    text: modelData.title
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    color: "#c9d1d9"
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
                                                 }
+                                                Text {
+                                                    text: modelData.relative
+                                                    font.pixelSize: 9
+                                                    color: "#58a6ff"
+                                                }
+                                            }
+
+                                            Text {
+                                                text: modelData.timestamp + (modelData.repo_or_id ? " • " + modelData.repo_or_id : "")
+                                                font.pixelSize: 9
+                                                color: "#6e7681"
+                                                anchors.leftMargin: 18
                                             }
                                         }
                                     }
@@ -1504,68 +1498,67 @@ Item {
                         }
 
                         // Section 4: Assigned Work Items
-                        if (root.selectedUser && root.selectedUser.assigned_work_items && root.selectedUser.assigned_work_items.length > 0) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: wiCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#30363d"
+                        Rectangle {
+                            visible: !!(root.selectedUser && root.selectedUser.assigned_work_items && root.selectedUser.assigned_work_items.length > 0)
+                            Layout.fillWidth: true
+                            implicitHeight: wiCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
 
-                                ColumnLayout {
-                                    id: wiCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 8
+                            ColumnLayout {
+                                id: wiCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
 
-                                    RowLayout {
-                                        Text {
-                                            text: "📋 Active Assigned Tasks (" + root.selectedUser.assigned_work_items.length + ")"
-                                            font.family: "Segoe UI, sans-serif"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Bold
-                                            color: "#f0f6fc"
-                                        }
+                                RowLayout {
+                                    Text {
+                                        text: "📋 Active Assigned Tasks (" + ((root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items.length : 0) + ")"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Bold
+                                        color: "#f0f6fc"
                                     }
+                                }
 
-                                    Repeater {
-                                        model: root.selectedUser.assigned_work_items
+                                Repeater {
+                                    model: (root.selectedUser && root.selectedUser.assigned_work_items) ? root.selectedUser.assigned_work_items : []
 
-                                        Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: 30
-                                            radius: 4
-                                            color: "#161b22"
-                                            border.color: "#21262d"
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: 30
+                                        radius: 4
+                                        color: "#161b22"
+                                        border.color: "#21262d"
 
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                spacing: 6
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            spacing: 6
 
-                                                Text {
-                                                    text: "#" + modelData.id
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 10
-                                                    font.weight: Font.Bold
-                                                    color: "#58a6ff"
-                                                }
+                                            Text {
+                                                text: "#" + modelData.id
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: "#58a6ff"
+                                            }
 
-                                                Text {
-                                                    text: modelData.title
-                                                    font.family: "Segoe UI, sans-serif"
-                                                    font.pixelSize: 10
-                                                    color: "#c9d1d9"
-                                                    Layout.fillWidth: true
-                                                    elide: Text.ElideRight
-                                                }
+                                            Text {
+                                                text: modelData.title
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                color: "#c9d1d9"
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
+                                            }
 
-                                                Text {
-                                                    text: modelData.state
-                                                    font.pixelSize: 9
-                                                    color: "#3fb950"
-                                                }
+                                            Text {
+                                                text: modelData.state
+                                                font.pixelSize: 9
+                                                color: "#3fb950"
                                             }
                                         }
                                     }
@@ -1574,48 +1567,47 @@ Item {
                         }
 
                         // Section 5: Badges Showcase
-                        if (root.selectedUser && root.selectedUser.badges && root.selectedUser.badges.length > 0) {
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: badgesCol.implicitHeight + 20
-                                radius: 8
-                                color: "#0d1117"
-                                border.color: "#30363d"
+                        Rectangle {
+                            visible: !!(root.selectedUser && root.selectedUser.badges && root.selectedUser.badges.length > 0)
+                            Layout.fillWidth: true
+                            implicitHeight: badgesCol.implicitHeight + 20
+                            radius: 8
+                            color: "#0d1117"
+                            border.color: "#30363d"
 
-                                ColumnLayout {
-                                    id: badgesCol
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 8
+                            ColumnLayout {
+                                id: badgesCol
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
 
-                                    Text {
-                                        text: "🏅 Earned Badges (" + root.selectedUser.badges.length + ")"
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: "#f0f6fc"
-                                    }
+                                Text {
+                                    text: "🏅 Earned Badges (" + ((root.selectedUser && root.selectedUser.badges) ? root.selectedUser.badges.length : 0) + ")"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
 
-                                    Flow {
-                                        Layout.fillWidth: true
-                                        spacing: 6
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
-                                        Repeater {
-                                            model: root.selectedUser.badges
+                                    Repeater {
+                                        model: (root.selectedUser && root.selectedUser.badges) ? root.selectedUser.badges : []
 
-                                            Rectangle {
-                                                implicitWidth: bText.implicitWidth + 14
-                                                implicitHeight: 24
-                                                radius: 4
-                                                color: Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.1)
-                                                border.color: "#d29922"
+                                        Rectangle {
+                                            implicitWidth: bText.implicitWidth + 14
+                                            implicitHeight: 24
+                                            radius: 4
+                                            color: Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.1)
+                                            border.color: "#d29922"
 
-                                                Row {
-                                                    anchors.centerIn: parent
-                                                    spacing: 4
-                                                    Text { text: modelData.icon || "🏅"; font.pixelSize: 10 }
-                                                    Text { id: bText; text: modelData.name || ""; font.pixelSize: 10; color: "#f0f6fc" }
-                                                }
+                                            Row {
+                                                anchors.centerIn: parent
+                                                spacing: 4
+                                                Text { text: modelData.icon || "🏅"; font.pixelSize: 10 }
+                                                Text { id: bText; text: modelData.name || ""; font.pixelSize: 10; color: "#f0f6fc" }
                                             }
                                         }
                                     }
@@ -1662,23 +1654,26 @@ Item {
                 Layout.fillWidth: true
             }
 
-            if (root.autoDetectSuggestions.length === 0) {
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 120
-                    radius: 6
-                    color: "#0d1117"
-                    border.color: "#30363d"
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: 4
-                        Text { text: "✓"; font.pixelSize: 24; color: "#3fb950"; Layout.alignment: Qt.AlignHCenter }
-                        Text { text: "All Git commit authors and user aliases are currently mapped!"; font.pixelSize: 12; color: "#c9d1d9"; Layout.alignment: Qt.AlignHCenter }
-                    }
+            Rectangle {
+                visible: !root.autoDetectSuggestions || root.autoDetectSuggestions.length === 0
+                Layout.fillWidth: true
+                implicitHeight: 120
+                radius: 6
+                color: "#0d1117"
+                border.color: "#30363d"
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Text { text: "✓"; font.pixelSize: 24; color: "#3fb950"; Layout.alignment: Qt.AlignHCenter }
+                    Text { text: "All Git commit authors and user aliases are currently mapped!"; font.pixelSize: 12; color: "#c9d1d9"; Layout.alignment: Qt.AlignHCenter }
                 }
             }
 
             ScrollView {
+                visible: !!(root.autoDetectSuggestions && root.autoDetectSuggestions.length > 0)
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
