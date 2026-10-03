@@ -545,15 +545,10 @@ Item {
                     }
 
                     Text {
-                        text: {
-                            var extra = [];
-                            if (root.pendingPrsCount > 0) extra.push(root.pendingPrsCount + " untagged PRs");
-                            if (root.unmergedBranchesCount > 0) extra.push(root.unmergedBranchesCount + " unmerged branches");
-                            return "(" + root.totalMatchingCount + " repos" + (extra.length > 0 ? " • " + extra.join(" • ") : "") + ")";
-                        }
+                        text: "(" + root.totalMatchingCount + " repos)"
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 12
-                        color: (root.pendingPrsCount > 0 || root.unmergedBranchesCount > 0) ? "#f0883e" : "#8b949e"
+                        color: "#8b949e"
                     }
 
                     Item { Layout.fillWidth: true }
@@ -580,7 +575,7 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
-                                color: togglePrSidebarBtn.checked ? "#ffffff" : (root.activePrsCount > 0 ? "#79c0ff" : "#c9d1d9")
+                                color: togglePrSidebarBtn.checked ? "#ffffff" : ((root.activePrsCount > 0 || root.untaggedPrsCount > 0) ? "#79c0ff" : "#c9d1d9")
                             }
                             Rectangle {
                                 visible: root.activePrsCount > 0
@@ -591,7 +586,23 @@ Item {
                                 Text {
                                     id: activePrPillText
                                     anchors.centerIn: parent
-                                    text: root.activePrsCount + " active"
+                                    text: root.activePrsCount === 1 ? "1 active PR" : (root.activePrsCount + " active PRs")
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 9
+                                    font.weight: Font.Bold
+                                    color: "#ffffff"
+                                }
+                            }
+                            Rectangle {
+                                visible: root.untaggedPrsCount > 0
+                                height: 16
+                                width: untaggedPrPillText.implicitWidth + 8
+                                radius: 8
+                                color: togglePrSidebarBtn.checked ? "#b08800" : "#9e6a03"
+                                Text {
+                                    id: untaggedPrPillText
+                                    anchors.centerIn: parent
+                                    text: root.untaggedPrsCount === 1 ? "1 untagged PR" : (root.untaggedPrsCount + " untagged PRs")
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 9
                                     font.weight: Font.Bold
@@ -601,7 +612,7 @@ Item {
                         }
                         background: Rectangle {
                             implicitHeight: 32
-                            implicitWidth: 140
+                            implicitWidth: 155 + (root.untaggedPrsCount > 0 ? untaggedPrPillText.implicitWidth + 12 : 0)
                             radius: 6
                             color: togglePrSidebarBtn.checked ? "#1f6feb" : (togglePrSidebarBtn.hovered ? "#21262d" : "#161b22")
                             border.color: togglePrSidebarBtn.checked ? "#58a6ff" : (root.activePrsCount > 0 ? "#388bfd" : "#30363d")
@@ -632,10 +643,11 @@ Item {
                                 font.family: "Segoe UI, sans-serif"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
-                                color: toggleBranchesSidebarBtn.checked ? "#ffffff" : (root.unmergedBranchesCount > 0 ? "#bc8cff" : "#c9d1d9")
+                                color: toggleBranchesSidebarBtn.checked ? "#ffffff" : (root.totalBranchesCount > 0 ? "#bc8cff" : "#c9d1d9")
                             }
                             Rectangle {
-                                visible: root.unmergedBranchesCount > 0
+                                property int bCnt: root.totalBranchesCount > 0 ? root.totalBranchesCount : root.unmergedBranchesCount
+                                visible: bCnt > 0
                                 height: 16
                                 width: unmergedBrPillText.implicitWidth + 8
                                 radius: 8
@@ -643,7 +655,8 @@ Item {
                                 Text {
                                     id: unmergedBrPillText
                                     anchors.centerIn: parent
-                                    text: root.unmergedBranchesCount + " ahead"
+                                    property int bCnt: root.totalBranchesCount > 0 ? root.totalBranchesCount : root.unmergedBranchesCount
+                                    text: bCnt === 1 ? "1 branch ahead" : (bCnt + " branches ahead")
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 9
                                     font.weight: Font.Bold
@@ -653,10 +666,10 @@ Item {
                         }
                         background: Rectangle {
                             implicitHeight: 32
-                            implicitWidth: 155
+                            implicitWidth: 165
                             radius: 6
                             color: toggleBranchesSidebarBtn.checked ? "#6e40c9" : (toggleBranchesSidebarBtn.hovered ? "#21262d" : "#161b22")
-                            border.color: toggleBranchesSidebarBtn.checked ? "#bc8cff" : (root.unmergedBranchesCount > 0 ? "#8957e5" : "#30363d")
+                            border.color: toggleBranchesSidebarBtn.checked ? "#bc8cff" : (root.totalBranchesCount > 0 ? "#8957e5" : "#30363d")
                             border.width: 1
                         }
                         onClicked: root.toggleBranchesSidebar()
@@ -1680,6 +1693,42 @@ Item {
                                     font.weight: tabPrBtn.checked ? Font.DemiBold : Font.Normal
                                     color: tabPrBtn.checked ? "#ffffff" : "#8b949e"
                                 }
+                                Rectangle {
+                                    visible: root.activePrsCount > 0
+                                    implicitHeight: 16
+                                    implicitWidth: activePrsBadgeText.implicitWidth + 8
+                                    radius: 8
+                                    color: tabPrBtn.checked ? "#388bfd" : "#1f6feb"
+                                    border.color: "#58a6ff"
+                                    border.width: 1
+                                    Text {
+                                        id: activePrsBadgeText
+                                        anchors.centerIn: parent
+                                        text: root.activePrsCount === 1 ? "1 active PR" : (root.activePrsCount + " active PRs")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: "#ffffff"
+                                    }
+                                }
+                                Rectangle {
+                                    visible: root.untaggedPrsCount > 0
+                                    implicitHeight: 16
+                                    implicitWidth: untaggedPrsBadgeText.implicitWidth + 8
+                                    radius: 8
+                                    color: tabPrBtn.checked ? "#b08800" : "#9e6a03"
+                                    border.color: "#f0883e"
+                                    border.width: 1
+                                    Text {
+                                        id: untaggedPrsBadgeText
+                                        anchors.centerIn: parent
+                                        text: root.untaggedPrsCount === 1 ? "1 untagged PR" : (root.untaggedPrsCount + " untagged PRs")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: "#ffffff"
+                                    }
+                                }
                             }
                             background: Rectangle {
                                 radius: 4
@@ -1692,7 +1741,7 @@ Item {
                             }
                         }
 
-                        // Tab 1: Unmerged Branches
+                        // Tab 1: Branches ahead
                         Button {
                             id: tabBranchesBtn
                             Layout.fillWidth: true
@@ -1709,11 +1758,31 @@ Item {
                                     font.pixelSize: 11
                                 }
                                 Text {
-                                    text: "Branches (" + root.totalBranchesCount + ")"
+                                    text: "Branches ahead (" + root.totalBranchesCount + ")"
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     font.weight: tabBranchesBtn.checked ? Font.DemiBold : Font.Normal
                                     color: tabBranchesBtn.checked ? "#ffffff" : "#8b949e"
+                                }
+                                Rectangle {
+                                    property int bCnt: root.totalBranchesCount > 0 ? root.totalBranchesCount : root.unmergedBranchesCount
+                                    visible: bCnt > 0
+                                    implicitHeight: 16
+                                    implicitWidth: branchesAheadBadgeText.implicitWidth + 8
+                                    radius: 8
+                                    color: tabBranchesBtn.checked ? "#a371f7" : "#8957e5"
+                                    border.color: "#bc8cff"
+                                    border.width: 1
+                                    Text {
+                                        id: branchesAheadBadgeText
+                                        anchors.centerIn: parent
+                                        property int bCnt: root.totalBranchesCount > 0 ? root.totalBranchesCount : root.unmergedBranchesCount
+                                        text: bCnt === 1 ? "1 branch ahead" : (bCnt + " branches ahead")
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 9
+                                        font.weight: Font.Bold
+                                        color: "#ffffff"
+                                    }
                                 }
                             }
                             background: Rectangle {
@@ -3156,6 +3225,7 @@ Item {
             }
         }
     }
+}
 
     // ==========================================
     // Repositories Filtering Logic

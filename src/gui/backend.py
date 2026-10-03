@@ -1708,23 +1708,8 @@ class DevOpsBackend(QObject):
             return []
         all_branches = []
         for repo in self._tagday_data.get("repos_summary", []):
-            rname = repo.get("name", "")
-            r_url = repo.get("web_url", "")
-            r_cat = repo.get("category", "OTHERS")
-            r_def_branch = repo.get("default_branch", "main")
             for b in repo.get("unmerged_branches", []):
-                branch_copy = dict(b)
-                branch_copy["repo_name"] = rname
-                branch_copy["repo_url"] = r_url
-                branch_copy["repo_category"] = r_cat
-                branch_copy["default_branch"] = r_def_branch
-                if r_url:
-                    b_name = b.get("branch_name", "")
-                    clean_b_name = b_name.replace("refs/heads/", "")
-                    branch_copy["branch_url"] = f"{r_url}?version=GB{clean_b_name}"
-                else:
-                    branch_copy["branch_url"] = ""
-                all_branches.append(branch_copy)
+                all_branches.append(dict(b))
         return all_branches
 
     @Property(dict, notify=storageDataChanged)
@@ -2020,6 +2005,45 @@ class DevOpsBackend(QObject):
 
             status_text = ", ".join(parts) if parts else "Up to date"
 
+            clean_repo_branches = []
+            if td_repo and td_repo.get("unmerged_branches"):
+                r_web_url = info.get("webUrl", "")
+                for b in td_repo.get("unmerged_branches", []):
+                    prep_pr_id = ""
+                    prep_pr_title = ""
+                    prep_pr_status = ""
+                    is_abandoned = b.get("is_abandoned", False)
+                    if b.get("prepared_pr"):
+                        prep_pr_id = str(b["prepared_pr"].get("pr_id", ""))
+                        prep_pr_title = str(b["prepared_pr"].get("title", ""))
+                        prep_pr_status = str(b["prepared_pr"].get("status", ""))
+                        if not is_abandoned and prep_pr_status in ("abandoned", "2"):
+                            is_abandoned = True
+
+                    b_name = b.get("branch_name", "")
+                    clean_b_name = b_name.replace("refs/heads/", "")
+                    branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
+
+                    clean_repo_branches.append({
+                        "branch_name": b_name,
+                        "repo_name": rname,
+                        "repo_url": r_web_url,
+                        "branch_url": branch_url,
+                        "repo_category": rcat,
+                        "default_branch": info.get("defaultBranch", "").replace("refs/heads/", "") or "main",
+                        "commit_id": b.get("commit_id", ""),
+                        "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
+                        "commit_date": b.get("commit_date", ""),
+                        "committer": b.get("committer", ""),
+                        "comment": b.get("comment", ""),
+                        "ahead": b.get("ahead", 0),
+                        "behind": b.get("behind", 0),
+                        "prepared_pr_id": prep_pr_id,
+                        "prepared_pr_title": prep_pr_title,
+                        "prepared_pr_status": prep_pr_status,
+                        "is_abandoned": is_abandoned,
+                    })
+
             repo_list.append({
                 "id": str(r_id),
                 "name": rname,
@@ -2039,6 +2063,7 @@ class DevOpsBackend(QObject):
                 "prs_after_tag_count": prs_after_tag_count,
                 "unmerged_branches_count": unmerged_branches_count,
                 "active_prs_count": active_prs_count,
+                "unmerged_branches": clean_repo_branches,
                 "pending_status_text": status_text,
                 "is_deleted": bool((rcat or "").strip().upper() == "DELETED" or r.get("is_deleted")),
             })
@@ -2534,6 +2559,7 @@ class DevOpsBackend(QObject):
                 p_copy["tasks"] = self._extract_pr_tasks(p_copy, work_items_map=all_wis_map)
                 enriched_all_prs.append(p_copy)
 
+            r_web_url = rinfo.get("web_url", "")
             clean_branches = []
             for b in unmerged_branches:
                 prep_pr_id = ""
@@ -2547,10 +2573,19 @@ class DevOpsBackend(QObject):
                     if not is_abandoned and prep_pr_status in ("abandoned", "2"):
                         is_abandoned = True
 
+                b_name = b.get("branch_name", "")
+                clean_b_name = b_name.replace("refs/heads/", "")
+                branch_url = f"{r_web_url}?version=GB{clean_b_name}" if r_web_url else ""
+
                 clean_branches.append({
-                    "branch_name": b.get("branch_name", ""),
+                    "branch_name": b_name,
+                    "repo_name": rname,
+                    "repo_url": r_web_url,
+                    "branch_url": branch_url,
+                    "repo_category": rinfo.get("category", "OTHERS"),
+                    "default_branch": rinfo.get("default_branch", "main"),
                     "commit_id": b.get("commit_id", ""),
-                    "short_hash": b.get("short_hash", ""),
+                    "short_hash": b.get("short_hash", "") or (b.get("commit_id", "")[:7] if b.get("commit_id") else ""),
                     "commit_date": b.get("commit_date", ""),
                     "committer": b.get("committer", ""),
                     "comment": b.get("comment", ""),
