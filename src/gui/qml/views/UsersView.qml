@@ -2149,6 +2149,8 @@ Item {
                                                 }
                                             }
                                         }
+                                    }
+
                                     // Empty state message
                                     Rectangle {
                                         visible: !(root.selectedUser && root.selectedUser.recent_activities && root.selectedUser.recent_activities.length > 0)
@@ -2165,6 +2167,7 @@ Item {
                                             color: "#8b949e"
                                         }
                                     }
+                                }
                             }
                         }
 
