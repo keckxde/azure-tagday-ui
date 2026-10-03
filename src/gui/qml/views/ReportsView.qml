@@ -286,33 +286,63 @@ Item {
                     currentIndex: root.activeReportTab
 
                     // Tab 0: Actions & File Exports
-                    ReportsOverviewTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 0 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsOverviewTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
 
                     // Tab 1: Interactive Tag Day Explorer
-                    ReportsTagDayExplorerTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 1 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsTagDayExplorerTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
 
                     // Tab 2: Interactive Storage & Build Artifacts
-                    ReportsStorageArtifactsTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 2 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsStorageArtifactsTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
 
                     // Tab 3: Interactive Release Notes & Version Overview
-                    ReportsReleaseNotesTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 3 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsReleaseNotesTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
 
                     // Tab 4: Agile Sprint & Timeframe Explorer
-                    ReportsSprintReportTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 4 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsSprintReportTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
 
                     // Tab 5: Iteration Shifts & Impact Analysis
-                    ReportsIterationShiftsTab {
-                        root: root
+                    Loader {
+                        active: root.activeReportTab === 5 || _hasLoaded
+                        property bool _hasLoaded: false
+                        sourceComponent: Component {
+                            ReportsIterationShiftsTab { root: root }
+                        }
+                        onLoaded: _hasLoaded = true
                     }
                 }
             }
@@ -327,9 +357,16 @@ Item {
     }
 
     // =========================================================================
-    // MODAL DIALOG: Tag Repository (Create Git Tag)
+    // MODAL DIALOG: Tag Repository (Create Git Tag) - Lazy Loaded
     // =========================================================================
-    ReportsTaggingModal {
-        root: root
+    Loader {
+        active: root.tagModalOpen || _hasLoaded
+        property bool _hasLoaded: false
+        sourceComponent: Component {
+            ReportsTaggingModal {
+                root: root
+            }
+        }
+        onLoaded: _hasLoaded = true
     }
 }

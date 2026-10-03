@@ -7,16 +7,19 @@ ColumnLayout {
     id: explorerTabRoot
     property var root: null
 
-    readonly property bool isPagedMode: (!root.tdRepoFilter || root.tdRepoFilter === "none")
+    readonly property bool isPagedMode: (!root || !root.tdRepoFilter || root.tdRepoFilter === "none")
+    readonly property string activeFilter: (root && root.tdRepoFilter) ? root.tdRepoFilter : "changes"
+    readonly property string searchQuery: (root && root.tdRepoSearchQuery) ? root.tdRepoSearchQuery : ""
 
     readonly property var fullFilteredList: {
         if (!backend || !backend.tagDayData) return [];
         var list = [];
-        if (root.tdRepoFilter === "prs") {
+        var f = explorerTabRoot.activeFilter;
+        if (f === "prs") {
             list = (backend.tagDayData.repos_summary || []).filter(function(r) { return (r.prs_count || 0) > 0; });
-        } else if (root.tdRepoFilter === "branches") {
+        } else if (f === "branches") {
             list = (backend.tagDayData.repos_summary || []).filter(function(r) { return (r.branches_count || 0) > 0; });
-        } else if (root.tdRepoFilter === "changes") {
+        } else if (f === "changes") {
             list = backend.tagDayData.repos_summary || [];
         } else {
             // None of the filters is active -> Show all repositories in paged mode
@@ -24,7 +27,7 @@ ColumnLayout {
                 ? backend.tagDayData.all_repos_summary
                 : (backend.tagDayData.repos_summary || []);
         }
-        var q = (root.tdRepoSearchQuery || "").trim().toLowerCase();
+        var q = explorerTabRoot.searchQuery.trim().toLowerCase();
         if (q) {
             list = list.filter(function(r) {
                 var n = (r.name || "").toLowerCase();
@@ -133,14 +136,14 @@ ColumnLayout {
 
             // Right Sidebar Toggle Button in Header
             Button {
-                text: root.isTdSidebarOpen ? "Sidebar ◨" : "Sidebar ◧"
+                text: (root && root.isTdSidebarOpen) ? "Sidebar ◨" : "Sidebar ◧"
                 font.pixelSize: 12
                 ToolTip.visible: hovered
-                ToolTip.text: root.isTdSidebarOpen ? "Collapse right sidebar" : "Open right sidebar"
+                ToolTip.text: (root && root.isTdSidebarOpen) ? "Collapse right sidebar" : "Open right sidebar"
                 contentItem: Text {
                     text: parent.text
                     font: parent.font
-                    color: root.isTdSidebarOpen ? "#58a6ff" : "#c9d1d9"
+                    color: (root && root.isTdSidebarOpen) ? "#58a6ff" : "#c9d1d9"
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -149,9 +152,11 @@ ColumnLayout {
                     implicitWidth: 100
                     radius: 6
                     color: parent.hovered ? "#30363d" : "#21262d"
-                    border.color: root.isTdSidebarOpen ? "#388bfd" : "#30363d"
+                    border.color: (root && root.isTdSidebarOpen) ? "#388bfd" : "#30363d"
                 }
-                onClicked: root.isTdSidebarOpen = !root.isTdSidebarOpen
+                onClicked: {
+                    if (root) root.isTdSidebarOpen = !root.isTdSidebarOpen;
+                }
             }
         }
     }
@@ -171,8 +176,10 @@ ColumnLayout {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    root.tdRepoFilter = "none";
-                    root.tdCurrentPage = 1;
+                    if (root) {
+                        root.tdRepoFilter = "none";
+                        root.tdCurrentPage = 1;
+                    }
                 }
             }
         }
@@ -187,8 +194,10 @@ ColumnLayout {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    root.tdRepoFilter = (root.tdRepoFilter === "prs") ? "none" : "prs";
-                    root.tdCurrentPage = 1;
+                    if (root) {
+                        root.tdRepoFilter = (root.tdRepoFilter === "prs") ? "none" : "prs";
+                        root.tdCurrentPage = 1;
+                    }
                 }
             }
         }
@@ -203,8 +212,10 @@ ColumnLayout {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    root.tdRepoFilter = (root.tdRepoFilter === "branches") ? "none" : "branches";
-                    root.tdCurrentPage = 1;
+                    if (root) {
+                        root.tdRepoFilter = (root.tdRepoFilter === "branches") ? "none" : "branches";
+                        root.tdCurrentPage = 1;
+                    }
                 }
             }
         }
@@ -219,8 +230,10 @@ ColumnLayout {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    root.isTdSidebarOpen = true;
-                    root.tdSidebarView = 1;
+                    if (root) {
+                        root.isTdSidebarOpen = true;
+                        root.tdSidebarView = 1;
+                    }
                 }
             }
         }
@@ -273,10 +286,12 @@ ColumnLayout {
                             font.pixelSize: 12
                             color: "#f0f6fc"
                             clip: true
-                            text: root.tdRepoSearchQuery
+                            text: explorerTabRoot.searchQuery
                             onTextChanged: {
-                                root.tdRepoSearchQuery = text;
-                                root.tdCurrentPage = 1;
+                                if (root) {
+                                    root.tdRepoSearchQuery = text;
+                                    root.tdCurrentPage = 1;
+                                }
                             }
 
                             Text {
@@ -299,7 +314,7 @@ ColumnLayout {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     tdSearchInput.text = "";
-                                    root.tdCurrentPage = 1;
+                                    if (root) root.tdCurrentPage = 1;
                                 }
                             }
                         }
@@ -314,7 +329,7 @@ ColumnLayout {
                         readonly property int count: (backend && backend.tagDayData && backend.tagDayData.repos_summary) ? backend.tagDayData.repos_summary.length : 0
                         text: "Changes (" + count + ")"
                         checkable: true
-                        checked: root.tdRepoFilter === "changes"
+                        checked: (root && root.tdRepoFilter === "changes")
                         font.pixelSize: 11
                         font.weight: checked ? Font.DemiBold : Font.Normal
                         contentItem: Text {
@@ -332,8 +347,10 @@ ColumnLayout {
                             border.color: parent.checked ? "#388bfd" : "#30363d"
                         }
                         onClicked: {
-                            root.tdRepoFilter = (root.tdRepoFilter === "changes") ? "none" : "changes";
-                            root.tdCurrentPage = 1;
+                            if (root) {
+                                root.tdRepoFilter = (root.tdRepoFilter === "changes") ? "none" : "changes";
+                                root.tdCurrentPage = 1;
+                            }
                         }
                     }
 
@@ -344,7 +361,7 @@ ColumnLayout {
                         }
                         text: "🏷️ PRs (" + count + ")"
                         checkable: true
-                        checked: root.tdRepoFilter === "prs"
+                        checked: (root && root.tdRepoFilter === "prs")
                         font.pixelSize: 11
                         font.weight: checked ? Font.DemiBold : Font.Normal
                         contentItem: Text {
@@ -362,8 +379,10 @@ ColumnLayout {
                             border.color: parent.checked ? "#e3b341" : "#6e4b10"
                         }
                         onClicked: {
-                            root.tdRepoFilter = (root.tdRepoFilter === "prs") ? "none" : "prs";
-                            root.tdCurrentPage = 1;
+                            if (root) {
+                                root.tdRepoFilter = (root.tdRepoFilter === "prs") ? "none" : "prs";
+                                root.tdCurrentPage = 1;
+                            }
                         }
                     }
 
@@ -374,7 +393,7 @@ ColumnLayout {
                         }
                         text: "🌿 Branches (" + count + ")"
                         checkable: true
-                        checked: root.tdRepoFilter === "branches"
+                        checked: (root && root.tdRepoFilter === "branches")
                         font.pixelSize: 11
                         font.weight: checked ? Font.DemiBold : Font.Normal
                         contentItem: Text {
@@ -392,8 +411,10 @@ ColumnLayout {
                             border.color: parent.checked ? "#a371f7" : "#5a3e85"
                         }
                         onClicked: {
-                            root.tdRepoFilter = (root.tdRepoFilter === "branches") ? "none" : "branches";
-                            root.tdCurrentPage = 1;
+                            if (root) {
+                                root.tdRepoFilter = (root.tdRepoFilter === "branches") ? "none" : "branches";
+                                root.tdCurrentPage = 1;
+                            }
                         }
                     }
                 }
@@ -408,7 +429,7 @@ ColumnLayout {
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
-                        color: (root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#ffffff" : "#58a6ff"
+                        color: (root && root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#ffffff" : "#58a6ff"
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -416,12 +437,14 @@ ColumnLayout {
                         implicitHeight: 28
                         implicitWidth: 140
                         radius: 5
-                        color: (root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#1f6feb" : (parent.hovered ? "#21262d" : "#0d1117")
-                        border.color: (root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#388bfd" : "#30363d"
+                        color: (root && root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#1f6feb" : (parent.hovered ? "#21262d" : "#0d1117")
+                        border.color: (root && root.isTdSidebarOpen && root.tdSidebarView === 1) ? "#388bfd" : "#30363d"
                     }
                     onClicked: {
-                        root.isTdSidebarOpen = true;
-                        root.tdSidebarView = 1;
+                        if (root) {
+                            root.isTdSidebarOpen = true;
+                            root.tdSidebarView = 1;
+                        }
                     }
                 }
             }
@@ -457,7 +480,7 @@ ColumnLayout {
                         }
 
                         Text {
-                            text: root.tdRepoSearchQuery ? "No repositories match your filter" : (explorerTabRoot.isPagedMode ? "No repositories found" : "No repositories with changes found")
+                            text: (root && root.tdRepoSearchQuery) ? "No repositories match your filter" : (explorerTabRoot.isPagedMode ? "No repositories found" : "No repositories with changes found")
                             font.family: "Segoe UI, sans-serif"
                             font.pixelSize: 13
                             font.weight: Font.DemiBold
@@ -471,7 +494,7 @@ ColumnLayout {
                             font.pixelSize: 11
                             color: "#484f58"
                             Layout.alignment: Qt.AlignHCenter
-                            visible: !root.tdRepoSearchQuery
+                            visible: !(root && root.tdRepoSearchQuery)
                         }
                     }
                 }
@@ -481,7 +504,7 @@ ColumnLayout {
                     width: tdReposList.width - 8
                     height: 58
                     radius: 6
-                    readonly property bool isSelected: root.selectedRepoName === modelData.name
+                    readonly property bool isSelected: (root && root.selectedRepoName === modelData.name)
                     color: isSelected ? "#1f293d" : (cardMouse.containsMouse ? "#21262d" : "#0d1117")
                     border.color: isSelected ? "#388bfd" : (cardMouse.containsMouse ? "#3b434d" : "#30363d")
                     border.width: isSelected ? 2 : 1
@@ -679,18 +702,20 @@ ColumnLayout {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            root.selectedRepoName = modelData.name;
-                            root.tdSidebarView = 0;
-                            root.isTdSidebarOpen = true;
-                            if (root.tdRepoFilter === "branches") {
-                                root.repoDetailSubTab = 1; // Unmerged Branches
-                            } else if (root.tdRepoFilter === "prs") {
-                                root.repoDetailSubTab = 0; // Merged PRs
-                            } else {
-                                if ((modelData.prs_count || 0) === 0 && (modelData.branches_count || 0) > 0) {
-                                    root.repoDetailSubTab = 1;
+                            if (root) {
+                                root.selectedRepoName = modelData.name;
+                                root.tdSidebarView = 0;
+                                root.isTdSidebarOpen = true;
+                                if (root.tdRepoFilter === "branches") {
+                                    root.repoDetailSubTab = 1; // Unmerged Branches
+                                } else if (root.tdRepoFilter === "prs") {
+                                    root.repoDetailSubTab = 0; // Merged PRs
                                 } else {
-                                    root.repoDetailSubTab = 0;
+                                    if ((modelData.prs_count || 0) === 0 && (modelData.branches_count || 0) > 0) {
+                                        root.repoDetailSubTab = 1;
+                                    } else {
+                                        root.repoDetailSubTab = 0;
+                                    }
                                 }
                             }
                         }
@@ -722,7 +747,8 @@ ColumnLayout {
                                 var endNum = Math.min(explorerTabRoot.currentPage * explorerTabRoot.pageSize, explorerTabRoot.totalFilteredCount);
                                 return "Showing " + startNum + "–" + endNum + " of " + explorerTabRoot.totalFilteredCount + " repositories" + (explorerTabRoot.isPagedMode ? " (All Repositories · Paged Mode)" : "");
                             }
-                            return "Showing " + explorerTabRoot.totalFilteredCount + " repositories with " + (root.tdRepoFilter === "prs" ? "pending PRs" : (root.tdRepoFilter === "branches" ? "unmerged branches" : "changes"));
+                            var curF = explorerTabRoot.activeFilter;
+                            return "Showing " + explorerTabRoot.totalFilteredCount + " repositories with " + (curF === "prs" ? "pending PRs" : (curF === "branches" ? "unmerged branches" : "changes"));
                         }
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 11
@@ -755,7 +781,7 @@ ColumnLayout {
                                 border.color: parent.enabled ? "#30363d" : "#21262d"
                             }
                             onClicked: {
-                                if (root.tdCurrentPage > 1) {
+                                if (root && root.tdCurrentPage > 1) {
                                     root.tdCurrentPage = root.tdCurrentPage - 1;
                                 }
                             }
@@ -798,7 +824,7 @@ ColumnLayout {
                                 border.color: parent.enabled ? "#30363d" : "#21262d"
                             }
                             onClicked: {
-                                if (root.tdCurrentPage < explorerTabRoot.totalPages) {
+                                if (root && root.tdCurrentPage < explorerTabRoot.totalPages) {
                                     root.tdCurrentPage = root.tdCurrentPage + 1;
                                 }
                             }

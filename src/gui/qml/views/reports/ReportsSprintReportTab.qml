@@ -44,7 +44,7 @@ import "../../components"
                                 model: (backend && backend.availableSprintList) ? backend.availableSprintList : []
                                 currentIndex: {
                                     if (!backend || !backend.availableSprintList || backend.availableSprintList.length === 0) return 0;
-                                    var target = root.selectedSprintReport || root.getDefaultSprint();
+                                    var target = (root && root.selectedSprintReport) ? root.selectedSprintReport : ((root && typeof root.getDefaultSprint === "function") ? root.getDefaultSprint() : "");
                                     var idx = backend.availableSprintList.indexOf(target);
                                     return idx >= 0 ? idx : 0;
                                 }
@@ -62,8 +62,10 @@ import "../../components"
                                 }
                                 onActivated: function(index) {
                                     var s = backend.availableSprintList[index];
-                                    root.selectedSprintReport = s;
-                                    root.sprintReportData = backend.get_sprint_report_data(s);
+                                    if (root) {
+                                        root.selectedSprintReport = s;
+                                        root.sprintReportData = backend.get_sprint_report_data(s);
+                                    }
                                 }
                             }
 
@@ -74,11 +76,11 @@ import "../../components"
                                 radius: 12
                                 color: "#0d2344"
                                 border.color: "#1f6feb"
-                                visible: root.sprintReportData && root.sprintReportData.start_date !== "N/A"
+                                visible: !!(root && root.sprintReportData && root.sprintReportData.start_date && root.sprintReportData.start_date !== "N/A")
                                 Text {
                                     id: tfLabel
                                     anchors.centerIn: parent
-                                    text: "📅 " + (root.sprintReportData ? (root.sprintReportData.start_date + " → " + root.sprintReportData.end_date) : "")
+                                    text: "📅 " + ((root && root.sprintReportData && root.sprintReportData.start_date) ? (root.sprintReportData.start_date + " → " + root.sprintReportData.end_date) : "")
                                     font.pixelSize: 11
                                     font.weight: Font.DemiBold
                                     color: "#58a6ff"
@@ -288,17 +290,17 @@ import "../../components"
 
                         Repeater {
                             model: [
-                                { label: "All Items", count: root.sprintReportData ? root.sprintReportData.total_items : 0 },
-                                { label: "🎯 Stories & Reqs", count: root.sprintReportData && root.sprintReportData.stories ? root.sprintReportData.stories.length : 0 },
-                                { label: "🐛 Bugs & Defects", count: root.sprintReportData && root.sprintReportData.bugs ? root.sprintReportData.bugs.length : 0 },
-                                { label: "🛠️ Tasks", count: root.sprintReportData && root.sprintReportData.tasks ? root.sprintReportData.tasks.length : 0 },
-                                { label: "👥 Team Workload", count: root.sprintReportData && root.sprintReportData.assignee_stats ? Object.keys(root.sprintReportData.assignee_stats).length : 0 }
+                                { label: "All Items", count: (root && root.sprintReportData) ? (root.sprintReportData.total_items || 0) : 0 },
+                                { label: "🎯 Stories & Reqs", count: (root && root.sprintReportData && root.sprintReportData.stories) ? root.sprintReportData.stories.length : 0 },
+                                { label: "🐛 Bugs & Defects", count: (root && root.sprintReportData && root.sprintReportData.bugs) ? root.sprintReportData.bugs.length : 0 },
+                                { label: "🛠️ Tasks", count: (root && root.sprintReportData && root.sprintReportData.tasks) ? root.sprintReportData.tasks.length : 0 },
+                                { label: "👥 Team Workload", count: (root && root.sprintReportData && root.sprintReportData.assignee_stats) ? Object.keys(root.sprintReportData.assignee_stats).length : 0 }
                             ]
 
                             Button {
                                 text: modelData.label + " (" + modelData.count + ")"
                                 checkable: true
-                                checked: root.sprintFilterType === index
+                                checked: (root && root.sprintFilterType === index)
                                 font.pixelSize: 11
                                 font.weight: checked ? Font.DemiBold : Font.Normal
                                 contentItem: Text {
@@ -311,7 +313,9 @@ import "../../components"
                                     color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
                                     border.color: parent.checked ? "#388bfd" : "#30363d"
                                 }
-                                onClicked: root.sprintFilterType = index
+                                onClicked: {
+                                    if (root) root.sprintFilterType = index;
+                                }
                             }
                         }
 
@@ -335,10 +339,10 @@ import "../../components"
                             anchors.margins: 10
                             clip: true
                             spacing: 4
-                            visible: root.sprintFilterType !== 4
+                            visible: (!root || root.sprintFilterType !== 4)
 
                             model: {
-                                if (!root.sprintReportData) return [];
+                                if (!root || !root.sprintReportData) return [];
                                 if (root.sprintFilterType === 1) return root.sprintReportData.stories || [];
                                 if (root.sprintFilterType === 2) return root.sprintReportData.bugs || [];
                                 if (root.sprintFilterType === 3) return root.sprintReportData.tasks || [];

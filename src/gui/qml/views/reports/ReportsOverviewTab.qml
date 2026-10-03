@@ -151,8 +151,10 @@ import "../../components"
                                         border.color: "#388bfd"
                                     }
                                     onClicked: {
-                                        root.activeReportTab = 0;
-                                        root.isTdSidebarOpen = true;
+                                        if (root) {
+                                            root.activeReportTab = 0;
+                                            root.isTdSidebarOpen = true;
+                                        }
                                     }
                                 }
 
@@ -178,7 +180,9 @@ import "../../components"
                                         color: parent.hovered ? "#212836" : "transparent"
                                         border.color: "#30363d"
                                     }
-                                    onClicked: root.activeReportTab = 1
+                                    onClicked: {
+                                        if (root) root.activeReportTab = 1;
+                                    }
                                 }
                             }
                         }
@@ -322,8 +326,10 @@ import "../../components"
                                         border.color: "#a371f7"
                                     }
                                     onClicked: {
-                                        root.activeReportTab = 2;
-                                        root.isTdSidebarOpen = true;
+                                        if (root) {
+                                            root.activeReportTab = 2;
+                                            root.isTdSidebarOpen = true;
+                                        }
                                     }
                                 }
 
@@ -349,7 +355,9 @@ import "../../components"
                                         color: parent.hovered ? "#212836" : "transparent"
                                         border.color: "#30363d"
                                     }
-                                    onClicked: root.activeReportTab = 2
+                                    onClicked: {
+                                        if (root) root.activeReportTab = 2;
+                                    }
                                 }
                             }
                         }
@@ -493,8 +501,10 @@ import "../../components"
                                         border.color: "#3fb950"
                                     }
                                     onClicked: {
-                                        root.activeReportTab = 3;
-                                        root.isTdSidebarOpen = true;
+                                        if (root) {
+                                            root.activeReportTab = 3;
+                                            root.isTdSidebarOpen = true;
+                                        }
                                     }
                                 }
 
@@ -520,7 +530,9 @@ import "../../components"
                                         color: parent.hovered ? "#212836" : "transparent"
                                         border.color: "#30363d"
                                     }
-                                    onClicked: root.activeReportTab = 3
+                                    onClicked: {
+                                        if (root) root.activeReportTab = 3;
+                                    }
                                 }
                             }
                         }
@@ -608,7 +620,7 @@ import "../../components"
                                     model: (backend && backend.availableSprintList) ? backend.availableSprintList : []
                                     currentIndex: {
                                         if (!backend || !backend.availableSprintList || backend.availableSprintList.length === 0) return 0;
-                                        var target = root.selectedSprintReport || root.getDefaultSprint();
+                                        var target = (root && root.selectedSprintReport) ? root.selectedSprintReport : ((root && typeof root.getDefaultSprint === "function") ? root.getDefaultSprint() : "");
                                         var idx = backend.availableSprintList.indexOf(target);
                                         return idx >= 0 ? idx : 0;
                                     }
@@ -625,7 +637,7 @@ import "../../components"
                                         verticalAlignment: Text.AlignVCenter
                                     }
                                     onActivated: function(index) {
-                                        if (backend && backend.availableSprintList && backend.availableSprintList[index]) {
+                                        if (backend && backend.availableSprintList && backend.availableSprintList[index] && root) {
                                             root.selectedSprintReport = backend.availableSprintList[index];
                                         }
                                     }
@@ -700,8 +712,12 @@ import "../../components"
                                     }
                                     onClicked: {
                                         var targetSprint = sprintSelectCombo.currentText;
-                                        root.openSprintReport(targetSprint);
-                                        root.isTdSidebarOpen = true;
+                                        if (root) {
+                                            if (typeof root.openSprintReport === "function") {
+                                                root.openSprintReport(targetSprint);
+                                            }
+                                            root.isTdSidebarOpen = true;
+                                        }
                                     }
                                 }
 
@@ -728,7 +744,9 @@ import "../../components"
                                         border.color: "#30363d"
                                     }
                                     onClicked: {
-                                        root.openSprintReport(sprintSelectCombo.currentText);
+                                        if (root && typeof root.openSprintReport === "function") {
+                                            root.openSprintReport(sprintSelectCombo.currentText);
+                                        }
                                     }
                                 }
                             }

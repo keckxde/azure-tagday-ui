@@ -23,6 +23,17 @@ ApplicationWindow {
 
     property int currentTabIndex: 0
 
+    Timer {
+        id: idleWarmupTimer
+        interval: 350
+        running: true
+        repeat: false
+        onTriggered: {
+            if (reportsViewLoader && !reportsViewLoader.active) reportsViewLoader.active = true;
+            if (pullRequestsViewLoader && !pullRequestsViewLoader.active) pullRequestsViewLoader.active = true;
+        }
+    }
+
     readonly property var pullRequestsView: pullRequestsViewLoader ? pullRequestsViewLoader.item : null
     readonly property var workItemsView: workItemsViewLoader ? workItemsViewLoader.item : null
     readonly property var workloadExplorerView: workloadExplorerViewLoader ? workloadExplorerViewLoader.item : null

@@ -1800,76 +1800,111 @@ Click to open in TFS"
         // ============================================================
         // MODE 2: Storage & Build Artifacts Report Preview (Tab 2)
         // ============================================================
-        ReportPreviewPane {
+        Loader {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             visible: root && root.activeReportTab === 2
-            root: root
-            reportType: "storage"
-            customTitle: "📦 Storage & Build Artifacts Preview"
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "storage"
+                    customTitle: "📦 Storage & Build Artifacts Preview"
+                }
+            }
+            onLoaded: _hasLoaded = true
         }
 
         // ============================================================
         // MODE 3: Release Notes & Version Tracking Preview (Tab 3)
         // ============================================================
-        ReportPreviewPane {
+        Loader {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             visible: root && root.activeReportTab === 3
-            root: root
-            reportType: "revision"
-            customTitle: "📝 Release Notes (REVISION.md)"
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "revision"
+                    customTitle: "📝 Release Notes (REVISION.md)"
+                }
+            }
+            onLoaded: _hasLoaded = true
         }
 
         // ============================================================
         // MODE 4: Agile Sprint Report Preview (Tab 4)
         // ============================================================
-        ReportPreviewPane {
+        Loader {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             visible: root && root.activeReportTab === 4
-            root: root
-            reportType: "sprint"
-            reportParam: (root && root.selectedSprintReport) ? root.selectedSprintReport : ""
-            customTitle: "🚀 Sprint Report: " + ((root && root.selectedSprintReport) ? root.selectedSprintReport : "Active")
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "sprint"
+                    reportParam: (root && root.selectedSprintReport) ? root.selectedSprintReport : ""
+                    customTitle: "🚀 Sprint Report: " + ((root && root.selectedSprintReport) ? root.selectedSprintReport : "Active")
+                }
+            }
+            onLoaded: _hasLoaded = true
         }
 
         // ============================================================
         // MODE 5: Sprint Rescheduling & Shifts Preview (Tab 5)
         // ============================================================
-        ReportPreviewPane {
+        Loader {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             visible: root && root.activeReportTab === 5
-            root: root
-            reportType: "rescheduling"
-            customTitle: "⏱️ Rescheduling & Shifts Preview"
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "rescheduling"
+                    customTitle: "⏱️ Rescheduling & Shifts Preview"
+                }
+            }
+            onLoaded: _hasLoaded = true
         }
 
         // ============================================================
         // MODE 0: Reports Overview Live Draft Preview (Tab 0)
         // ============================================================
-        ReportPreviewPane {
+        Loader {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
             visible: root && root.activeReportTab === 0
-            root: root
-            reportType: "tagday"
-            customTitle: "📊 Tag Day Release Preview"
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "tagday"
+                    customTitle: "📊 Tag Day Release Preview"
+                }
+            }
+            onLoaded: _hasLoaded = true
         }
     }

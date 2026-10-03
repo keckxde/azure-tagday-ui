@@ -254,7 +254,9 @@ import "../../components"
                                             border.color: "#30363d"
                                         }
                                         onClicked: {
-                                            root.openTagDayRepo(modelData.name);
+                                            if (root && typeof root.openTagDayRepo === "function") {
+                                                root.openTagDayRepo(modelData.name);
+                                            }
                                         }
                                     }
                                 }

@@ -4,7 +4,13 @@ import QtQuick.Layouts 1.15
 import "../../components"
 
             Item {
+    id: shiftsTabRoot
     property var root: null
+
+    readonly property string curReviewFilter: (root && root.shiftReviewFilter) ? root.shiftReviewFilter : "all"
+    readonly property string curSourceFilter: (root && root.shiftSourceFilter) ? root.shiftSourceFilter : "all"
+    readonly property bool curSprintOnly: !!(root && root.shiftSprintOnlyFilter)
+    readonly property string curSearch: (root && root.shiftSearchQuery) ? root.shiftSearchQuery : ""
 
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -54,7 +60,7 @@ import "../../components"
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Generate exportable Markdown wiki report of sprint-to-sprint rescheduled items"
                                 onClicked: {
-                                    if (backend) backend.generate_rescheduling_report_async(root.shiftReviewFilter);
+                                    if (backend) backend.generate_rescheduling_report_async(shiftsTabRoot.curReviewFilter);
                                 }
                             }
 
@@ -72,7 +78,7 @@ import "../../components"
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Export sprint-to-sprint rescheduled items to CSV file"
                                 onClicked: {
-                                    if (backend) backend.generate_rescheduling_report_async(root.shiftReviewFilter);
+                                    if (backend) backend.generate_rescheduling_report_async(shiftsTabRoot.curReviewFilter);
                                 }
                             }
 
@@ -128,7 +134,7 @@ import "../../components"
                                 Button {
                                     text: modelData.label
                                     checkable: true
-                                    checked: root.shiftReviewFilter === modelData.value
+                                    checked: shiftsTabRoot.curReviewFilter === modelData.value
                                     font.pixelSize: 11
                                     font.weight: checked ? Font.DemiBold : Font.Normal
                                     contentItem: Text {
@@ -146,7 +152,7 @@ import "../../components"
                                         border.color: parent.checked ? "#58a6ff" : "#30363d"
                                     }
                                     onClicked: {
-                                        root.shiftReviewFilter = modelData.value;
+                                        if (root) root.shiftReviewFilter = modelData.value;
                                     }
                                 }
                             }
@@ -164,7 +170,7 @@ import "../../components"
                                 Button {
                                     text: modelData.label
                                     checkable: true
-                                    checked: root.shiftSourceFilter === modelData.value
+                                    checked: shiftsTabRoot.curSourceFilter === modelData.value
                                     font.pixelSize: 11
                                     font.weight: checked ? Font.DemiBold : Font.Normal
                                     contentItem: Text {
@@ -182,7 +188,7 @@ import "../../components"
                                         border.color: parent.checked ? "#388bfd" : "#30363d"
                                     }
                                     onClicked: {
-                                        root.shiftSourceFilter = modelData.value;
+                                        if (root) root.shiftSourceFilter = modelData.value;
                                     }
                                 }
                             }
@@ -190,9 +196,9 @@ import "../../components"
 
                         // Scope Toggle: Sprint-to-Sprint Only (ignore Backlog moves)
                         Button {
-                            text: root.shiftSprintOnlyFilter ? "🏃 Sprints Only (Active)" : "📋 All Moves"
+                            text: shiftsTabRoot.curSprintOnly ? "🏃 Sprints Only (Active)" : "📋 All Moves"
                             checkable: true
-                            checked: root.shiftSprintOnlyFilter
+                            checked: shiftsTabRoot.curSprintOnly
                             font.pixelSize: 11
                             font.weight: checked ? Font.DemiBold : Font.Normal
                             contentItem: Text {
@@ -210,9 +216,9 @@ import "../../components"
                                 border.color: parent.checked ? "#a371f7" : "#30363d"
                             }
                             ToolTip.visible: hovered
-                            ToolTip.text: root.shiftSprintOnlyFilter ? "Showing sprint-to-sprint rescheduled items only (initial Backlog scheduling ignored)." : "Click to filter to sprint-to-sprint rescheduled items only."
+                            ToolTip.text: shiftsTabRoot.curSprintOnly ? "Showing sprint-to-sprint rescheduled items only (initial Backlog scheduling ignored)." : "Click to filter to sprint-to-sprint rescheduled items only."
                             onClicked: {
-                                root.shiftSprintOnlyFilter = !root.shiftSprintOnlyFilter;
+                                if (root) root.shiftSprintOnlyFilter = !root.shiftSprintOnlyFilter;
                             }
                         }
 
@@ -222,7 +228,7 @@ import "../../components"
                         SearchBar {
                             placeholder: "Search item #, title, sprint..."
                             onSearchUpdated: function(query) {
-                                root.shiftSearchQuery = (query || "").toLowerCase();
+                                if (root) root.shiftSearchQuery = (query || "").toLowerCase();
                             }
                         }
                     }
@@ -445,20 +451,21 @@ import "../../components"
                                         var list = backend.shiftImpactMetrics.top_delayed_items;
 
                                         // Review Policy Filter
-                                        if (root.shiftReviewFilter === "pending") {
+                                        var rf = shiftsTabRoot.curReviewFilter;
+                                        if (rf === "pending") {
                                             list = list.filter(function(it) {
                                                 return (it.pending_count || 0) > 0 || it.review_status === "pending";
                                             });
-                                        } else if (root.shiftReviewFilter === "accepted") {
+                                        } else if (rf === "accepted") {
                                             list = list.filter(function(it) {
                                                 return (it.pending_count || 0) === 0 || it.review_status === "accepted";
                                             });
                                         }
 
                                         // Search Filter
-                                        if (!root.shiftSearchQuery) return list;
+                                        var q = shiftsTabRoot.curSearch;
+                                        if (!q) return list;
                                         return list.filter(function(it) {
-                                            var q = root.shiftSearchQuery;
                                             return (it.id && it.id.toString().indexOf(q) !== -1) ||
                                                    (it.title && it.title.toLowerCase().indexOf(q) !== -1) ||
                                                    (it.assigned_to && it.assigned_to.toLowerCase().indexOf(q) !== -1) ||
@@ -685,21 +692,23 @@ import "../../components"
                                         var list = backend.iterationShifts;
 
                                         // Source Filter
-                                        if (root.shiftSourceFilter !== "all") {
+                                        var sf = shiftsTabRoot.curSourceFilter;
+                                        if (sf !== "all") {
                                             list = list.filter(function(ev) {
-                                                return ev.source === root.shiftSourceFilter;
+                                                return ev.source === sf;
                                             });
                                         }
 
                                         // Review Policy Filter
-                                        if (root.shiftReviewFilter !== "all") {
+                                        var rf = shiftsTabRoot.curReviewFilter;
+                                        if (rf !== "all") {
                                             list = list.filter(function(ev) {
-                                                return (ev.review_status || "pending") === root.shiftReviewFilter;
+                                                return (ev.review_status || "pending") === rf;
                                             });
                                         }
 
                                         // Sprint-to-Sprint Only Filter (ignore initial moves from Backlog/root)
-                                        if (root.shiftSprintOnlyFilter) {
+                                        if (shiftsTabRoot.curSprintOnly) {
                                             list = list.filter(function(ev) {
                                                 var os = (ev.old_sprint || ev.old_iteration || "").toLowerCase();
                                                 return os !== "" && os !== "none" && os !== "backlog" && os !== "unassigned";
@@ -707,9 +716,9 @@ import "../../components"
                                         }
 
                                         // Search Query Filter
-                                        if (!root.shiftSearchQuery) return list;
+                                        var q = shiftsTabRoot.curSearch;
+                                        if (!q) return list;
                                         return list.filter(function(ev) {
-                                            var q = root.shiftSearchQuery;
                                             return (ev.work_item_id && ev.work_item_id.toString().indexOf(q) !== -1) ||
                                                    (ev.title && ev.title.toLowerCase().indexOf(q) !== -1) ||
                                                    (ev.old_sprint && ev.old_sprint.toLowerCase().indexOf(q) !== -1) ||
