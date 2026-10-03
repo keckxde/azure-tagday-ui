@@ -36,7 +36,6 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
                 pass
 
         self.backend = DevOpsBackend()
-        self.app.processEvents()
 
     def tearDown(self):
         if hasattr(self, "backend") and self.backend:
@@ -44,7 +43,6 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
                 self.backend._auto_sync_timer.stop()
             if getattr(self.backend, "_worker", None) and self.backend._worker.isRunning():
                 self.backend._worker.wait(500)
-        self.app.processEvents()
         # Restore original user settings
         if self.original_settings is not None:
             os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)

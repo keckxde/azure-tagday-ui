@@ -46,12 +46,16 @@ class QtLogHandler(logging.Handler):
         if record.name.startswith("gui.qt_log"):
             return
         try:
+            from PySide6.QtCore import QCoreApplication
+            if not QCoreApplication.instance():
+                return
             from shiboken6 import isValid
-            if not isValid(self.emitter):
+            if self.emitter is None or not isValid(self.emitter):
                 return
         except Exception:
-            pass
+            return
         try:
+            self._in_emit = True
             msg = self.format(record)
             ts = datetime.now().strftime("%H:%M:%S")
             lvl = record.levelname.upper()
@@ -372,6 +376,21 @@ class DevOpsBackend(QObject):
         self._all_discovered_area_paths = []
         self._work_items_filtered_by_area_path_count = 0
         self._work_items_total_before_area_filter = 0
+
+        # Work items metadata caches (pre-computed in Python for instant UI loading)
+        self._cached_types = None
+        self._cached_states = None
+        self._cached_assignees = None
+        self._cached_iterations = None
+        self._cached_l1 = None
+        self._cached_l2 = None
+        self._cached_area_paths = None
+        self._cached_tags = None
+        self._cached_target_tags = None
+        self._cached_tag_counts = None
+        self._cached_overdue_count = 0
+        self._cached_tagged_count = 0
+        self._cached_unique_tags_count = 0
 
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
@@ -1267,6 +1286,27 @@ class DevOpsBackend(QObject):
     def repositories(self):
         return self._repositories
 
+    @Property(int, notify=workItemsChanged)
+    def overdueWorkItemsCount(self):
+        """Returns the pre-computed count of non-deleted overdue work items."""
+        if self._cached_overdue_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_overdue_count or 0
+
+    @Property(int, notify=workItemsChanged)
+    def taggedWorkItemsCount(self):
+        """Returns the pre-computed count of non-deleted tagged work items."""
+        if self._cached_tagged_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tagged_count or 0
+
+    @Property(int, notify=workItemsChanged)
+    def uniqueWorkItemTagsCount(self):
+        """Returns the pre-computed count of unique tags across work items."""
+        if self._cached_unique_tags_count is None:
+            self._invalidate_work_items_cache()
+        return self._cached_unique_tags_count or 0
+
     @Property(list, notify=workItemsChanged)
     def workItems(self):
         return self._work_items
@@ -1274,122 +1314,189 @@ class DevOpsBackend(QObject):
     @Property(list, notify=workItemsChanged)
     def workItemTypes(self):
         """Returns the sorted unique list of work item types currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            t = wi.get("type") or ""
-            if t:
-                seen.add(t)
-        return sorted(seen)
+        if self._cached_types is None:
+            self._invalidate_work_items_cache()
+        return self._cached_types or []
 
     @Property(list, notify=workItemsChanged)
     def workItemStates(self):
         """Returns the sorted unique list of work item states currently in cache."""
-        preferred_order = ["Active", "In Progress", "In Planning", "Proposed", "New", "Resolved", "Closed", "Done"]
-        seen = set()
-        for wi in self._work_items:
-            s = wi.get("state") or ""
-            if s and s != "Deleted":
-                seen.add(s)
-        ordered = [s for s in preferred_order if s in seen]
-        others = sorted([s for s in seen if s not in preferred_order])
-        return ordered + others
+        if self._cached_states is None:
+            self._invalidate_work_items_cache()
+        return self._cached_states or []
 
     @Property(list, notify=workItemsChanged)
     def workItemAssignees(self):
         """Returns the sorted unique list of assignees currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            a = wi.get("assigned_to") or ""
-            if a and a != "Unassigned":
-                seen.add(a)
-        return sorted(seen)
+        if self._cached_assignees is None:
+            self._invalidate_work_items_cache()
+        return self._cached_assignees or []
 
     @Property(list, notify=workItemsChanged)
     def workItemIterations(self):
         """Returns the sorted unique list of planned iteration names currently in cache."""
-        seen = set()
-        for wi in self._work_items:
-            if wi.get("is_iteration_planned") and wi.get("iteration_name"):
-                seen.add(wi.get("iteration_name"))
-        return sorted(seen)
+        if self._cached_iterations is None:
+            self._invalidate_work_items_cache()
+        return self._cached_iterations or []
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel1List(self):
         """Returns the sorted unique list of Level 1 (Epic / Sub-System) display names, with [<NR>] <Name> complying items first."""
-        seen = set()
-        for wi in self._work_items:
-            disp = wi.get("level1_display") or ""
-            if disp and disp != "Ungrouped Sub-System":
-                seen.add(disp)
-        
-        def sort_key(s):
-            tag, name, sk = utils.parse_pbs_tag(str(s).strip())
-            if tag:
-                return (0, sk, name.lower())
-            return (1, (0,), str(s).lower())
-
-        return sorted(seen, key=sort_key)
+        if self._cached_l1 is None:
+            self._invalidate_work_items_cache()
+        return self._cached_l1 or []
 
     @Property(list, notify=workItemsChanged)
     def workItemLevel2List(self):
         """Returns the sorted unique list of Level 2 (Feature / Major Component) display names, with [<NR>] <Name> complying items first."""
-        seen = set()
+        if self._cached_l2 is None:
+            self._invalidate_work_items_cache()
+        return self._cached_l2 or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemAreaPaths(self):
+        """Returns the sorted unique list of Area Paths currently present on work items in cache."""
+        if self._cached_area_paths is None:
+            self._invalidate_work_items_cache()
+        return self._cached_area_paths or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemTags(self):
+        """Returns the sorted unique list of all tags currently present on work items in cache."""
+        if self._cached_tags is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tags or []
+
+    @Property(list, notify=workItemsChanged)
+    def workItemTargetTags(self):
+        """Returns the sorted unique list of Target:<Name> milestone tags present on work items."""
+        if self._cached_target_tags is None:
+            self._invalidate_work_items_cache()
+        return self._cached_target_tags or []
+
+    @Property(dict, notify=workItemsChanged)
+    def workItemTagCounts(self):
+        """Returns a dict mapping tag name -> count of work items having that tag."""
+        if self._cached_tag_counts is None:
+            self._invalidate_work_items_cache()
+        return self._cached_tag_counts or {}
+
+    def _invalidate_work_items_cache(self):
+        """Pre-computes and caches all unique filter lists, search indices, and count summaries in a single fast pass."""
+        types_seen = set()
+        states_seen = set()
+        assignees_seen = set()
+        iterations_seen = set()
+        l1_seen = set()
+        l2_seen = set()
+        area_seen = set()
+        tags_seen = set()
+        target_tags_seen = set()
+        tag_counts = {}
+        overdue_count = 0
+        tagged_count = 0
+
         for wi in self._work_items:
-            disp = wi.get("level2_display") or ""
-            if disp and disp != "Ungrouped Component":
-                seen.add(disp)
-        
-        def sort_key(s):
+            is_del = bool(wi.get("deleted"))
+
+            # Types
+            t = wi.get("type") or ""
+            if t:
+                types_seen.add(t)
+
+            # States
+            s = wi.get("state") or ""
+            if s and s != "Deleted":
+                states_seen.add(s)
+
+            # Assignees
+            a = wi.get("assigned_to") or ""
+            if a and a != "Unassigned":
+                assignees_seen.add(a)
+
+            # Iterations
+            if wi.get("is_iteration_planned") and wi.get("iteration_name"):
+                iterations_seen.add(wi.get("iteration_name"))
+
+            # Level 1 / Level 2
+            l1 = wi.get("level1_display") or ""
+            if l1 and l1 != "Ungrouped Sub-System":
+                l1_seen.add(l1)
+            l2 = wi.get("level2_display") or ""
+            if l2 and l2 != "Ungrouped Component":
+                l2_seen.add(l2)
+
+            # Area Paths
+            ap = (wi.get("area_path") or "").strip()
+            if ap:
+                area_seen.add(ap)
+
+            # Tags
+            t_list = wi.get("tag_list") or []
+            if not is_del and (t_list or (wi.get("tags") and str(wi.get("tags")).strip())):
+                tagged_count += 1
+
+            for tag in t_list:
+                if tag:
+                    tags_seen.add(tag)
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+            for tt in wi.get("target_tags") or []:
+                if tt:
+                    target_tags_seen.add(tt)
+
+            # Overdue
+            if not is_del and wi.get("urgency_status") == "overdue":
+                overdue_count += 1
+
+            # Pre-compute _search_text on each item if missing or empty
+            if "_search_text" not in wi:
+                tokens = [
+                    str(wi.get("id") or ""),
+                    wi.get("title") or "",
+                    wi.get("assigned_to") or "",
+                    wi.get("type") or "",
+                    wi.get("state") or "",
+                    wi.get("iteration_name") or "",
+                    wi.get("iteration_path") or "",
+                    wi.get("level1_display") or "",
+                    wi.get("level2_display") or "",
+                    wi.get("prio_tag") or "",
+                    wi.get("tags") or "",
+                    wi.get("milestone_name") or "",
+                    wi.get("effective_milestone_name") or "",
+                    wi.get("milestone_category") or "",
+                    wi.get("area_path") or "",
+                ]
+                wi["_search_text"] = " ".join(t.lower() for t in tokens if t)
+
+        for r in getattr(self, "_area_path_rules", []):
+            p = str(r.get("path") or r.get("value") or "").strip()
+            if p:
+                area_seen.add(p)
+
+        preferred_order = ["Active", "In Progress", "In Planning", "Proposed", "New", "Resolved", "Closed", "Done"]
+        ordered_states = [s for s in preferred_order if s in states_seen] + sorted([s for s in states_seen if s not in preferred_order])
+
+        def sort_pbs_key(s):
             tag, name, sk = utils.parse_pbs_tag(str(s).strip())
             if tag:
                 return (0, sk, name.lower())
             return (1, (0,), str(s).lower())
 
-        return sorted(seen, key=sort_key)
-
-    @Property(list, notify=workItemsChanged)
-    def workItemAreaPaths(self):
-        """Returns the sorted unique list of Area Paths currently present on work items in cache."""
-        seen = set()
-        for wi in self._work_items:
-            ap = (wi.get("area_path") or "").strip()
-            if ap:
-                seen.add(ap)
-        for r in getattr(self, "_area_path_rules", []):
-            p = str(r.get("path") or r.get("value") or "").strip()
-            if p:
-                seen.add(p)
-        return sorted(seen, key=lambda s: s.lower())
-
-    @Property(list, notify=workItemsChanged)
-    def workItemTags(self):
-        """Returns the sorted unique list of all tags currently present on work items in cache."""
-        seen = set()
-        for wi in self._work_items:
-            for t in wi.get("tag_list") or []:
-                if t:
-                    seen.add(t)
-        return sorted(seen, key=lambda s: s.lower())
-
-    @Property(list, notify=workItemsChanged)
-    def workItemTargetTags(self):
-        """Returns the sorted unique list of Target:<Name> milestone tags present on work items."""
-        seen = set()
-        for wi in self._work_items:
-            for t in wi.get("target_tags") or []:
-                if t:
-                    seen.add(t)
-        return sorted(seen, key=lambda s: s.lower())
-
-    @Property(dict, notify=workItemsChanged)
-    def workItemTagCounts(self):
-        """Returns a dict mapping tag name -> count of work items having that tag."""
-        counts = {}
-        for wi in self._work_items:
-            for t in wi.get("tag_list") or []:
-                if t:
-                    counts[t] = counts.get(t, 0) + 1
-        return counts
+        self._cached_types = sorted(types_seen)
+        self._cached_states = ordered_states
+        self._cached_assignees = sorted(assignees_seen)
+        self._cached_iterations = sorted(iterations_seen)
+        self._cached_l1 = sorted(l1_seen, key=sort_pbs_key)
+        self._cached_l2 = sorted(l2_seen, key=sort_pbs_key)
+        self._cached_area_paths = sorted(area_seen, key=lambda s: s.lower())
+        self._cached_tags = sorted(tags_seen, key=lambda s: s.lower())
+        self._cached_target_tags = sorted(target_tags_seen, key=lambda s: s.lower())
+        self._cached_tag_counts = tag_counts
+        self._cached_overdue_count = overdue_count
+        self._cached_tagged_count = tagged_count
+        self._cached_unique_tags_count = len(tags_seen)
 
     @Slot(result=list)
     def get_work_item_tags_summary(self):
@@ -2241,6 +2348,26 @@ class DevOpsBackend(QObject):
         sorted_wis = sorted(wi_list, key=lambda x: x["id"], reverse=True)
         self._enrich_work_items_with_milestones(items=sorted_wis, all_wis_map=all_wis_map)
 
+        for item in sorted_wis:
+            tokens = [
+                str(item.get("id") or ""),
+                item.get("title") or "",
+                item.get("assigned_to") or "",
+                item.get("type") or "",
+                item.get("state") or "",
+                item.get("iteration_name") or "",
+                item.get("iteration_path") or "",
+                item.get("level1_display") or "",
+                item.get("level2_display") or "",
+                item.get("prio_tag") or "",
+                item.get("tags") or "",
+                item.get("milestone_name") or "",
+                item.get("effective_milestone_name") or "",
+                item.get("milestone_category") or "",
+                item.get("area_path") or "",
+            ]
+            item["_search_text"] = " ".join(t.lower() for t in tokens if t)
+
         if worker:
             worker.report_progress(60, "Processing pull requests and links...")
 
@@ -2727,6 +2854,7 @@ class DevOpsBackend(QObject):
         self._repositories = data.get("repositories", [])
         self._work_items = data.get("work_items", [])
         self._work_items_map = data.get("work_items_map", {w["id"]: w for w in self._work_items})
+        self._invalidate_work_items_cache()
         self._pull_requests = data.get("pull_requests", [])
         self._pr_repositories = data.get("pr_repositories", [])
         self._tagday_data = data.get("tagday_data", {})
