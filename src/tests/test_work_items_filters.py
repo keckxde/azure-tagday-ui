@@ -177,40 +177,38 @@ class TestWorkItemsFilters(unittest.TestCase):
             }
         ]
 
-        try:
-            import openpyxl
-        except ImportError:
-            self.skipTest("openpyxl is not installed in the test environment")
-
+        import csv
         with tempfile.TemporaryDirectory() as tmpdir:
             out_file = os.path.join(tmpdir, "exported_workitems.xlsx")
             res = backend.exportWorkItemsToExcel(file_path=out_file)
             self.assertTrue(res["success"])
             self.assertEqual(res["item_count"], 2)
-            self.assertTrue(os.path.exists(out_file))
+            actual_file = res["file_path"]
+            self.assertTrue(actual_file.endswith(".csv"))
+            self.assertTrue(os.path.exists(actual_file))
 
-            wb = openpyxl.load_workbook(out_file)
-            self.assertIn("Work Items", wb.sheetnames)
-            ws = wb["Work Items"]
+            with open(actual_file, "r", encoding="utf-8-sig") as f:
+                reader = list(csv.reader(f, delimiter=";"))
+                self.assertGreaterEqual(len(reader), 3)
 
-            # Header assertions
-            self.assertEqual(ws.cell(row=1, column=1).value, "ID")
-            self.assertEqual(ws.cell(row=1, column=2).value, "Type")
-            self.assertEqual(ws.cell(row=1, column=3).value, "Title")
-            self.assertEqual(ws.cell(row=1, column=4).value, "State")
+                # Header assertions
+                self.assertEqual(reader[0][0], "ID")
+                self.assertEqual(reader[0][1], "Type")
+                self.assertEqual(reader[0][2], "Title")
+                self.assertEqual(reader[0][3], "State")
 
-            # Row 1 assertions
-            self.assertEqual(ws.cell(row=2, column=1).value, 3001)
-            self.assertEqual(ws.cell(row=2, column=2).value, "Requirement")
-            self.assertEqual(ws.cell(row=2, column=3).value, "Implement Login")
-            self.assertEqual(ws.cell(row=2, column=5).value, "Alice")
-            self.assertEqual(ws.cell(row=2, column=10).value, "DDQS Gate 1")
+                # Row 1 assertions
+                self.assertEqual(reader[1][0], "3001")
+                self.assertEqual(reader[1][1], "Requirement")
+                self.assertEqual(reader[1][2], "Implement Login")
+                self.assertEqual(reader[1][4], "Alice")
+                self.assertEqual(reader[1][9], "DDQS Gate 1")
 
-            # Row 2 assertions
-            self.assertEqual(ws.cell(row=3, column=1).value, 3002)
-            self.assertEqual(ws.cell(row=3, column=2).value, "Bug")
-            self.assertEqual(ws.cell(row=3, column=4).value, "Closed")
-            self.assertEqual(ws.cell(row=3, column=5).value, "Bob")
+                # Row 2 assertions
+                self.assertEqual(reader[2][0], "3002")
+                self.assertEqual(reader[2][1], "Bug")
+                self.assertEqual(reader[2][3], "Closed")
+                self.assertEqual(reader[2][4], "Bob")
 
     def test_work_items_tags_extraction_and_properties(self):
         backend = DevOpsBackend()

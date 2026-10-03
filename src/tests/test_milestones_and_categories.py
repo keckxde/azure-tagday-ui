@@ -644,10 +644,7 @@ class TestMilestonesAndCategories(unittest.TestCase):
             team="Beta Team"
         )
 
-        try:
-            import openpyxl
-        except ImportError:
-            self.skipTest("openpyxl is not installed in the test environment")
+        import csv
 
         backend = DevOpsBackend()
         backend._cache_db = self.cache
@@ -655,22 +652,22 @@ class TestMilestonesAndCategories(unittest.TestCase):
         export_path = os.path.join(self.test_dir, "milestones_export_test.xlsx")
         res_export = backend.exportMilestonesToExcel(export_path)
         self.assertTrue(res_export["success"])
-        self.assertTrue(os.path.exists(export_path))
+        actual_path = res_export["file_path"]
+        self.assertTrue(actual_path.endswith(".csv"))
+        self.assertTrue(os.path.exists(actual_path))
         self.assertEqual(res_export["count"], 2)
 
-        # Verify Excel content with openpyxl
-        wb = openpyxl.load_workbook(export_path)
-        ws = wb.active
-        self.assertEqual(ws.title, "Milestones")
-        rows = list(ws.iter_rows(values_only=True))
-        self.assertEqual(len(rows), 3)  # Header + 2 rows
-        header = rows[0]
-        self.assertIn("Milestone Name", header)
-        self.assertIn("Team", header)
-        self.assertIn("Category", header)
-        self.assertIn("Start Date", header)
-        self.assertIn("End Date", header)
-        self.assertIn("Week Range", header)
+        # Verify CSV content
+        with open(actual_path, "r", encoding="utf-8-sig") as f:
+            reader = list(csv.reader(f, delimiter=";"))
+            self.assertEqual(len(reader), 3)  # Header + 2 rows
+            header = reader[0]
+            self.assertIn("Milestone Name", header)
+            self.assertIn("Team", header)
+            self.assertIn("Category", header)
+            self.assertIn("Start Date", header)
+            self.assertIn("End Date", header)
+            self.assertIn("Week Range", header)
 
         # Import into fresh database
         new_db_path = os.path.join(self.test_dir, "new_import_cache.db")
@@ -678,7 +675,7 @@ class TestMilestonesAndCategories(unittest.TestCase):
         new_backend = DevOpsBackend()
         new_backend._cache_db = new_cache
 
-        res_import = new_backend.importMilestonesFromExcel(export_path)
+        res_import = new_backend.importMilestonesFromExcel(actual_path)
         self.assertTrue(res_import["success"])
         self.assertEqual(res_import["total"], 2)
 

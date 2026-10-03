@@ -571,14 +571,14 @@ Item {
                 }
             }
 
-            // Export to Excel Button
+            // Export to CSV Button
             Button {
                 id: exportExcelBtn
-                text: "📊 Export to Excel"
+                text: "📊 Export to CSV"
                 enabled: backend ? !backend.isBusy && root.totalMatchingCount > 0 : false
                 font.weight: Font.DemiBold
                 ToolTip.visible: hovered
-                ToolTip.text: "Export the current (" + root.totalMatchingCount + ") matching work items to an Excel (.xlsx) spreadsheet"
+                ToolTip.text: "Export the current (" + root.totalMatchingCount + ") matching work items to a CSV spreadsheet (.csv)"
                 contentItem: Text {
                     text: parent.text
                     font: parent.font
@@ -605,7 +605,7 @@ Item {
             }
         }
 
-        // Excel Export Success Banner
+        // CSV Export Success Banner
         Rectangle {
             id: exportBanner
             Layout.fillWidth: true
@@ -627,7 +627,7 @@ Item {
 
                 Text { text: "✅"; font.pixelSize: 16 }
                 Text {
-                    text: "Exported " + exportBanner.itemCount + " work items to Excel: "
+                    text: "Exported " + exportBanner.itemCount + " work items to CSV: "
                     font.family: "Segoe UI, sans-serif"
                     font.pixelSize: 12
                     font.weight: Font.DemiBold

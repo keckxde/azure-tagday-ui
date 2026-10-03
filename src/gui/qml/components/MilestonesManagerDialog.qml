@@ -509,13 +509,13 @@ Dialog {
                                 Text { text: "PROJECT MILESTONES"; font.pixelSize: 11; font.weight: Font.Bold; color: "#8b949e" }
                                 Item { Layout.fillWidth: true }
                                 Button {
-                                    text: "📤 Export Excel"
+                                    text: "📤 Export CSV"
                                     font.pixelSize: 11
                                     font.weight: Font.DemiBold
                                     contentItem: Text { text: parent.text; font: parent.font; color: "#7ee787"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                     background: Rectangle {
                                         implicitHeight: 22
-                                        implicitWidth: 105
+                                        implicitWidth: 100
                                         radius: 4
                                         color: parent.hovered ? "#162b20" : "#0d1b12"
                                         border.color: parent.hovered ? "#3fb950" : "#238636"
