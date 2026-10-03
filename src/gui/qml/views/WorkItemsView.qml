@@ -17,6 +17,7 @@ Item {
     property string filterPriority: "ALL"    // "ALL", "PRIO1", "STANDARD"
     property string filterGrouping: "ALL"    // "ALL", "GROUPED", "UNGROUPED"
     property string filterMilestone: "ALL"   // "ALL", "PLANNED", "UNPLANNED", or specific milestone name
+    property string filterAreaPath: "ALL"    // "ALL" or specific Area Path
     property string filterTagCategory: "ALL" // "ALL" or specific category name
     property string filterTag: "ALL"         // "ALL", "TAGGED", "UNTAGGED", or specific tag name
     property int currentPage: 1
@@ -59,6 +60,7 @@ Item {
     property var level1List: ["ALL"]
     property var level2List: ["ALL"]
     property var milestonesList: ["ALL"]
+    property var areaPathsList: ["ALL"]
     property var tagCategoryList: ["ALL"]   // populated from backend.get_tag_category_names()
     property var tagsByCategoryData: ({})   // populated from backend.get_tags_by_category() JSON
     property var tagsList: ["ALL"]
@@ -128,6 +130,12 @@ Item {
         milestonesList = ["ALL", "PLANNED", "UNPLANNED"].concat(ms)
     }
 
+    function refreshAreaPathsList() {
+        if (!backend) return
+        var ap = backend.workItemAreaPaths || []
+        areaPathsList = ["ALL"].concat(ap)
+    }
+
     function refreshTagsList() {
         if (!backend) return
         // Refresh the category → tags mapping
@@ -161,6 +169,7 @@ Item {
         root.filterPriority = "ALL"
         root.filterGrouping = "ALL"
         root.filterMilestone = "ALL"
+        root.filterAreaPath = "ALL"
         root.filterTagCategory = "ALL"
         root.filterTag = "ALL"
         if (typeof level1Combo !== "undefined" && level1Combo) {
@@ -175,6 +184,10 @@ Item {
             wiMilestoneCombo.currentIndex = 0
             wiMilestoneCombo.editText = ""
         }
+        if (typeof wiAreaPathCombo !== "undefined" && wiAreaPathCombo) {
+            wiAreaPathCombo.currentIndex = 0
+            wiAreaPathCombo.editText = ""
+        }
         if (typeof wiTagCategoryCombo !== "undefined" && wiTagCategoryCombo) {
             wiTagCategoryCombo.currentIndex = 0
         }
@@ -187,7 +200,7 @@ Item {
     }
 
     property bool isFiltersCollapsed: false
-    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
+    property bool hasActiveFilters: root.searchQuery !== "" || root.filterState !== "ALL" || root.filterType !== "ALL" || root.filterAssignee !== "ALL" || root.filterModified !== "ALL" || root.filterIteration !== "ALL" || root.filterUrgency !== "ALL" || root.filterLevel1 !== "ALL" || root.filterLevel2 !== "ALL" || root.filterPriority !== "ALL" || root.filterGrouping !== "ALL" || root.filterMilestone !== "ALL" || root.filterAreaPath !== "ALL" || root.filterTagCategory !== "ALL" || root.filterTag !== "ALL"
 
     function isWithinDays(dateStr, maxDays) {
         if (!dateStr) return false;
@@ -348,6 +361,54 @@ Item {
                         font.pixelSize: 11
                         font.weight: (root.filterTag !== "ALL") ? Font.Bold : Font.Normal
                         color: (root.filterTag !== "ALL") ? "#58a6ff" : "#8b949e"
+                    }
+                }
+            }
+
+            // Clickable Area Path Filter Pill in Top Header
+            Rectangle {
+                visible: (backend && backend.areaPathFilterEnabled) || (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                implicitHeight: 24
+                implicitWidth: areaTopText.implicitWidth + 16
+                radius: 12
+                color: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") ? "#1f334d" : (areaTopMa.containsMouse ? "#1c2b20" : "#122319")
+                border.color: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") ? "#58a6ff" : "#238636"
+                border.width: 1
+
+                MouseArea {
+                    id: areaTopMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                        ? ("Active Area Path Filter: " + root.filterAreaPath + "\nClick to reset area filter.")
+                        : ("📁 Project Area Filter active (" + (backend ? backend.areaPathRules.length : 0) + " rules" + ((backend && backend.workItemsFilteredByAreaPathCount > 0) ? (" • " + backend.workItemsFilteredByAreaPathCount + " excluded") : "") + ")\nClick to filter by specific Area Path.")
+                    onClicked: {
+                        if (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") {
+                            root.filterAreaPath = "ALL";
+                            if (typeof wiAreaPathCombo !== "undefined" && wiAreaPathCombo) {
+                                wiAreaPathCombo.currentIndex = 0;
+                                wiAreaPathCombo.editText = "";
+                            }
+                            root.currentPage = 1;
+                            root.updateFilteredModel();
+                        }
+                    }
+                }
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Text {
+                        id: areaTopText
+                        text: (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "")
+                            ? ("📁 Area: " + root.filterAreaPath)
+                            : ("📁 Area Filter (" + (backend ? backend.areaPathRules.length : 0) + " rules)")
+                        font.family: "Segoe UI, sans-serif"
+                        font.pixelSize: 11
+                        font.weight: (root.filterAreaPath !== "ALL") ? Font.Bold : Font.Normal
+                        color: (root.filterAreaPath !== "ALL") ? "#58a6ff" : "#3fb950"
                     }
                 }
             }
@@ -1202,6 +1263,84 @@ Item {
                         root.filterMilestone = "ALL";
                         wiMilestoneCombo.currentIndex = 0;
                         wiMilestoneCombo.editText = "";
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 18; color: "#30363d" }
+
+            // Area Path Filter
+            RowLayout {
+                spacing: 6
+                Text {
+                    text: "Area Path:"
+                    font.family: "Segoe UI, sans-serif"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: "#8b949e"
+                }
+
+                ComboBox {
+                    id: wiAreaPathCombo
+                    implicitWidth: 190
+                    implicitHeight: 28
+                    font.pixelSize: 11
+                    editable: true
+                    model: root.areaPathsList
+                    editText: root.filterAreaPath === "ALL" ? "" : root.filterAreaPath
+
+                    onEditTextChanged: {
+                        var val = editText ? editText.trim() : "";
+                        root.filterAreaPath = (val === "" ? "ALL" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    onActivated: function(index) {
+                        var val = root.areaPathsList[index] || "ALL";
+                        root.filterAreaPath = val;
+                        editText = (val === "ALL" ? "" : val);
+                        root.currentPage = 1;
+                        root.updateFilteredModel();
+                    }
+
+                    background: Rectangle {
+                        color: "#161b22"
+                        radius: 6
+                        border.color: wiAreaPathCombo.hovered || wiAreaPathCombo.activeFocus ? "#58a6ff" : (root.filterAreaPath !== "ALL" ? "#3fb950" : "#30363d")
+                    }
+
+                    contentItem: TextField {
+                        leftPadding: 8
+                        rightPadding: (root.filterAreaPath !== "ALL") ? 32 : 24
+                        text: wiAreaPathCombo.editText
+                        placeholderText: "Type or select Area..."
+                        placeholderTextColor: "#484f58"
+                        font: wiAreaPathCombo.font
+                        color: root.filterAreaPath !== "ALL" ? "#3fb950" : "#f0f6fc"
+                        verticalAlignment: Text.AlignVCenter
+                        background: Item {}
+                        onTextChanged: {
+                            if (text !== wiAreaPathCombo.editText) {
+                                wiAreaPathCombo.editText = text;
+                            }
+                        }
+                    }
+                }
+
+                // Clear Area Path filter button
+                Button {
+                    visible: root.filterAreaPath !== "ALL" && root.filterAreaPath !== ""
+                    text: "✖"
+                    font.pixelSize: 10
+                    contentItem: Text { text: parent.text; font: parent.font; color: "#8b949e"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { implicitWidth: 20; implicitHeight: 20; radius: 10; color: parent.hovered ? "#21262d" : "transparent" }
+                    onClicked: {
+                        root.filterAreaPath = "ALL";
+                        wiAreaPathCombo.currentIndex = 0;
+                        wiAreaPathCombo.editText = "";
                         root.currentPage = 1;
                         root.updateFilteredModel();
                     }
@@ -2120,6 +2259,18 @@ Item {
                                         }
                                     }
 
+                                    Row {
+                                        spacing: 5
+                                        visible: (model.area_path || "") !== ""
+                                        Text { text: "📁 Area:"; font.pixelSize: 11; font.weight: Font.DemiBold; color: "#8b949e" }
+                                        Text {
+                                            text: model.area_path
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: "#3fb950"
+                                        }
+                                    }
+
                                     Item { Layout.fillWidth: true }
 
                                     Row {
@@ -2738,7 +2889,14 @@ Item {
                 matchesTag = tList.indexOf(targetTag) !== -1 || tList.some(function(t) { return t.indexOf(targetTag) !== -1; }) || rawT.indexOf(targetTag) !== -1
             }
 
-            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone && matchesTag) {
+            var matchesArea = true
+            if (root.filterAreaPath !== "ALL" && root.filterAreaPath !== "") {
+                var targetArea = root.filterAreaPath.toLowerCase().trim().replace(/\//g, "\\")
+                var itemArea = (item.area_path || "").toLowerCase().trim().replace(/\//g, "\\")
+                matchesArea = (itemArea === targetArea) || (itemArea.indexOf(targetArea) !== -1) || (targetArea.indexOf(itemArea) !== -1)
+            }
+
+            if (matchesQuery && matchesState && matchesType && matchesModified && matchesAssignee && matchesIteration && matchesUrgency && matchesLevel1 && matchesLevel2 && matchesPriority && matchesGrouping && matchesMilestone && matchesTag && matchesArea) {
                 matched.push(item)
             }
         }
@@ -2830,6 +2988,7 @@ Item {
             root.refreshIterationsList()
             root.refreshHierarchyLists()
             root.refreshMilestonesList()
+            root.refreshAreaPathsList()
             root.refreshTagsList()
             root.updateFilteredModel()
         }
@@ -2855,6 +3014,7 @@ Item {
     onFilterPriorityChanged:  updateFilteredModel()
     onFilterGroupingChanged:  updateFilteredModel()
     onFilterMilestoneChanged:    updateFilteredModel()
+    onFilterAreaPathChanged:     updateFilteredModel()
     onFilterTagCategoryChanged:  updateFilteredModel()
     onFilterTagChanged:          updateFilteredModel()
 
@@ -2879,6 +3039,7 @@ Item {
         refreshIterationsList()
         refreshHierarchyLists()
         refreshMilestonesList()
+        refreshAreaPathsList()
         refreshTagsList()
         updateFilteredModel()
     }

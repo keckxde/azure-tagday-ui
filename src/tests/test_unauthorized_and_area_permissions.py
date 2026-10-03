@@ -91,32 +91,83 @@ class TestAzureUnauthorizedAndAreaPermissions(unittest.TestCase):
         self.assertFalse(is_work_item_in_area_path("MyProject\\TeamBeta", manual_rules))
 
     def test_delete_and_clear_area_path_rules(self):
+        import tempfile
+        from azure.azure_db import AzureDevOpsCache
         from PySide6.QtCore import QCoreApplication
         if not QCoreApplication.instance():
             _app = QCoreApplication([])
         from gui.backend import DevOpsBackend
 
-        backend = DevOpsBackend()
-        backend._area_path_rules = [
-            {"path": "MyProject\\Alpha", "include_children": True},
-            {"path": "MyProject\\Beta", "include_children": False},
-            {"path": "MyProject\\Gamma", "include_children": True}
-        ]
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            cache = AzureDevOpsCache(tmp_path)
+            backend = DevOpsBackend()
+            backend._cache_db = cache
+            backend._db_path = tmp_path
+            backend._area_path_rules = [
+                {"path": "MyProject\\Alpha", "include_children": True},
+                {"path": "MyProject\\Beta", "include_children": False},
+                {"path": "MyProject\\Gamma", "include_children": True}
+            ]
 
-        # Delete single rule
-        ok = backend.delete_area_path_rule("MyProject\\Beta")
-        self.assertTrue(ok)
-        self.assertEqual(len(backend._area_path_rules), 2)
-        paths = [r["path"] for r in backend._area_path_rules]
-        self.assertIn("MyProject\\Alpha", paths)
-        self.assertIn("MyProject\\Gamma", paths)
-        self.assertNotIn("MyProject\\Beta", paths)
+            # Delete single rule
+            ok = backend.delete_area_path_rule("MyProject\\Beta")
+            self.assertTrue(ok)
+            self.assertEqual(len(backend._area_path_rules), 2)
+            paths = [r["path"] for r in backend._area_path_rules]
+            self.assertIn("MyProject\\Alpha", paths)
+            self.assertIn("MyProject\\Gamma", paths)
+            self.assertNotIn("MyProject\\Beta", paths)
 
-        # Clear all rules
-        clear_ok = backend.clear_area_path_rules()
-        self.assertTrue(clear_ok)
-        self.assertEqual(len(backend._area_path_rules), 0)
+            # Clear all rules
+            clear_ok = backend.clear_area_path_rules()
+            self.assertTrue(clear_ok)
+            self.assertEqual(len(backend._area_path_rules), 0)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+    def test_delete_and_set_default_area_path(self):
+        import tempfile
+        from azure.azure_db import AzureDevOpsCache
+        from PySide6.QtCore import QCoreApplication
+        if not QCoreApplication.instance():
+            _app = QCoreApplication([])
+        from gui.backend import DevOpsBackend
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            cache = AzureDevOpsCache(tmp_path)
+            backend = DevOpsBackend()
+            backend._cache_db = cache
+            backend._db_path = tmp_path
+            backend.setDefaultAreaPath("MyProject")
+            backend._area_path_rules = [
+                {"path": "MyProject", "include_children": True},
+                {"path": "MyProject\\SubArea", "include_children": True}
+            ]
+            self.assertEqual(backend.defaultAreaPath, "MyProject")
+
+            # Delete Default Area Path
+            del_ok = backend.deleteDefaultAreaPath()
+            self.assertTrue(del_ok)
+            self.assertEqual(backend.defaultAreaPath, "")
+            # Verifies the default area rule was removed from rules list, leaving only subarea
+            self.assertEqual(len(backend._area_path_rules), 1)
+            self.assertEqual(backend._area_path_rules[0]["path"], "MyProject\\SubArea")
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
 
 if __name__ == '__main__':
     unittest.main()
+

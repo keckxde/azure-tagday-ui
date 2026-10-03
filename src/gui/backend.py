@@ -356,7 +356,7 @@ class DevOpsBackend(QObject):
         self._project_id = devops_helper.AZURE_PROJECT_ID or ""
 
         # Area Path settings & Work item filtering
-        self._area_path_filter_enabled = True
+        self._area_path_filter_enabled = False
         self._default_area_path = ""
         self._area_path_rules = []
         self._all_discovered_area_paths = []
@@ -483,7 +483,7 @@ class DevOpsBackend(QObject):
             # Load Area Path settings
             try:
                 area_cfg = cache_db.get_area_path_settings()
-                self._area_path_filter_enabled = area_cfg.get("enabled", True)
+                self._area_path_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
                 self._default_area_path = area_cfg.get("default_area", "")
                 self._area_path_rules = area_cfg.get("rules", [])
                 self._all_discovered_area_paths = area_cfg.get("all_areas", [])
@@ -608,7 +608,55 @@ class DevOpsBackend(QObject):
     @Property(str, notify=areaPathSettingsChanged)
     def defaultAreaPath(self):
         """Returns the default project or team Area Path."""
-        return self._default_area_path or (self.projectName if self.projectName != "N/A" else "")
+        return self._default_area_path or ""
+
+    @Slot(str, result=bool)
+    def setDefaultAreaPath(self, path):
+        """Sets or updates the default Area Path."""
+        self._default_area_path = (path or "").strip().replace("/", "\\")
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(default_area=self._default_area_path)
+            except Exception as e:
+                logger.error("Error setting default area path: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        return True
+
+    @Slot(result=bool)
+    def deleteDefaultAreaPath(self):
+        """Deletes/clears the default Area Path, allowing filtering solely on configured sub-areas."""
+        old_def = self._default_area_path
+        self._default_area_path = ""
+        # Also remove the default area rule from rules list if present
+        if old_def:
+            clean_def = old_def.strip().replace("/", "\\").lower()
+            self._area_path_rules = [
+                r for r in self._area_path_rules
+                if str(r.get("path") or r.get("value") or "").strip().replace("/", "\\").lower() != clean_def
+            ]
+        if self._cache_db:
+            try:
+                self._cache_db.set_area_path_settings(
+                    default_area="",
+                    rules=self._area_path_rules
+                )
+            except Exception as e:
+                logger.error("Error deleting default area path: %s", e)
+        self.areaPathSettingsChanged.emit()
+        self.refresh_all_data()
+        self.logMessage.emit("🗑️ Deleted Default Area Path. Filter now applies strictly to configured Sub-Areas.")
+        return True
+
+    @Slot(result=bool)
+    def delete_default_area_path(self):
+        """Alias for deleteDefaultAreaPath."""
+        return self.deleteDefaultAreaPath()
+
+    @Slot(result=bool)
+    def clear_default_area_path(self):
+        """Alias for deleteDefaultAreaPath."""
+        return self.deleteDefaultAreaPath()
 
     @Property('QVariantList', notify=areaPathSettingsChanged)
     def areaPathRules(self):
@@ -1251,6 +1299,20 @@ class DevOpsBackend(QObject):
         return sorted(seen, key=sort_key)
 
     @Property(list, notify=workItemsChanged)
+    def workItemAreaPaths(self):
+        """Returns the sorted unique list of Area Paths currently present on work items in cache."""
+        seen = set()
+        for wi in self._work_items:
+            ap = (wi.get("area_path") or "").strip()
+            if ap:
+                seen.add(ap)
+        for r in getattr(self, "_area_path_rules", []):
+            p = str(r.get("path") or r.get("value") or "").strip()
+            if p:
+                seen.add(p)
+        return sorted(seen, key=lambda s: s.lower())
+
+    @Property(list, notify=workItemsChanged)
     def workItemTags(self):
         """Returns the sorted unique list of all tags currently present on work items in cache."""
         seen = set()
@@ -1872,19 +1934,23 @@ class DevOpsBackend(QObject):
         deadline_field_setting = self._custom_deadline_field or ""
 
         # Check Area Path settings for filtering work items
-        area_filter_enabled = getattr(self, "_area_path_filter_enabled", True)
-        area_rules = getattr(self, "_area_path_rules", [])
-        if self._cache_db and not area_rules:
+        area_filter_enabled = False
+        area_rules = []
+        if self._cache_db:
             try:
                 area_cfg = self._cache_db.get_area_path_settings()
-                area_filter_enabled = area_cfg.get("enabled", True)
+                area_filter_enabled = bool(area_cfg.get("enabled") if "enabled" in area_cfg else area_cfg.get("filter_enabled", False))
                 area_rules = area_cfg.get("rules", [])
                 self._area_path_filter_enabled = area_filter_enabled
                 self._area_path_rules = area_rules
                 self._default_area_path = area_cfg.get("default_area", "")
                 self._all_discovered_area_paths = area_cfg.get("all_areas", [])
             except Exception:
-                pass
+                area_filter_enabled = bool(getattr(self, "_area_path_filter_enabled", False))
+                area_rules = getattr(self, "_area_path_rules", [])
+        else:
+            area_filter_enabled = bool(getattr(self, "_area_path_filter_enabled", False))
+            area_rules = getattr(self, "_area_path_rules", [])
 
         total_before_area_filter = len(raw_wis)
         filtered_by_area_path_count = 0

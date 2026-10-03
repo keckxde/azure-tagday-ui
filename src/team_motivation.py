@@ -362,9 +362,8 @@ def compute_team_motivation_data(cache_db, timeframe="last_week", custom_sprint=
         filter_start_str = last_start_str
         filter_end_str = cur_start_str
 
-    # Fetch raw datasets if not provided
-    all_wis = work_items if work_items is not None else cache_db.get_all_work_items()
-    all_wis = work_items if work_items is not None else cache_db.get_all_work_items()
+    # Fetch raw datasets if not provided (honoring Area Path filter if active)
+    all_wis = work_items if work_items is not None else cache_db.get_all_work_items(filter_area_paths=True)
     all_prs = []
     if pull_requests is not None:
         all_prs = pull_requests

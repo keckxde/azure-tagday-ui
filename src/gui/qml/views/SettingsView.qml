@@ -2064,13 +2064,13 @@ Item {
 
                         Item { Layout.fillWidth: true }
 
-                        // Default Project Area Path Badge
+                        // Default Project Area Path Badge & Clear Action
                         Rectangle {
                             implicitHeight: 26
                             implicitWidth: defAreaRow.implicitWidth + 16
                             radius: 4
-                            color: "#0d1117"
-                            border.color: "#30363d"
+                            color: (backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "") ? "#0d1117" : "#162b20"
+                            border.color: (backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "") ? "#30363d" : "#238636"
                             border.width: 1
 
                             RowLayout {
@@ -2086,11 +2086,40 @@ Item {
                                 }
 
                                 Text {
-                                    text: (backend && backend.defaultAreaPath) ? backend.defaultAreaPath : (backend ? backend.projectName : "N/A")
-                                    font.family: "Consolas, monospace"
+                                    text: (backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "") 
+                                        ? backend.defaultAreaPath 
+                                        : "None (Filtering on Sub-Areas only)"
+                                    font.family: (backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "") ? "Consolas, monospace" : "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     font.weight: Font.Bold
-                                    color: "#58a6ff"
+                                    color: (backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== "") ? "#58a6ff" : "#3fb950"
+                                }
+
+                                // Delete / Clear Default Area button
+                                Button {
+                                    visible: backend && backend.defaultAreaPath && backend.defaultAreaPath.trim() !== ""
+                                    implicitHeight: 20
+                                    implicitWidth: 20
+                                    text: "✖"
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: "Delete Default Area to filter only on specific Sub-Areas"
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: parent.hovered ? "#f85149" : "#8b949e"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        radius: 3
+                                        color: parent.hovered ? "#3c1e1e" : "transparent"
+                                    }
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.deleteDefaultAreaPath();
+                                        }
+                                    }
                                 }
                             }
                         }

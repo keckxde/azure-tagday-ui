@@ -291,6 +291,97 @@ class TestAreaPathSettings(unittest.TestCase):
         self.assertEqual(restored_settings["default_value"], "MyProject\\Engineering")
         self.assertEqual(len(restored_settings["rules"]), 1)
 
+    def test_delete_default_area_path_and_filter_only_subareas(self):
+        """Deleting default area path allows filtering strictly on specified sub-areas across TagDay UI."""
+        from datetime import date
+        today_obj = date.today()
+        curr_y, curr_w, _ = today_obj.isocalendar()
+        curr_sprint = f"week-{str(curr_y)[-2:]}{curr_w:02d}"
+
+        raw_root = {
+            "id": 301,
+            "fields": {
+                "System.Title": "Project Root Work Item",
+                "System.WorkItemType": "Task",
+                "System.State": "Active",
+                "System.AreaPath": "MyProject",
+                "System.AssignedTo": {"displayName": "Alice Dev"},
+                "System.IterationPath": f"MyProject\\{curr_sprint}"
+            }
+        }
+        raw_sub1 = {
+            "id": 302,
+            "fields": {
+                "System.Title": "Component A Feature",
+                "System.WorkItemType": "Task",
+                "System.State": "Active",
+                "System.AreaPath": "MyProject\\ComponentA",
+                "System.AssignedTo": {"displayName": "Alice Dev"},
+                "System.IterationPath": f"MyProject\\{curr_sprint}"
+            }
+        }
+        raw_sub2 = {
+            "id": 303,
+            "fields": {
+                "System.Title": "Component B Feature",
+                "System.WorkItemType": "Task",
+                "System.State": "Active",
+                "System.AreaPath": "MyProject\\ComponentB",
+                "System.AssignedTo": {"displayName": "Bob Dev"},
+                "System.IterationPath": f"MyProject\\{curr_sprint}"
+            }
+        }
+        self.cache.save_work_item(301, "Project Root Work Item", "Task", "Active", "Alice Dev", "2026-10-01", raw_root)
+        self.cache.save_work_item(302, "Component A Feature", "Task", "Active", "Alice Dev", "2026-10-01", raw_sub1)
+        self.cache.save_work_item(303, "Component B Feature", "Task", "Active", "Bob Dev", "2026-10-01", raw_sub2)
+
+        backend = DevOpsBackend()
+        backend.set_cache_db(self.cache)
+
+        # Initially set default area and rule
+        backend.setDefaultAreaPath("MyProject")
+        backend.addAreaPathRule("MyProject", True)
+        self.assertEqual(backend.defaultAreaPath, "MyProject")
+
+        # Delete default area path
+        del_ok = backend.deleteDefaultAreaPath()
+        self.assertTrue(del_ok)
+        self.assertEqual(backend.defaultAreaPath, "")
+
+        # Now configure rule ONLY for ComponentA subarea
+        backend.addAreaPathRule("MyProject\\ComponentA", True)
+        backend.setAreaPathFilterEnabled(True)
+
+        backend._load_all_data_sync()
+
+        # 1. Work Items Page data
+        self.assertEqual(len(backend.workItems), 1)
+        self.assertEqual(backend.workItems[0]["id"], 302)
+        self.assertEqual(backend.workItems[0]["area_path"], "MyProject\\ComponentA")
+        self.assertIn("MyProject\\ComponentA", backend.workItemAreaPaths)
+
+        # 2. Member Workload Details (Right Sidebar & Workload Plan)
+        details = backend.get_member_workload_details("Alice Dev")
+        self.assertEqual(details["assignee"], "Alice Dev")
+        self.assertEqual(details["total_items"], 1)
+        self.assertEqual(details["work_items"][0]["id"], 302)
+
+        # Excluded member Bob Dev should have 0 items in workload details
+        bob_details = backend.get_member_workload_details("Bob Dev")
+        self.assertEqual(bob_details["total_items"], 0)
+
+        # 3. Team Motivation Data
+        import team_motivation
+        motiv_data = team_motivation.compute_team_motivation_data(
+            self.cache,
+            timeframe="all_time",
+            work_items=backend.workItems
+        )
+        roster = motiv_data.get("members", [])
+        self.assertEqual(len(roster), 1)
+        self.assertEqual(roster[0]["name"], "Alice Dev")
+
 
 if __name__ == "__main__":
     unittest.main()
+
