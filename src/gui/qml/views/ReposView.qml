@@ -675,23 +675,7 @@ Item {
                         onClicked: root.toggleBranchesSidebar()
                     }
 
-                    Button {
-                        text: "🏷️ Category Settings"
-                        font.pixelSize: 11
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: "#bc8cff"
-                        }
-                        background: Rectangle {
-                            implicitHeight: 32
-                            implicitWidth: 140
-                            radius: 6
-                            color: parent.hovered ? "#21262d" : "#161b22"
-                            border.color: "#30363d"
-                        }
-                        onClicked: repoCategoriesDialog.openDialog()
-                    }
+
 
                     Button {
                         text: "📑 Open TAGDAY.md"
@@ -1395,9 +1379,15 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             z: -1
                             onClicked: {
-                                // Clicking anywhere on the row selects this repository in the PR sidebar or navigates to Tag Day
+                                // Clicking anywhere on the row selects this repository in the active sidebar tab or navigates to Tag Day
                                 if (root.isPrSidebarOpen) {
-                                    root.filterPrsByRepo(model.name);
+                                    if (root.sidebarTab === 1) {
+                                        root.branchSelectedRepo = model.name;
+                                        root.branchCurrentPage = 1;
+                                        root.updateFilteredBranches();
+                                    } else {
+                                        root.filterPrsByRepo(model.name);
+                                    }
                                 } else {
                                     if (typeof window !== "undefined" && window.navigateToTagDayRepo) {
                                         window.navigateToTagDayRepo(model.name);
@@ -1921,31 +1911,7 @@ Item {
                         }
                     }
 
-                    // Sync PRs Button
-                    Button {
-                        text: "⚡ Sync"
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                        ToolTip.visible: hovered
-                        ToolTip.text: "Sync pull requests with Azure DevOps API"
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: "#ffffff"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            implicitHeight: 26
-                            implicitWidth: 56
-                            radius: 4
-                            color: parent.hovered ? "#238636" : "#2ea043"
-                            border.color: "#3fb950"
-                        }
-                        onClicked: {
-                            if (backend) backend.sync_pull_requests_async();
-                        }
-                    }
+
 
                     // Close Sidebar Button
                     Button {
@@ -2856,7 +2822,7 @@ Item {
                         delegate: Rectangle {
                             id: brCardRoot
                             width: branchListView.width - (branchListVBar.visible ? 10 : 0)
-                            implicitHeight: brCardLayout.implicitHeight + 16
+                            height: brCardLayout.implicitHeight + 16
                             color: brCardMa.containsMouse ? "#161b22" : "#0d1117"
                             radius: 6
                             border.color: brCardMa.containsMouse ? "#8957e5" : "#30363d"
@@ -2871,7 +2837,9 @@ Item {
 
                             ColumnLayout {
                                 id: brCardLayout
-                                anchors.fill: parent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
                                 anchors.margins: 8
                                 spacing: 6
 
@@ -3292,9 +3260,11 @@ Item {
         function onRepositoriesChanged() {
             root.validateSelectedCategory();
             root.updateFilteredModel();
+            root.updateFilteredBranches();
         }
         function onRepoCategoriesChanged() {
             root.updateFilteredModel();
+            root.updateFilteredBranches();
         }
         function onPullRequestsChanged() {
             root.updateFilteredPrs();
@@ -3310,6 +3280,14 @@ Item {
         }
     }
 
+    onSidebarTabChanged: {
+        if (root.sidebarTab === 1) {
+            root.updateFilteredBranches();
+        } else {
+            root.updateFilteredPrs();
+        }
+    }
+
     onSearchQueryChanged: {
         root.currentPage = 1;
         root.updateFilteredModel();
@@ -3322,9 +3300,5 @@ Item {
         root.updateFilteredModel();
         root.updateFilteredPrs();
         root.updateFilteredBranches();
-    }
-
-    RepoCategoriesDialog {
-        id: repoCategoriesDialog
     }
 }

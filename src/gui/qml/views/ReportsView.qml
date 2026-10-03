@@ -140,6 +140,18 @@ Item {
         if (!root.selectedSprintReport) {
             root.selectedSprintReport = root.getDefaultSprint();
         }
+        if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
+            window.closeRightSidebar();
+        }
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            root.isTdSidebarOpen = true;
+            if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
+                window.closeRightSidebar();
+            }
+        }
     }
 
     onSelectedSprintReportChanged: {

@@ -174,14 +174,14 @@ def get_reports_dir(default=None):
     """
     Returns the configured target directory for reading baseline reports and writing generated reports.
     Checks database / user configuration ('REPORTS_DIR', 'reports_dir', 'BASE_FOLDER', 'base_folder'),
-    falling back to environment variables, and defaulting to default or os.getcwd().
+    falling back to environment variables, and defaulting to 'reports' folder under cwd (or specified default).
     """
     configured = GetEnvVariable("REPORTS_DIR") or GetEnvVariable("BASE_FOLDER")
     if configured and str(configured).strip():
         return os.path.normpath(str(configured).strip())
-    if default is not None:
-        return os.path.normpath(default)
-    return os.getcwd()
+    if default is not None and str(default).strip():
+        return os.path.normpath(str(default).strip())
+    return os.path.normpath(os.path.join(os.getcwd(), "reports"))
         
 
 def parse_iso_datetime(date_str):

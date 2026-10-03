@@ -72,7 +72,7 @@ Rectangle {
 
     Layout.preferredWidth: isOpen ? preferredWidth : 0
     Layout.fillHeight: true
-    visible: isOpen || Layout.preferredWidth > 0
+    visible: isOpen
     color: "#161b22"
     border.color: "#30363d"
     border.width: 1

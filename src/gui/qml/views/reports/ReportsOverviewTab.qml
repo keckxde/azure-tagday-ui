@@ -151,10 +151,8 @@ import "../../components"
                                         border.color: "#388bfd"
                                     }
                                     onClicked: {
-                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
-                                            var rep = backend.get_report_content("tagday");
-                                            window.openRightSidebar("report_preview", "Tag Day Release Report", "Preview & Markdown Inspector", rep);
-                                        }
+                                        root.activeReportTab = 0;
+                                        root.isTdSidebarOpen = true;
                                     }
                                 }
 
@@ -324,10 +322,8 @@ import "../../components"
                                         border.color: "#a371f7"
                                     }
                                     onClicked: {
-                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
-                                            var rep = backend.get_report_content("storage");
-                                            window.openRightSidebar("report_preview", "Storage & Artifacts Report", "Storage Footprint Preview", rep);
-                                        }
+                                        root.activeReportTab = 2;
+                                        root.isTdSidebarOpen = true;
                                     }
                                 }
 
@@ -497,10 +493,8 @@ import "../../components"
                                         border.color: "#3fb950"
                                     }
                                     onClicked: {
-                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
-                                            var rep = backend.get_report_content("revision");
-                                            window.openRightSidebar("report_preview", "Release Notes & Revision", "REVISION.md Markdown Inspector", rep);
-                                        }
+                                        root.activeReportTab = 3;
+                                        root.isTdSidebarOpen = true;
                                     }
                                 }
 
@@ -705,11 +699,9 @@ import "../../components"
                                         border.color: "#388bfd"
                                     }
                                     onClicked: {
-                                        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function" && backend) {
-                                            var targetSprint = sprintSelectCombo.currentText;
-                                            var rep = backend.get_report_content("sprint", targetSprint);
-                                            window.openRightSidebar("report_preview", "Sprint Report: " + targetSprint, "Sprint Velocity & Items Breakdown", rep);
-                                        }
+                                        var targetSprint = sprintSelectCombo.currentText;
+                                        root.openSprintReport(targetSprint);
+                                        root.isTdSidebarOpen = true;
                                     }
                                 }
 

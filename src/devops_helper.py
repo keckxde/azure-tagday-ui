@@ -20,12 +20,11 @@ from azure import AzureInfoHandler, AzureDevOpsCache, AzureServerConnectionError
 logger = logging.getLogger(__name__)
 
 def get_reports_dir(default=None) -> str:
-    """Returns the currently configured reports target/baseline directory, defaulting to cwd."""
-    return utils.get_reports_dir(default or os.getcwd())
+    """Returns the currently configured reports target/baseline directory, defaulting to reports folder."""
+    return utils.get_reports_dir(default)
 
-# Determine BASE_FOLDER based on configuration or cwd
-cwd = os.getcwd()
-BASE_FOLDER = utils.get_reports_dir(cwd)
+# Determine BASE_FOLDER based on configuration or reports folder
+BASE_FOLDER = utils.get_reports_dir()
 
 logger.info("Use BASE_FOLDER: %s", BASE_FOLDER)
 

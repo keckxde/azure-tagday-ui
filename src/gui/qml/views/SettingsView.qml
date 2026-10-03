@@ -303,6 +303,14 @@ Item {
                                 badgeColor: "#d29922"
                             },
                             {
+                                id: "categories",
+                                icon: "🏷️",
+                                label: "Repo Categories",
+                                desc: "Classification & Overrides",
+                                badge: (backend && backend.repoCategories && backend.repoCategories.length > 0) ? (backend.repoCategories.length + " Categories") : "",
+                                badgeColor: "#bc8cff"
+                            },
+                            {
                                 id: "aliases",
                                 icon: "👤",
                                 label: "Users & Aliases",
@@ -454,6 +462,18 @@ Item {
                 asynchronous: true
                 source: "settings/SettingsReportsTab.qml"
                 visible: root.activeTab === "reports"
+                onLoaded: _loaded = true
+            }
+
+            // Tab 4: Repository Categories
+            Loader {
+                id: categoriesTabLoader
+                Layout.fillWidth: true
+                active: root.activeTab === "categories" || _loaded
+                property bool _loaded: false
+                asynchronous: true
+                source: "settings/SettingsCategoriesTab.qml"
+                visible: root.activeTab === "categories"
                 onLoaded: _loaded = true
             }
 

@@ -196,7 +196,7 @@ class DevOpsBackend(QObject):
         if not self._team_motivation_score_config or not isinstance(self._team_motivation_score_config, dict):
             self._team_motivation_score_config = team_motivation.get_default_score_config()
         self._custom_deadline_field = _load_user_settings().get("custom_deadline_field", "") or utils.get_configured_deadline_field()
-        self._reports_dir = user_cfg.get("reports_dir", "") or utils.get_reports_dir(default="")
+        self._reports_dir = user_cfg.get("reports_dir", "")
         if self._reports_dir:
             devops_helper.BASE_FOLDER = self._reports_dir
         self._info_handler = None
@@ -1537,12 +1537,15 @@ class DevOpsBackend(QObject):
     @Property(list, notify=tagDayDataChanged)
     def unmergedBranches(self):
         """Returns all unmerged branches across all repositories with repository metadata."""
-        if not self._tagday_data:
-            return []
         all_branches = []
-        for repo in self._tagday_data.get("repos_summary", []):
-            for b in repo.get("unmerged_branches", []):
-                all_branches.append(dict(b))
+        if self._tagday_data and self._tagday_data.get("repos_summary"):
+            for repo in self._tagday_data.get("repos_summary", []):
+                for b in repo.get("unmerged_branches", []):
+                    all_branches.append(dict(b))
+        elif self._repositories:
+            for repo in self._repositories:
+                for b in repo.get("unmerged_branches", []):
+                    all_branches.append(dict(b))
         return all_branches
 
     @Property(dict, notify=storageDataChanged)
@@ -3023,12 +3026,12 @@ class DevOpsBackend(QObject):
             self.logMessage.emit(f"Error loading report metrics: {e}")
 
     def get_effective_reports_dir(self):
-        """Returns the configured reports target folder, or BASE_FOLDER / os.getcwd() by default."""
+        """Returns the configured reports target folder, or reports folder by default."""
         if self._reports_dir and str(self._reports_dir).strip():
             return os.path.normpath(str(self._reports_dir).strip())
         if devops_helper.BASE_FOLDER and os.path.isabs(devops_helper.BASE_FOLDER) and devops_helper.BASE_FOLDER != os.getcwd():
             return os.path.normpath(devops_helper.BASE_FOLDER)
-        return os.getcwd()
+        return utils.get_reports_dir()
 
     @Slot(str)
     def setReportsDir(self, path):
@@ -7643,6 +7646,9 @@ class DevOpsBackend(QObject):
                 os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
                 os.path.join(eff_dir, "BUILD_ARTIFACTS.md"),
                 os.path.join(eff_dir, "STORAGE.md"),
+                os.path.join(os.getcwd(), "reports", devops_helper.BUILD_ARTIFACTS_MD),
+                os.path.join(os.getcwd(), "reports", "BUILD_ARTIFACTS.md"),
+                os.path.join(os.getcwd(), "reports", "STORAGE.md"),
                 os.path.join(os.getcwd(), devops_helper.BUILD_ARTIFACTS_MD),
                 os.path.join(os.getcwd(), "BUILD_ARTIFACTS.md"),
                 os.path.join(os.getcwd(), "STORAGE.md"),
@@ -7654,35 +7660,84 @@ class DevOpsBackend(QObject):
                         res["title"] = "Storage & Build Artifacts Report"
                         res["format"] = "markdown"
                         return res
+
+            # Try generating dynamic markdown from cache DB if available
+            if self._cache_db:
+                try:
+                    import generate_artifacts_report
+                    artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
+                    if artifacts:
+                        metrics = generate_artifacts_report.calculate_metrics(artifacts)
+                        md_content = generate_artifacts_report.generate_markdown_report(
+                            metrics,
+                            artifacts,
+                            output_path=os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                            project_name=devops_helper.AZURE_PROJECT_ID,
+                            csv_filename=devops_helper.BUILD_ARTIFACTS_CSV
+                        )
+                        if md_content:
+                            return {
+                                "success": True,
+                                "title": "Storage & Build Artifacts Report",
+                                "format": "markdown",
+                                "file_path": os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
+                                "file_name": devops_helper.BUILD_ARTIFACTS_MD,
+                                "content": md_content,
+                                "line_count": len(md_content.splitlines()),
+                                "word_count": len(re.findall(r"\b\w+\b", md_content)),
+                                "size_bytes": len(md_content.encode("utf-8")),
+                                "modified_at": "Live generated"
+                            }
+                except Exception as e:
+                    logger.debug(f"Could not render full storage markdown: {e}")
+
+            # Structured live fallback from _storage_data
             s_data = self._storage_data or {}
-            packages = s_data.get("packages", [])
-            total_size = s_data.get("total_size_mb", 0)
+            repo_groups = s_data.get("artifacts_by_repo", [])
+            total_builds = s_data.get("total_builds", 0)
+            total_artifacts = s_data.get("total_artifacts", 0)
+            total_gb = s_data.get("total_size_gb", "0.00")
+            active_gb = s_data.get("active_size_gb", "0.00")
+            deleted_gb = s_data.get("deleted_size_gb", "0.00")
+
             md_lines = [
-                "# Storage & Build Artifacts Report",
+                "# 📦 Build Artifact & Storage Report",
                 "",
-                f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"> **Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ",
+                f"> **Target Directory:** `{eff_dir}`  ",
                 "",
-                f"- **Total Storage Used:** {total_size:.2f} MB",
-                f"- **Total Artifact Packages:** {len(packages)}",
+                "## 📊 Storage Metrics Summary",
                 "",
-                "## Packages Overview",
+                "| Metric | Count / Size | Description |",
+                "| :--- | :--- | :--- |",
+                f"| **Total Builds Tracked** | `{total_builds}` | Completed pipeline builds analyzed |",
+                f"| **Total Artifact Packages** | `{total_artifacts}` | Published drop folders and build artifacts |",
+                f"| **Total Storage Footprint** | `{total_gb} GB` | Combined active and historical storage |",
+                f"| **Active Storage in Use** | `{active_gb} GB` | Current retained build packages |",
+                f"| **Reclaimed / Deleted** | `{deleted_gb} GB` | Cleaned up artifact storage |",
                 "",
-                "| Package Name | Size (MB) | Files Count | Path |",
-                "|---|---|---|---|"
+                "## 📂 Repository Breakdown",
+                "",
+                "| Repository | Builds | Artifacts | Active Size | Total Size |",
+                "| :--- | :--- | :--- | :--- | :--- |"
             ]
-            if packages:
-                for pkg in packages:
-                    p_name = pkg.get("name", "Package")
-                    p_size = pkg.get("size_mb", 0)
-                    p_files = pkg.get("files_count", 0)
-                    p_path = pkg.get("path", "-")
-                    md_lines.append(f"| {p_name} | {p_size:.2f} | {p_files} | `{p_path}` |")
+            if repo_groups:
+                for grp in repo_groups:
+                    r_name = grp.get("repo_name", "-")
+                    b_count = grp.get("builds_count", 0)
+                    a_count = grp.get("artifacts_count", 0)
+                    act_sz = f"{grp.get('active_size_mb', 0):.2f} MB"
+                    tot_sz = grp.get("total_size_str", "0 MB")
+                    md_lines.append(f"| **{r_name}** | {b_count} | {a_count} | `{act_sz}` | `{tot_sz}` |")
             else:
-                md_lines.append("*No artifact package data cached yet. Click 'Generate Storage Report' to analyze.*")
+                md_lines.append("| *No repository artifact data cached yet* | - | - | - | - |")
+                md_lines.append("")
+                md_lines.append("*Click '⚡ Generate Storage Report' in the Storage page to sync live builds and generate full analysis.*")
+
             content = "\n".join(md_lines)
             return {
                 "success": True,
-                "title": "Storage & Build Artifacts Report (Live)",
+                "title": "Storage & Build Artifacts Report",
                 "format": "markdown",
                 "file_path": os.path.join(eff_dir, devops_helper.BUILD_ARTIFACTS_MD),
                 "file_name": devops_helper.BUILD_ARTIFACTS_MD,
@@ -7720,7 +7775,7 @@ class DevOpsBackend(QObject):
                 if md_text:
                     return {
                         "success": True,
-                        "title": f"Sprint Report - {clean_sprint} (Live)",
+                        "title": f"Sprint Report - {clean_sprint}",
                         "format": "markdown",
                         "file_path": os.path.join(eff_dir, f"SPRINT_REPORT_{clean_sprint}.md"),
                         "file_name": f"SPRINT_REPORT_{clean_sprint}.md",

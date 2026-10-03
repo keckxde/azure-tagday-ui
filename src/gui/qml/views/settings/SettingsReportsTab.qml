@@ -65,7 +65,7 @@ ColumnLayout {
                     Text {
                         id: reportsDirPillText
                         anchors.centerIn: parent
-                        text: (backend && backend.reportsDir) ? "📁 Custom Directory" : "🏠 Default (Current Directory)"
+                        text: (backend && backend.reportsDir) ? "📁 Custom Directory" : "🏠 Default (reports/)"
                         font.family: "Segoe UI, sans-serif"
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
@@ -88,7 +88,7 @@ ColumnLayout {
                     font.family: "Consolas, monospace"
                     font.pixelSize: 12
                     text: backend ? (backend.reportsDir || backend.effectiveReportsDir) : ""
-                    placeholderText: "e.g. C:/Projects/Reports or relative path (empty for current directory)"
+                    placeholderText: "e.g. C:/Projects/Reports or relative path (empty for default ./reports)"
                     placeholderTextColor: "#484f58"
                     color: "#f0f6fc"
                     background: Rectangle {

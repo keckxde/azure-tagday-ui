@@ -39,10 +39,10 @@ class TestReportsTargetFolder(unittest.TestCase):
             os.environ.pop("BASE_FOLDER", None)
 
     def test_utils_get_reports_dir_default_and_env(self):
-        # When not set, defaults to cwd or custom default
+        # When not set, defaults to reports folder under cwd or custom default
         os.environ.pop("REPORTS_DIR", None)
         os.environ.pop("BASE_FOLDER", None)
-        self.assertEqual(utils.get_reports_dir(), os.getcwd())
+        self.assertEqual(utils.get_reports_dir(), os.path.normpath(os.path.join(os.getcwd(), "reports")))
         self.assertEqual(utils.get_reports_dir(default="custom/path"), os.path.normpath("custom/path"))
 
         # When set via environment variable

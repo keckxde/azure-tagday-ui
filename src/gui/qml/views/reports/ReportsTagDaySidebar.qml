@@ -11,7 +11,7 @@ import "../../components"
             Layout.minimumWidth: (root && root.isTdSidebarOpen) ? root.minTdSidebarWidth : 0
             Layout.maximumWidth: (root && root.isTdSidebarOpen) ? root.maxTdSidebarWidth : 0
             Layout.fillHeight: true
-            visible: (root && root.isTdSidebarOpen) || Layout.preferredWidth > 0
+            visible: root && root.isTdSidebarOpen
             color: "#161b22"
             border.color: "#30363d"
             border.width: 1
