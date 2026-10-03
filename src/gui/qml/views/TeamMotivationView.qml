@@ -35,6 +35,8 @@ Item {
         }
         return result;
     }
+    property string selectedBadgeCategory: "all"
+    readonly property var badgeCategoriesList: motivationData && motivationData.badge_categories ? motivationData.badge_categories : []
     readonly property var allBadgesList: motivationData && motivationData.all_badges ? motivationData.all_badges : []
     readonly property var staleRadarList: motivationData && motivationData.stale_radar ? motivationData.stale_radar : []
 
@@ -53,6 +55,13 @@ Item {
             window.openRightSidebar("contributor_profile", memberObj.name, "Contributor & Gamification Profile", memberObj);
         } else {
             root.isProfileDrawerOpen = true;
+        }
+    }
+
+    function openBadgeDetail(badgeObj) {
+        if (!badgeObj) return;
+        if (typeof window !== "undefined" && typeof window.openRightSidebar === "function") {
+            window.openRightSidebar("badge_detail", badgeObj.name, (badgeObj.category_name || "Badge Details & Achievers"), badgeObj);
         }
     }
 
@@ -2384,52 +2393,44 @@ Item {
             }
 
             // ==========================================
-            // Badge Legend / Unlockable Badges Gallery
+            // Badge Legend / Unlockable Badges Gallery & Categories
             // ==========================================
-            Text {
-                visible: root.activeTab === "badges"
-                text: "🎖️ Unlockable Sprint & Team Badges"
-                font.family: "Segoe UI, sans-serif"
-                font.pixelSize: 16
-                font.weight: Font.Bold
-                color: "#f0f6fc"
-                Layout.topMargin: 12
-            }
-
-            GridLayout {
+            ColumnLayout {
                 visible: root.activeTab === "badges"
                 Layout.fillWidth: true
-                columns: width > 1100 ? 3 : (width > 700 ? 2 : 1)
-                columnSpacing: 12
-                rowSpacing: 12
+                spacing: 16
+                Layout.topMargin: 4
 
-                Repeater {
-                    model: allBadgesList
+                // Badges Gallery Hero Header
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: badgeHeaderCol.implicitHeight + 28
+                    radius: 8
+                    color: "#161b22"
+                    border.color: "#30363d"
+                    border.width: 1
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 74
-                        radius: 8
-                        color: "#161b22"
-                        border.color: "#30363d"
-                        border.width: 1
+                    ColumnLayout {
+                        id: badgeHeaderCol
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
 
                         RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 12
+                            Layout.fillWidth: true
+                            spacing: 10
 
                             Rectangle {
                                 width: 38
                                 height: 38
-                                radius: 19
-                                color: modelData.bg_color || "#21262d"
-                                border.color: modelData.color || "#30363d"
-                                border.width: 1.5
+                                radius: 8
+                                color: "#2d2300"
+                                border.color: "#ffd700"
+                                border.width: 1
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: modelData.icon || "🎖️"
+                                    text: "🎖️"
                                     font.pixelSize: 18
                                 }
                             }
@@ -2438,41 +2439,462 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: 2
 
+                                Text {
+                                    text: "Unlockable Badges & Tier Progression Catalog"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 16
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+
+                                Text {
+                                    text: "All badges feature Bronze 🥉, Silver 🥈, and Gold 🥇 tiers with escalating thresholds. Click any badge or category to view team achievers in the Right Sidebar."
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 11
+                                    color: "#8b949e"
+                                }
+                            }
+                        }
+
+                        // Category Filter Pills Bar
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            // "All Categories" Filter Pill
+                            Rectangle {
+                                property bool isSelected: root.selectedBadgeCategory === "all"
+                                implicitHeight: 28
+                                implicitWidth: allCatTxt.implicitWidth + 20
+                                radius: 14
+                                color: isSelected ? "#1f6feb" : (allCatMa.containsMouse ? "#21262d" : "#0d1117")
+                                border.color: isSelected ? "#388bfd" : "#30363d"
+                                border.width: 1
+
                                 RowLayout {
-                                    spacing: 6
+                                    id: allCatTxt
+                                    anchors.centerIn: parent
+                                    spacing: 5
                                     Text {
-                                        text: modelData.name
+                                        text: "🌟 All Categories"
                                         font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 13
-                                        font.weight: Font.Bold
-                                        color: modelData.color || "#f0f6fc"
+                                        font.pixelSize: 11
+                                        font.weight: parent.parent.isSelected ? Font.Bold : Font.Normal
+                                        color: parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
                                     }
                                     Rectangle {
                                         implicitHeight: 16
-                                        implicitWidth: tierTxt.implicitWidth + 8
-                                        radius: 3
-                                        color: modelData.tier === "legendary" ? "#3b2d00" : (modelData.tier === "gold" ? "#2d2300" : "#21262d")
-                                        border.color: modelData.color || "#30363d"
-                                        border.width: 1
-
+                                        implicitWidth: countAllTxt.implicitWidth + 8
+                                        radius: 8
+                                        color: parent.parent.parent.isSelected ? "#388bfd" : "#21262d"
                                         Text {
-                                            id: tierTxt
+                                            id: countAllTxt
                                             anchors.centerIn: parent
-                                            text: (modelData.tier || "badge").toUpperCase()
-                                            font.pixelSize: 8
+                                            text: String(allBadgesList ? allBadgesList.length : 24)
+                                            font.pixelSize: 9
                                             font.weight: Font.Bold
-                                            color: modelData.color || "#8b949e"
+                                            color: "#ffffff"
                                         }
                                     }
                                 }
 
+                                MouseArea {
+                                    id: allCatMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.selectedBadgeCategory = "all"
+                                }
+                            }
+
+                            // Dynamic Category Pills
+                            Repeater {
+                                model: root.badgeCategoriesList
+
+                                Rectangle {
+                                    property bool isSelected: root.selectedBadgeCategory === modelData.id
+                                    implicitHeight: 28
+                                    implicitWidth: catRow.implicitWidth + 20
+                                    radius: 14
+                                    color: isSelected ? "#1f6feb" : (catPillMa.containsMouse ? "#21262d" : "#0d1117")
+                                    border.color: isSelected ? "#388bfd" : "#30363d"
+                                    border.width: 1
+
+                                    RowLayout {
+                                        id: catRow
+                                        anchors.centerIn: parent
+                                        spacing: 5
+
+                                        Text {
+                                            text: (modelData.icon ? (modelData.icon + " ") : "") + modelData.name
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            font.weight: parent.parent.isSelected ? Font.Bold : Font.Normal
+                                            color: parent.parent.isSelected ? "#ffffff" : "#c9d1d9"
+                                        }
+
+                                        Rectangle {
+                                            implicitHeight: 16
+                                            implicitWidth: bCountTxt.implicitWidth + 8
+                                            radius: 8
+                                            color: parent.parent.parent.isSelected ? "#388bfd" : "#21262d"
+                                            Text {
+                                                id: bCountTxt
+                                                anchors.centerIn: parent
+                                                text: String(modelData.badges ? modelData.badges.length : 0)
+                                                font.pixelSize: 9
+                                                font.weight: Font.Bold
+                                                color: "#ffffff"
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: catPillMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (root.selectedBadgeCategory === modelData.id) {
+                                                root.selectedBadgeCategory = "all";
+                                            } else {
+                                                root.selectedBadgeCategory = modelData.id;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Grouped Categories & Badges List
+                Repeater {
+                    model: root.badgeCategoriesList
+
+                    ColumnLayout {
+                        id: catSectionCol
+                        visible: root.selectedBadgeCategory === "all" || root.selectedBadgeCategory === modelData.id
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        // Category Section Header Banner
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 46
+                            radius: 6
+                            color: "#161b22"
+                            border.color: "#30363d"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 8
+
                                 Text {
-                                    text: modelData.description
+                                    text: modelData.icon || "📂"
+                                    font.pixelSize: 16
+                                }
+
+                                Text {
+                                    text: modelData.name || "Category"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 14
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+
+                                Text {
+                                    text: "— " + (modelData.description || "")
                                     font.family: "Segoe UI, sans-serif"
                                     font.pixelSize: 11
                                     color: "#8b949e"
-                                    wrapMode: Text.WordWrap
+                                    elide: Text.ElideRight
                                     Layout.fillWidth: true
+                                }
+
+                                // Badges count pill
+                                Rectangle {
+                                    implicitHeight: 22
+                                    implicitWidth: catBadgeCountTxt.implicitWidth + 12
+                                    radius: 11
+                                    color: "#21262d"
+                                    border.color: "#30363d"
+                                    border.width: 1
+
+                                    Text {
+                                        id: catBadgeCountTxt
+                                        anchors.centerIn: parent
+                                        text: (modelData.badges ? modelData.badges.length : 0) + " Badges"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: "#c9d1d9"
+                                    }
+                                }
+
+                                // Total Achievers in this category pill
+                                Rectangle {
+                                    implicitHeight: 22
+                                    implicitWidth: catAchCountTxt.implicitWidth + 12
+                                    radius: 11
+                                    color: "#16243b"
+                                    border.color: "#388bfd"
+                                    border.width: 1
+
+                                    Text {
+                                        id: catAchCountTxt
+                                        anchors.centerIn: parent
+                                        text: "👥 " + (modelData.total_achievers || 0) + " Unlocked"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        color: "#79c0ff"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Badges Grid inside Category
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width > 1180 ? 3 : (width > 760 ? 2 : 1)
+                            columnSpacing: 12
+                            rowSpacing: 12
+
+                            Repeater {
+                                model: modelData.badges
+
+                                Rectangle {
+                                    id: badgeCard
+                                    Layout.fillWidth: true
+                                    implicitHeight: badgeCardLayout.implicitHeight + 24
+                                    radius: 8
+                                    color: cardMa.containsMouse ? "#1c2128" : "#161b22"
+                                    border.color: cardMa.containsMouse ? "#58a6ff" : (modelData.color || "#30363d")
+                                    border.width: cardMa.containsMouse ? 1.5 : 1
+
+                                    Behavior on border.color { ColorAnimation { duration: 120 } }
+                                    Behavior on color { ColorAnimation { duration: 120 } }
+
+                                    ColumnLayout {
+                                        id: badgeCardLayout
+                                        anchors.fill: parent
+                                        anchors.margins: 12
+                                        spacing: 8
+
+                                        // Top Row: Icon + Title + Tier Pills
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 10
+
+                                            Rectangle {
+                                                width: 40
+                                                height: 40
+                                                radius: 20
+                                                color: modelData.bg_color || "#2d2300"
+                                                border.color: modelData.color || "#ffd700"
+                                                border.width: 1.5
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: modelData.icon || "🎖️"
+                                                    font.pixelSize: 19
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 2
+
+                                                Text {
+                                                    text: modelData.name
+                                                    font.family: "Segoe UI, sans-serif"
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.Bold
+                                                    color: modelData.color || "#f0f6fc"
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                // Tier availability chips (Bronze 🥉, Silver 🥈, Gold 🥇)
+                                                RowLayout {
+                                                    spacing: 4
+
+                                                    Rectangle {
+                                                        implicitHeight: 16
+                                                        implicitWidth: bzTxt.implicitWidth + 8
+                                                        radius: 3
+                                                        color: "#2a1e17"
+                                                        border.color: "#cd7f32"
+                                                        border.width: 1
+                                                        Text { id: bzTxt; anchors.centerIn: parent; text: "🥉 BRONZE"; font.pixelSize: 8; font.weight: Font.Bold; color: "#cd7f32" }
+                                                    }
+
+                                                    Rectangle {
+                                                        implicitHeight: 16
+                                                        implicitWidth: svTxt.implicitWidth + 8
+                                                        radius: 3
+                                                        color: "#21262d"
+                                                        border.color: "#c0c0c0"
+                                                        border.width: 1
+                                                        Text { id: svTxt; anchors.centerIn: parent; text: "🥈 SILVER"; font.pixelSize: 8; font.weight: Font.Bold; color: "#e6edf3" }
+                                                    }
+
+                                                    Rectangle {
+                                                        implicitHeight: 16
+                                                        implicitWidth: gdTxt.implicitWidth + 8
+                                                        radius: 3
+                                                        color: "#2d2300"
+                                                        border.color: "#ffd700"
+                                                        border.width: 1
+                                                        Text { id: gdTxt; anchors.centerIn: parent; text: "🥇 GOLD"; font.pixelSize: 8; font.weight: Font.Bold; color: "#ffd700" }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Badge Description / Lore
+                                        Text {
+                                            text: modelData.description || ""
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 11
+                                            color: "#8b949e"
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+
+                                        // Multi-Tier Escalating Requirements Preview
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: tierLevelsCol.implicitHeight + 12
+                                            radius: 6
+                                            color: "#0d1117"
+                                            border.color: "#21262d"
+                                            border.width: 1
+
+                                            ColumnLayout {
+                                                id: tierLevelsCol
+                                                anchors.fill: parent
+                                                anchors.margins: 6
+                                                spacing: 4
+
+                                                // Bronze preview
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 4
+                                                    Text { text: "🥉"; font.pixelSize: 10 }
+                                                    Text {
+                                                        text: (modelData.tiers && modelData.tiers.bronze) ? modelData.tiers.bronze.criteria : "Standard"
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        color: "#cd7f32"
+                                                        elide: Text.ElideRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Text {
+                                                        text: "+" + ((modelData.tiers && modelData.tiers.bronze) ? modelData.tiers.bronze.points : 50) + "p"
+                                                        font.pixelSize: 9
+                                                        color: "#8b949e"
+                                                    }
+                                                }
+
+                                                // Silver preview
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 4
+                                                    Text { text: "🥈"; font.pixelSize: 10 }
+                                                    Text {
+                                                        text: (modelData.tiers && modelData.tiers.silver) ? modelData.tiers.silver.criteria : "Higher"
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        color: "#c9d1d9"
+                                                        elide: Text.ElideRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Text {
+                                                        text: "+" + ((modelData.tiers && modelData.tiers.silver) ? modelData.tiers.silver.points : 100) + "p"
+                                                        font.pixelSize: 9
+                                                        color: "#8b949e"
+                                                    }
+                                                }
+
+                                                // Gold preview
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 4
+                                                    Text { text: "🥇"; font.pixelSize: 10 }
+                                                    Text {
+                                                        text: (modelData.tiers && modelData.tiers.gold) ? modelData.tiers.gold.criteria : "Master"
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        color: "#ffd700"
+                                                        elide: Text.ElideRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Text {
+                                                        text: "+" + ((modelData.tiers && modelData.tiers.gold) ? modelData.tiers.gold.points : 200) + "p"
+                                                        font.pixelSize: 9
+                                                        color: "#ffd700"
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Footer: Achievers breakdown & Sidebar button
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            // Achievers preview pill
+                                            Rectangle {
+                                                implicitHeight: 22
+                                                implicitWidth: achPrevTxt.implicitWidth + 12
+                                                radius: 4
+                                                color: (modelData.achievers && modelData.achievers.length > 0) ? "#162b20" : "#21262d"
+                                                border.color: (modelData.achievers && modelData.achievers.length > 0) ? "#3fb950" : "#30363d"
+                                                border.width: 1
+
+                                                RowLayout {
+                                                    id: achPrevTxt
+                                                    anchors.centerIn: parent
+                                                    spacing: 4
+                                                    Text {
+                                                        text: (modelData.achievers && modelData.achievers.length > 0) ? "👥" : "🎯"
+                                                        font.pixelSize: 10
+                                                    }
+                                                    Text {
+                                                        text: (modelData.achievers && modelData.achievers.length > 0) ? (modelData.achievers.length + " Achiever" + (modelData.achievers.length > 1 ? "s" : "")) : "0 Unlocked"
+                                                        font.family: "Segoe UI, sans-serif"
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.DemiBold
+                                                        color: (modelData.achievers && modelData.achievers.length > 0) ? "#3fb950" : "#8b949e"
+                                                    }
+                                                }
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+
+                                            // "Inspect in Sidebar" prompt
+                                            Text {
+                                                text: "Details & Achievers →"
+                                                font.family: "Segoe UI, sans-serif"
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: cardMa.containsMouse ? "#58a6ff" : "#8b949e"
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: cardMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.openBadgeDetail(modelData)
+                                    }
                                 }
                             }
                         }
@@ -2789,13 +3211,14 @@ Item {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            implicitHeight: 52
+                            implicitHeight: drawerBadgeRow.implicitHeight + 16
                             radius: 6
-                            color: "#0d1117"
+                            color: modelData.bg_color || "#0d1117"
                             border.color: modelData.color || "#30363d"
                             border.width: 1
 
                             RowLayout {
+                                id: drawerBadgeRow
                                 anchors.fill: parent
                                 anchors.margins: 8
                                 spacing: 10
@@ -2807,6 +3230,7 @@ Item {
                                     color: modelData.bg_color || "#21262d"
                                     border.color: modelData.color || "#30363d"
                                     border.width: 1
+                                    Layout.alignment: Qt.AlignTop
 
                                     Text {
                                         anchors.centerIn: parent
@@ -2817,21 +3241,49 @@ Item {
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 1
+                                    spacing: 2
 
-                                    Text {
-                                        text: modelData.name
-                                        font.family: "Segoe UI, sans-serif"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                        color: modelData.color || "#f0f6fc"
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+
+                                        Text {
+                                            text: modelData.name
+                                            font.family: "Segoe UI, sans-serif"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: modelData.color || "#f0f6fc"
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        // Tier Chip
+                                        Rectangle {
+                                            visible: modelData.tier !== undefined
+                                            implicitHeight: 16
+                                            implicitWidth: drwTierTxt.implicitWidth + 8
+                                            radius: 3
+                                            color: modelData.tier === "gold" ? "#2d2300" : (modelData.tier === "silver" ? "#21262d" : "#2a1e17")
+                                            border.color: modelData.color || "#30363d"
+                                            border.width: 1
+
+                                            Text {
+                                                id: drwTierTxt
+                                                anchors.centerIn: parent
+                                                text: (modelData.tier_label || modelData.tier || "Badge").toUpperCase()
+                                                font.pixelSize: 8
+                                                font.weight: Font.Bold
+                                                color: modelData.color || "#8b949e"
+                                            }
+                                        }
                                     }
+
                                     Text {
                                         text: modelData.description
                                         font.family: "Segoe UI, sans-serif"
                                         font.pixelSize: 10
                                         color: "#8b949e"
-                                        elide: Text.ElideRight
+                                        wrapMode: Text.WordWrap
                                         Layout.fillWidth: true
                                     }
                                 }

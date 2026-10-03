@@ -381,6 +381,52 @@ class TestAreaPathSettings(unittest.TestCase):
         self.assertEqual(len(roster), 1)
         self.assertEqual(roster[0]["name"], "Alice Dev")
 
+    def test_team_motivation_excludes_unmatched_area_paths(self):
+        """Verify tasks and bugs outside configured Team Area Filter are not counted in Hall of Fame or Rhythm."""
+        import team_motivation
+
+        # Save work items in different area paths
+        raw_in_scope = {
+            "fields": {
+                "System.AreaPath": "MyProject\\AlphaTeam",
+                "System.WorkItemType": "Task",
+                "System.State": "Closed",
+                "System.AssignedTo": {"displayName": "Alpha Worker"},
+                "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Alpha Worker"},
+                "Microsoft.VSTS.Common.ClosedDate": "2026-10-01T14:30:00Z",
+            }
+        }
+        raw_bug_out_scope = {
+            "fields": {
+                "System.AreaPath": "MyProject\\OtherTeam",
+                "System.WorkItemType": "Bug",
+                "System.State": "Resolved",
+                "System.AssignedTo": {"displayName": "Beta Worker"},
+                "Microsoft.VSTS.Common.ClosedBy": {"displayName": "Beta Worker"},
+                "Microsoft.VSTS.Common.ClosedDate": "2026-10-01T15:30:00Z",
+            }
+        }
+        self.cache.save_work_item(401, "Alpha Task Done", "Task", "Closed", "Alpha Worker", "2026-10-01", raw_in_scope)
+        self.cache.save_work_item(402, "Beta Bug Resolved", "Bug", "Resolved", "Beta Worker", "2026-10-01", raw_bug_out_scope)
+
+        # Set Area Filter rule ONLY for AlphaTeam
+        self.cache.set_area_path_settings({
+            "filter_enabled": True,
+            "rules": [{"path": "MyProject\\AlphaTeam", "include_sub_areas": True}]
+        })
+
+        # Compute motivation data directly from cache_db
+        data = team_motivation.compute_team_motivation_data(self.cache, timeframe="all_time")
+
+        members = {m["name"]: m for m in data.get("members", [])}
+        self.assertIn("Alpha Worker", members)
+        self.assertEqual(members["Alpha Worker"]["tasks_completed"], 1)
+
+        # Beta Worker should NOT have the out-of-scope bug counted
+        if "Beta Worker" in members:
+            self.assertEqual(members["Beta Worker"]["bugs_resolved"], 0)
+            self.assertEqual(members["Beta Worker"]["tasks_completed"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
