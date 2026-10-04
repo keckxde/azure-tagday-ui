@@ -330,6 +330,8 @@ def _getDBCacheHandler() -> Tuple[str, AzureDevOpsCache]:
     """
     global AZURE_PROJECT_ID
     project_id = AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "default")
+    if BASE_FOLDER and not os.path.exists(BASE_FOLDER):
+        os.makedirs(BASE_FOLDER, exist_ok=True)
     db_path = os.path.join(BASE_FOLDER, f"tfs_cache_{project_id}.db")
     return db_path, AzureDevOpsCache(db_path)
 
