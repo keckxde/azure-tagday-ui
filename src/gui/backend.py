@@ -5448,6 +5448,10 @@ class DevOpsBackend(QObject):
             self._db_scan_cache = {}
 
         search_dirs = [devops_helper.BASE_FOLDER, os.getcwd()]
+        if getattr(self, "_db_path", None) and os.path.dirname(self._db_path):
+            db_dir = os.path.dirname(os.path.abspath(self._db_path))
+            if db_dir not in search_dirs:
+                search_dirs.append(db_dir)
         found = {}
         for sdir in search_dirs:
             if not sdir or not os.path.exists(sdir):

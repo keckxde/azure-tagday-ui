@@ -4,7 +4,7 @@ import json
 import os
 import re
 import contextlib
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 class DateTimeEncoder(json.JSONEncoder):
     """
@@ -153,6 +153,10 @@ class AzureDevOpsCache:
             db_path (str): Path to the SQLite database file.
         """
         self.db_path = db_path
+        if self.db_path and self.db_path != ":memory:":
+            db_dir = os.path.dirname(os.path.abspath(self.db_path))
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
         self._init_db()
 
     @contextlib.contextmanager
@@ -160,6 +164,10 @@ class AzureDevOpsCache:
         """
         Context manager for database connections. Ensures transaction integrity and closes the connection.
         """
+        if self.db_path and self.db_path != ":memory:":
+            db_dir = os.path.dirname(os.path.abspath(self.db_path))
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         try:
@@ -3146,7 +3154,7 @@ class AzureDevOpsCache:
         is_deleted = 1 if artifact.get("is_deleted") or artifact.get("deleted") else 0
         deleted_at = artifact.get("deleted_at")
         if is_deleted and not deleted_at:
-            deleted_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            deleted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         with self._connection() as conn:
             conn.execute("""
@@ -3171,7 +3179,7 @@ class AzureDevOpsCache:
         except (ValueError, TypeError):
             return 0
         if not deleted_at:
-            deleted_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            deleted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         with self._connection() as conn:
             cur = conn.execute("""
@@ -3199,7 +3207,7 @@ class AzureDevOpsCache:
         except (ValueError, TypeError):
             return 0
         if not deleted_at:
-            deleted_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            deleted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         with self._connection() as conn:
             cur = conn.execute("""
