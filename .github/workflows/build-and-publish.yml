@@ -11,6 +11,8 @@ on:
     branches:
       - main
       - master
+      - 'release/**'
+      - 'feature/**'
   workflow_dispatch:
     inputs:
       publish_release:
@@ -59,6 +61,7 @@ jobs:
   # ============================================================================
   build-python-package:
     name: Build Python Wheel & Sdist
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -100,6 +103,7 @@ jobs:
   # ============================================================================
   build-windows-installer:
     name: Build Windows Standalone Bundle & Installer
+    needs: [test]
     runs-on: windows-latest
     steps:
       - name: Checkout Source Code

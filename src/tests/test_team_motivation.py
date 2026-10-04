@@ -39,6 +39,15 @@ class TestTeamMotivation(unittest.TestCase):
         ly, lw, _ = last_dt.isocalendar()
         self.last_sprint = f"week-{str(ly)[-2:]}{lw:02d}"
 
+        # Calculate exact dates within last_sprint (Monday - Friday) to ensure timeframe="last_week" matches
+        from utils import get_sprint_date_range
+        last_s_d, last_e_d, _, _ = get_sprint_date_range(ly, lw)
+        last_mon = datetime.combine(last_s_d, datetime.min.time()) + timedelta(hours=10)
+        last_tue = last_mon + timedelta(days=1)
+        last_wed = last_mon + timedelta(days=2)
+        last_thu = last_mon + timedelta(days=3)
+        last_fri = last_mon + timedelta(days=4)
+
         # Populate sample PRs
         prs_sample = [
             {
@@ -47,8 +56,8 @@ class TestTeamMotivation(unittest.TestCase):
                 "status": "completed",
                 "createdBy": {"displayName": "Alice Smith", "id": "1"},
                 "closedBy": {"displayName": "Alice Smith", "id": "1"},
-                "creationDate": (now - timedelta(days=5)).isoformat(),
-                "closedDate": (now - timedelta(days=4)).isoformat(),
+                "creationDate": last_mon.isoformat(),
+                "closedDate": last_tue.isoformat(),
                 "sourceRefName": "refs/heads/feature/telemetry",
                 "reviewers": [
                     {"displayName": "Bob Jones", "id": "2", "vote": 10}
@@ -60,8 +69,8 @@ class TestTeamMotivation(unittest.TestCase):
                 "status": "completed",
                 "createdBy": {"displayName": "Alice Smith", "id": "1"},
                 "closedBy": {"displayName": "Alice Smith", "id": "1"},
-                "creationDate": (now - timedelta(days=6)).isoformat(),
-                "closedDate": (now - timedelta(days=5, hours=20)).isoformat(),
+                "creationDate": last_mon.isoformat(),
+                "closedDate": (last_tue + timedelta(hours=6)).isoformat(),
                 "sourceRefName": "refs/heads/bugfix/crash",
                 "reviewers": [
                     {"displayName": "Charlie Brown", "id": "3", "vote": 10}
@@ -73,8 +82,8 @@ class TestTeamMotivation(unittest.TestCase):
                 "status": "completed",
                 "createdBy": {"displayName": "Bob Jones", "id": "2"},
                 "closedBy": {"displayName": "Bob Jones", "id": "2"},
-                "creationDate": (now - timedelta(days=4)).isoformat(),
-                "closedDate": (now - timedelta(days=3)).isoformat(),
+                "creationDate": last_tue.isoformat(),
+                "closedDate": last_wed.isoformat(),
                 "sourceRefName": "refs/heads/feature/engine-sync",
                 "reviewers": [
                     {"displayName": "Alice Smith", "id": "1", "vote": 10}
@@ -85,56 +94,56 @@ class TestTeamMotivation(unittest.TestCase):
 
         # Populate sample Work Items
         wis_sample = [
-            (201, "Implement auth module", "Task", "Closed", "Alice Smith", (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),
+            (201, "Implement auth module", "Task", "Closed", "Alice Smith", last_tue.strftime("%Y-%m-%d %H:%M:%S"),
              {"fields": {"System.Title": "Implement auth module", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Closed", "System.WorkItemType": "Task", "System.AssignedTo": {"displayName": "Alice Smith"}}}),
-            (202, "Fix memory leak in parser", "Bug", "Resolved", "Alice Smith", (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"),
+            (202, "Fix memory leak in parser", "Bug", "Resolved", "Alice Smith", last_wed.strftime("%Y-%m-%d %H:%M:%S"),
              {"fields": {"System.Title": "Fix memory leak in parser", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Resolved", "System.WorkItemType": "Bug", "System.AssignedTo": {"displayName": "Alice Smith"}}}),
-            (203, "Design new dashboard", "User Story", "Closed", "Bob Jones", (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),
+            (203, "Design new dashboard", "User Story", "Closed", "Bob Jones", last_tue.strftime("%Y-%m-%d %H:%M:%S"),
              {"fields": {"System.Title": "Design new dashboard", "System.IterationPath": f"Project\\{self.last_sprint}", "System.State": "Closed", "System.WorkItemType": "User Story", "System.AssignedTo": {"displayName": "Bob Jones"}}}),
         ]
         for wid, title, wtype, state, assigned, cdate, raw_obj in wis_sample:
             self.cache.save_work_item(wid, title, wtype, state, assigned, cdate, raw_obj)
 
         # Populate sample Tags & Branches
-        self.cache.save_single_tag("repo1", "v1.0.0", "commit1", commit_date=(now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"), committer="Alice Smith")
+        self.cache.save_single_tag("repo1", "v1.0.0", "commit1", commit_date=last_tue.strftime("%Y-%m-%d %H:%M:%S"), committer="Alice Smith")
         
         with self.cache._connection() as conn:
             conn.execute("""
                 INSERT INTO branches (repo_id, name, commit_id, commit_date, committer_name, comment)
                 VALUES ('repo1', 'feature/new-ui', 'c101', ?, 'Alice Smith', 'Initial UI draft')
-            """, ((now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"),))
+            """, (last_tue.strftime("%Y-%m-%d %H:%M:%S"),))
 
             # Populate sample Builds
             conn.execute("""
                 INSERT INTO builds (id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result, start_time, finish_time, requested_by)
                 VALUES (1, 'p1', 'repo1', 10, 'CI Build', '1.0.1', 'completed', 'succeeded', ?, ?, 'Alice Smith')
-            """, ((now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S"), (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")))
+            """, (last_tue.strftime("%Y-%m-%d %H:%M:%S"), last_tue.strftime("%Y-%m-%d %H:%M:%S")))
 
             conn.execute("""
                 INSERT INTO builds (id, project_id, repo_id, pipeline_id, pipeline_name, build_number, status, result, start_time, finish_time, requested_by)
                 VALUES (2, 'p1', 'repo1', 10, 'CI Build', '1.0.2', 'completed', 'succeeded', ?, ?, 'Alice Smith')
-            """, ((now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"), (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")))
+            """, (last_wed.strftime("%Y-%m-%d %H:%M:%S"), last_wed.strftime("%Y-%m-%d %H:%M:%S")))
 
         # Populate sample Commits
         commits_sample = [
             {
                 "commitId": "sha101",
-                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
-                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=4)).isoformat()},
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": last_tue.isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": last_tue.isoformat()},
                 "comment": "Feature: Implement high-performance buffer",
                 "changeCounts": {"Add": 15, "Edit": 20, "Delete": 2}
             },
             {
                 "commitId": "sha102",
-                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
-                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": (now - timedelta(days=3)).isoformat()},
+                "author": {"name": "Alice Smith", "email": "alice@company.com", "date": last_wed.isoformat()},
+                "committer": {"name": "Alice Smith", "email": "alice@company.com", "date": last_wed.isoformat()},
                 "comment": "Fix: Handle null pointer on empty input",
                 "changeCounts": {"Add": 2, "Edit": 5, "Delete": 0}
             },
             {
                 "commitId": "sha103",
-                "author": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
-                "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": (now - timedelta(days=2)).isoformat()},
+                "author": {"name": "Bob Jones", "email": "bob@company.com", "date": last_thu.isoformat()},
+                "committer": {"name": "Bob Jones", "email": "bob@company.com", "date": last_thu.isoformat()},
                 "comment": "Refactor: Modularize DB connection pool",
                 "changeCounts": {"Add": 40, "Edit": 10, "Delete": 30}
             }
