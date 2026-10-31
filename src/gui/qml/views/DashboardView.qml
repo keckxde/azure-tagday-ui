@@ -172,6 +172,60 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
+                    // Jenkins Build Pipelines Health Monitor Shortcut
+                    Rectangle {
+                        implicitHeight: 34
+                        implicitWidth: pipeTopBtnRow.implicitWidth + 24
+                        radius: 6
+                        color: {
+                            var prob = (backend && backend.stats && backend.stats.pipelines_problem_count) ? backend.stats.pipelines_problem_count : 0;
+                            if (prob > 0) return pipeTopMa.containsMouse ? "#3b171c" : "#2d1418";
+                            return pipeTopMa.containsMouse ? "#193326" : "#12261e";
+                        }
+                        border.color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? "#f85149" : "#238636"
+                        border.width: 1
+
+                        RowLayout {
+                            id: pipeTopBtnRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            Text {
+                                text: (backend && backend.stats && backend.stats.pipelines_weather_icon) ? backend.stats.pipelines_weather_icon : "🔧"
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                text: {
+                                    if (!backend || !backend.stats) return "Build Pipelines";
+                                    var prob = backend.stats.pipelines_problem_count || 0;
+                                    var tot = backend.stats.pipelines_count || 0;
+                                    if (prob > 0) return "Pipelines: " + prob + " Problem(e)";
+                                    if (tot > 0) return "Pipelines: " + (backend.stats.pipelines_health_pct !== undefined ? backend.stats.pipelines_health_pct : 100) + "% (" + tot + ")";
+                                    return "Build Pipelines";
+                                }
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? "#ff7b72" : "#3fb950"
+                            }
+                        }
+
+                        ToolTip.visible: pipeTopMa.containsMouse
+                        ToolTip.text: "Open Jenkins Build Pipeline Monitor & Culprit Analysis (Wer / Was)"
+                        ToolTip.delay: 150
+
+                        MouseArea {
+                            id: pipeTopMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (typeof window !== "undefined" && window.navigateToPipelinesReport) {
+                                    window.navigateToPipelinesReport();
+                                }
+                            }
+                        }
+                    }
+
                     // Team Motivation & Hall of Fame Button
                     Rectangle {
                         implicitHeight: 34

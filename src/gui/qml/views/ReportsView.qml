@@ -142,6 +142,10 @@ Item {
         root.activeReportTab = 2;
     }
 
+    function openPipelinesReport() {
+        root.activeReportTab = 6;
+    }
+
     Component.onCompleted: {
         if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
             window.closeRightSidebar();
@@ -247,7 +251,7 @@ Item {
                     Row {
                         spacing: 5
                         Repeater {
-                            model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts"]
+                            model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts", "🔧 Build Pipelines"]
                             Button {
                                 text: modelData
                                 checkable: true
@@ -263,7 +267,7 @@ Item {
                                 }
                                 background: Rectangle {
                                     implicitHeight: 28
-                                    implicitWidth: 125
+                                    implicitWidth: 118
                                     radius: 6
                                     color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
                                     border.color: parent.checked ? "#388bfd" : "#30363d"
@@ -312,6 +316,11 @@ Item {
 
                     // Tab 5: Iteration Shifts & Impact Analysis
                     ReportsIterationShiftsTab {
+                        root: root
+                    }
+
+                    // Tab 6: Jenkins-Style Build Pipelines & Culprit Monitor
+                    ReportsBuildPipelinesTab {
                         root: root
                     }
                 }

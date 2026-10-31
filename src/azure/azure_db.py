@@ -3379,8 +3379,9 @@ class AzureDevOpsCache:
         """
         query = """
         SELECT b.id AS build_id, b.project_id, b.pipeline_id, b.repo_id, b.build_number,
-               b.status, b.result, b.source_branch, b.source_version, b.start_time,
-               b.finish_time, b.requested_by, r.name AS repo_name, p.name AS project_name,
+               b.status, b.result, b.source_branch, b.source_version, b.queue_time, b.start_time,
+               b.finish_time, b.requested_by, b.url, b.raw_json,
+               r.name AS repo_name, p.name AS project_name,
                COALESCE(pl.name, NULLIF(b.pipeline_name, ''), '') AS pipeline_name
         FROM builds b
         LEFT JOIN repositories r ON b.repo_id = r.id
@@ -3441,6 +3442,20 @@ class AzureDevOpsCache:
         with self._connection() as conn:
             row = conn.execute("SELECT * FROM pipelines WHERE id = ?", (p_int,)).fetchone()
             return dict(row) if row else None
+
+    def get_all_pipelines(self, project_id=None):
+        """
+        Retrieves all cached pipeline definitions.
+        """
+        query = "SELECT id, project_id, name, folder, revision, url, raw_json FROM pipelines WHERE 1=1"
+        params = []
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+        query += " ORDER BY name ASC, id ASC"
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
 
     def _find_alternate_dbs(self):
         """

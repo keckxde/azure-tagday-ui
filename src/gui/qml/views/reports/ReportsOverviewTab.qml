@@ -753,6 +753,178 @@ import "../../components"
                         }
                     }
 
+                    // Report 6: Jenkins-Style Build Pipelines & Culprit Monitor
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: pipelinesCardCol.implicitHeight + 36
+                        height: implicitHeight
+                        color: "#161b22"
+                        radius: 8
+                        border.color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? "#f85149" : "#30363d"
+                        border.width: 1
+
+                        ColumnLayout {
+                            id: pipelinesCardCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 18
+                            spacing: 12
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Text {
+                                    text: (backend && backend.stats && backend.stats.pipelines_weather_icon) ? backend.stats.pipelines_weather_icon : "🔧"
+                                    font.pixelSize: 22
+                                }
+
+                                Text {
+                                    text: "Jenkins Build Pipeline Monitor & Culprit Analysis"
+                                    font.family: "Segoe UI, sans-serif"
+                                    font.pixelSize: 16
+                                    font.weight: Font.Bold
+                                    color: "#f0f6fc"
+                                }
+
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                Rectangle {
+                                    height: 22
+                                    width: pipelinesBadgeText.implicitWidth + 14
+                                    radius: 4
+                                    color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? Qt.rgba(248 / 255, 81 / 255, 73 / 255, 0.15) : Qt.rgba(63 / 255, 185 / 255, 80 / 255, 0.15)
+                                    border.color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? "#f85149" : "#3fb950"
+                                    border.width: 1
+                                    Text {
+                                        id: pipelinesBadgeText
+                                        anchors.centerIn: parent
+                                        text: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? (backend.stats.pipelines_problem_count + " PIPELINE PROBLEMS") : "JENKINS HEALTH MONITOR"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        color: (backend && backend.stats && backend.stats.pipelines_problem_count > 0) ? "#ff7b72" : "#3fb950"
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Prüft alle Build-Pipelines im klassischen Jenkins-Stil (Status-Kugeln S, Wetter-Icons W, letzte 5 Läufe) und liefert bei Fehlern einfache Hinweise auf mögliche Verursacher (Wer: Commit/PR-Autor, Was: fehlgeschlagener Task/Commit)."
+                                font.family: "Segoe UI, sans-serif"
+                                font.pixelSize: 12
+                                color: "#8b949e"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Button {
+                                    text: "⚡ Generate Pipelines Report"
+                                    enabled: backend ? !backend.isBusy : false
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#ffffff"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 205
+                                        radius: 6
+                                        color: parent.enabled ? (parent.hovered ? "#2ea043" : "#238636") : "#30363d"
+                                    }
+                                    onClicked: {
+                                        if (backend)
+                                            backend.generate_pipelines_report_async();
+                                    }
+                                }
+
+                                Button {
+                                    text: "📑 Open BUILD_PIPELINES.md"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#f0f6fc"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 185
+                                        radius: 6
+                                        color: parent.hovered ? "#30363d" : "#21262d"
+                                        border.color: "#30363d"
+                                    }
+                                    onClicked: {
+                                        if (backend)
+                                            backend.open_pipelines_report_file();
+                                    }
+                                }
+
+                                Button {
+                                    text: "👁️ Preview in Sidebar"
+                                    font.pixelSize: 12
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#3fb950"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 160
+                                        radius: 6
+                                        color: parent.hovered ? "#12261e" : "#161b22"
+                                        border.color: "#238636"
+                                    }
+                                    onClicked: {
+                                        if (root) {
+                                            root.activeReportTab = 6;
+                                            root.isTdSidebarOpen = true;
+                                        }
+                                    }
+                                }
+
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                Button {
+                                    text: "Explore Build Pipelines ➔"
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font: parent.font
+                                        color: "#3fb950"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        implicitHeight: 34
+                                        implicitWidth: 175
+                                        radius: 6
+                                        color: parent.hovered ? "#12261e" : "transparent"
+                                        border.color: "#30363d"
+                                    }
+                                    onClicked: {
+                                        if (root) root.activeReportTab = 6;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Direct Shortcut Banner to Standalone Pull Requests Page
                     Rectangle {
                         Layout.fillWidth: true

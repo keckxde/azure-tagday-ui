@@ -38,7 +38,9 @@ IGNORE_REPOS = utils.GetEnvVariable('IGNORE_REPOS', '')
 TAGDAY_FILE_MD = utils.GetEnvVariable('TAGDAY_FILE_MD', "TAGDAY.md")
 REVISION_FILE_MD = utils.GetEnvVariable('REVISION_FILE_MD', "REVISION.md")
 BUILD_ARTIFACTS_MD = utils.GetEnvVariable('BUILD_ARTIFACTS_MD', "BUILD_ARTIFACTS.md")
-BUILD_ARTIFACTS_CSV = utils.GetEnvVariable('BUILD_ARTIFACTS_CSV', "BUILD_ARTIFACTS.csv")   
+BUILD_ARTIFACTS_CSV = utils.GetEnvVariable('BUILD_ARTIFACTS_CSV', "BUILD_ARTIFACTS.csv")
+BUILD_PIPELINES_MD = utils.GetEnvVariable('BUILD_PIPELINES_MD', "BUILD_PIPELINES.md")
+BUILD_PIPELINES_CSV = utils.GetEnvVariable('BUILD_PIPELINES_CSV', "BUILD_PIPELINES.csv")   
 
 RECENT_DELAY_raw = utils.GetEnvVariable('RECENT_DELAY', '')
 RECENT_DELAY = int(RECENT_DELAY_raw) if RECENT_DELAY_raw else 60 * 24
@@ -597,7 +599,35 @@ def check_pipelines():
     if pipelines and cache_db:
         cache_db.save_pipelines(AZURE_PROJECT_ID, pipelines)
     logger.info(f"Cached {len(pipelines)} pipelines into {db_path}")
-    return pipelines    
+    return pipelines
+
+
+def check_pipelines_and_builds(progress_callback=None, top=200):
+    """
+    Synchronizes all pipeline definitions and recent build runs (succeeded, unstable, failed, running)
+    including timeline error details from TFS into the SQLite cache.
+    """
+    azHandler = _getHandler()
+    if not azHandler:
+        logger.warning("No handler available for check_pipelines_and_builds")
+        return {"pipelines": [], "builds": [], "failed_builds": 0}
+    db_path, cache_db = _getDBCacheHandler()
+    if hasattr(azHandler, "sync_pipelines_and_builds"):
+        res = azHandler.sync_pipelines_and_builds(
+            AZURE_PROJECT_ID,
+            cache_db=cache_db,
+            progress_callback=progress_callback,
+            top=top
+        )
+        logger.info(
+            "Synced %d pipelines and %d builds into %s",
+            len(res.get("pipelines", [])),
+            len(res.get("builds", [])),
+            db_path
+        )
+        return res
+    pipelines = check_pipelines()
+    return {"pipelines": pipelines, "builds": [], "failed_builds": 0}    
 
 def main(run_templates: bool = False) -> None:
     """Entry point for devops sync operations. Does not generate reports by default."""
@@ -1037,6 +1067,31 @@ def generate_revision_report(db_path: Optional[str] = None, revision_md_path: Op
     return generate_revision.generate_revision_md(db_path, revision_md_path)
 
 
+def generate_pipelines_report(db_path: Optional[str] = None, md_path: Optional[str] = None, csv_path: Optional[str] = None, reports_dir: Optional[str] = None):
+    """
+    Standardized entrypoint to generate the Jenkins-style Build Pipelines Health & Culprit Report
+    (BUILD_PIPELINES.md and BUILD_PIPELINES.csv).
+    """
+    import generate_pipelines_report as gpr
+    target_dir = reports_dir or get_reports_dir()
+    if not db_path:
+        db_path, _ = _getDBCacheHandler()
+    if not md_path:
+        md_path = os.path.join(target_dir, BUILD_PIPELINES_MD)
+    elif not os.path.isabs(md_path):
+        md_path = os.path.join(target_dir, md_path)
+    if not csv_path:
+        csv_path = os.path.join(target_dir, BUILD_PIPELINES_CSV)
+    elif not os.path.isabs(csv_path):
+        csv_path = os.path.join(target_dir, csv_path)
+    return gpr.run_pipelines_report(
+        db_path=db_path,
+        md_path=md_path,
+        csv_path=csv_path,
+        project_id=AZURE_PROJECT_ID
+    )
+
+
 
 def main_cli():
     """CLI entry point for devops-helper / tagday-cli command."""
@@ -1053,6 +1108,8 @@ def main_cli():
     parser.add_argument("--revision", action="store_true", help="Generate and update the REVISION.md release history document.")
     parser.add_argument("--check-artifacts", action="store_true", help="Check Artifacts")
     parser.add_argument("--report-artifacts", action="store_true", help="Generate Markdown and CSV reports on build artifacts and disk space usage.")
+    parser.add_argument("--check-pipelines", action="store_true", help="Sync build pipelines and recent build runs from TFS.")
+    parser.add_argument("--report-pipelines", action="store_true", help="Generate Jenkins-style Build Pipelines Health & Culprit Markdown and CSV reports.")
     parser.add_argument("--report-tagday", action="store_true", help="Generate enhanced Tag Day report relative to reference tag baseline.")
     parser.add_argument("--untagged-repos", action="store_true", help="List all repositories where the latest pull request is either not closed or untagged.")
 
@@ -1076,6 +1133,12 @@ def main_cli():
 
     if args.report_artifacts or args.check_artifacts:
         generate_artifacts_report()
+
+    if args.check_pipelines:
+        check_pipelines_and_builds()
+
+    if args.report_pipelines or args.check_pipelines:
+        generate_pipelines_report()
 
     if args.report_tagday:
         generate_tagday_report()

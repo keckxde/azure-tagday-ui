@@ -96,6 +96,131 @@ class AzureInfoHandler(AzureBaseClient):
             logger.error("Error in GetTFSPipelines: %s", e)
             return []
 
+    def sync_pipelines_and_builds(self, project_id, cache_db=None, progress_callback=None, max_workers=8, top=200):
+        """
+        Synchronizes all build pipeline definitions and recent build executions (including succeeded,
+        partiallySucceeded, failed, canceled, and inProgress builds) into the SQLite cache.
+        For failed or unstable builds, also fetches the build timeline to extract failed tasks and error messages.
+
+        Args:
+            project_id (str): The project ID or name.
+            cache_db (AzureDevOpsCache, optional): Database cache instance.
+            progress_callback (callable, optional): Callback for live progress updates.
+            max_workers (int, optional): Max parallel workers for timeline queries. Defaults to 8.
+            top (int, optional): Max builds to retrieve. Defaults to 200.
+
+        Returns:
+            dict: Summary dictionary with 'pipelines', 'builds', and 'failed_builds'.
+        """
+        def _notify(msg, cur=0, tot=0):
+            if callable(progress_callback):
+                try:
+                    progress_callback(msg, cur, tot)
+                except TypeError:
+                    try:
+                        progress_callback(msg)
+                    except Exception:
+                        pass
+
+        _notify(f"Discovering build pipeline definitions for '{project_id}'...", 0, 100)
+        pipes = self.GetTFSPipelines(project_id)
+        if cache_db and pipes:
+            try:
+                cache_db.save_pipelines(project_id, pipes)
+            except Exception as e:
+                logger.warning("Could not save pipeline definitions to cache: %s", e)
+
+        _notify(f"Fetching recent build runs for '{project_id}'...", 20, 100)
+        try:
+            builds = self.get_project_builds(
+                project_id,
+                top=top,
+                status_filter="all",
+                result_filter="all"
+            )
+        except Exception as e:
+            if is_connection_error(e):
+                raise AzureServerConnectionError(f"Lost connection to repository server during build sync: {e}", original_error=e) from e
+            logger.error("Error fetching project builds for %s: %s", project_id, e)
+            builds = []
+
+        if not isinstance(builds, list):
+            builds = []
+
+        # Normalize pipeline names and identify failed/unstable builds needing timeline inspection
+        problem_builds = []
+        for b in builds:
+            if not isinstance(b, dict):
+                continue
+            definition = b.get("definition") or b.get("pipeline") or {}
+            if isinstance(definition, dict):
+                p_name = definition.get("name") or (definition.get("path") or "").strip("\\/ ") or ""
+                if p_name:
+                    b["pipeline_name"] = p_name
+                    b["definitionName"] = p_name
+            res_str = str(b.get("result") or "").lower()
+            if res_str in ("failed", "partiallysucceeded") and not b.get("failed_tasks"):
+                problem_builds.append(b)
+
+        # Fetch build timelines for up to 30 recent problem builds to identify failing steps/tasks
+        target_problem_builds = problem_builds[:30]
+        if target_problem_builds:
+            def _enrich_timeline(b_item):
+                b_id = b_item.get("id")
+                if not b_id:
+                    return
+                records = self.get_build_timeline(project_id, b_id)
+                if not records:
+                    return
+                failed_tasks = []
+                timeline_issues = []
+                for rec in records:
+                    if not isinstance(rec, dict):
+                        continue
+                    r_res = str(rec.get("result") or "").lower()
+                    r_type = str(rec.get("type") or "")
+                    r_name = str(rec.get("name") or "").strip()
+                    if r_res in ("failed", "partiallysucceeded") and r_name and r_type.lower() in ("task", "job", "stage", "phase", ""):
+                        err_msg = ""
+                        issues = rec.get("issues") or []
+                        if isinstance(issues, list):
+                            for iss in issues:
+                                if isinstance(iss, dict) and iss.get("message"):
+                                    msg_txt = str(iss.get("message")).strip()
+                                    if msg_txt and msg_txt not in timeline_issues:
+                                        timeline_issues.append(msg_txt)
+                                    if not err_msg:
+                                        err_msg = msg_txt
+                        if not err_msg and rec.get("errorCount"):
+                            err_msg = f"{rec.get('errorCount')} error(s)"
+                        failed_tasks.append({
+                            "name": r_name,
+                            "type": r_type or "Task",
+                            "result": rec.get("result") or "failed",
+                            "message": err_msg
+                        })
+                if failed_tasks:
+                    b_item["failed_tasks"] = failed_tasks
+                if timeline_issues:
+                    b_item["timeline_issues"] = timeline_issues[:10]
+
+            workers = min(max_workers, max(1, len(target_problem_builds)))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(_enrich_timeline, target_problem_builds))
+
+        if cache_db and builds:
+            try:
+                cache_db.save_builds(project_id, builds)
+            except Exception as e:
+                logger.warning("Could not save builds to cache: %s", e)
+
+        _notify(f"Synced {len(pipes)} pipeline(s) and {len(builds)} build run(s).", 100, 100)
+        return {
+            "pipelines": pipes,
+            "builds": builds,
+            "failed_builds": len(problem_builds)
+        }
+
     def GetTFSWorkItems(self, task_id_list, cache_db=None, max_workers=10):
         """
         Retrieves work item details for a list of work item IDs.

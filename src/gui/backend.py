@@ -57,6 +57,7 @@ class DevOpsBackend(QObject):
     pullRequestsChanged = Signal()
     tagDayDataChanged = Signal()
     storageDataChanged = Signal()
+    pipelinesDataChanged = Signal()
     sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
     workloadMatrixChanged = Signal()
     milestonesChanged = Signal()
@@ -174,6 +175,13 @@ class DevOpsBackend(QObject):
             "prs_open_count": 0,
             "prs_completed_count": 0,
             "prs_abandoned_count": 0,
+            "pipelines_count": 0,
+            "pipelines_healthy_count": 0,
+            "pipelines_failed_count": 0,
+            "pipelines_unstable_count": 0,
+            "pipelines_problem_count": 0,
+            "pipelines_health_pct": 100,
+            "pipelines_weather_icon": "☀️",
             "last_synced": "Never",
             "project_name": devops_helper.AZURE_PROJECT_ID or "N/A",
             "db_path": "",
@@ -186,6 +194,7 @@ class DevOpsBackend(QObject):
         self._is_pr_titles_patched = False
         self._tagday_data = {}
         self._storage_data = {}
+        self._pipelines_data = {}
         self._last_week_activity = {}
         self._current_week_planned = {}
         self._team_motivation_data = {}
@@ -1552,6 +1561,10 @@ class DevOpsBackend(QObject):
     def storageData(self):
         return self._storage_data
 
+    @Property(dict, notify=pipelinesDataChanged)
+    def pipelinesData(self):
+        return self._pipelines_data
+
     @Property(str, notify=reportsDirChanged)
     def reportsDir(self):
         return self._reports_dir or ""
@@ -2356,6 +2369,34 @@ class DevOpsBackend(QObject):
         artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
         storage_data = self._build_storage_payload(artifacts)
 
+        # 4b. Jenkins Build Pipelines Health & Culprit Data
+        pipelines_data = {}
+        try:
+            import generate_pipelines_report
+            pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+        except Exception as pe:
+            logger.debug(f"Could not compute pipelines health data: {pe}")
+            pipelines_data = {
+                "summary": {
+                    "total_pipelines": 0,
+                    "healthy_count": 0,
+                    "unstable_count": 0,
+                    "failed_count": 0,
+                    "problem_count": 0,
+                    "running_count": 0,
+                    "aborted_or_idle_count": 0,
+                    "total_builds": 0,
+                    "overall_health_pct": 100,
+                    "overall_weather_icon": "☀️",
+                    "overall_weather_key": "sunny",
+                },
+                "pipelines": [],
+                "problem_pipelines": [],
+                "recent_failed_builds": [],
+                "all_builds": [],
+            }
+        pipe_sum = pipelines_data.get("summary", {})
+
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
         all_repos_raw = td_raw.get("all_repositories") or {}
@@ -2421,6 +2462,13 @@ class DevOpsBackend(QObject):
             "prs_open_count": prs_open_count,
             "prs_completed_count": prs_completed_count,
             "prs_abandoned_count": prs_abandoned_count,
+            "pipelines_count": pipe_sum.get("total_pipelines", 0),
+            "pipelines_healthy_count": pipe_sum.get("healthy_count", 0),
+            "pipelines_failed_count": pipe_sum.get("failed_count", 0),
+            "pipelines_unstable_count": pipe_sum.get("unstable_count", 0),
+            "pipelines_problem_count": pipe_sum.get("problem_count", 0),
+            "pipelines_health_pct": pipe_sum.get("overall_health_pct", 100),
+            "pipelines_weather_icon": pipe_sum.get("overall_weather_icon", "☀️"),
             "project_name": devops_helper.AZURE_PROJECT_ID or self._stats.get("project_name", "TFS Project"),
             "db_path": self._db_path or "tfs_cache.db",
             "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
@@ -2652,6 +2700,7 @@ class DevOpsBackend(QObject):
             "pr_repositories": pr_repositories,
             "tagday_data": tagday_data,
             "storage_data": storage_data,
+            "pipelines_data": pipelines_data,
             "stats": stats,
             "shift_summary_map": shift_summary_map,
             "last_week_activity": last_week_activity,
@@ -2673,6 +2722,7 @@ class DevOpsBackend(QObject):
         self._pr_repositories = data.get("pr_repositories", [])
         self._tagday_data = data.get("tagday_data", {})
         self._storage_data = data.get("storage_data", {})
+        self._pipelines_data = data.get("pipelines_data", {})
         self._shift_summary_map = data.get("shift_summary_map", {})
         self._last_week_activity = data.get("last_week_activity", {})
         self._current_week_planned = data.get("current_week_planned", {})
@@ -2686,6 +2736,7 @@ class DevOpsBackend(QObject):
         self.statsChanged.emit()
         self.tagDayDataChanged.emit()
         self.storageDataChanged.emit()
+        self.pipelinesDataChanged.emit()
         self.iterationShiftsChanged.emit()
         self.workloadMatrixChanged.emit()
         self.milestonesChanged.emit()
@@ -2936,6 +2987,24 @@ class DevOpsBackend(QObject):
             artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
             self._storage_data = self._build_storage_payload(artifacts)
             self.storageDataChanged.emit()
+
+            # 3. Jenkins Build Pipelines Interactive Data
+            try:
+                import generate_pipelines_report
+                self._pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+                pipe_sum = self._pipelines_data.get("summary", {})
+                self._stats["pipelines_count"] = pipe_sum.get("total_pipelines", 0)
+                self._stats["pipelines_healthy_count"] = pipe_sum.get("healthy_count", 0)
+                self._stats["pipelines_failed_count"] = pipe_sum.get("failed_count", 0)
+                self._stats["pipelines_unstable_count"] = pipe_sum.get("unstable_count", 0)
+                self._stats["pipelines_problem_count"] = pipe_sum.get("problem_count", 0)
+                self._stats["pipelines_health_pct"] = pipe_sum.get("overall_health_pct", 100)
+                self._stats["pipelines_weather_icon"] = pipe_sum.get("overall_weather_icon", "☀️")
+                self.pipelinesDataChanged.emit()
+                self.statsChanged.emit()
+            except Exception as pe:
+                logger.debug(f"Could not load pipelines interactive data: {pe}")
+
             self.iterationShiftsChanged.emit()
 
         except Exception as e:
@@ -3177,6 +3246,82 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot()
+    def generate_pipelines_report_async(self):
+        """Generates the Jenkins-style Build Pipelines Health & Culprit report in background, syncing live builds from TFS if connected."""
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            azHandler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+            project_id = devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", "") or "default"
+
+            if azHandler and hasattr(azHandler, "sync_pipelines_and_builds"):
+                worker.report_progress(10, f"Connecting to TFS ({devops_helper.AZURE_BASE_URL})...")
+                worker.log_message.emit(f"Syncing build pipelines and recent executions for project '{project_id}'...")
+                try:
+                    def _prog(msg, cur=0, tot=0):
+                        worker.log_message.emit(msg)
+                        if tot > 0:
+                            pct = 10 + int((cur / tot) * 65)
+                            worker.report_progress(pct, msg)
+
+                    sync_res = azHandler.sync_pipelines_and_builds(
+                        project_id,
+                        cache_db=self._cache_db,
+                        progress_callback=_prog
+                    )
+                    worker.log_message.emit(
+                        f"Synced {len(sync_res.get('pipelines', []))} pipelines and {len(sync_res.get('builds', []))} builds from TFS."
+                    )
+                except Exception as he:
+                    logger.warning(f"Could not sync live pipelines/builds from TFS: {he}")
+                    worker.log_message.emit(f"TFS sync notice: {he}. Proceeding with local cache...")
+
+            worker.report_progress(80, "Analyzing pipeline stability (Jenkins Weather) & culprits...")
+            worker.log_message.emit("Analyzing pipeline stability, Jenkins weather scores, and culprit hints...")
+            reports_dir = self.get_effective_reports_dir()
+            md_path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_MD)
+            csv_path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_CSV)
+            report_data = devops_helper.generate_pipelines_report(
+                db_path=self._db_path,
+                md_path=md_path,
+                csv_path=csv_path,
+                reports_dir=reports_dir
+            )
+            if not report_data:
+                raise RuntimeError("Build Pipelines report generation returned empty result")
+
+            worker.report_progress(100, "Build Pipelines report generated successfully")
+            worker.log_message.emit(f"Build Pipelines report generated successfully: {md_path}")
+            return "Build Pipelines report generated successfully"
+
+        self._run_worker(_work, "Generating Build Pipelines report...")
+
+    @Slot()
+    def open_pipelines_report_file(self):
+        """Opens generated BUILD_PIPELINES.md report in default editor."""
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_MD)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD)
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}. Please click 'Generate Pipelines Report' first.")
+
+    @Slot()
+    def open_pipelines_csv_file(self):
+        """Opens generated BUILD_PIPELINES.csv report in default spreadsheet viewer."""
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_CSV)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_CSV)
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}. Please click 'Generate Pipelines Report' first.")
 
     @Slot(str, result=str)
     @Slot(str, str, result=str)
@@ -7812,6 +7957,54 @@ class DevOpsBackend(QObject):
                 logger.debug(f"Could not build draft rescheduling markdown: {e}")
             res = self.get_file_content(os.path.join(eff_dir, "RESCHEDULING_REPORT.md"))
             res["title"] = "Iteration Shifts & Rescheduling Report"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("pipelines", "build_pipelines", "jenkins"):
+            candidates = [
+                os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                os.path.join(eff_dir, "BUILD_PIPELINES.md"),
+                os.path.join(os.getcwd(), "reports", devops_helper.BUILD_PIPELINES_MD),
+                os.path.join(os.getcwd(), "reports", "BUILD_PIPELINES.md"),
+                os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD),
+                os.path.join(os.getcwd(), "BUILD_PIPELINES.md"),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Jenkins Build Pipelines Health & Culprit Report"
+                        res["format"] = "markdown"
+                        return res
+
+            if self._cache_db:
+                try:
+                    import generate_pipelines_report
+                    rep_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+                    md_content = generate_pipelines_report.generate_markdown_report(
+                        rep_data,
+                        output_path=os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                        project_name=devops_helper.AZURE_PROJECT_ID or "DefaultProject",
+                        csv_filename=devops_helper.BUILD_PIPELINES_CSV,
+                    )
+                    if md_content:
+                        return {
+                            "success": True,
+                            "title": "Jenkins Build Pipelines Health & Culprit Report",
+                            "format": "markdown",
+                            "file_path": os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                            "file_name": devops_helper.BUILD_PIPELINES_MD,
+                            "content": md_content,
+                            "line_count": len(md_content.splitlines()),
+                            "word_count": len(re.findall(r"\b\w+\b", md_content)),
+                            "size_bytes": len(md_content.encode("utf-8")),
+                            "modified_at": "Live generated",
+                        }
+                except Exception as e:
+                    logger.debug(f"Could not render live pipelines markdown: {e}")
+
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD))
+            res["title"] = "Jenkins Build Pipelines Health & Culprit Report"
             res["format"] = "markdown"
             return res
 

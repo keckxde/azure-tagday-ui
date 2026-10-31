@@ -19,3 +19,20 @@ tagday_status:
   completed_pr: ":octicons-check-circle-16:"
   active_pr: ":octicons-git-pull-request-16:"
   unmerged_branch: ":octicons-git-branch-16:"
+
+# Jenkins-style build status balls (S) and weather icons (W)
+jenkins_balls:
+  success: "🟢"
+  unstable: "🟡"
+  failed: "🔴"
+  running: "🔄"
+  aborted: "⚪"
+  not_built: "⚪"
+
+jenkins_weather:
+  sunny: "☀️"
+  partly_cloudy: "🌤️"
+  cloudy: "☁️"
+  raining: "🌧️"
+  stormy: "⛈️"
+  unknown: "❔"

@@ -143,6 +143,27 @@ ApplicationWindow {
         }
     }
 
+    function navigateToPipelinesReport() {
+        window.currentTabIndex = 4;
+        if (reportsView && typeof reportsView.openPipelinesReport === "function") {
+            reportsView.openPipelinesReport();
+        } else if (reportsView) {
+            reportsView.activeReportTab = 6;
+        } else if (reportsViewLoader) {
+            var conn = function() {
+                if (reportsViewLoader.item) {
+                    reportsViewLoader.loaded.disconnect(conn);
+                    if (typeof reportsViewLoader.item.openPipelinesReport === "function") {
+                        reportsViewLoader.item.openPipelinesReport();
+                    } else {
+                        reportsViewLoader.item.activeReportTab = 6;
+                    }
+                }
+            };
+            reportsViewLoader.loaded.connect(conn);
+        }
+    }
+
     function navigateToWorkloadSprint(assignee, sprintName) {
         window.currentTabIndex = 3;
         var applyWl = function(view) {
