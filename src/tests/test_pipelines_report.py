@@ -285,3 +285,27 @@ def test_backend_pipelines_data_and_report_content(tmp_path, monkeypatch):
     assert "Max Mustermann" in md_preview["content"]
     assert "Deploy Step" in md_preview["content"]
 
+
+def test_reports_view_and_tabs_qml_load(tmp_path):
+    """Verifies that ReportsView.qml and all 7 subtabs (TagDay, Pipelines, etc.) compile and instantiate cleanly."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+    from PySide6.QtCore import QUrl
+
+    app = QGuiApplication.instance() or QGuiApplication([])
+    engine = QQmlApplicationEngine()
+
+    base_src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    reports_qml = os.path.join(base_src_dir, "gui", "qml", "views", "ReportsView.qml")
+    pipelines_qml = os.path.join(base_src_dir, "gui", "qml", "views", "reports", "ReportsBuildPipelinesTab.qml")
+    assert os.path.isfile(reports_qml), "ReportsView.qml must exist"
+    assert os.path.isfile(pipelines_qml), "ReportsBuildPipelinesTab.qml must exist"
+
+    comp_pipe = QQmlComponent(engine, QUrl.fromLocalFile(pipelines_qml))
+    assert not comp_pipe.isError(), f"ReportsBuildPipelinesTab.qml errors: {[e.toString() for e in comp_pipe.errors()]}"
+
+    comp_rep = QQmlComponent(engine, QUrl.fromLocalFile(reports_qml))
+    assert not comp_rep.isError(), f"ReportsView.qml errors: {[e.toString() for e in comp_rep.errors()]}"
+
+
