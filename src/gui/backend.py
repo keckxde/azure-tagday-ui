@@ -234,8 +234,66 @@ class DevOpsBackend(QObject):
         self._cached_tagged_count = 0
         self._cached_unique_tags_count = 0
 
+        # DB-backed property caches (prevents repeated SQLite roundtrips on QML binding evaluation)
+        self._cached_iteration_shifts = None
+        self._cached_shift_impact_metrics = None
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        self._cached_milestone_categories = None
+        self._cached_repo_cat_config = None
+        self._cached_repo_categories = None
+        self._cached_repo_prefix_rules = None
+        self._cached_repo_cat_overrides = None
+        self._cached_change_filter_patterns = None
+        self._suppress_cache_invalidation = False
+
+        self.iterationShiftsChanged.connect(self._on_iteration_shifts_signal)
+        self.milestonesChanged.connect(self._on_milestones_signal)
+        self.milestoneCategoriesChanged.connect(self._on_milestone_categories_signal)
+        self.repoCategoriesChanged.connect(self._on_repo_categories_signal)
+        self.changeFiltersChanged.connect(self._on_change_filters_signal)
+
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
+
+    def _on_iteration_shifts_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_iteration_shifts = None
+            self._cached_shift_impact_metrics = None
+
+    def _on_milestones_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_milestones = None
+            self._cached_coming_milestones = None
+
+    def _on_milestone_categories_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_milestone_categories = None
+            self._cached_milestones = None
+            self._cached_coming_milestones = None
+
+    def _on_repo_categories_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_repo_cat_config = None
+            self._cached_repo_categories = None
+            self._cached_repo_prefix_rules = None
+            self._cached_repo_cat_overrides = None
+
+    def _on_change_filters_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_change_filter_patterns = None
+
+    def _invalidate_all_db_property_caches(self):
+        self._cached_iteration_shifts = None
+        self._cached_shift_impact_metrics = None
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        self._cached_milestone_categories = None
+        self._cached_repo_cat_config = None
+        self._cached_repo_categories = None
+        self._cached_repo_prefix_rules = None
+        self._cached_repo_cat_overrides = None
+        self._cached_change_filter_patterns = None
 
     def _init_cache(self):
         try:
@@ -277,6 +335,7 @@ class DevOpsBackend(QObject):
     def set_cache_db(self, cache_db):
         """Sets the cache database instance (used for dependency injection and testing)."""
         self._cache_db = cache_db
+        self._invalidate_all_db_property_caches()
         if cache_db:
             self._load_project_config_from_db(cache_db)
 
@@ -1588,10 +1647,10 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=repoCategoriesChanged)
     def categoryColors(self):
         try:
-            if self._cache_db:
-                cfg = self._cache_db.get_full_repo_category_config()
-                if cfg and cfg.get("category_colors"):
-                    return cfg["category_colors"]
+            if self._cached_repo_cat_config is None and self._cache_db:
+                self._cached_repo_cat_config = self._cache_db.get_full_repo_category_config() or {}
+            if self._cached_repo_cat_config and self._cached_repo_cat_config.get("category_colors"):
+                return self._cached_repo_cat_config["category_colors"]
         except Exception:
             pass
         return {}
@@ -1599,51 +1658,50 @@ class DevOpsBackend(QObject):
     @Slot(str, result=str)
     def get_category_color(self, category):
         try:
-            if self._cache_db:
-                cfg = self._cache_db.get_full_repo_category_config()
-                colors = cfg.get("category_colors", {}) if cfg else {}
-                return colors.get(category, colors.get("OTHERS", "#6e7681"))
+            colors = self.categoryColors
+            return colors.get(category, colors.get("OTHERS", "#6e7681"))
         except Exception:
             pass
         return "#6e7681"
 
     @Property(list, notify=repoCategoriesChanged)
     def repoCategories(self):
-        if not self._cache_db:
-            return []
-        try:
-            return self._cache_db.get_repo_categories()
-        except Exception:
-            return []
+        return self.get_repo_categories()
 
     @Property(list, notify=changeFiltersChanged)
     def repoCategoryFilterPatterns(self):
-        cat_pat, _ = utils.load_change_filter_patterns(cache_db=self._cache_db)
-        return cat_pat
+        if self._cached_change_filter_patterns is None:
+            self._cached_change_filter_patterns = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return self._cached_change_filter_patterns[0]
 
     @Property(list, notify=changeFiltersChanged)
     def branchFilterPatterns(self):
-        _, br_pat = utils.load_change_filter_patterns(cache_db=self._cache_db)
-        return br_pat
+        if self._cached_change_filter_patterns is None:
+            self._cached_change_filter_patterns = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return self._cached_change_filter_patterns[1]
 
     @Property(list, notify=repoCategoriesChanged)
     def repoPrefixRules(self):
         if not self._cache_db:
             return []
-        try:
-            return self._cache_db.get_repo_prefix_rules()
-        except Exception:
-            return []
+        if self._cached_repo_prefix_rules is None:
+            try:
+                self._cached_repo_prefix_rules = self._cache_db.get_repo_prefix_rules()
+            except Exception:
+                self._cached_repo_prefix_rules = []
+        return self._cached_repo_prefix_rules
 
     @Property(list, notify=repoCategoriesChanged)
     def repoCategoryOverrides(self):
         if not self._cache_db:
             return []
-        try:
-            overrides = self._cache_db.get_repo_category_overrides()
-            return [{"repo_name": k, "category": v} for k, v in overrides.items()]
-        except Exception:
-            return []
+        if self._cached_repo_cat_overrides is None:
+            try:
+                overrides = self._cache_db.get_repo_category_overrides()
+                self._cached_repo_cat_overrides = [{"repo_name": k, "category": v} for k, v in overrides.items()]
+            except Exception:
+                self._cached_repo_cat_overrides = []
+        return self._cached_repo_cat_overrides
 
     @Property(dict, notify=syncLogsChanged)
     def logCounts(self):
@@ -1658,25 +1716,27 @@ class DevOpsBackend(QObject):
     def iterationShifts(self):
         if not self._cache_db:
             return []
-        try:
-            return self._cache_db.get_iteration_shifts(limit=200)
-        except Exception:
-            return []
+        if self._cached_iteration_shifts is None:
+            try:
+                self._cached_iteration_shifts = self._cache_db.get_iteration_shifts(limit=200)
+            except Exception:
+                self._cached_iteration_shifts = []
+        return self._cached_iteration_shifts
 
     @Property(dict, notify=iterationShiftsChanged)
     def shiftImpactMetrics(self):
+        default_metrics = {
+            "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
+            "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
+        }
         if not self._cache_db:
-            return {
-                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
-                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
-            }
-        try:
-            return self._cache_db.get_shift_metrics()
-        except Exception:
-            return {
-                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
-                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
-            }
+            return default_metrics
+        if self._cached_shift_impact_metrics is None:
+            try:
+                self._cached_shift_impact_metrics = self._cache_db.get_shift_metrics()
+            except Exception:
+                self._cached_shift_impact_metrics = default_metrics
+        return self._cached_shift_impact_metrics
 
     @Property(list, notify=milestonesChanged)
     def milestones(self):
@@ -2691,6 +2751,24 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.debug(f"Could not compute initial team motivation data: {e}")
 
+        # Pre-fetch shifts and milestone categories in background worker
+        pre_shifts = []
+        pre_shift_metrics = None
+        pre_milestone_cats = []
+        if self._cache_db:
+            try:
+                pre_shifts = self._cache_db.get_iteration_shifts(limit=200)
+            except Exception:
+                pre_shifts = []
+            try:
+                pre_shift_metrics = self._cache_db.get_shift_metrics()
+            except Exception:
+                pre_shift_metrics = None
+            try:
+                pre_milestone_cats = self._cache_db.get_milestone_categories()
+            except Exception:
+                pre_milestone_cats = []
+
         return {
             "repositories": sorted_repos,
             "work_items": sorted_wis,
@@ -2706,6 +2784,9 @@ class DevOpsBackend(QObject):
             "last_week_activity": last_week_activity,
             "current_week_planned": current_week_planned,
             "team_motivation_data": team_motivation_data,
+            "iteration_shifts": pre_shifts,
+            "shift_impact_metrics": pre_shift_metrics,
+            "milestone_categories": pre_milestone_cats,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -2730,17 +2811,30 @@ class DevOpsBackend(QObject):
         if "stats" in data:
             self._stats = data["stats"]
 
-        self.repositoriesChanged.emit()
-        self.workItemsChanged.emit()
-        self.pullRequestsChanged.emit()
-        self.statsChanged.emit()
-        self.tagDayDataChanged.emit()
-        self.storageDataChanged.emit()
-        self.pipelinesDataChanged.emit()
-        self.iterationShiftsChanged.emit()
-        self.workloadMatrixChanged.emit()
-        self.milestonesChanged.emit()
-        self.teamMotivationChanged.emit()
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        if "iteration_shifts" in data:
+            self._cached_iteration_shifts = data["iteration_shifts"]
+        if data.get("shift_impact_metrics") is not None:
+            self._cached_shift_impact_metrics = data["shift_impact_metrics"]
+        if "milestone_categories" in data:
+            self._cached_milestone_categories = data["milestone_categories"]
+
+        self._suppress_cache_invalidation = True
+        try:
+            self.repositoriesChanged.emit()
+            self.workItemsChanged.emit()
+            self.pullRequestsChanged.emit()
+            self.statsChanged.emit()
+            self.tagDayDataChanged.emit()
+            self.storageDataChanged.emit()
+            self.pipelinesDataChanged.emit()
+            self.iterationShiftsChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.milestonesChanged.emit()
+            self.teamMotivationChanged.emit()
+        finally:
+            self._suppress_cache_invalidation = False
 
     @Slot()
     def startup_load_async(self):
@@ -5921,6 +6015,9 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_milestones(self):
         """Returns all milestones discovered from Area Paths (*\\TargetMilestone\\<Year>_<Week> Title Format) combined with configured milestones for GANTT visualization."""
+        if self._cached_milestones is not None:
+            return self._cached_milestones
+
         all_paths = set()
         if hasattr(self, "_all_discovered_area_paths") and self._all_discovered_area_paths:
             for p in self._all_discovered_area_paths:
@@ -5960,11 +6057,14 @@ class DevOpsBackend(QObject):
                 if dm.get("category_bg_color"):
                     merged_map[k]["category_bg_color"] = dm.get("category_bg_color")
 
-        return sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        self._cached_milestones = sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        return self._cached_milestones
 
     @Slot(result=list)
     def get_coming_milestones(self):
         """Returns configured milestones starting from the current week sorted ascending by target date."""
+        if self._cached_coming_milestones is not None:
+            return self._cached_coming_milestones
         all_milestones = self.get_milestones()
         cur_year, cur_week, _ = datetime.now().isocalendar()
         _, _, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
@@ -6019,6 +6119,7 @@ class DevOpsBackend(QObject):
                 coming.append(m_copy)
 
         coming.sort(key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        self._cached_coming_milestones = coming
         return coming
 
     @Slot(result=list)
@@ -6625,9 +6726,14 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_milestone_categories(self):
         """Returns all milestone categories."""
-        if self._cache_db:
-            return self._cache_db.get_milestone_categories()
-        return []
+        if not self._cache_db:
+            return []
+        if self._cached_milestone_categories is None:
+            try:
+                self._cached_milestone_categories = self._cache_db.get_milestone_categories()
+            except Exception:
+                self._cached_milestone_categories = []
+        return self._cached_milestone_categories
 
     @Slot(str, str, str, str, str, int, result=dict)
     def save_milestone_category(self, cat_id, name, color, bg_color, icon, sort_order=0):
@@ -6662,9 +6768,14 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_repo_categories(self):
         """Returns all repo categories from database."""
-        if self._cache_db:
-            return self._cache_db.get_repo_categories()
-        return []
+        if not self._cache_db:
+            return []
+        if self._cached_repo_categories is None:
+            try:
+                self._cached_repo_categories = self._cache_db.get_repo_categories()
+            except Exception:
+                self._cached_repo_categories = []
+        return self._cached_repo_categories
 
     @Slot(str, str, str, int, bool, result=dict)
     def save_repo_category(self, name, color, bg_color="", sort_order=0, is_default=False):
@@ -7964,11 +8075,14 @@ class DevOpsBackend(QObject):
             candidates = [
                 os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
                 os.path.join(eff_dir, "BUILD_PIPELINES.md"),
-                os.path.join(os.getcwd(), "reports", devops_helper.BUILD_PIPELINES_MD),
-                os.path.join(os.getcwd(), "reports", "BUILD_PIPELINES.md"),
-                os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD),
-                os.path.join(os.getcwd(), "BUILD_PIPELINES.md"),
             ]
+            if not getattr(self, "_reports_dir", ""):
+                candidates.extend([
+                    os.path.join(os.getcwd(), "reports", devops_helper.BUILD_PIPELINES_MD),
+                    os.path.join(os.getcwd(), "reports", "BUILD_PIPELINES.md"),
+                    os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD),
+                    os.path.join(os.getcwd(), "BUILD_PIPELINES.md"),
+                ])
             for c in candidates:
                 if os.path.isfile(c):
                     res = self.get_file_content(c)
@@ -7983,7 +8097,7 @@ class DevOpsBackend(QObject):
                     rep_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
                     md_content = generate_pipelines_report.generate_markdown_report(
                         rep_data,
-                        output_path=os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                        output_path=None,
                         project_name=devops_helper.AZURE_PROJECT_ID or "DefaultProject",
                         csv_filename=devops_helper.BUILD_PIPELINES_CSV,
                     )

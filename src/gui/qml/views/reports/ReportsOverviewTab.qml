@@ -3,15 +3,21 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "../../components"
 
-            ScrollView {
+Item {
+    id: overviewTabRoot
     property var root: null
+    Layout.fillWidth: true
+    Layout.fillHeight: true
 
-                contentWidth: parent.width
-                clip: true
+    ScrollView {
+        id: overviewScrollView
+        anchors.fill: parent
+        contentWidth: availableWidth
+        clip: true
 
-                ColumnLayout {
-                    width: parent.width - 20
-                    spacing: 20
+        ColumnLayout {
+            width: Math.max(300, overviewScrollView.availableWidth - 20)
+            spacing: 20
 
                     // Report 1: Tag Day
                     Rectangle {
@@ -996,5 +1002,6 @@ import "../../components"
                     Item {
                         height: 10
                     }
-                }
-            }
+        }
+    }
+}

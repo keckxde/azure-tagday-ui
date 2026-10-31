@@ -18,6 +18,8 @@ azure_tagday_ui-*/*
 BUILD_ARTIFACTS*
 cache.db
 
-# Generated reports directory and output files
-reports/
-reports/*
+# Generated reports directory and output files (root /reports/ only, not src/gui/qml/views/reports/)
+/reports/
+/reports/*
+!/src/gui/qml/views/reports/
+!/src/gui/qml/views/reports/**

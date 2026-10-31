@@ -944,7 +944,7 @@ def load_jinja_template(template_name="BUILD_PIPELINES.tmpl", custom_path=None):
 
 def generate_markdown_report(
     report_data,
-    output_path,
+    output_path=None,
     project_name="DemoProject",
     csv_filename="BUILD_PIPELINES.csv",
     template_path=None,
@@ -970,10 +970,11 @@ def generate_markdown_report(
         status_icons=status_icons_config,
     )
 
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(content)
-    logger.info("Generated Build Pipelines Markdown report: %s", output_path)
+    if output_path:
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("Generated Build Pipelines Markdown report: %s", output_path)
     return content
 
 

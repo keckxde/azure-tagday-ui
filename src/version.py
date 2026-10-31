@@ -39,7 +39,10 @@ def _get_git_describe(repo_dir=None):
     return None
 
 
-def get_version_info():
+_CACHED_VERSION_INFO = None
+
+
+def get_version_info(refresh=False):
     """
     Returns a comprehensive dictionary of version information.
     {
@@ -55,6 +58,10 @@ def get_version_info():
         "source": "git" | "scm_cache" | "package_metadata" | "fallback"
     }
     """
+    global _CACHED_VERSION_INFO
+    if _CACHED_VERSION_INFO is not None and not refresh:
+        return _CACHED_VERSION_INFO
+
     describe_str = _get_git_describe()
     source = "git" if describe_str else None
 
@@ -64,7 +71,8 @@ def get_version_info():
             from _version_scm import version as scm_ver, version_tuple
             source = "scm_cache"
             # Attempt to parse scm version
-            return _format_from_pep440(scm_ver, source="scm_cache")
+            _CACHED_VERSION_INFO = _format_from_pep440(scm_ver, source="scm_cache")
+            return _CACHED_VERSION_INFO
         except Exception:
             pass
 
@@ -72,7 +80,8 @@ def get_version_info():
             import importlib.metadata
             pkg_ver = importlib.metadata.version("azure-tagday-ui")
             source = "package_metadata"
-            return _format_from_pep440(pkg_ver, source="package_metadata")
+            _CACHED_VERSION_INFO = _format_from_pep440(pkg_ver, source="package_metadata")
+            return _CACHED_VERSION_INFO
         except Exception:
             pass
 
@@ -118,7 +127,7 @@ def get_version_info():
             display_version = f"{tag} ({commit_hash}, modified)"
             status_label = f"{tag} (modified working tree)"
 
-        return {
+        _CACHED_VERSION_INFO = {
             "tag": tag,
             "distance": distance,
             "commit_hash": commit_hash,
@@ -130,11 +139,12 @@ def get_version_info():
             "pep440_version": pep440_version,
             "source": source,
         }
+        return _CACHED_VERSION_INFO
 
     # Fallback for plain commit hash without tags
     is_dirty = "-dirty" in describe_str
     clean_hash = describe_str.replace("-dirty", "").lstrip("g")
-    return {
+    _CACHED_VERSION_INFO = {
         "tag": "v0.01.0",
         "distance": 0,
         "commit_hash": clean_hash,
@@ -146,6 +156,7 @@ def get_version_info():
         "pep440_version": f"0.1.0+g{clean_hash}{'.dirty' if is_dirty else ''}",
         "source": source,
     }
+    return _CACHED_VERSION_INFO
 
 
 def _format_from_pep440(version_str, source="package_metadata"):
