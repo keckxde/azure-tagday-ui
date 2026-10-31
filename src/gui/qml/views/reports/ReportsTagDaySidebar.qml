@@ -1887,6 +1887,28 @@ Click to open in TFS"
         }
 
         // ============================================================
+        // MODE 6: Jenkins Build Pipelines & Culprit Monitor Preview (Tab 6)
+        // ============================================================
+        Loader {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 12
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            visible: root && root.activeReportTab === 6
+            active: visible || _hasLoaded
+            property bool _hasLoaded: false
+            sourceComponent: Component {
+                ReportPreviewPane {
+                    root: root
+                    reportType: "pipelines"
+                    customTitle: "🔧 Build Pipelines (BUILD_PIPELINES.md)"
+                }
+            }
+            onLoaded: _hasLoaded = true
+        }
+
+        // ============================================================
         // MODE 0: Reports Overview Live Draft Preview (Tab 0)
         // ============================================================
         Loader {

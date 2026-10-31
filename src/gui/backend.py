@@ -57,6 +57,7 @@ class DevOpsBackend(QObject):
     pullRequestsChanged = Signal()
     tagDayDataChanged = Signal()
     storageDataChanged = Signal()
+    pipelinesDataChanged = Signal()
     sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
     workloadMatrixChanged = Signal()
     milestonesChanged = Signal()
@@ -174,6 +175,13 @@ class DevOpsBackend(QObject):
             "prs_open_count": 0,
             "prs_completed_count": 0,
             "prs_abandoned_count": 0,
+            "pipelines_count": 0,
+            "pipelines_healthy_count": 0,
+            "pipelines_failed_count": 0,
+            "pipelines_unstable_count": 0,
+            "pipelines_problem_count": 0,
+            "pipelines_health_pct": 100,
+            "pipelines_weather_icon": "☀️",
             "last_synced": "Never",
             "project_name": devops_helper.AZURE_PROJECT_ID or "N/A",
             "db_path": "",
@@ -186,6 +194,7 @@ class DevOpsBackend(QObject):
         self._is_pr_titles_patched = False
         self._tagday_data = {}
         self._storage_data = {}
+        self._pipelines_data = {}
         self._last_week_activity = {}
         self._current_week_planned = {}
         self._team_motivation_data = {}
@@ -225,8 +234,66 @@ class DevOpsBackend(QObject):
         self._cached_tagged_count = 0
         self._cached_unique_tags_count = 0
 
+        # DB-backed property caches (prevents repeated SQLite roundtrips on QML binding evaluation)
+        self._cached_iteration_shifts = None
+        self._cached_shift_impact_metrics = None
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        self._cached_milestone_categories = None
+        self._cached_repo_cat_config = None
+        self._cached_repo_categories = None
+        self._cached_repo_prefix_rules = None
+        self._cached_repo_cat_overrides = None
+        self._cached_change_filter_patterns = None
+        self._suppress_cache_invalidation = False
+
+        self.iterationShiftsChanged.connect(self._on_iteration_shifts_signal)
+        self.milestonesChanged.connect(self._on_milestones_signal)
+        self.milestoneCategoriesChanged.connect(self._on_milestone_categories_signal)
+        self.repoCategoriesChanged.connect(self._on_repo_categories_signal)
+        self.changeFiltersChanged.connect(self._on_change_filters_signal)
+
         # Initialize cache handler only — heavy data load happens in startup_load_async()
         self._init_cache()
+
+    def _on_iteration_shifts_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_iteration_shifts = None
+            self._cached_shift_impact_metrics = None
+
+    def _on_milestones_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_milestones = None
+            self._cached_coming_milestones = None
+
+    def _on_milestone_categories_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_milestone_categories = None
+            self._cached_milestones = None
+            self._cached_coming_milestones = None
+
+    def _on_repo_categories_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_repo_cat_config = None
+            self._cached_repo_categories = None
+            self._cached_repo_prefix_rules = None
+            self._cached_repo_cat_overrides = None
+
+    def _on_change_filters_signal(self):
+        if not self._suppress_cache_invalidation:
+            self._cached_change_filter_patterns = None
+
+    def _invalidate_all_db_property_caches(self):
+        self._cached_iteration_shifts = None
+        self._cached_shift_impact_metrics = None
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        self._cached_milestone_categories = None
+        self._cached_repo_cat_config = None
+        self._cached_repo_categories = None
+        self._cached_repo_prefix_rules = None
+        self._cached_repo_cat_overrides = None
+        self._cached_change_filter_patterns = None
 
     def _init_cache(self):
         try:
@@ -268,6 +335,7 @@ class DevOpsBackend(QObject):
     def set_cache_db(self, cache_db):
         """Sets the cache database instance (used for dependency injection and testing)."""
         self._cache_db = cache_db
+        self._invalidate_all_db_property_caches()
         if cache_db:
             self._load_project_config_from_db(cache_db)
 
@@ -1552,6 +1620,10 @@ class DevOpsBackend(QObject):
     def storageData(self):
         return self._storage_data
 
+    @Property(dict, notify=pipelinesDataChanged)
+    def pipelinesData(self):
+        return self._pipelines_data
+
     @Property(str, notify=reportsDirChanged)
     def reportsDir(self):
         return self._reports_dir or ""
@@ -1575,10 +1647,10 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=repoCategoriesChanged)
     def categoryColors(self):
         try:
-            if self._cache_db:
-                cfg = self._cache_db.get_full_repo_category_config()
-                if cfg and cfg.get("category_colors"):
-                    return cfg["category_colors"]
+            if self._cached_repo_cat_config is None and self._cache_db:
+                self._cached_repo_cat_config = self._cache_db.get_full_repo_category_config() or {}
+            if self._cached_repo_cat_config and self._cached_repo_cat_config.get("category_colors"):
+                return self._cached_repo_cat_config["category_colors"]
         except Exception:
             pass
         return {}
@@ -1586,51 +1658,50 @@ class DevOpsBackend(QObject):
     @Slot(str, result=str)
     def get_category_color(self, category):
         try:
-            if self._cache_db:
-                cfg = self._cache_db.get_full_repo_category_config()
-                colors = cfg.get("category_colors", {}) if cfg else {}
-                return colors.get(category, colors.get("OTHERS", "#6e7681"))
+            colors = self.categoryColors
+            return colors.get(category, colors.get("OTHERS", "#6e7681"))
         except Exception:
             pass
         return "#6e7681"
 
     @Property(list, notify=repoCategoriesChanged)
     def repoCategories(self):
-        if not self._cache_db:
-            return []
-        try:
-            return self._cache_db.get_repo_categories()
-        except Exception:
-            return []
+        return self.get_repo_categories()
 
     @Property(list, notify=changeFiltersChanged)
     def repoCategoryFilterPatterns(self):
-        cat_pat, _ = utils.load_change_filter_patterns(cache_db=self._cache_db)
-        return cat_pat
+        if self._cached_change_filter_patterns is None:
+            self._cached_change_filter_patterns = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return self._cached_change_filter_patterns[0]
 
     @Property(list, notify=changeFiltersChanged)
     def branchFilterPatterns(self):
-        _, br_pat = utils.load_change_filter_patterns(cache_db=self._cache_db)
-        return br_pat
+        if self._cached_change_filter_patterns is None:
+            self._cached_change_filter_patterns = utils.load_change_filter_patterns(cache_db=self._cache_db)
+        return self._cached_change_filter_patterns[1]
 
     @Property(list, notify=repoCategoriesChanged)
     def repoPrefixRules(self):
         if not self._cache_db:
             return []
-        try:
-            return self._cache_db.get_repo_prefix_rules()
-        except Exception:
-            return []
+        if self._cached_repo_prefix_rules is None:
+            try:
+                self._cached_repo_prefix_rules = self._cache_db.get_repo_prefix_rules()
+            except Exception:
+                self._cached_repo_prefix_rules = []
+        return self._cached_repo_prefix_rules
 
     @Property(list, notify=repoCategoriesChanged)
     def repoCategoryOverrides(self):
         if not self._cache_db:
             return []
-        try:
-            overrides = self._cache_db.get_repo_category_overrides()
-            return [{"repo_name": k, "category": v} for k, v in overrides.items()]
-        except Exception:
-            return []
+        if self._cached_repo_cat_overrides is None:
+            try:
+                overrides = self._cache_db.get_repo_category_overrides()
+                self._cached_repo_cat_overrides = [{"repo_name": k, "category": v} for k, v in overrides.items()]
+            except Exception:
+                self._cached_repo_cat_overrides = []
+        return self._cached_repo_cat_overrides
 
     @Property(dict, notify=syncLogsChanged)
     def logCounts(self):
@@ -1645,25 +1716,27 @@ class DevOpsBackend(QObject):
     def iterationShifts(self):
         if not self._cache_db:
             return []
-        try:
-            return self._cache_db.get_iteration_shifts(limit=200)
-        except Exception:
-            return []
+        if self._cached_iteration_shifts is None:
+            try:
+                self._cached_iteration_shifts = self._cache_db.get_iteration_shifts(limit=200)
+            except Exception:
+                self._cached_iteration_shifts = []
+        return self._cached_iteration_shifts
 
     @Property(dict, notify=iterationShiftsChanged)
     def shiftImpactMetrics(self):
+        default_metrics = {
+            "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
+            "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
+        }
         if not self._cache_db:
-            return {
-                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
-                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
-            }
-        try:
-            return self._cache_db.get_shift_metrics()
-        except Exception:
-            return {
-                "total_shifts": 0, "affected_work_items": 0, "total_postponed": 0,
-                "total_accelerated": 0, "net_delayed_weeks": 0, "top_postponed": []
-            }
+            return default_metrics
+        if self._cached_shift_impact_metrics is None:
+            try:
+                self._cached_shift_impact_metrics = self._cache_db.get_shift_metrics()
+            except Exception:
+                self._cached_shift_impact_metrics = default_metrics
+        return self._cached_shift_impact_metrics
 
     @Property(list, notify=milestonesChanged)
     def milestones(self):
@@ -1909,7 +1982,11 @@ class DevOpsBackend(QObject):
             worker.report_progress(25, "Processing work items and hierarchy...")
 
         # 2. Work Items
-        # Build WI -> PR cross-reference map from PR status_str and title #NNNN mentions
+        raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
+        pr_to_wi_map = utils.build_pr_to_work_items_map(raw_wis)
+        self._pr_to_wi_map = pr_to_wi_map
+
+        # Build WI -> PR cross-reference map from all PR references and direct links
         all_prs_raw = self._cache_db.get_all_prs()
         wi_to_prs = {}   # wi_id (int) -> list of {pr_id, repo_name, title}
         wi_to_repos = {} # wi_id (int) -> set of repo names
@@ -1918,10 +1995,7 @@ class DevOpsBackend(QObject):
                 pr_id = pr.get("pr_id")
                 repo_name = pr.get("repo_name", "")
                 pr_title = pr.get("title", "") or ""
-                pr_status_str = pr.get("status_str", "") or ""
-                combined_text = f"{pr_title} {pr_status_str}"
-                for m in re.finditer(r"#(\d{4,})", combined_text):
-                    wi_id_ref = int(m.group(1))
+                for wi_id_ref in utils.extract_work_item_ids_from_pr(pr, pr_to_wi_map=pr_to_wi_map):
                     if wi_id_ref not in wi_to_prs:
                         wi_to_prs[wi_id_ref] = []
                     if not any(p.get("pr_id") == pr_id for p in wi_to_prs[wi_id_ref]):
@@ -1932,7 +2006,8 @@ class DevOpsBackend(QObject):
                         })
                     if wi_id_ref not in wi_to_repos:
                         wi_to_repos[wi_id_ref] = set()
-                    wi_to_repos[wi_id_ref].add(repo_name)
+                    if repo_name:
+                        wi_to_repos[wi_id_ref].add(repo_name)
         except Exception as e:
             logger.warning(f"Could not build WI->PR cross-reference map: {e}")
 
@@ -1941,8 +2016,6 @@ class DevOpsBackend(QObject):
         tfs_col = (devops_helper.AZURE_COLLECTION or "").strip("/")
         tfs_proj = devops_helper.AZURE_PROJECT_ID or ""
         tfs_wi_url_base = f"{tfs_base}/{tfs_col}/{tfs_proj}/_workitems/edit/" if (tfs_base and tfs_col and tfs_proj) else ""
-
-        raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
 
         # Determine iteration hierarchy to identify planned sprint iterations vs root / backlog containers
         all_iter_paths = set()
@@ -2356,6 +2429,34 @@ class DevOpsBackend(QObject):
         artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
         storage_data = self._build_storage_payload(artifacts)
 
+        # 4b. Jenkins Build Pipelines Health & Culprit Data
+        pipelines_data = {}
+        try:
+            import generate_pipelines_report
+            pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+        except Exception as pe:
+            logger.debug(f"Could not compute pipelines health data: {pe}")
+            pipelines_data = {
+                "summary": {
+                    "total_pipelines": 0,
+                    "healthy_count": 0,
+                    "unstable_count": 0,
+                    "failed_count": 0,
+                    "problem_count": 0,
+                    "running_count": 0,
+                    "aborted_or_idle_count": 0,
+                    "total_builds": 0,
+                    "overall_health_pct": 100,
+                    "overall_weather_icon": "☀️",
+                    "overall_weather_key": "sunny",
+                },
+                "pipelines": [],
+                "problem_pipelines": [],
+                "recent_failed_builds": [],
+                "all_builds": [],
+            }
+        pipe_sum = pipelines_data.get("summary", {})
+
         # 5. Tag Day Structure
         timeline = td_raw.get("all_changes_timeline", [])
         all_repos_raw = td_raw.get("all_repositories") or {}
@@ -2421,6 +2522,13 @@ class DevOpsBackend(QObject):
             "prs_open_count": prs_open_count,
             "prs_completed_count": prs_completed_count,
             "prs_abandoned_count": prs_abandoned_count,
+            "pipelines_count": pipe_sum.get("total_pipelines", 0),
+            "pipelines_healthy_count": pipe_sum.get("healthy_count", 0),
+            "pipelines_failed_count": pipe_sum.get("failed_count", 0),
+            "pipelines_unstable_count": pipe_sum.get("unstable_count", 0),
+            "pipelines_problem_count": pipe_sum.get("problem_count", 0),
+            "pipelines_health_pct": pipe_sum.get("overall_health_pct", 100),
+            "pipelines_weather_icon": pipe_sum.get("overall_weather_icon", "☀️"),
             "project_name": devops_helper.AZURE_PROJECT_ID or self._stats.get("project_name", "TFS Project"),
             "db_path": self._db_path or "tfs_cache.db",
             "last_synced_at": last_sync_dt.strftime("%Y-%m-%d %H:%M:%S") if last_sync_dt else "Never",
@@ -2643,19 +2751,42 @@ class DevOpsBackend(QObject):
         except Exception as e:
             logger.debug(f"Could not compute initial team motivation data: {e}")
 
+        # Pre-fetch shifts and milestone categories in background worker
+        pre_shifts = []
+        pre_shift_metrics = None
+        pre_milestone_cats = []
+        if self._cache_db:
+            try:
+                pre_shifts = self._cache_db.get_iteration_shifts(limit=200)
+            except Exception:
+                pre_shifts = []
+            try:
+                pre_shift_metrics = self._cache_db.get_shift_metrics()
+            except Exception:
+                pre_shift_metrics = None
+            try:
+                pre_milestone_cats = self._cache_db.get_milestone_categories()
+            except Exception:
+                pre_milestone_cats = []
+
         return {
             "repositories": sorted_repos,
             "work_items": sorted_wis,
             "work_items_map": all_wis_map,
+            "pr_to_wi_map": pr_to_wi_map,
             "pull_requests": sorted_prs,
             "pr_repositories": pr_repositories,
             "tagday_data": tagday_data,
             "storage_data": storage_data,
+            "pipelines_data": pipelines_data,
             "stats": stats,
             "shift_summary_map": shift_summary_map,
             "last_week_activity": last_week_activity,
             "current_week_planned": current_week_planned,
             "team_motivation_data": team_motivation_data,
+            "iteration_shifts": pre_shifts,
+            "shift_impact_metrics": pre_shift_metrics,
+            "milestone_categories": pre_milestone_cats,
         }
 
     def _apply_computed_cache_data(self, data):
@@ -2665,11 +2796,14 @@ class DevOpsBackend(QObject):
         self._repositories = data.get("repositories", [])
         self._work_items = data.get("work_items", [])
         self._work_items_map = data.get("work_items_map", {w["id"]: w for w in self._work_items})
+        if "pr_to_wi_map" in data:
+            self._pr_to_wi_map = data["pr_to_wi_map"]
         self._invalidate_work_items_cache()
         self._pull_requests = data.get("pull_requests", [])
         self._pr_repositories = data.get("pr_repositories", [])
         self._tagday_data = data.get("tagday_data", {})
         self._storage_data = data.get("storage_data", {})
+        self._pipelines_data = data.get("pipelines_data", {})
         self._shift_summary_map = data.get("shift_summary_map", {})
         self._last_week_activity = data.get("last_week_activity", {})
         self._current_week_planned = data.get("current_week_planned", {})
@@ -2677,16 +2811,30 @@ class DevOpsBackend(QObject):
         if "stats" in data:
             self._stats = data["stats"]
 
-        self.repositoriesChanged.emit()
-        self.workItemsChanged.emit()
-        self.pullRequestsChanged.emit()
-        self.statsChanged.emit()
-        self.tagDayDataChanged.emit()
-        self.storageDataChanged.emit()
-        self.iterationShiftsChanged.emit()
-        self.workloadMatrixChanged.emit()
-        self.milestonesChanged.emit()
-        self.teamMotivationChanged.emit()
+        self._cached_milestones = None
+        self._cached_coming_milestones = None
+        if "iteration_shifts" in data:
+            self._cached_iteration_shifts = data["iteration_shifts"]
+        if data.get("shift_impact_metrics") is not None:
+            self._cached_shift_impact_metrics = data["shift_impact_metrics"]
+        if "milestone_categories" in data:
+            self._cached_milestone_categories = data["milestone_categories"]
+
+        self._suppress_cache_invalidation = True
+        try:
+            self.repositoriesChanged.emit()
+            self.workItemsChanged.emit()
+            self.pullRequestsChanged.emit()
+            self.statsChanged.emit()
+            self.tagDayDataChanged.emit()
+            self.storageDataChanged.emit()
+            self.pipelinesDataChanged.emit()
+            self.iterationShiftsChanged.emit()
+            self.workloadMatrixChanged.emit()
+            self.milestonesChanged.emit()
+            self.teamMotivationChanged.emit()
+        finally:
+            self._suppress_cache_invalidation = False
 
     @Slot()
     def startup_load_async(self):
@@ -2922,6 +3070,7 @@ class DevOpsBackend(QObject):
 
         try:
             # 1. Tag Day Interactive Data
+            self._pr_to_wi_map = utils.build_pr_to_work_items_map(self._cache_db)
             if td_raw is None:
                 import generate_tagday_report
                 td_raw = generate_tagday_report.load_tagday_data(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
@@ -2932,6 +3081,24 @@ class DevOpsBackend(QObject):
             artifacts = generate_artifacts_report.load_artifacts_data(self._cache_db)
             self._storage_data = self._build_storage_payload(artifacts)
             self.storageDataChanged.emit()
+
+            # 3. Jenkins Build Pipelines Interactive Data
+            try:
+                import generate_pipelines_report
+                self._pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+                pipe_sum = self._pipelines_data.get("summary", {})
+                self._stats["pipelines_count"] = pipe_sum.get("total_pipelines", 0)
+                self._stats["pipelines_healthy_count"] = pipe_sum.get("healthy_count", 0)
+                self._stats["pipelines_failed_count"] = pipe_sum.get("failed_count", 0)
+                self._stats["pipelines_unstable_count"] = pipe_sum.get("unstable_count", 0)
+                self._stats["pipelines_problem_count"] = pipe_sum.get("problem_count", 0)
+                self._stats["pipelines_health_pct"] = pipe_sum.get("overall_health_pct", 100)
+                self._stats["pipelines_weather_icon"] = pipe_sum.get("overall_weather_icon", "☀️")
+                self.pipelinesDataChanged.emit()
+                self.statsChanged.emit()
+            except Exception as pe:
+                logger.debug(f"Could not load pipelines interactive data: {pe}")
+
             self.iterationShiftsChanged.emit()
 
         except Exception as e:
@@ -3173,6 +3340,82 @@ class DevOpsBackend(QObject):
             self.open_path_in_explorer(path)
         else:
             self.logMessage.emit(f"File does not exist: {path}")
+
+    @Slot()
+    def generate_pipelines_report_async(self):
+        """Generates the Jenkins-style Build Pipelines Health & Culprit report in background, syncing live builds from TFS if connected."""
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            azHandler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+            project_id = devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", "") or "default"
+
+            if azHandler and hasattr(azHandler, "sync_pipelines_and_builds"):
+                worker.report_progress(10, f"Connecting to TFS ({devops_helper.AZURE_BASE_URL})...")
+                worker.log_message.emit(f"Syncing build pipelines and recent executions for project '{project_id}'...")
+                try:
+                    def _prog(msg, cur=0, tot=0):
+                        worker.log_message.emit(msg)
+                        if tot > 0:
+                            pct = 10 + int((cur / tot) * 65)
+                            worker.report_progress(pct, msg)
+
+                    sync_res = azHandler.sync_pipelines_and_builds(
+                        project_id,
+                        cache_db=self._cache_db,
+                        progress_callback=_prog
+                    )
+                    worker.log_message.emit(
+                        f"Synced {len(sync_res.get('pipelines', []))} pipelines and {len(sync_res.get('builds', []))} builds from TFS."
+                    )
+                except Exception as he:
+                    logger.warning(f"Could not sync live pipelines/builds from TFS: {he}")
+                    worker.log_message.emit(f"TFS sync notice: {he}. Proceeding with local cache...")
+
+            worker.report_progress(80, "Analyzing pipeline stability (Jenkins Weather) & culprits...")
+            worker.log_message.emit("Analyzing pipeline stability, Jenkins weather scores, and culprit hints...")
+            reports_dir = self.get_effective_reports_dir()
+            md_path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_MD)
+            csv_path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_CSV)
+            report_data = devops_helper.generate_pipelines_report(
+                db_path=self._db_path,
+                md_path=md_path,
+                csv_path=csv_path,
+                reports_dir=reports_dir
+            )
+            if not report_data:
+                raise RuntimeError("Build Pipelines report generation returned empty result")
+
+            worker.report_progress(100, "Build Pipelines report generated successfully")
+            worker.log_message.emit(f"Build Pipelines report generated successfully: {md_path}")
+            return "Build Pipelines report generated successfully"
+
+        self._run_worker(_work, "Generating Build Pipelines report...")
+
+    @Slot()
+    def open_pipelines_report_file(self):
+        """Opens generated BUILD_PIPELINES.md report in default editor."""
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_MD)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD)
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}. Please click 'Generate Pipelines Report' first.")
+
+    @Slot()
+    def open_pipelines_csv_file(self):
+        """Opens generated BUILD_PIPELINES.csv report in default spreadsheet viewer."""
+        reports_dir = self.get_effective_reports_dir()
+        path = os.path.join(reports_dir, devops_helper.BUILD_PIPELINES_CSV)
+        if not os.path.exists(path):
+            path = os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_CSV)
+        if os.path.exists(path):
+            self.open_path_in_explorer(path)
+        else:
+            self.logMessage.emit(f"File does not exist: {path}. Please click 'Generate Pipelines Report' first.")
 
     @Slot(str, result=str)
     @Slot(str, str, result=str)
@@ -5772,6 +6015,9 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_milestones(self):
         """Returns all milestones discovered from Area Paths (*\\TargetMilestone\\<Year>_<Week> Title Format) combined with configured milestones for GANTT visualization."""
+        if self._cached_milestones is not None:
+            return self._cached_milestones
+
         all_paths = set()
         if hasattr(self, "_all_discovered_area_paths") and self._all_discovered_area_paths:
             for p in self._all_discovered_area_paths:
@@ -5811,11 +6057,14 @@ class DevOpsBackend(QObject):
                 if dm.get("category_bg_color"):
                     merged_map[k]["category_bg_color"] = dm.get("category_bg_color")
 
-        return sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        self._cached_milestones = sorted(merged_map.values(), key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        return self._cached_milestones
 
     @Slot(result=list)
     def get_coming_milestones(self):
         """Returns configured milestones starting from the current week sorted ascending by target date."""
+        if self._cached_coming_milestones is not None:
+            return self._cached_coming_milestones
         all_milestones = self.get_milestones()
         cur_year, cur_week, _ = datetime.now().isocalendar()
         _, _, cur_start_str, cur_end_str = utils.get_sprint_date_range(cur_year, cur_week)
@@ -5870,6 +6119,7 @@ class DevOpsBackend(QObject):
                 coming.append(m_copy)
 
         coming.sort(key=lambda x: (x.get("target_date") or "", x.get("name") or ""))
+        self._cached_coming_milestones = coming
         return coming
 
     @Slot(result=list)
@@ -6476,9 +6726,14 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_milestone_categories(self):
         """Returns all milestone categories."""
-        if self._cache_db:
-            return self._cache_db.get_milestone_categories()
-        return []
+        if not self._cache_db:
+            return []
+        if self._cached_milestone_categories is None:
+            try:
+                self._cached_milestone_categories = self._cache_db.get_milestone_categories()
+            except Exception:
+                self._cached_milestone_categories = []
+        return self._cached_milestone_categories
 
     @Slot(str, str, str, str, str, int, result=dict)
     def save_milestone_category(self, cat_id, name, color, bg_color, icon, sort_order=0):
@@ -6513,9 +6768,14 @@ class DevOpsBackend(QObject):
     @Slot(result=list)
     def get_repo_categories(self):
         """Returns all repo categories from database."""
-        if self._cache_db:
-            return self._cache_db.get_repo_categories()
-        return []
+        if not self._cache_db:
+            return []
+        if self._cached_repo_categories is None:
+            try:
+                self._cached_repo_categories = self._cache_db.get_repo_categories()
+            except Exception:
+                self._cached_repo_categories = []
+        return self._cached_repo_categories
 
     @Slot(str, str, str, int, bool, result=dict)
     def save_repo_category(self, name, color, bg_color="", sort_order=0, is_default=False):
@@ -7228,33 +7488,23 @@ class DevOpsBackend(QObject):
 
         self.logMessage.emit(f"Tag Day report file not found at: {output_path}")
     def _extract_pr_tasks(self, pr, work_items_map=None):
-        """Extracts referenced work item tasks from PR title, description, and status_str."""
+        """
+        Extracts all referenced and directly linked work item tasks for a PR
+        (from title, description, status_str, raw_json workItemRefs/workItems, and
+        reverse ArtifactLink relations in work_items), removing any duplicates.
+        """
         if not pr:
             return []
 
-        title = pr.get("title") or ""
-        description = pr.get("description") or ""
-        status_str = pr.get("status_str") or ""
-        raw_json_str = pr.get("raw_json") or ""
-
-        task_ids = set()
-        for m in re.finditer(r"#(\d{4,})", f"{title} {description} {status_str}"):
-            task_ids.add(int(m.group(1)))
-
-        if raw_json_str and isinstance(raw_json_str, str):
+        pr_to_wi_map = getattr(self, "_pr_to_wi_map", None)
+        if pr_to_wi_map is None and self._cache_db:
             try:
-                raw_meta = json.loads(raw_json_str)
-                raw_desc = raw_meta.get("description") or ""
-                for m in re.finditer(r"#(\d{4,})", raw_desc):
-                    task_ids.add(int(m.group(1)))
+                pr_to_wi_map = utils.build_pr_to_work_items_map(self._cache_db)
+                self._pr_to_wi_map = pr_to_wi_map
             except Exception:
-                pass
+                pr_to_wi_map = {}
 
-        # Discard PR ID itself to avoid self-referencing
-        pr_id = str(pr.get("pr_id") or "")
-        if pr_id and pr_id.isdigit():
-            task_ids.discard(int(pr_id))
-
+        task_ids = set(utils.extract_work_item_ids_from_pr(pr, pr_to_wi_map=pr_to_wi_map))
         if not task_ids:
             return []
 
@@ -7264,25 +7514,41 @@ class DevOpsBackend(QObject):
             for tid in task_ids:
                 if tid in wis_map:
                     found_map[str(tid)] = wis_map[tid]
-        elif self._cache_db:
+                elif str(tid) in wis_map:
+                    found_map[str(tid)] = wis_map[str(tid)]
+
+        # Also reuse any already-cached task objects attached to pr
+        for existing_task in (pr.get("tasks") or []):
+            if isinstance(existing_task, dict) and existing_task.get("in_cache"):
+                tid_str = str(existing_task.get("id") or "")
+                if tid_str and tid_str not in found_map:
+                    found_map[tid_str] = existing_task
+
+        missing_tids = [tid for tid in task_ids if str(tid) not in found_map]
+        if missing_tids and self._cache_db:
             try:
                 with self._cache_db._connection() as conn:
-                    placeholders = ",".join("?" for _ in task_ids)
+                    placeholders = ",".join("?" for _ in missing_tids)
                     query = f"""
                         SELECT id, title, type, state, assigned_to, deleted
                         FROM work_items
                         WHERE id IN ({placeholders})
                     """
-                    rows = conn.execute(query, list(task_ids)).fetchall()
-                    found_map = {str(r["id"]): dict(r) for r in rows}
+                    rows = conn.execute(query, list(missing_tids)).fetchall()
+                    for r in rows:
+                        found_map[str(r["id"])] = dict(r)
             except Exception as e:
                 logger.warning(f"Error querying work items for PR tasks: {e}")
 
         tasks = []
+        seen_out = set()
         base_url = (devops_helper.AZURE_BASE_URL or "").rstrip("/")
         collection = (devops_helper.AZURE_COLLECTION or "").strip("/")
         project_id = devops_helper.AZURE_PROJECT_ID or ""
         for tid in sorted(task_ids):
+            if tid in seen_out:
+                continue
+            seen_out.add(tid)
             info = found_map.get(str(tid))
             url = f"{base_url}/{collection}/{project_id}/_workitems/edit/{tid}" if (base_url and collection and project_id) else ""
             if info:
@@ -7802,6 +8068,57 @@ class DevOpsBackend(QObject):
                 logger.debug(f"Could not build draft rescheduling markdown: {e}")
             res = self.get_file_content(os.path.join(eff_dir, "RESCHEDULING_REPORT.md"))
             res["title"] = "Iteration Shifts & Rescheduling Report"
+            res["format"] = "markdown"
+            return res
+
+        elif r_type in ("pipelines", "build_pipelines", "jenkins"):
+            candidates = [
+                os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                os.path.join(eff_dir, "BUILD_PIPELINES.md"),
+            ]
+            if not getattr(self, "_reports_dir", ""):
+                candidates.extend([
+                    os.path.join(os.getcwd(), "reports", devops_helper.BUILD_PIPELINES_MD),
+                    os.path.join(os.getcwd(), "reports", "BUILD_PIPELINES.md"),
+                    os.path.join(os.getcwd(), devops_helper.BUILD_PIPELINES_MD),
+                    os.path.join(os.getcwd(), "BUILD_PIPELINES.md"),
+                ])
+            for c in candidates:
+                if os.path.isfile(c):
+                    res = self.get_file_content(c)
+                    if res.get("success"):
+                        res["title"] = "Jenkins Build Pipelines Health & Culprit Report"
+                        res["format"] = "markdown"
+                        return res
+
+            if self._cache_db:
+                try:
+                    import generate_pipelines_report
+                    rep_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+                    md_content = generate_pipelines_report.generate_markdown_report(
+                        rep_data,
+                        output_path=None,
+                        project_name=devops_helper.AZURE_PROJECT_ID or "DefaultProject",
+                        csv_filename=devops_helper.BUILD_PIPELINES_CSV,
+                    )
+                    if md_content:
+                        return {
+                            "success": True,
+                            "title": "Jenkins Build Pipelines Health & Culprit Report",
+                            "format": "markdown",
+                            "file_path": os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD),
+                            "file_name": devops_helper.BUILD_PIPELINES_MD,
+                            "content": md_content,
+                            "line_count": len(md_content.splitlines()),
+                            "word_count": len(re.findall(r"\b\w+\b", md_content)),
+                            "size_bytes": len(md_content.encode("utf-8")),
+                            "modified_at": "Live generated",
+                        }
+                except Exception as e:
+                    logger.debug(f"Could not render live pipelines markdown: {e}")
+
+            res = self.get_file_content(os.path.join(eff_dir, devops_helper.BUILD_PIPELINES_MD))
+            res["title"] = "Jenkins Build Pipelines Health & Culprit Report"
             res["format"] = "markdown"
             return res
 

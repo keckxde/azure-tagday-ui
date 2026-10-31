@@ -225,6 +225,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                     }
 
         # 3. Fetch Pull Requests and filter each against its repository's latest tag
+        pr_to_wi_map = utils.build_pr_to_work_items_map(conn)
+
         prs_rows = conn.execute("""
             SELECT 
                 pr.id AS pr_id,
@@ -259,6 +261,8 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         prs_by_repo_and_source = {}
         prs_by_repo_and_source_lower = {}
         seen_pr_ids = set()
+        all_referenced_wi_ids = set()
+        all_pr_items = []
 
         for pr in prs_rows:
             pr_id = pr["pr_id"]
@@ -287,9 +291,14 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
             target_branch = (pr["target_branch"] or "").replace("refs/heads/", "").strip()
             source_branch = (pr["source_branch"] or "").replace("refs/heads/", "").strip()
 
+            work_item_ids = utils.extract_work_item_ids_from_pr(pr, pr_to_wi_map=pr_to_wi_map)
+            all_referenced_wi_ids.update(work_item_ids)
+
             pr_title = pr["title"] or "(No title)"
             if patch_titles and patch_pr_title_for_release_notes:
-                pr_title = patch_pr_title_for_release_notes(pr, cache_db=cache_db, default_title=pr_title)
+                pr_for_patch = dict(pr)
+                pr_for_patch["work_item_ids"] = work_item_ids
+                pr_title = patch_pr_title_for_release_notes(pr_for_patch, cache_db=cache_db, default_title=pr_title)
 
             # Determine tag association: direct tag match (only v* tags) or release tag based on closed_date
             direct_tag = pr["direct_tag_name"]
@@ -344,8 +353,12 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 "item_type": "PR",
                 "tag_name": assigned_tag or "",
                 "is_tagged": is_tagged,
-                "tag_type": tag_type
+                "tag_type": tag_type,
+                "raw_json": pr["raw_json"] or "",
+                "work_item_ids": work_item_ids,
+                "tasks": [],
             }
+            all_pr_items.append(pr_item)
 
             prs_by_repo_and_source.setdefault((rname, source_branch), []).append(pr_item)
             prs_by_repo_and_source_lower.setdefault((rname.lower(), source_branch.lower()), []).append(pr_item)
@@ -370,6 +383,59 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
                 elif is_active:
                     repositories[rname]["active_prs"].append(pr_item)
                     all_changes_timeline.append(pr_item)
+
+        # Resolve linked work items (tasks) for all PRs
+        if all_referenced_wi_ids:
+            wi_lookup = {}
+            try:
+                wi_list_ids = sorted(all_referenced_wi_ids)
+                for i in range(0, len(wi_list_ids), 500):
+                    chunk = wi_list_ids[i:i + 500]
+                    placeholders = ",".join("?" for _ in chunk)
+                    wi_rows = conn.execute(
+                        f"SELECT id, title, type, state, assigned_to, deleted FROM work_items WHERE id IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                    for wr in wi_rows:
+                        wi_lookup[int(wr["id"])] = dict(wr)
+            except Exception as e:
+                logger.debug(f"Could not query work items for TagDay PRs: {e}")
+
+            base_url = (getattr(devops_helper, "AZURE_BASE_URL", "") or "").rstrip("/")
+            collection = (getattr(devops_helper, "AZURE_COLLECTION", "") or "").strip("/")
+            proj_id = project_id or getattr(devops_helper, "AZURE_PROJECT_ID", "") or ""
+            for pr_item in all_pr_items:
+                tasks = []
+                seen_tids = set()
+                for tid in sorted(pr_item.get("work_item_ids") or []):
+                    if tid in seen_tids:
+                        continue
+                    seen_tids.add(tid)
+                    info = wi_lookup.get(tid)
+                    url = f"{base_url}/{collection}/{proj_id}/_workitems/edit/{tid}" if (base_url and collection and proj_id) else ""
+                    if info:
+                        tasks.append({
+                            "id": str(info.get("id", tid)),
+                            "title": info.get("title") or f"Work Item #{tid}",
+                            "type": info.get("type") or "Task",
+                            "state": info.get("state") or "Active",
+                            "assigned_to": info.get("assigned_to") or "",
+                            "deleted": bool(info.get("deleted", 0)),
+                            "url": url,
+                            "in_cache": True,
+                        })
+                    else:
+                        tasks.append({
+                            "id": str(tid),
+                            "title": f"Task #{tid}",
+                            "type": "Task",
+                            "state": "Linked",
+                            "assigned_to": "",
+                            "deleted": False,
+                            "url": url,
+                            "in_cache": False,
+                        })
+                pr_item["tasks"] = tasks
 
         # 4. Fetch Branches with unmerged commits (ahead_count > 0)
         branches_rows = conn.execute("""

@@ -142,6 +142,10 @@ Item {
         root.activeReportTab = 2;
     }
 
+    function openPipelinesReport() {
+        root.activeReportTab = 6;
+    }
+
     Component.onCompleted: {
         if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
             window.closeRightSidebar();
@@ -215,6 +219,7 @@ Item {
         // LEFT: Main Reports Page Content
         // ==========================================
         Rectangle {
+            id: leftPaneRect
             Layout.fillWidth: true
             Layout.minimumWidth: Math.floor(root.width * 0.48)
             Layout.fillHeight: true
@@ -222,14 +227,15 @@ Item {
             clip: true
 
             ColumnLayout {
+                id: leftPaneCol
                 anchors.fill: parent
                 anchors.margins: 14
                 spacing: 12
 
                 // Header and Tab Navigation
-                RowLayout {
+                Flow {
                     Layout.fillWidth: true
-                    spacing: 12
+                    spacing: 8
 
                     Text {
                         text: "Reports & Analytics"
@@ -237,42 +243,40 @@ Item {
                         font.pixelSize: 17
                         font.weight: Font.Bold
                         color: "#f0f6fc"
-                    }
-
-                    Item {
-                        Layout.fillWidth: true
+                        height: 28
+                        verticalAlignment: Text.AlignVCenter
+                        rightPadding: 8
                     }
 
                     // Subtab Switcher
-                    Row {
-                        spacing: 5
-                        Repeater {
-                            model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts"]
-                            Button {
-                                text: modelData
-                                checkable: true
-                                checked: root.activeReportTab === index
-                                font.pixelSize: 11
-                                font.weight: checked ? Font.DemiBold : Font.Normal
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: parent.checked ? "#ffffff" : "#8b949e"
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 28
-                                    implicitWidth: 125
-                                    radius: 6
-                                    color: parent.checked ? "#1f6feb" : (parent.hovered ? "#21262d" : "#161b22")
-                                    border.color: parent.checked ? "#388bfd" : "#30363d"
-                                }
-                                onClicked: {
-                                    root.activeReportTab = index;
-                                    if (index === 4) {
-                                        root.refreshSprintReport();
-                                    }
+                    Repeater {
+                        model: ["📊 Reports Overview", "🏷️ Tag Day Explorer", "📦 Storage & Artifacts", "📝 Release Notes", "🚀 Sprint Report", "⏱️ Iteration Shifts", "🔧 Build Pipelines"]
+                        Button {
+                            id: subTabBtn
+                            text: modelData
+                            checkable: true
+                            checked: root.activeReportTab === index
+                            font.pixelSize: 11
+                            font.weight: checked ? Font.DemiBold : Font.Normal
+                            contentItem: Text {
+                                id: subTabBtnText
+                                text: subTabBtn.text
+                                font: subTabBtn.font
+                                color: subTabBtn.checked ? "#ffffff" : "#8b949e"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                implicitHeight: 28
+                                implicitWidth: Math.max(96, subTabBtnText.implicitWidth + 18)
+                                radius: 6
+                                color: subTabBtn.checked ? "#1f6feb" : (subTabBtn.hovered ? "#21262d" : "#161b22")
+                                border.color: subTabBtn.checked ? "#388bfd" : "#30363d"
+                            }
+                            onClicked: {
+                                root.activeReportTab = index;
+                                if (index === 4) {
+                                    root.refreshSprintReport();
                                 }
                             }
                         }
@@ -283,35 +287,55 @@ Item {
                 StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.maximumWidth: Math.max(300, leftPaneRect.width - 28)
                     currentIndex: root.activeReportTab
 
                     // Tab 0: Actions & File Exports
                     ReportsOverviewTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
 
                     // Tab 1: Interactive Tag Day Explorer
                     ReportsTagDayExplorerTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
 
                     // Tab 2: Interactive Storage & Build Artifacts
                     ReportsStorageArtifactsTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
 
                     // Tab 3: Interactive Release Notes & Version Overview
                     ReportsReleaseNotesTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
 
                     // Tab 4: Agile Sprint & Timeframe Explorer
                     ReportsSprintReportTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
 
                     // Tab 5: Iteration Shifts & Impact Analysis
                     ReportsIterationShiftsTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        root: root
+                    }
+
+                    // Tab 6: Jenkins-Style Build Pipelines & Culprit Monitor
+                    ReportsBuildPipelinesTab {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         root: root
                     }
                 }

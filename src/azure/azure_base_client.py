@@ -521,6 +521,32 @@ class AzureBaseClient:
                 "deleted": True
             }]
 
+    def get_build_timeline(self, project_id, build_id):
+        """
+        Retrieves the build execution timeline (stages, jobs, tasks, issues/errors) for a specific build.
+
+        Args:
+            project_id (str): The target project ID or name.
+            build_id (int/str): The build ID.
+
+        Returns:
+            list: List of timeline record dictionaries.
+        """
+        try:
+            res, _ = self._request(
+                "GET",
+                f"{project_id}/_apis/build/builds/{build_id}/timeline",
+                params={"api-version": "6.0"},
+                suppress_error_log=True
+            )
+            if isinstance(res, dict):
+                return res.get("records", []) or []
+            if isinstance(res, list):
+                return res
+        except Exception as e:
+            logger.debug("Could not retrieve build timeline for build %s in %s: %s", build_id, project_id, e)
+        return []
+
     def get_work_item(self, task_id, expand="all"):
         """
         Retrieves details of a specific work item by ID.
@@ -817,6 +843,33 @@ class AzureBaseClient:
 
         res, _ = self._request("GET", f"_apis/git/pullrequests/{pr_id}", params={"api-version": "6.0"})
         return res
+
+    def get_pull_request_work_items(self, project_id, repo_id, pr_id):
+        """
+        Retrieves work items directly linked to a specific pull request.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID or name.
+            pr_id (int/str): The ID of the pull request.
+
+        Returns:
+            list: List of work item reference dictionaries (e.g. [{'id': '12345', 'url': '...'}]).
+        """
+        try:
+            res, _ = self._request(
+                "GET",
+                f"{project_id}/_apis/git/repositories/{repo_id}/pullrequests/{pr_id}/workitems",
+                params={"api-version": "6.0"},
+                suppress_error_log=True,
+            )
+            if isinstance(res, dict):
+                return res.get("value", [])
+            if isinstance(res, list):
+                return res
+        except Exception as e:
+            logger.debug("Failed get_pull_request_work_items for PR %s: %s", pr_id, e)
+        return []
 
     def get_pull_requests(self, project_id, repo_id, status=None, top=None, skip=None):
         """

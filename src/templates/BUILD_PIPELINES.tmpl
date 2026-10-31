@@ -1,0 +1,62 @@
+# Jenkins Build Pipelines Health & Culprit Report{% if project_name %} ({{ project_name }}){% endif %}
+> **Report Generation Date:** `{{ now_str }}`  
+> **Scope:** Classic Jenkins-Style Build Pipeline Monitor (`Status S`, `Weather W`, Stability Score) & Automated Culprit Analysis (*Wer / Was*)  
+> **External Data Export:** [:material-file-delimited: Download Build Pipelines CSV]({{ csv_filename }}){ .md-button .md-button--primary }
+
+## 1. Executive Summary & Build Monitor KPIs
+
+| Metric | Value | Description |
+| :--- | :---: | :--- |
+| **Overall Build Weather** | {{ summary.overall_weather_icon }} **`{{ summary.overall_health_pct }}%`** | Average stability across all active pipelines |
+| **Total Pipelines Monitored** | `{{ summary.total_pipelines }}` | Total configured build definitions / pipelines |
+| **🟢 Stable / Passing (`Success`)** | **`{{ summary.healthy_count }}`** | Latest build succeeded |
+| **🟡 Unstable (`Partially Succeeded`)** | **`{{ summary.unstable_count }}`** | Completed with warnings or non-critical test failures |
+| **🔴 Broken / Failing (`Failed`)** | **`{{ summary.failed_count }}`** | Latest build failed — immediate attention required |
+| **🔄 Currently Running** | `{{ summary.running_count }}` | Builds currently in progress or queued |
+| **⚪ Aborted / Never Built** | `{{ summary.aborted_or_idle_count }}` | Canceled or no recorded runs |
+| **Total Build Runs Analyzed** | `{{ summary.total_builds }}` | Historical executions evaluated from cache |
+
+---
+
+## 2. 🚨 Problem-Analyse: Wer / Was ist der Verursacher? (Broken & Unstable Pipelines)
+
+{% if problem_pipelines %}
+Folgende Pipelines weisen aktuell Fehler (`🔴 FAILED`), Instabilitäten (`🟡 UNSTABLE`) oder schlechtes Build-Wetter auf. Die automatische Ursachenanalyse (analog zum **Jenkins Culprit / Suspects-Tracking**) zeigt einfache Hinweise darauf, **wer** und **was** das Problem ausgelöst haben könnte:
+
+| S | W | Pipeline & Branch | Fehler seit | 👤 Wer (Mögliche Verursacher / Culprits) | 🔍 Was (Ursache, Commit, PR & Fehlgeschlagener Step) | 💡 Einfacher Hinweis |
+| :-: | :-: | :--- | :--- | :--- | :--- | :--- |
+{% for p in problem_pipelines -%}
+| {{ p.status_ball }} | {{ p.weather_icon }} `{{ p.weather_score }}%` | **{{ p.name }}**<br><small>Repo: `{{ p.repo_name }}` (`{{ p.last_branch or 'default' }}`)</small> | `#{{ p.broken_since_build or p.last_build_number }}`<br><small>({{ p.consecutive_failures }}x in Folge)</small> | **{{ p.culprit_who }}**{% if p.suspects_str and p.suspects_str != p.culprit_who %}<br><small>Suspects: {{ p.suspects_str }}</small>{% endif %} | {{ p.culprit_what }} | {{ p.hint_text }} |
+{% endfor %}
+{% else %}
+> ✅ **Alle Build-Pipelines sind aktuell grün und stabil (`☀️ Sunny`)!** Es wurden keine fehlgeschlagenen oder instabilen Pipelines gefunden.
+{% endif %}
+
+---
+
+## 3. Classic Jenkins Build Monitor Table (Alle Pipelines)
+
+*Legende wie in klassischem Jenkins:*
+- **S (Status Ball):** `🟢` Erster/Letzter Lauf erfolgreich (`SUCCESS`) · `🟡` Instabil / Warnungen (`UNSTABLE`) · `🔴` Fehlgeschlagen (`FAILED`) · `🔄` Läuft (`RUNNING`) · `⚪` Abgebrochen / Inaktiv (`ABORTED / NOT BUILT`)
+- **W (Wetter / Health über letzte 5 Builds):** `☀️` Sonnig (81–100%) · `🌤️` Leicht bewölkt (61–80%) · `☁️` Bewölkt (41–60%) · `🌧️` Regen (21–40%) · `⛈️` Gewitter (0–20%)
+
+| S | W | Letzte 5 | Name (Pipeline / Job) | Repository & Branch | Letzter Erfolg (Last Success) | Letzter Fehler (Last Failure) | Letzte Dauer (Duration) | Verursacher / Status-Hinweis |
+| :-: | :-: | :---: | :--- | :--- | :--- | :--- | :---: | :--- |
+{% for p in pipelines -%}
+| {{ p.status_ball }} | {{ p.weather_icon }} `{{ p.weather_score }}%` | {{ p.last_5_balls }} | **{{ p.name }}** | `{{ p.repo_name }}`<br><small>`{{ p.last_branch or '-' }}`</small> | {{ p.last_success_display }} | {{ p.last_failure_display }} | `{{ p.last_duration_str }}` | {% if p.has_problem %}**Wer:** {{ p.culprit_who }}<br>**Was:** {{ p.culprit_what }}{% else %}✅ Stabil ({{ p.weather_label }}){% endif %} |
+{% endfor %}
+
+---
+
+## 4. Letzte Fehlgeschlagene & Instabile Build-Läufe (Detail-Log)
+
+{% if recent_failed_builds %}
+| Status | Build # | Pipeline | Repository | Branch | Commit / PR | Ausgelöst durch (Wer) | Fehlgeschlagener Step / Ursache (Was) | Zeitpunkt | Dauer |
+| :-: | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+{% for b in recent_failed_builds -%}
+| {{ b.status_ball }} `{{ b.status_label }}` | **`#{{ b.build_number }}`** | **{{ b.pipeline_name }}** | `{{ b.repo_name }}` | `{{ b.branch_short }}` | `{{ b.commit_short }}`{% if b.pr_label %} ({{ b.pr_label }}){% endif %} | **{{ b.who_summary }}** | {{ b.what_summary }} | `{{ b.finish_time_str }}` | `{{ b.duration_str }}` |
+{% endfor %}
+{% else %}
+*Keine fehlgeschlagenen oder instabilen Build-Läufe im aktuellen Analysezeitraum vorhanden.*
+{% endif %}
+

@@ -46,10 +46,12 @@ py-modules = [
     "devops_helper",
     "utils",
     "generate_artifacts_report",
+    "generate_pipelines_report",
     "generate_rescheduling_report",
     "generate_revision",
     "generate_sprint_report",
     "generate_tagday_report",
+    "team_motivation",
 ]
 
 [tool.setuptools.packages.find]

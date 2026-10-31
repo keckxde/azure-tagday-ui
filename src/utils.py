@@ -2192,4 +2192,263 @@ def format_compact_iteration(iter_name: str, is_planned: bool = False, has_miles
     return clean
 
 
+def extract_pr_ids_from_work_item(wi_or_raw) -> list:
+    """
+    Extracts all unique Pull Request IDs (as ints) linked in a work item's relations
+    (e.g. ArtifactLink with 'vstfs:///Git/PullRequestId/{projectId}%2F{repoId}%2F{prId}'
+    or '/pullrequest/{prId}').
+    """
+    if not wi_or_raw:
+        return []
+
+    import urllib.parse
+
+    relations = []
+    if isinstance(wi_or_raw, str):
+        if "pullrequest" in wi_or_raw.lower():
+            try:
+                parsed = json.loads(wi_or_raw)
+                if isinstance(parsed, dict):
+                    relations = parsed.get("relations") or []
+            except Exception:
+                pass
+    elif hasattr(wi_or_raw, "keys"):
+        wi_dict = dict(wi_or_raw) if not isinstance(wi_or_raw, dict) else wi_or_raw
+        if isinstance(wi_dict.get("relations"), list):
+            relations = wi_dict["relations"]
+        elif isinstance(wi_dict.get("raw_dict"), dict) and isinstance(wi_dict["raw_dict"].get("relations"), list):
+            relations = wi_dict["raw_dict"]["relations"]
+        else:
+            raw_json = wi_dict.get("raw_json")
+            if isinstance(raw_json, dict):
+                relations = raw_json.get("relations") or []
+            elif isinstance(raw_json, str) and "pullrequest" in raw_json.lower():
+                try:
+                    parsed = json.loads(raw_json)
+                    if isinstance(parsed, dict):
+                        relations = parsed.get("relations") or []
+                except Exception:
+                    pass
+
+    pr_ids = []
+    seen = set()
+    for rel in relations or []:
+        if not isinstance(rel, dict):
+            continue
+        url = rel.get("url") or ""
+        if not url or "pullrequest" not in str(url).lower():
+            continue
+        unquoted = urllib.parse.unquote(str(url))
+        m = re.search(r"vstfs:///Git/PullRequestId/(?:[^/]+/)*(\d+)", unquoted, re.IGNORECASE)
+        if not m:
+            m = re.search(r"/(?:pullrequests?|pullRequestId)/(\d+)(?:\b|/|$)", unquoted, re.IGNORECASE)
+        if m:
+            try:
+                pid = int(m.group(1))
+                if pid > 0 and pid not in seen:
+                    seen.add(pid)
+                    pr_ids.append(pid)
+            except (ValueError, TypeError):
+                pass
+    return pr_ids
+
+
+def build_pr_to_work_items_map(work_items_or_db) -> dict:
+    """
+    Builds a mapping of {pr_id (int): [work_item_id (int), ...]} from work items'
+    ArtifactLink relations. Accepts an iterable/dict of work items, an AzureDevOpsCache
+    instance, or a sqlite3.Connection. Guarantees deduplicated work item IDs per PR.
+    """
+    pr_to_wi = {}
+    if not work_items_or_db:
+        return pr_to_wi
+
+    rows_iter = None
+    try:
+        if hasattr(work_items_or_db, "_connection"):
+            with work_items_or_db._connection() as conn:
+                rows_iter = conn.execute(
+                    "SELECT id, raw_json FROM work_items WHERE raw_json LIKE '%PullRequest%'"
+                ).fetchall()
+        elif hasattr(work_items_or_db, "execute"):
+            rows_iter = work_items_or_db.execute(
+                "SELECT id, raw_json FROM work_items WHERE raw_json LIKE '%PullRequest%'"
+            ).fetchall()
+        elif isinstance(work_items_or_db, dict):
+            rows_iter = work_items_or_db.values()
+        else:
+            rows_iter = work_items_or_db
+    except Exception:
+        return pr_to_wi
+
+    for wi in rows_iter or []:
+        try:
+            wi_dict = dict(wi) if not isinstance(wi, dict) else wi
+            wi_id = int(wi_dict.get("id") or 0)
+        except Exception:
+            continue
+        if wi_id <= 0:
+            continue
+        for pr_id in extract_pr_ids_from_work_item(wi_dict):
+            bucket = pr_to_wi.setdefault(pr_id, [])
+            if wi_id not in bucket:
+                bucket.append(wi_id)
+
+    return pr_to_wi
+
+
+def extract_work_item_ids_from_pr(pr, pr_to_wi_map: dict = None) -> list:
+    """
+    Extracts all referenced and directly linked Work Item IDs (as deduplicated ints) for a Pull Request.
+    Sources inspected:
+      1. Direct PR fields ('work_items', 'work_item_ids', 'referenced_work_items', 'workItemRefs', 'workItems', 'tasks').
+      2. Raw JSON metadata ('workItemRefs', 'workItems', 'work_items', 'work_item_ids', 'referenced_work_items', 'relations').
+      3. Reverse ArtifactLink relations from work_items via pr_to_wi_map.
+      4. Text mentions (#12345, AB#12345, Task 12345, Bug 12345, WI 12345, etc.) in title, description,
+         status_str, mergeCommitMessage, and lastMergeCommit.comment.
+    Automatically excludes the PR's own ID and removes all duplicates.
+    """
+    if not pr:
+        return []
+
+    import urllib.parse
+
+    if hasattr(pr, "keys"):
+        pr_dict = dict(pr) if not isinstance(pr, dict) else pr
+    else:
+        return []
+
+    raw_json_val = pr_dict.get("raw_json") or pr_dict.get("raw_dict") or ""
+    raw_meta = {}
+    if isinstance(raw_json_val, dict):
+        raw_meta = raw_json_val
+    elif isinstance(raw_json_val, str) and raw_json_val.strip():
+        try:
+            parsed = json.loads(raw_json_val)
+            if isinstance(parsed, dict):
+                raw_meta = parsed
+        except Exception:
+            pass
+
+    # Determine PR's own ID to prevent self-referencing
+    raw_pr_id = (
+        pr_dict.get("pr_id")
+        or pr_dict.get("pull_request_id")
+        or pr_dict.get("pullRequestId")
+        or pr_dict.get("id")
+        or raw_meta.get("pullRequestId")
+        or raw_meta.get("id")
+    )
+    self_pr_id = None
+    if raw_pr_id is not None:
+        try:
+            self_pr_id = int(str(raw_pr_id).strip().lstrip("#!"))
+        except (ValueError, TypeError):
+            self_pr_id = None
+
+    wi_ids = []
+    seen = set()
+
+    def _add_id(val):
+        if val is None or isinstance(val, bool):
+            return
+        try:
+            wid = int(val)
+        except (ValueError, TypeError):
+            return
+        if wid <= 0 or (self_pr_id is not None and wid == self_pr_id):
+            return
+        if wid not in seen:
+            seen.add(wid)
+            wi_ids.append(wid)
+
+    def _extract_from_entry(entry):
+        if entry is None or isinstance(entry, bool):
+            return
+        if isinstance(entry, int):
+            _add_id(entry)
+        elif isinstance(entry, str):
+            s = entry.strip()
+            if not s:
+                return
+            clean = s.lstrip("#").strip()
+            if clean.isdigit():
+                _add_id(int(clean))
+                return
+            unq = urllib.parse.unquote(s)
+            m = re.search(r"(?:workItems|workitems|WorkItem)/(\d+)(?:\b|/|$)", unq, re.IGNORECASE)
+            if m:
+                _add_id(int(m.group(1)))
+        elif isinstance(entry, dict):
+            raw_id = entry.get("id")
+            if raw_id is None:
+                raw_id = entry.get("workItemId")
+            if raw_id is None:
+                raw_id = entry.get("work_item_id")
+            if raw_id is not None:
+                _extract_from_entry(raw_id)
+                return
+            url = entry.get("url") or ""
+            if url:
+                unq = urllib.parse.unquote(str(url))
+                m = re.search(r"(?:workItems|workitems|WorkItem)/(\d+)(?:\b|/|$)", unq, re.IGNORECASE)
+                if not m:
+                    m = re.search(r"/(\d+)$", unq.rstrip("/"))
+                if m:
+                    _add_id(int(m.group(1)))
+
+    # 1. Direct fields on PR dict
+    for key in ("work_items", "work_item_ids", "referenced_work_items", "workItemRefs", "workItems", "tasks"):
+        items = pr_dict.get(key)
+        if isinstance(items, (list, tuple, set)):
+            for item in items:
+                _extract_from_entry(item)
+
+    # 2. Direct fields in raw_json metadata
+    if raw_meta:
+        for key in ("workItemRefs", "workItems", "work_items", "work_item_ids", "referenced_work_items", "tasks"):
+            items = raw_meta.get(key)
+            if isinstance(items, (list, tuple, set)):
+                for item in items:
+                    _extract_from_entry(item)
+        if isinstance(raw_meta.get("relations"), list):
+            for rel in raw_meta["relations"]:
+                if isinstance(rel, dict):
+                    _extract_from_entry(rel)
+
+    # 3. Reverse links from work_items table relations (pr_to_wi_map)
+    if pr_to_wi_map and self_pr_id is not None:
+        linked = pr_to_wi_map.get(self_pr_id) or pr_to_wi_map.get(str(self_pr_id)) or []
+        for wid in linked:
+            _add_id(wid)
+
+    # 4. Text mentions in title, description, status_str, and merge commit comments
+    text_parts = [
+        str(pr_dict.get("title") or ""),
+        str(pr_dict.get("description") or ""),
+        str(pr_dict.get("status_str") or ""),
+    ]
+    if raw_meta:
+        if raw_meta.get("title"):
+            text_parts.append(str(raw_meta["title"]))
+        if raw_meta.get("description"):
+            text_parts.append(str(raw_meta["description"]))
+        comp_opts = raw_meta.get("completionOptions")
+        if isinstance(comp_opts, dict) and comp_opts.get("mergeCommitMessage"):
+            text_parts.append(str(comp_opts["mergeCommitMessage"]))
+        last_merge = raw_meta.get("lastMergeCommit")
+        if isinstance(last_merge, dict) and last_merge.get("comment"):
+            text_parts.append(str(last_merge["comment"]))
+
+    combined_text = " ".join(p for p in text_parts if p)
+    if combined_text:
+        for m in re.finditer(r"(?:AB)?#(\d{4,7})\b", combined_text, re.IGNORECASE):
+            _add_id(int(m.group(1)))
+        for m in re.finditer(r"\b(?:task|workitem|wi|issue|bug)\s*[:#]?\s*(\d{4,7})\b", combined_text, re.IGNORECASE):
+            _add_id(int(m.group(1)))
+
+    return wi_ids
+
+
+
 
