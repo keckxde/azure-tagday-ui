@@ -2199,6 +2199,7 @@ class AzureDevOpsCache:
     def save_pull_requests(self, repo_id, prs):
         """
         Saves or updates PRs for a repository in the database without deleting previously cached PRs.
+        Preserves existing workItemRefs/workItems if the incoming PR payload does not include them.
         """
         if not prs:
             return
@@ -2208,12 +2209,24 @@ class AzureDevOpsCache:
                 pr_id = pr.get("pullRequestId") or pr.get("id")
                 if not pr_id:
                     continue
-                created_by = pr.get("createdBy", {}).get("displayName", "") if isinstance(pr.get("createdBy"), dict) else str(pr.get("createdBy") or "")
-                closed_by = pr.get("closedBy", {}).get("displayName", "") if isinstance(pr.get("closedBy"), dict) else str(pr.get("closedBy") or "")
-                closed_date = pr.get("closedDateStr", "")
-                creation_date = pr.get("creationDateStr", "")
-                norm_status = normalize_pr_status(pr.get("status"))
-                status_str = pr.get("statusStr", "")
+                pr_to_save = dict(pr)
+                if not pr_to_save.get("workItemRefs") and not pr_to_save.get("workItems"):
+                    try:
+                        existing = conn.execute("SELECT raw_json FROM pull_requests WHERE id = ?", (int(pr_id),)).fetchone()
+                        if existing and existing["raw_json"]:
+                            old_meta = json.loads(existing["raw_json"])
+                            if isinstance(old_meta, dict):
+                                for k in ("workItemRefs", "workItems", "work_items", "work_item_ids"):
+                                    if old_meta.get(k) and not pr_to_save.get(k):
+                                        pr_to_save[k] = old_meta[k]
+                    except Exception:
+                        pass
+                created_by = pr_to_save.get("createdBy", {}).get("displayName", "") if isinstance(pr_to_save.get("createdBy"), dict) else str(pr_to_save.get("createdBy") or "")
+                closed_by = pr_to_save.get("closedBy", {}).get("displayName", "") if isinstance(pr_to_save.get("closedBy"), dict) else str(pr_to_save.get("closedBy") or "")
+                closed_date = pr_to_save.get("closedDateStr", "")
+                creation_date = pr_to_save.get("creationDateStr", "")
+                norm_status = normalize_pr_status(pr_to_save.get("status"))
+                status_str = pr_to_save.get("statusStr", "")
                 if not status_str:
                     if norm_status == "completed":
                         status_str = f"DON {closed_date}"
@@ -2221,12 +2234,12 @@ class AzureDevOpsCache:
                         status_str = f"ABANDONED {closed_date}"
                     else:
                         status_str = f"OPN {creation_date}"
-                raw_json = json.dumps(pr, cls=DateTimeEncoder, ensure_ascii=False)
+                raw_json = json.dumps(pr_to_save, cls=DateTimeEncoder, ensure_ascii=False)
 
                 conn.execute("""
                 INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (int(pr_id), repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+                """, (int(pr_id), repo_id, pr_to_save.get("title"), norm_status, pr_to_save.get("targetRefName"), pr_to_save.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
 
     def get_pr_ids_for_repo(self, repo_id):
         """
@@ -3008,17 +3021,22 @@ class AzureDevOpsCache:
     def save_single_pull_request(self, pr):
         """
         Saves a single pull request to the database.
+        Preserves existing workItemRefs/workItems if the incoming PR payload does not include them.
         """
         from utils import normalize_pr_status
         repo_id = pr.get("repository", {}).get("id")
         if not repo_id:
             return
-        created_by = pr.get("createdBy", {}).get("displayName", "")
-        closed_by = pr.get("closedBy", {}).get("displayName", "") if pr.get("closedBy") else ""
-        closed_date = pr.get("closedDateStr", "")
-        creation_date = pr.get("creationDateStr", "")
-        norm_status = normalize_pr_status(pr.get("status"))
-        status_str = pr.get("statusStr", "")
+        pr_id = pr.get("pullRequestId") or pr.get("id")
+        if not pr_id:
+            return
+        pr_to_save = dict(pr)
+        created_by = pr_to_save.get("createdBy", {}).get("displayName", "") if isinstance(pr_to_save.get("createdBy"), dict) else str(pr_to_save.get("createdBy") or "")
+        closed_by = pr_to_save.get("closedBy", {}).get("displayName", "") if isinstance(pr_to_save.get("closedBy"), dict) else str(pr_to_save.get("closedBy") or "")
+        closed_date = pr_to_save.get("closedDateStr", "")
+        creation_date = pr_to_save.get("creationDateStr", "")
+        norm_status = normalize_pr_status(pr_to_save.get("status"))
+        status_str = pr_to_save.get("statusStr", "")
         if not status_str:
             if norm_status == "completed":
                 status_str = f"DON {closed_date}"
@@ -3026,13 +3044,24 @@ class AzureDevOpsCache:
                 status_str = f"ABANDONED {closed_date}"
             else:
                 status_str = f"OPN {creation_date}"
-        raw_json = json.dumps(pr, cls=DateTimeEncoder, ensure_ascii=False)
 
         with self._connection() as conn:
+            if not pr_to_save.get("workItemRefs") and not pr_to_save.get("workItems"):
+                try:
+                    existing = conn.execute("SELECT raw_json FROM pull_requests WHERE id = ?", (int(pr_id),)).fetchone()
+                    if existing and existing["raw_json"]:
+                        old_meta = json.loads(existing["raw_json"])
+                        if isinstance(old_meta, dict):
+                            for k in ("workItemRefs", "workItems", "work_items", "work_item_ids"):
+                                if old_meta.get(k) and not pr_to_save.get(k):
+                                    pr_to_save[k] = old_meta[k]
+                except Exception:
+                    pass
+            raw_json = json.dumps(pr_to_save, cls=DateTimeEncoder, ensure_ascii=False)
             conn.execute("""
             INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, status_str, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pr["pullRequestId"], repo_id, pr.get("title"), norm_status, pr.get("targetRefName"), pr.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
+            """, (int(pr_id), repo_id, pr_to_save.get("title"), norm_status, pr_to_save.get("targetRefName"), pr_to_save.get("sourceRefName"), created_by, closed_by, closed_date, status_str, raw_json))
 
     def save_pipeline(self, project_id, pipeline):
         """

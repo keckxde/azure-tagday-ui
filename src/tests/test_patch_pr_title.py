@@ -213,6 +213,49 @@ class TestPatchPrTitle(unittest.TestCase):
             if os.path.exists(temp_db):
                 os.remove(temp_db)
 
+    def test_patch_pr_title_via_reverse_artifact_link_only(self):
+        import json
+        import generate_tagday_report
+        import tempfile
+        from azure import AzureDevOpsCache
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            cache = AzureDevOpsCache(temp_db)
+            wi_raw = {
+                "id": 138058,
+                "fields": {"System.Title": "OI-171: LoupeDeck Profil"},
+                "relations": [
+                    {
+                        "rel": "ArtifactLink",
+                        "url": "vstfs:///Git/PullRequestId/proj-id%2F101%2F502",
+                        "attributes": {"name": "Pull Request"}
+                    }
+                ]
+            }
+            with cache._connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO repositories (id, project_id, name, default_branch, web_url, is_disabled)
+                    VALUES ('101', 'PROJ', 'repo-core', 'main', 'http://tfs/repo-core', 0)
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO work_items (id, title, type, state, raw_json)
+                    VALUES (138058, 'OI-171: LoupeDeck Profil', 'Task', 'Active', ?)
+                """, (json.dumps(wi_raw),))
+                conn.execute("""
+                    INSERT OR REPLACE INTO pull_requests (id, repo_id, title, status, closed_date, status_str, target_branch, source_branch, raw_json)
+                    VALUES (502, '101', 'LoupeDeck Implementierung ohne Text-Referenz', 'completed', '2026-02-01 10:00:00', 'Completed', 'refs/heads/main', 'refs/heads/feat', '{"description":"no hash ref"}')
+                """)
+
+            data_patched = generate_tagday_report.load_tagday_data(cache, project_id="PROJ", patch_titles=True)
+            pr_patched = data_patched["all_repositories"]["repo-core"]["prs_after_tag"][0]
+            self.assertEqual(pr_patched["title"], "[OI_171] LoupeDeck Implementierung ohne Text-Referenz")
+            self.assertEqual([t["id"] for t in pr_patched["tasks"]], ["138058"])
+        finally:
+            if os.path.exists(temp_db):
+                os.remove(temp_db)
+
 
 if __name__ == "__main__":
     unittest.main()

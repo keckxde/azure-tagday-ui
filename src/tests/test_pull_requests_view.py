@@ -476,6 +476,106 @@ class TestPullRequestsViewData(unittest.TestCase):
         self.assertEqual(len(b_pr_ids), len(set(b_pr_ids)), "PR IDs must be unique in backend.pullRequests")
         self.assertEqual(backend.stats["prs_count"], 3)
 
+    def test_directly_linked_and_referenced_work_items_extracted_and_deduplicated(self):
+        """
+        Tests that PR work items are discovered from all sources:
+        1. Direct links in work_items.raw_json relations (ArtifactLink vstfs:///Git/PullRequestId/...)
+        2. Direct links in pull_requests.raw_json workItemRefs / workItems
+        3. Text mentions in title, description, status_str, mergeCommitMessage (#12345, Task 12345, etc.)
+        And that duplicate references across sources are strictly deduplicated in TagDay and PullRequests views.
+        """
+        import generate_tagday_report
+        from gui.backend import DevOpsBackend
+
+        with self.cache._connection() as conn:
+            # Work item 150001: linked ONLY via ArtifactLink in work_items.relations to PR 1002
+            wi_150001_raw = {
+                "id": 150001,
+                "fields": {"System.Title": "Directly Linked Task via ArtifactLink"},
+                "relations": [
+                    {
+                        "rel": "ArtifactLink",
+                        "url": "vstfs:///Git/PullRequestId/proj-guid%2Frepo-uuid-1%2F1002",
+                        "attributes": {"name": "Pull Request"}
+                    }
+                ]
+            }
+            conn.execute("""
+                INSERT OR REPLACE INTO work_items (id, title, type, state, assigned_to, deleted, raw_json)
+                VALUES (150001, 'Directly Linked Task via ArtifactLink', 'Task', 'Active', 'Alice', 0, ?)
+            """, (json.dumps(wi_150001_raw),))
+
+            # Work item 150002: linked ONLY via workItemRefs in PR 1002 raw_json
+            conn.execute("""
+                INSERT OR REPLACE INTO work_items (id, title, type, state, assigned_to, deleted, raw_json)
+                VALUES (150002, 'Directly Linked Bug via workItemRefs', 'Bug', 'Resolved', 'Bob', 0, '{}')
+            """)
+
+            # Work item 150003: linked via ArtifactLink, workItemRefs, AND mentioned twice in text (#150003 and Task 150003)
+            wi_150003_raw = {
+                "id": 150003,
+                "fields": {"System.Title": "Multi-Referenced Story"},
+                "relations": [
+                    {
+                        "rel": "ArtifactLink",
+                        "url": "vstfs:///Git/PullRequestId/1002",
+                        "attributes": {"name": "Pull Request"}
+                    }
+                ]
+            }
+            conn.execute("""
+                INSERT OR REPLACE INTO work_items (id, title, type, state, assigned_to, deleted, raw_json)
+                VALUES (150003, 'Multi-Referenced Story', 'User Story', 'Closed', 'Charlie', 0, ?)
+            """, (json.dumps(wi_150003_raw),))
+
+            # Update PR 1002: title has no #150001 or #150002, only #150003; raw_json has workItemRefs for 150002 & 150003
+            pr_1002_raw = {
+                "pullRequestId": 1002,
+                "title": "Implement feature (#150003)",
+                "description": "Implements #150003 and Task 150003",
+                "workItemRefs": [
+                    {"id": "150002", "url": "https://tfs/_apis/wit/workItems/150002"},
+                    {"id": "150003", "url": "https://tfs/_apis/wit/workItems/150003"},
+                    {"url": "https://tfs/_apis/wit/workItems/150002"}
+                ]
+            }
+            conn.execute("""
+                UPDATE pull_requests
+                SET title = 'Implement feature (#150003)', raw_json = ?
+                WHERE id = 1002
+            """, (json.dumps(pr_1002_raw),))
+
+        # 1. Verify TagDay report data loader
+        td_data = generate_tagday_report.load_tagday_data(self.cache, project_id="TEST_PROJECT")
+        repo_alpha_prs = td_data["all_repositories"]["repo-alpha"]["prs_after_tag"]
+        pr_1002_td = next(p for p in repo_alpha_prs if p["pr_id"] == 1002)
+        self.assertEqual(sorted(pr_1002_td["work_item_ids"]), [150001, 150002, 150003])
+        td_task_ids = [t["id"] for t in pr_1002_td["tasks"]]
+        self.assertEqual(td_task_ids, ["150001", "150002", "150003"], "Tasks in TagDay data must include all linked WIs without duplicates")
+
+        # 2. Verify Backend TagDay summary and PullRequests view
+        backend = DevOpsBackend()
+        backend._db_path = self.db_path
+        backend._cache_db = self.cache
+        backend.refresh_all_data()
+
+        pr_1002_ui = next(p for p in backend.pullRequests if p["id"] == 1002)
+        ui_task_ids = [t["id"] for t in pr_1002_ui["tasks"]]
+        self.assertEqual(ui_task_ids, ["150001", "150002", "150003"], "Tasks in PullRequests view must be complete and deduplicated")
+
+        td_summary_repos = backend.tagDayData["repos_summary"]
+        repo_alpha_summary = next(r for r in td_summary_repos if r["name"] == "repo-alpha")
+        pr_1002_summary = next(p for p in repo_alpha_summary["prs_after_tag"] if p["pr_id"] == 1002)
+        summary_task_ids = [t["id"] for t in pr_1002_summary["tasks"]]
+        self.assertEqual(summary_task_ids, ["150001", "150002", "150003"], "Tasks in TagDay view summary must be complete and deduplicated")
+
+        # 3. Verify WorkItem -> PR reverse cross-reference in backend._work_items
+        wi_map = {w["id"]: w for w in backend._work_items}
+        for wid in (150001, 150002, 150003):
+            self.assertIn(wid, wi_map)
+            linked_pr_ids = [p["pr_id"] for p in wi_map[wid]["linked_prs"]]
+            self.assertEqual(linked_pr_ids, [1002], f"Work item #{wid} should link to PR 1002 exactly once")
+
 
 if __name__ == "__main__":
     unittest.main()

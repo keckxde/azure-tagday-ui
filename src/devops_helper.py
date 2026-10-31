@@ -453,38 +453,43 @@ def patch_pr_title_for_release_notes(
 
     # 1. Find referenced work item IDs
     combined_text: str = f"{title} {desc}"
-    wi_ids: set = set()
+    pr_for_extract = dict(pr_dict)
+    pr_for_extract["title"] = title
+    if desc and not pr_for_extract.get("description"):
+        pr_for_extract["description"] = desc
 
-    for k in ("work_items", "work_item_ids", "referenced_work_items"):
-        for val in pr_dict.get(k) or []:
-            try:
-                if isinstance(val, dict):
-                    wi_ids.add(int(val.get("id") or val.get("workItemId")))
-                else:
-                    wi_ids.add(int(val))
-            except (ValueError, TypeError):
-                pass
-
-    for m in re.findall(r'#(\d{4,7})', combined_text):
-        wi_ids.add(int(m))
-    for m in re.findall(r'\b(?:task|workitem|wi|issue|bug)\s*[:#]?\s*(\d{4,7})\b', combined_text, re.IGNORECASE):
-        wi_ids.add(int(m))
-
-    for k in ("workItemRefs", "workItems"):
-        items = raw_meta.get(k) or []
-        for item in items:
-            if isinstance(item, dict) and item.get("id"):
-                try:
-                    wi_ids.add(int(item["id"]))
-                except (ValueError, TypeError):
-                    pass
-
-    # 2. Query work items and search for schematics
     if cache_db is None:
         try:
             _, cache_db = _getDBCacheHandler()
         except Exception:
             cache_db = None
+
+    pr_id_val = (
+        pr_dict.get("pull_request_id")
+        or pr_dict.get("pr_id")
+        or pr_dict.get("pullRequestId")
+        or pr_dict.get("id")
+        or raw_meta.get("pullRequestId")
+        or raw_meta.get("id")
+    )
+    pr_to_wi_map: Dict[int, List[int]] = {}
+    if cache_db and pr_id_val is not None and hasattr(cache_db, "_connection"):
+        try:
+            pid_int = int(str(pr_id_val).strip().lstrip("#!"))
+            with cache_db._connection() as conn:
+                cand_rows = conn.execute(
+                    "SELECT id, raw_json FROM work_items WHERE raw_json LIKE ?",
+                    (f"%{pid_int}%",)
+                ).fetchall()
+            for r in cand_rows:
+                if pid_int in utils.extract_pr_ids_from_work_item(r):
+                    pr_to_wi_map.setdefault(pid_int, []).append(int(r["id"]))
+        except Exception:
+            pass
+
+    wi_ids: set = set(utils.extract_work_item_ids_from_pr(pr_for_extract, pr_to_wi_map=pr_to_wi_map))
+
+    # 2. Query work items and search for schematics
 
     found_schematics: List[str] = []
     if cache_db:

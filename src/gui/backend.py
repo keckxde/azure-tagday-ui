@@ -1909,7 +1909,11 @@ class DevOpsBackend(QObject):
             worker.report_progress(25, "Processing work items and hierarchy...")
 
         # 2. Work Items
-        # Build WI -> PR cross-reference map from PR status_str and title #NNNN mentions
+        raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
+        pr_to_wi_map = utils.build_pr_to_work_items_map(raw_wis)
+        self._pr_to_wi_map = pr_to_wi_map
+
+        # Build WI -> PR cross-reference map from all PR references and direct links
         all_prs_raw = self._cache_db.get_all_prs()
         wi_to_prs = {}   # wi_id (int) -> list of {pr_id, repo_name, title}
         wi_to_repos = {} # wi_id (int) -> set of repo names
@@ -1918,10 +1922,7 @@ class DevOpsBackend(QObject):
                 pr_id = pr.get("pr_id")
                 repo_name = pr.get("repo_name", "")
                 pr_title = pr.get("title", "") or ""
-                pr_status_str = pr.get("status_str", "") or ""
-                combined_text = f"{pr_title} {pr_status_str}"
-                for m in re.finditer(r"#(\d{4,})", combined_text):
-                    wi_id_ref = int(m.group(1))
+                for wi_id_ref in utils.extract_work_item_ids_from_pr(pr, pr_to_wi_map=pr_to_wi_map):
                     if wi_id_ref not in wi_to_prs:
                         wi_to_prs[wi_id_ref] = []
                     if not any(p.get("pr_id") == pr_id for p in wi_to_prs[wi_id_ref]):
@@ -1932,7 +1933,8 @@ class DevOpsBackend(QObject):
                         })
                     if wi_id_ref not in wi_to_repos:
                         wi_to_repos[wi_id_ref] = set()
-                    wi_to_repos[wi_id_ref].add(repo_name)
+                    if repo_name:
+                        wi_to_repos[wi_id_ref].add(repo_name)
         except Exception as e:
             logger.warning(f"Could not build WI->PR cross-reference map: {e}")
 
@@ -1941,8 +1943,6 @@ class DevOpsBackend(QObject):
         tfs_col = (devops_helper.AZURE_COLLECTION or "").strip("/")
         tfs_proj = devops_helper.AZURE_PROJECT_ID or ""
         tfs_wi_url_base = f"{tfs_base}/{tfs_col}/{tfs_proj}/_workitems/edit/" if (tfs_base and tfs_col and tfs_proj) else ""
-
-        raw_wis = self._cache_db.get_all_work_items(include_deleted=True)
 
         # Determine iteration hierarchy to identify planned sprint iterations vs root / backlog containers
         all_iter_paths = set()
@@ -2647,6 +2647,7 @@ class DevOpsBackend(QObject):
             "repositories": sorted_repos,
             "work_items": sorted_wis,
             "work_items_map": all_wis_map,
+            "pr_to_wi_map": pr_to_wi_map,
             "pull_requests": sorted_prs,
             "pr_repositories": pr_repositories,
             "tagday_data": tagday_data,
@@ -2665,6 +2666,8 @@ class DevOpsBackend(QObject):
         self._repositories = data.get("repositories", [])
         self._work_items = data.get("work_items", [])
         self._work_items_map = data.get("work_items_map", {w["id"]: w for w in self._work_items})
+        if "pr_to_wi_map" in data:
+            self._pr_to_wi_map = data["pr_to_wi_map"]
         self._invalidate_work_items_cache()
         self._pull_requests = data.get("pull_requests", [])
         self._pr_repositories = data.get("pr_repositories", [])
@@ -2922,6 +2925,7 @@ class DevOpsBackend(QObject):
 
         try:
             # 1. Tag Day Interactive Data
+            self._pr_to_wi_map = utils.build_pr_to_work_items_map(self._cache_db)
             if td_raw is None:
                 import generate_tagday_report
                 td_raw = generate_tagday_report.load_tagday_data(self._cache_db, project_id=devops_helper.AZURE_PROJECT_ID)
@@ -7228,33 +7232,23 @@ class DevOpsBackend(QObject):
 
         self.logMessage.emit(f"Tag Day report file not found at: {output_path}")
     def _extract_pr_tasks(self, pr, work_items_map=None):
-        """Extracts referenced work item tasks from PR title, description, and status_str."""
+        """
+        Extracts all referenced and directly linked work item tasks for a PR
+        (from title, description, status_str, raw_json workItemRefs/workItems, and
+        reverse ArtifactLink relations in work_items), removing any duplicates.
+        """
         if not pr:
             return []
 
-        title = pr.get("title") or ""
-        description = pr.get("description") or ""
-        status_str = pr.get("status_str") or ""
-        raw_json_str = pr.get("raw_json") or ""
-
-        task_ids = set()
-        for m in re.finditer(r"#(\d{4,})", f"{title} {description} {status_str}"):
-            task_ids.add(int(m.group(1)))
-
-        if raw_json_str and isinstance(raw_json_str, str):
+        pr_to_wi_map = getattr(self, "_pr_to_wi_map", None)
+        if pr_to_wi_map is None and self._cache_db:
             try:
-                raw_meta = json.loads(raw_json_str)
-                raw_desc = raw_meta.get("description") or ""
-                for m in re.finditer(r"#(\d{4,})", raw_desc):
-                    task_ids.add(int(m.group(1)))
+                pr_to_wi_map = utils.build_pr_to_work_items_map(self._cache_db)
+                self._pr_to_wi_map = pr_to_wi_map
             except Exception:
-                pass
+                pr_to_wi_map = {}
 
-        # Discard PR ID itself to avoid self-referencing
-        pr_id = str(pr.get("pr_id") or "")
-        if pr_id and pr_id.isdigit():
-            task_ids.discard(int(pr_id))
-
+        task_ids = set(utils.extract_work_item_ids_from_pr(pr, pr_to_wi_map=pr_to_wi_map))
         if not task_ids:
             return []
 
@@ -7264,25 +7258,41 @@ class DevOpsBackend(QObject):
             for tid in task_ids:
                 if tid in wis_map:
                     found_map[str(tid)] = wis_map[tid]
-        elif self._cache_db:
+                elif str(tid) in wis_map:
+                    found_map[str(tid)] = wis_map[str(tid)]
+
+        # Also reuse any already-cached task objects attached to pr
+        for existing_task in (pr.get("tasks") or []):
+            if isinstance(existing_task, dict) and existing_task.get("in_cache"):
+                tid_str = str(existing_task.get("id") or "")
+                if tid_str and tid_str not in found_map:
+                    found_map[tid_str] = existing_task
+
+        missing_tids = [tid for tid in task_ids if str(tid) not in found_map]
+        if missing_tids and self._cache_db:
             try:
                 with self._cache_db._connection() as conn:
-                    placeholders = ",".join("?" for _ in task_ids)
+                    placeholders = ",".join("?" for _ in missing_tids)
                     query = f"""
                         SELECT id, title, type, state, assigned_to, deleted
                         FROM work_items
                         WHERE id IN ({placeholders})
                     """
-                    rows = conn.execute(query, list(task_ids)).fetchall()
-                    found_map = {str(r["id"]): dict(r) for r in rows}
+                    rows = conn.execute(query, list(missing_tids)).fetchall()
+                    for r in rows:
+                        found_map[str(r["id"])] = dict(r)
             except Exception as e:
                 logger.warning(f"Error querying work items for PR tasks: {e}")
 
         tasks = []
+        seen_out = set()
         base_url = (devops_helper.AZURE_BASE_URL or "").rstrip("/")
         collection = (devops_helper.AZURE_COLLECTION or "").strip("/")
         project_id = devops_helper.AZURE_PROJECT_ID or ""
         for tid in sorted(task_ids):
+            if tid in seen_out:
+                continue
+            seen_out.add(tid)
             info = found_map.get(str(tid))
             url = f"{base_url}/{collection}/{project_id}/_workitems/edit/{tid}" if (base_url and collection and project_id) else ""
             if info:
