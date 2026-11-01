@@ -133,31 +133,6 @@ ColumnLayout {
                         backend.open_tagday_file();
                 }
             }
-
-            // Right Sidebar Toggle Button in Header
-            Button {
-                text: (root && root.isTdSidebarOpen) ? "Sidebar ◨" : "Sidebar ◧"
-                font.pixelSize: 12
-                ToolTip.visible: hovered
-                ToolTip.text: (root && root.isTdSidebarOpen) ? "Collapse right sidebar" : "Open right sidebar"
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: (root && root.isTdSidebarOpen) ? "#58a6ff" : "#c9d1d9"
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    implicitHeight: 32
-                    implicitWidth: 100
-                    radius: 6
-                    color: parent.hovered ? "#30363d" : "#21262d"
-                    border.color: (root && root.isTdSidebarOpen) ? "#388bfd" : "#30363d"
-                }
-                onClicked: {
-                    if (root) root.isTdSidebarOpen = !root.isTdSidebarOpen;
-                }
-            }
         }
     }
 

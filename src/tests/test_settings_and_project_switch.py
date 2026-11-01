@@ -296,6 +296,69 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_create_project_creates_single_cache_and_stays_on_it(self):
+        """
+        Verify that connecting a new TFS project with a default/bare filename
+        creates only ONE database cache in BASE_FOLDER (not a duplicate in cwd),
+        immediately activates that cache, and syncs directly into it.
+        """
+        import shutil
+        import devops_helper
+
+        temp_base = tempfile.mkdtemp()
+        temp_cwd = tempfile.mkdtemp()
+        orig_base_folder = devops_helper.BASE_FOLDER
+        orig_cwd = os.getcwd()
+        try:
+            devops_helper.BASE_FOLDER = temp_base
+            os.chdir(temp_cwd)
+
+            default_path = self.backend.get_default_db_path("SingleCacheProj")
+            expected_db_path = os.path.abspath(os.path.join(temp_base, "tfs_cache_SingleCacheProj.db"))
+            self.assertEqual(default_path, expected_db_path)
+
+            mock_handler = MagicMock()
+            mock_handler.GetTFSRepositories.return_value = {"r1": {"info": {"id": "r1", "name": "RepoOne"}}}
+            mock_handler.sync_work_items.return_value = {"synced": 1, "deleted": 0, "errors": 0}
+            mock_handler.sync_pull_requests.return_value = {"synced": 1, "updated": 0, "new": 1, "errors": 0}
+            mock_handler.sync_commits.return_value = {"synced": 0}
+            mock_handler.sync_pipelines_and_builds.return_value = {"pipelines": [], "builds": [], "failed_builds": 0}
+
+            with patch("devops_helper._getHandler", return_value=mock_handler):
+                # Pass a bare filename as NewProjectDialog does if no directory is specified
+                res = self.backend.create_project_and_database(
+                    url="http://tfs.test.local:8080/tfs",
+                    collection="DefaultCollection",
+                    pat="pat-token",
+                    project_id="proj-guid-999",
+                    project_name="SingleCacheProj",
+                    db_path="tfs_cache_SingleCacheProj.db",
+                    start_sync=True,
+                    store_pat=True,
+                )
+                if getattr(self.backend, "_worker", None):
+                    self.backend._worker.wait(5000)
+
+            self.assertTrue(res["success"])
+            self.assertEqual(os.path.abspath(res["db_path"]), expected_db_path)
+            self.assertEqual(os.path.abspath(self.backend.dbPath), expected_db_path)
+            self.assertTrue(os.path.exists(expected_db_path))
+
+            # Ensure no duplicate DB cache was created in cwd
+            wrong_cwd_db = os.path.join(temp_cwd, "tfs_cache_SingleCacheProj.db")
+            self.assertFalse(os.path.exists(wrong_cwd_db))
+
+            # Ensure sync wrote directly to the active cache instance
+            mock_handler.GetTFSRepositories.assert_called_once()
+            synced_cache = mock_handler.GetTFSRepositories.call_args.kwargs.get("cache_db")
+            self.assertIsNotNone(synced_cache)
+            self.assertEqual(os.path.abspath(synced_cache.db_path), expected_db_path)
+        finally:
+            os.chdir(orig_cwd)
+            devops_helper.BASE_FOLDER = orig_base_folder
+            shutil.rmtree(temp_base, ignore_errors=True)
+            shutil.rmtree(temp_cwd, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

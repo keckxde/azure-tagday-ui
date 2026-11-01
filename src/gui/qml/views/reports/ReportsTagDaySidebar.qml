@@ -5,22 +5,66 @@ import "../../components"
 
         Rectangle {
     property var root: null
+    readonly property real collapsedWidth: 38
 
             id: tdSidebarRect
-            Layout.preferredWidth: (root && root.isTdSidebarOpen) ? root.tdSidebarWidth : 0
-            Layout.minimumWidth: (root && root.isTdSidebarOpen) ? root.minTdSidebarWidth : 0
-            Layout.maximumWidth: (root && root.isTdSidebarOpen) ? root.maxTdSidebarWidth : 0
+            Layout.preferredWidth: (root && root.isTdSidebarOpen) ? root.tdSidebarWidth : collapsedWidth
+            Layout.minimumWidth: (root && root.isTdSidebarOpen) ? root.minTdSidebarWidth : collapsedWidth
+            Layout.maximumWidth: (root && root.isTdSidebarOpen) ? root.maxTdSidebarWidth : collapsedWidth
             Layout.fillHeight: true
-            visible: root && root.isTdSidebarOpen
+            visible: true
             color: "#161b22"
             border.color: "#30363d"
             border.width: 1
             clip: true
             z: 10
 
+            // Minimal Collapsed Strip with Reactivate (Expand) Button
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.topMargin: 12
+                anchors.bottomMargin: 12
+                spacing: 8
+                visible: !(root && root.isTdSidebarOpen)
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    width: 28
+                    height: 28
+                    radius: 6
+                    color: expandTdSidebarMa.containsMouse ? "#30363d" : "#21262d"
+                    border.color: expandTdSidebarMa.containsMouse ? "#58a6ff" : "#30363d"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "◀"
+                        font.pixelSize: 10
+                        color: expandTdSidebarMa.containsMouse ? "#58a6ff" : "#8b949e"
+                    }
+
+                    MouseArea {
+                        id: expandTdSidebarMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        ToolTip.visible: containsMouse
+                        ToolTip.text: "Expand sidebar"
+                        onClicked: {
+                            if (root) root.isTdSidebarOpen = true;
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillHeight: true
+                }
+            }
+
             // Resizable Splitter Drag Handle at left edge
             Rectangle {
                 id: tdDragHandle
+                visible: root && root.isTdSidebarOpen
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
@@ -76,7 +120,7 @@ import "../../components"
                 anchors.topMargin: 12
                 anchors.bottomMargin: 12
                 spacing: 10
-                visible: root && root.activeReportTab === 1
+                visible: root && root.isTdSidebarOpen && root.activeReportTab === 1
 
                 // Top Header Bar: Switch between Selected Repo Inspector & Global Timeline + Close
                 Rectangle {
@@ -160,18 +204,20 @@ import "../../components"
                             }
                         }
 
-                        // Close Sidebar Button
+                        // Collapse Sidebar Button
                         Rectangle {
                             Layout.preferredWidth: 28
                             Layout.preferredHeight: 28
                             radius: 4
-                            color: closeTdMa.containsMouse ? "#30363d" : "transparent"
+                            color: closeTdMa.containsMouse ? "#30363d" : "#21262d"
+                            border.color: closeTdMa.containsMouse ? "#58a6ff" : "#30363d"
+                            border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "✕"
-                                font.pixelSize: 11
-                                color: closeTdMa.containsMouse ? "#f0f6fc" : "#8b949e"
+                                text: "▶"
+                                font.pixelSize: 10
+                                color: closeTdMa.containsMouse ? "#58a6ff" : "#8b949e"
                             }
 
                             MouseArea {
@@ -180,7 +226,7 @@ import "../../components"
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 ToolTip.visible: containsMouse
-                                ToolTip.text: "Close sidebar"
+                                ToolTip.text: "Collapse sidebar"
                                 onClicked: root.isTdSidebarOpen = false
                             }
                         }
@@ -1806,7 +1852,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 2
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 2
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {
@@ -1828,7 +1874,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 3
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 3
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {
@@ -1850,7 +1896,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 4
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 4
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {
@@ -1873,7 +1919,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 5
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 5
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {
@@ -1895,7 +1941,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 6
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 6
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {
@@ -1917,7 +1963,7 @@ Click to open in TFS"
             anchors.rightMargin: 12
             anchors.topMargin: 12
             anchors.bottomMargin: 12
-            visible: root && root.activeReportTab === 0
+            visible: root && root.isTdSidebarOpen && root.activeReportTab === 0
             active: visible || _hasLoaded
             property bool _hasLoaded: false
             sourceComponent: Component {

@@ -51,6 +51,38 @@ class TestSidebarCollapse(unittest.TestCase):
             backend = DevOpsBackend()
             self.assertTrue(backend.sidebarCollapsed)
 
+    def test_reports_right_sidebar_collapse_in_all_reports_and_reactivate_button(self):
+        qml_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "gui",
+            "qml",
+            "views",
+        )
+        with open(os.path.join(qml_dir, "ReportsView.qml"), "r", encoding="utf-8") as f:
+            reports_view_qml = f.read()
+        with open(os.path.join(qml_dir, "reports", "ReportsTagDayExplorerTab.qml"), "r", encoding="utf-8") as f:
+            explorer_tab_qml = f.read()
+        with open(os.path.join(qml_dir, "reports", "ReportsTagDaySidebar.qml"), "r", encoding="utf-8") as f:
+            td_sidebar_qml = f.read()
+        with open(os.path.join(qml_dir, "reports", "ReportPreviewPane.qml"), "r", encoding="utf-8") as f:
+            preview_pane_qml = f.read()
+
+        # 1. External toggle button removed from Tag Day Explorer header
+        self.assertNotIn("Sidebar ◨", explorer_tab_qml)
+        self.assertNotIn("Sidebar ◧", explorer_tab_qml)
+
+        # 2. Tab switching in ReportsView does not force-reopen the collapsed sidebar
+        active_tab_block = reports_view_qml.split("onActiveReportTabChanged:")[1].split("Connections")[0]
+        self.assertNotIn("root.isTdSidebarOpen = true", active_tab_block)
+
+        # 3. Collapse button exists inside both ReportPreviewPane (Tabs 0, 2..6) and ReportsTagDaySidebar (Tab 1)
+        self.assertIn("previewPaneRoot.root.isTdSidebarOpen = false", preview_pane_qml)
+        self.assertIn("root.isTdSidebarOpen = false", td_sidebar_qml)
+
+        # 4. Minimal collapsed strip with reactivate button remains visible when collapsed
+        self.assertIn("visible: !(root && root.isTdSidebarOpen)", td_sidebar_qml)
+        self.assertIn("if (root) root.isTdSidebarOpen = true;", td_sidebar_qml)
+
 
 if __name__ == "__main__":
     unittest.main()

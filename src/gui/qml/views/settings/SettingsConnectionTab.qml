@@ -731,9 +731,10 @@ ColumnLayout {
 
                     Repeater {
                         model: [
-                            { mode: "all",           label: "🔄 Full Sync (All Repos, WIQL & PRs)", desc: "Synchronizes git repos, work items, and pull requests" },
-                            { mode: "work_items",    label: "⚡ Work Items (WIQL) Only",           desc: "Fast agile work items and query status sync" },
-                            { mode: "pull_requests", label: "🔀 Pull Requests Only",               desc: "Lightweight pull requests status sync" }
+                            { mode: "all",           label: "🔄 Full Sync (Repos, WIQL, PRs & Pipelines)", desc: "Synchronizes git repos, work items, pull requests, and build pipelines" },
+                            { mode: "work_items",    label: "⚡ Work Items (WIQL) Only",                   desc: "Fast agile work items and query status sync" },
+                            { mode: "pull_requests", label: "🔀 Pull Requests Only",                       desc: "Lightweight pull requests status sync" },
+                            { mode: "pipelines",     label: "🔧 Build Pipelines Only",                     desc: "Synchronizes build pipelines, recent runs, and failure timelines" }
                         ]
 
                         Rectangle {

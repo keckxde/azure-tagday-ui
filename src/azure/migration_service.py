@@ -21,6 +21,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +31,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 VALID_BACKUP_MODES = ("worktree", "mirror", "both")
+DEFAULT_GIT_TIMEOUT_SECONDS = 3600  # 60 minutes per git step (0 = unlimited)
 
 CLASSIFICATION_RELATIVE_OK = "RELATIVE_OK"
 CLASSIFICATION_ABSOLUTE_SAME_PROJECT = "ABSOLUTE_SAME_PROJECT"
@@ -861,7 +863,8 @@ def build_git_auth_args(
     """
     Builds ephemeral Git CLI `-c` configuration arguments so PAT credentials
     are never persisted to `.git/config` on disk, SSL verification is relaxed
-    for self-signed TFS certificates, and local/file submodule protocols work.
+    for self-signed TFS certificates, `safe.directory=*` is enabled for network/UNC
+    shares, and local/file submodule protocols work.
 
     Args:
         pat (str, optional): Personal Access Token for HTTP Basic auth.
@@ -872,6 +875,7 @@ def build_git_auth_args(
         List[str]: List of `-c <key>=<value>` arguments for `git`.
     """
     args = [
+        "-c", "safe.directory=*",
         "-c", "http.sslVerify=false",
         "-c", "protocol.file.allow=always",
     ]
@@ -886,6 +890,150 @@ def build_git_auth_args(
             args.extend(["-c", f"url.{base_dst}.insteadOf={base_src}"])
 
     return args
+
+
+def _candidate_safe_directory_patterns(raw_path: str) -> List[str]:
+    """
+    Produces normalized Git `safe.directory` entries for a local or mapped-network/UNC path,
+    including `%(prefix)///server/share/...` forms required by Git for Windows on UNC shares.
+    """
+    if not raw_path or not str(raw_path).strip():
+        return []
+    raw_s = str(raw_path).strip().strip("'\"")
+    if raw_s == "*":
+        return ["*"]
+
+    out: List[str] = []
+
+    def _add(val: str):
+        if val and val not in out:
+            out.append(val)
+
+    variants = [raw_s]
+    try:
+        abs_p = os.path.abspath(raw_s)
+        if abs_p not in variants:
+            variants.append(abs_p)
+    except Exception:
+        pass
+    try:
+        real_p = os.path.realpath(raw_s)
+        if real_p not in variants:
+            variants.append(real_p)
+    except Exception:
+        pass
+
+    for v in variants:
+        if v.startswith("%(prefix)/"):
+            _add(v)
+            continue
+        norm = v.replace("\\", "/").rstrip("/")
+        if not norm:
+            continue
+        _add(norm)
+        # If UNC path (//server/share/...), Git on Windows requires '%(prefix)///server/share/...'
+        if norm.startswith("//"):
+            _add(f"%(prefix)/{norm}")
+            _add(f"%(prefix)/{norm}/*")
+        else:
+            _add(f"{norm}/*")
+
+    return out
+
+
+def extract_dubious_ownership_paths(stderr_text: str) -> List[str]:
+    """
+    Extracts the exact `safe.directory` path(s) suggested by Git when a
+    `fatal: detected dubious ownership in repository` error occurs.
+    """
+    if not stderr_text:
+        return []
+    found: List[str] = []
+
+    def _add(p: str):
+        clean = p.strip().strip("'\"")
+        if clean and clean not in found:
+            found.append(clean)
+            if clean.startswith("//") and not clean.startswith("%(prefix)/"):
+                pref = f"%(prefix)/{clean}"
+                if pref not in found:
+                    found.append(pref)
+
+    for m in re.finditer(r"safe\.directory\s+['\"]?([^'\"\r\n]+)['\"]?", stderr_text):
+        _add(m.group(1))
+    for m in re.finditer(r"dubious ownership in repository at\s+['\"]([^'\"\r\n]+)['\"]", stderr_text):
+        _add(m.group(1))
+
+    return found
+
+
+def ensure_git_safe_directories(
+    paths: Iterable[str],
+    git_executable: str = "git",
+    include_wildcard: bool = True,
+) -> List[str]:
+    """
+    Prepares global Git configuration (`git config --global --add safe.directory ...`)
+    for the chosen backup directory, `mirrors`, `worktrees`, UNC paths (`%(prefix)///...`),
+    and `*` so Git never rejects repositories or mirrors on network drives with
+    `fatal: detected dubious ownership`.
+
+    Returns:
+        List[str]: Newly added `safe.directory` entries.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
+    existing: set = set()
+    try:
+        res = subprocess.run(
+            [git_executable, "config", "--global", "--get-all", "safe.directory"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.splitlines():
+                if line.strip():
+                    existing.add(line.strip())
+    except Exception as exc:
+        logger.debug("Could not read existing global git safe.directory list: %s", exc)
+
+    desired: List[str] = []
+    if include_wildcard:
+        desired.append("*")
+
+    for p in (paths or []):
+        for cand in _candidate_safe_directory_patterns(p):
+            if cand not in desired:
+                desired.append(cand)
+
+    added: List[str] = []
+    for entry in desired:
+        if entry in existing:
+            continue
+        try:
+            add_res = subprocess.run(
+                [git_executable, "config", "--global", "--add", "safe.directory", entry],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if add_res.returncode == 0:
+                existing.add(entry)
+                added.append(entry)
+        except Exception as exc:
+            logger.debug("Could not add global git safe.directory '%s': %s", entry, exc)
+
+    if added:
+        logger.info("🛡️ Prepared global git safe.directory config (%d entries added)", len(added))
+    return added
 
 
 class LocalBackupManager:
@@ -907,6 +1055,9 @@ class LocalBackupManager:
         pat: str = "",
         cache_db=None,
         git_executable: str = "git",
+        git_timeout_seconds: Optional[int] = DEFAULT_GIT_TIMEOUT_SECONDS,
+        extend_timeout_on_activity: bool = True,
+        auto_configure_safe_directory: bool = True,
     ):
         norm_mode = str(mode or "both").strip().lower()
         if norm_mode not in VALID_BACKUP_MODES:
@@ -918,6 +1069,38 @@ class LocalBackupManager:
         self.pat = pat
         self.cache_db = cache_db
         self.git_executable = git_executable
+        self.git_timeout_seconds = (
+            None if (git_timeout_seconds is None or int(git_timeout_seconds) <= 0) else int(git_timeout_seconds)
+        )
+        self.extend_timeout_on_activity = bool(extend_timeout_on_activity)
+        self.auto_configure_safe_directory = bool(auto_configure_safe_directory)
+        if self.auto_configure_safe_directory:
+            self.ensure_global_safe_directories()
+
+    def ensure_global_safe_directories(self, extra_paths: Optional[Iterable[str]] = None) -> List[str]:
+        """
+        Ensures global Git `safe.directory` configuration is prepared for `target_dir`,
+        `mirrors_dir`, `worktrees_dir`, any existing `.git` mirrors/worktrees, and `extra_paths`.
+        """
+        paths = [self.target_dir, self.mirrors_dir, self.worktrees_dir]
+        if extra_paths:
+            for ep in extra_paths:
+                if ep and ep not in paths:
+                    paths.append(ep)
+        # Also include existing mirror directories if present on disk
+        if os.path.isdir(self.mirrors_dir):
+            try:
+                with os.scandir(self.mirrors_dir) as it:
+                    for entry in it:
+                        if entry.is_dir():
+                            paths.append(entry.path)
+            except OSError:
+                pass
+        return ensure_git_safe_directories(
+            paths=paths,
+            git_executable=self.git_executable,
+            include_wildcard=True,
+        )
 
     @property
     def mirrors_dir(self) -> str:
@@ -935,15 +1118,58 @@ class LocalBackupManager:
     def manifest_path(self) -> str:
         return os.path.join(self.target_dir, "backup_manifest.json")
 
+    @staticmethod
+    def _probe_disk_activity(watch_path: Optional[str]) -> Tuple[int, float]:
+        """
+        Samples file count and latest modification timestamp inside `watch_path`
+        (and `.git/objects` if present) to detect ongoing Git disk I/O on slow network drives.
+        """
+        if not watch_path or not os.path.exists(watch_path):
+            return (0, 0.0)
+        count = 0
+        latest_mtime = 0.0
+        probe_dirs = [watch_path]
+        for sub in (".git", os.path.join(".git", "objects"), os.path.join(".git", "objects", "pack"), "objects", os.path.join("objects", "pack")):
+            cand = os.path.join(watch_path, sub)
+            if os.path.isdir(cand):
+                probe_dirs.append(cand)
+        for d in probe_dirs:
+            try:
+                st = os.stat(d)
+                if st.st_mtime > latest_mtime:
+                    latest_mtime = st.st_mtime
+                with os.scandir(d) as it:
+                    for idx, entry in enumerate(it):
+                        if idx > 250:
+                            break
+                        count += 1
+                        try:
+                            est = entry.stat()
+                            if est.st_mtime > latest_mtime:
+                                latest_mtime = est.st_mtime
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        return (count, latest_mtime)
+
     def _run_git(
         self,
         git_args: List[str],
         cwd: Optional[str] = None,
         extra_config_args: Optional[List[str]] = None,
-        timeout: int = 600,
+        timeout: Optional[int] = -1,
+        watch_path: Optional[str] = None,
+        _retried_safe_dir: bool = False,
     ) -> subprocess.CompletedProcess:
-        """Executes a git command with ephemeral auth/config flags and captures output."""
-        cmd = [self.git_executable]
+        """
+        Executes a git command with ephemeral auth/config flags and captures output.
+        Supports unlimited timeout (`timeout=None` or `0`), automatic timeout extension
+        when disk I/O is still active on slow network shares, automatic global `safe.directory`
+        self-healing on `dubious ownership`, and catches `TimeoutExpired` cleanly so a slow
+        command never crashes the caller with an unhandled exception.
+        """
+        cmd = [self.git_executable, "-c", "safe.directory=*"]
         if extra_config_args:
             cmd.extend(extra_config_args)
         cmd.extend(git_args)
@@ -951,16 +1177,126 @@ class LocalBackupManager:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
 
-        return subprocess.run(
-            cmd,
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        effective_timeout: Optional[int]
+        if timeout == -1:
+            effective_timeout = self.git_timeout_seconds
+        elif timeout is None or int(timeout) <= 0:
+            effective_timeout = None
+        else:
+            effective_timeout = int(timeout)
+
+        target_watch = watch_path or cwd
+        if not target_watch and git_args:
+            last_arg = str(git_args[-1])
+            if os.path.isabs(last_arg) or os.path.exists(os.path.dirname(last_arg) or "."):
+                target_watch = last_arg
+
+        start_ts = time.monotonic()
+        last_activity = self._probe_disk_activity(target_watch)
+        max_extensions = 6  # Up to 6x window extensions if disk is actively writing
+        extensions_used = 0
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception as exc:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr=f"Failed to start git process: {exc}",
+            )
+
+        while True:
+            try:
+                stdout_str, stderr_str = proc.communicate(timeout=effective_timeout)
+                err_txt = stderr_str or ""
+                if (
+                    proc.returncode != 0
+                    and not _retried_safe_dir
+                    and ("dubious ownership" in err_txt or "safe.directory" in err_txt)
+                ):
+                    extracted = extract_dubious_ownership_paths(err_txt)
+                    if cwd:
+                        extracted.append(cwd)
+                    if target_watch:
+                        extracted.append(target_watch)
+                    logger.info(
+                        "🛡️ Detected Git dubious ownership on network/mirror directory; adding to global safe.directory and retrying: %s",
+                        extracted,
+                    )
+                    ensure_git_safe_directories(
+                        paths=extracted,
+                        git_executable=self.git_executable,
+                        include_wildcard=True,
+                    )
+                    return self._run_git(
+                        git_args=git_args,
+                        cwd=cwd,
+                        extra_config_args=extra_config_args,
+                        timeout=timeout,
+                        watch_path=watch_path,
+                        _retried_safe_dir=True,
+                    )
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=proc.returncode,
+                    stdout=stdout_str or "",
+                    stderr=err_txt,
+                )
+            except subprocess.TimeoutExpired as te:
+                cur_activity = self._probe_disk_activity(target_watch)
+                if (
+                    self.extend_timeout_on_activity
+                    and effective_timeout
+                    and effective_timeout >= 60
+                    and extensions_used < max_extensions
+                    and cur_activity != (0, 0.0)
+                    and cur_activity != last_activity
+                ):
+                    extensions_used += 1
+                    last_activity = cur_activity
+                    elapsed = int(time.monotonic() - start_ts)
+                    logger.info(
+                        "⏳ Git operation still actively writing to disk (%s, %ds elapsed) — extending timeout window (%d/%d)...",
+                        target_watch or "git", elapsed, extensions_used, max_extensions,
+                    )
+                    continue
+
+                # Terminate timed-out git process cleanly without raising an unhandled exception
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    out_part, err_part = proc.communicate(timeout=5)
+                except Exception:
+                    out_part = getattr(te, "stdout", "") or ""
+                    err_part = getattr(te, "stderr", "") or ""
+                if isinstance(out_part, bytes):
+                    out_part = out_part.decode("utf-8", errors="replace")
+                if isinstance(err_part, bytes):
+                    err_part = err_part.decode("utf-8", errors="replace")
+                elapsed = int(time.monotonic() - start_ts)
+                timeout_msg = (
+                    f"Git command timed out after {elapsed}s (configured step timeout: {effective_timeout}s). "
+                    f"Consider increasing the Git Timeout in Settings -> Migration & Backup or syncing this repository individually."
+                )
+                if err_part and err_part.strip():
+                    timeout_msg = f"{timeout_msg} Details: {err_part.strip()}"
+                logger.warning("⚠️ %s", timeout_msg)
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=124,
+                    stdout=out_part or "",
+                    stderr=timeout_msg,
+                )
 
     def _resolve_repo_clone_url(self, repo: Dict[str, Any]) -> str:
         """Resolves the Git clone URL for a repository dictionary."""
@@ -1006,6 +1342,9 @@ class LocalBackupManager:
 
         want_mirror = self.mode in ("mirror", "both")
         want_worktree = self.mode in ("worktree", "both")
+
+        if self.auto_configure_safe_directory:
+            self.ensure_global_safe_directories([mirror_path, worktree_path])
 
         # Check Standby Delta: skip network fetch if push_id matches and required folders already exist
         if not force and self.cache_db and remote_push_id is not None:
@@ -1066,44 +1405,119 @@ class LocalBackupManager:
             # If we have a local override base or sibling worktrees/mirrors, configure submodule URL resolution
             wt_auth_args = list(auth_args)
 
+            def _sync_and_init_submodules() -> bool:
+                gm_file = os.path.join(worktree_path, ".gitmodules")
+                if not os.path.isfile(gm_file):
+                    return True
+                logger.info("  ↳ [%s] Updating recursive submodules in worktree...", repo_name)
+                self._run_git(
+                    ["submodule", "sync", "--recursive"],
+                    cwd=worktree_path,
+                    extra_config_args=wt_auth_args,
+                    watch_path=worktree_path,
+                )
+                sub_res = self._run_git(
+                    ["submodule", "update", "--init", "--recursive"],
+                    cwd=worktree_path,
+                    extra_config_args=wt_auth_args,
+                    watch_path=worktree_path,
+                )
+                if sub_res.returncode == 0:
+                    return True
+
+                # Fallback: update each submodule from .gitmodules individually so one slow/huge submodule
+                # gets its own dedicated timeout window and does not block the remaining submodules.
+                try:
+                    with open(gm_file, "r", encoding="utf-8", errors="replace") as f:
+                        gm_entries = parse_gitmodules_content(f.read())
+                except Exception:
+                    gm_entries = []
+
+                if not gm_entries:
+                    errors.append(f"Submodule update failed: {sub_res.stderr.strip()}")
+                    return False
+
+                logger.info(
+                    "  ↳ [%s] Retrying %d submodule(s) individually...",
+                    repo_name, len(gm_entries),
+                )
+                all_subs_ok = True
+                for sub_entry in gm_entries:
+                    sub_path = sub_entry.get("path") or ""
+                    if not sub_path:
+                        continue
+                    ind_res = self._run_git(
+                        ["submodule", "update", "--init", "--recursive", "--", sub_path],
+                        cwd=worktree_path,
+                        extra_config_args=wt_auth_args,
+                        watch_path=os.path.join(worktree_path, sub_path),
+                    )
+                    if ind_res.returncode != 0:
+                        all_subs_ok = False
+                        errors.append(f"Submodule '{sub_path}' failed: {ind_res.stderr.strip()}")
+                return all_subs_ok
+
             if os.path.isdir(worktree_path) and os.path.exists(git_dir_marker):
                 action_taken = "UPDATED"
                 logger.info("  ↳ [%s] Fetching & updating worktree (%s)...", repo_name, worktree_path)
                 self._run_git(["remote", "set-url", "origin", clone_url], cwd=worktree_path, extra_config_args=wt_auth_args)
-                fetch_res = self._run_git(["fetch", "--all", "--tags", "--prune"], cwd=worktree_path, extra_config_args=wt_auth_args)
+                fetch_res = self._run_git(
+                    ["fetch", "--all", "--tags", "--prune"],
+                    cwd=worktree_path,
+                    extra_config_args=wt_auth_args,
+                    watch_path=worktree_path,
+                )
                 if fetch_res.returncode != 0:
                     errors.append(f"Worktree fetch failed: {fetch_res.stderr.strip()}")
                 else:
-                    # Fast-forward current branch if tracking upstream
-                    self._run_git(["pull", "--ff-only"], cwd=worktree_path, extra_config_args=wt_auth_args)
-                    if os.path.isfile(os.path.join(worktree_path, ".gitmodules")):
-                        logger.info("  ↳ [%s] Updating recursive submodules in worktree...", repo_name)
-                        self._run_git(["submodule", "sync", "--recursive"], cwd=worktree_path, extra_config_args=wt_auth_args)
-                        sub_res = self._run_git(
-                            ["submodule", "update", "--init", "--recursive"],
-                            cwd=worktree_path,
-                            extra_config_args=wt_auth_args,
-                        )
-                        if sub_res.returncode != 0:
-                            submodules_ok = False
-                            errors.append(f"Submodule update failed: {sub_res.stderr.strip()}")
+                    # Check if HEAD is valid; if a previous clone was interrupted before checkout finished, recover checkout
+                    head_check = self._run_git(["rev-parse", "--verify", "HEAD"], cwd=worktree_path, timeout=30)
+                    if head_check.returncode != 0:
+                        default_br = str(repo.get("defaultBranch") or repo.get("default_branch") or "").replace("refs/heads/", "").strip()
+                        if default_br:
+                            self._run_git(["checkout", "-f", default_br], cwd=worktree_path, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                        else:
+                            self._run_git(["checkout", "-f"], cwd=worktree_path, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                    else:
+                        # Fast-forward current branch if tracking upstream
+                        self._run_git(["pull", "--ff-only"], cwd=worktree_path, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                    if not _sync_and_init_submodules():
+                        submodules_ok = False
             else:
                 if os.path.exists(worktree_path):
                     shutil.rmtree(worktree_path, ignore_errors=True)
-                logger.info("  ↳ [%s] Cloning worktree with recursive submodules (%s)...", repo_name, worktree_path)
+                logger.info("  ↳ [%s] Cloning worktree (%s)...", repo_name, worktree_path)
+                # Clone parent repository first (with --reference-if-able when local mirror is available),
+                # then initialize recursive submodules as a separate step so huge repos + submodules do not share a single timeout.
                 clone_cmd = ["clone", "--recurse-submodules"]
                 if want_mirror and os.path.isdir(mirror_path):
                     clone_cmd.extend(["--reference-if-able", mirror_path])
                 clone_cmd.extend([clone_url, worktree_path])
 
-                res = self._run_git(clone_cmd, extra_config_args=wt_auth_args)
+                res = self._run_git(clone_cmd, extra_config_args=wt_auth_args, watch_path=worktree_path)
                 if res.returncode != 0:
-                    # Check if primary clone succeeded but submodule checkout failed
+                    # If clone --recurse-submodules timed out or failed on submodules, attempt 2-stage recovery
                     if os.path.exists(git_dir_marker):
-                        submodules_ok = False
-                        errors.append(f"Submodule clone warning: {res.stderr.strip()}")
+                        logger.info("  ↳ [%s] Attempting in-place worktree & submodule recovery...", repo_name)
+                        self._run_git(["fetch", "--all", "--tags", "--prune"], cwd=worktree_path, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                        self._run_git(["checkout", "-f"], cwd=worktree_path, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                        if not _sync_and_init_submodules():
+                            submodules_ok = False
+                            errors.append(f"Submodule clone warning: {res.stderr.strip()}")
                     else:
-                        errors.append(f"Worktree clone failed: {res.stderr.strip()}")
+                        # Retry base clone without --recurse-submodules, then init submodules separately
+                        if os.path.exists(worktree_path):
+                            shutil.rmtree(worktree_path, ignore_errors=True)
+                        base_clone_cmd = ["clone"]
+                        if want_mirror and os.path.isdir(mirror_path):
+                            base_clone_cmd.extend(["--reference-if-able", mirror_path])
+                        base_clone_cmd.extend([clone_url, worktree_path])
+                        base_res = self._run_git(base_clone_cmd, extra_config_args=wt_auth_args, watch_path=worktree_path)
+                        if base_res.returncode == 0 and os.path.exists(git_dir_marker):
+                            if not _sync_and_init_submodules():
+                                submodules_ok = False
+                        else:
+                            errors.append(f"Worktree clone failed: {(base_res.stderr or res.stderr).strip()}")
 
             # Verify submodule status if worktree exists
             if os.path.isdir(worktree_path) and os.path.exists(git_dir_marker):
@@ -1329,13 +1743,46 @@ class LocalBackupManager:
                 logger.info("⏹️ Local backup cancelled at repository %d/%d", idx, total)
                 break
             r_name = repo.get("name", "")
+            r_id = str(repo.get("id") or r_name)
             _notify(idx, r_name)
-            res = self.backup_single_repository(
-                repo,
-                force=force,
-                tfs_project_git_base=tfs_project_git_base,
-                local_override_base=local_override_base,
-            )
+            try:
+                res = self.backup_single_repository(
+                    repo,
+                    force=force,
+                    tfs_project_git_base=tfs_project_git_base,
+                    local_override_base=local_override_base,
+                )
+            except Exception as repo_exc:
+                err_str = f"Unexpected backup error: {repo_exc}"
+                logger.error("❌ [%d/%d] '%s' failed with exception (continuing with remaining repos): %s", idx, total, r_name, repo_exc)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if self.cache_db and r_id:
+                    try:
+                        self.cache_db.save_migration_status({
+                            "repo_id": r_id,
+                            "repo_name": r_name,
+                            "project_id": self.project_id,
+                            "backup_mode": self.mode,
+                            "last_backup_at": now_iso,
+                            "local_status": "FAILED",
+                            "last_error": err_str,
+                        })
+                    except Exception:
+                        pass
+                res = {
+                    "repo_id": r_id,
+                    "repo_name": r_name,
+                    "mode": self.mode,
+                    "status": "FAILED",
+                    "action": "FAILED",
+                    "mirror_path": "",
+                    "worktree_path": "",
+                    "head_commit": "",
+                    "submodules_ok": False,
+                    "submodule_details": [],
+                    "backed_up_at": now_iso,
+                    "error": err_str,
+                }
             results.append(res)
             st = res.get("status")
             action = res.get("action", "")
@@ -1659,6 +2106,7 @@ class ForgejoStandbySyncManager:
         tfs_pat: str = "",
         cache_db=None,
         git_executable: str = "git",
+        git_timeout_seconds: Optional[int] = DEFAULT_GIT_TIMEOUT_SECONDS,
     ):
         norm_strat = str(strategy or "push").strip().lower()
         if norm_strat not in VALID_FORGEJO_STRATEGIES:
@@ -1672,6 +2120,9 @@ class ForgejoStandbySyncManager:
         self.tfs_pat = tfs_pat
         self.cache_db = cache_db
         self.git_executable = git_executable
+        self.git_timeout_seconds = (
+            None if (git_timeout_seconds is None or int(git_timeout_seconds) <= 0) else int(git_timeout_seconds)
+        )
 
     def _run_git_push_to_forgejo(self, mirror_path: str, forgejo_clone_url: str) -> subprocess.CompletedProcess:
         """
@@ -1683,7 +2134,7 @@ class ForgejoStandbySyncManager:
 
         # Check if the bare mirror is completely empty (no branches/tags, e.g. VS403403 empty TFS repo)
         ref_check = subprocess.run(
-            [self.git_executable, "show-ref"],
+            [self.git_executable, "-c", "safe.directory=*", "show-ref"],
             cwd=mirror_path,
             env=env,
             stdout=subprocess.PIPE,
@@ -1702,6 +2153,7 @@ class ForgejoStandbySyncManager:
 
         cmd = [
             self.git_executable,
+            "-c", "safe.directory=*",
             "-c", "http.sslVerify=false",
             "-c", "protocol.file.allow=always",
         ]
@@ -1717,16 +2169,24 @@ class ForgejoStandbySyncManager:
             "+refs/tags/*:refs/tags/*",
         ])
 
-        return subprocess.run(
-            cmd,
-            cwd=mirror_path,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=600,
-            check=False,
-        )
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=mirror_path,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=self.git_timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as te:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=124,
+                stdout=getattr(te, "stdout", "") or "",
+                stderr=f"git push to Forgejo timed out after {self.git_timeout_seconds}s.",
+            )
 
     def sync_single_repository(
         self,
@@ -1867,6 +2327,7 @@ class ForgejoStandbySyncManager:
                 pat=self.tfs_pat,
                 cache_db=self.cache_db,
                 git_executable=self.git_executable,
+                git_timeout_seconds=self.git_timeout_seconds,
             )
 
         if repos is None:

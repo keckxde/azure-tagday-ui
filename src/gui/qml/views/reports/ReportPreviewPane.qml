@@ -247,6 +247,39 @@ Item {
                         }
                     }
                 }
+
+                Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                // Collapse Right Sidebar Button
+                Rectangle {
+                    Layout.preferredWidth: 26
+                    Layout.preferredHeight: 26
+                    radius: 4
+                    color: collapsePreviewSidebarMa.containsMouse ? "#30363d" : "#21262d"
+                    border.color: collapsePreviewSidebarMa.containsMouse ? "#58a6ff" : "#30363d"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "▶"
+                        font.pixelSize: 10
+                        color: collapsePreviewSidebarMa.containsMouse ? "#58a6ff" : "#8b949e"
+                    }
+
+                    MouseArea {
+                        id: collapsePreviewSidebarMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        ToolTip.visible: containsMouse
+                        ToolTip.text: "Collapse sidebar"
+                        onClicked: {
+                            if (previewPaneRoot.root) {
+                                previewPaneRoot.root.isTdSidebarOpen = false;
+                            }
+                        }
+                    }
+                }
             }
         }
 

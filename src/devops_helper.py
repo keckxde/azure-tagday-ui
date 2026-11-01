@@ -633,7 +633,14 @@ def main(run_templates: bool = False) -> None:
     """Entry point for devops sync operations. Does not generate reports by default."""
     sync(run_templates_flag=run_templates)
 
-def sync(force_sync=False, run_templates_flag=False, progress_callback=None, cancel_token=None):
+def sync(
+    force_sync=False,
+    run_templates_flag=False,
+    progress_callback=None,
+    cancel_token=None,
+    db_path: Optional[str] = None,
+    cache_db: Optional[AzureDevOpsCache] = None,
+):
     """
     Synchronizes repositories, branches, tags, PRs, and work items from TFS to SQLite.
 
@@ -642,6 +649,8 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
         run_templates_flag (bool): If True, render Tag Day templates after sync. Defaults to False.
         progress_callback (callable, optional): Optional callback for live progress updates.
         cancel_token (callable/object, optional): Cancellation token / predicate.
+        db_path (str, optional): Explicit target database path. Defaults to None.
+        cache_db (AzureDevOpsCache, optional): Explicit target database cache instance. Defaults to None.
     """
     azHandler = _getHandler()
     if not azHandler:
@@ -655,7 +664,16 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
 
     repos_all = {}
     
-    db_path, cache_db = _getDBCacheHandler()
+    if cache_db is not None and db_path:
+        pass
+    elif cache_db is not None:
+        db_path = getattr(cache_db, "db_path", None)
+        if not db_path:
+            db_path, _ = _getDBCacheHandler()
+    elif db_path:
+        cache_db = AzureDevOpsCache(db_path)
+    else:
+        db_path, cache_db = _getDBCacheHandler()
     if not force_sync and isFileRecent(db_path):
         logger.info(f"Read Repo Details from SQLite Database Cache {db_path}")
         try:
@@ -797,6 +815,25 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
             logger.error(f"Synchronization stopped: lost connection to repository server during commits sync: {e}")
             raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
         logger.warning(f"Error synchronizing Git commits: {e}")
+
+    if _is_cancelled():
+        logger.info("Sync aborted by user before pipelines sync.")
+        return
+
+    # Synchronize build pipelines and recent build runs (including failed task timelines)
+    try:
+        if azHandler and hasattr(azHandler, "sync_pipelines_and_builds"):
+            logger.info("Synchronizing build pipelines and recent build executions...")
+            azHandler.sync_pipelines_and_builds(
+                AZURE_PROJECT_ID,
+                cache_db=cache_db,
+                progress_callback=progress_callback
+            )
+    except Exception as e:
+        if is_connection_error(e):
+            logger.error(f"Synchronization stopped: lost connection to repository server during pipelines sync: {e}")
+            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+        logger.warning(f"Error synchronizing build pipelines: {e}")
 
     try:
         cache_db.update_project_last_synced(AZURE_PROJECT_ID, AZURE_PROJECT_ID)

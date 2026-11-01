@@ -613,9 +613,11 @@ Item {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 dialogRoot.selectedProject = modelData;
-                                                // Generate default proposed db path
+                                                // Generate default proposed db path in reports/base folder
                                                 var defaultName = "tfs_cache_" + modelData.name + ".db";
-                                                if (backend) {
+                                                if (backend && backend.get_default_db_path) {
+                                                    dialogRoot.targetDbPath = backend.get_default_db_path(modelData.name);
+                                                } else if (backend) {
                                                     dialogRoot.targetDbPath = defaultName;
                                                 }
                                             }

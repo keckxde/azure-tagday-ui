@@ -154,7 +154,6 @@ Item {
 
     onVisibleChanged: {
         if (visible) {
-            root.isTdSidebarOpen = true;
             if (typeof window !== "undefined" && typeof window.closeRightSidebar === "function") {
                 window.closeRightSidebar();
             }
@@ -168,7 +167,6 @@ Item {
     }
 
     onActiveReportTabChanged: {
-        root.isTdSidebarOpen = true;
         if (root.activeReportTab === 1) {
             if (!root.selectedRepoName && backend && backend.tagDayData && backend.tagDayData.repos_summary && backend.tagDayData.repos_summary.length > 0) {
                 var found = null;

@@ -741,6 +741,14 @@ ApplicationWindow {
                             }
 
                             NavItem {
+                                iconText: "🔧"
+                                label: "Build Pipelines"
+                                active: window.currentTabIndex === 4 && (reportsView ? reportsView.activeReportTab === 6 : false)
+                                isCollapsed: window.isSidebarCollapsed
+                                onClicked: window.navigateToPipelinesReport()
+                            }
+
+                            NavItem {
                                 iconText: "📑"
                                 label: "Report"
                                 active: window.currentTabIndex === 4 && (reportsView ? (reportsView.activeReportTab === 0 || reportsView.activeReportTab === 5) : false)
@@ -1180,6 +1188,39 @@ ApplicationWindow {
                                 }
                             }
 
+                            // Secondary: Sync Build Pipelines
+                            Button {
+                                Layout.fillWidth: true
+                                implicitHeight: 32
+                                enabled: backend ? !backend.isBusy : false
+                                font.weight: Font.DemiBold
+                                contentItem: Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text {
+                                        text: backend && backend.isBusy ? "⏳" : "🔧"
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: backend && backend.isBusy ? "Syncing Pipelines..." : "Sync Build Pipelines"
+                                        font.family: "Segoe UI, sans-serif"
+                                        font.pixelSize: 11
+                                        font.weight: Font.Medium
+                                        color: parent.parent.enabled ? (parent.parent.hovered ? "#f0883e" : "#e3b341") : "#8b949e"
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.enabled ? (parent.hovered ? Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.15) : "#161b22") : "#161b22"
+                                    border.color: parent.enabled ? (parent.hovered ? "#e3b341" : "#9e6a03") : "#30363d"
+                                    border.width: 1
+                                }
+                                onClicked: {
+                                    if (backend)
+                                        backend.sync_pipelines_async();
+                                }
+                            }
+
                             // Progress Bar & Abort Button (Visible during active sync / tasks)
                             Rectangle {
                                 Layout.fillWidth: true
@@ -1347,6 +1388,37 @@ ApplicationWindow {
                                 enabled: backend ? !backend.isBusy : false
                                 onClicked: {
                                     if (backend) backend.sync_pull_requests_async();
+                                }
+                            }
+                        }
+
+                        // Sync Pipelines Compact Icon Button
+                        Rectangle {
+                            width: 38
+                            height: 32
+                            radius: 6
+                            color: syncPipesColMa.containsMouse ? Qt.rgba(227 / 255, 179 / 255, 65 / 255, 0.25) : "#161b22"
+                            border.color: syncPipesColMa.containsMouse ? "#e3b341" : "#30363d"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "🔧"
+                                font.pixelSize: 14
+                            }
+
+                            ToolTip.visible: syncPipesColMa.containsMouse
+                            ToolTip.text: "Sync Build Pipelines"
+                            ToolTip.delay: 150
+
+                            MouseArea {
+                                id: syncPipesColMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: backend ? !backend.isBusy : false
+                                onClicked: {
+                                    if (backend) backend.sync_pipelines_async();
                                 }
                             }
                         }
