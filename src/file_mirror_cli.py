@@ -232,6 +232,16 @@ def resolve_mirror_configuration(args: argparse.Namespace) -> Dict[str, Any]:
         or "push"
     ).strip().lower()
 
+    raw_timeout = (
+        getattr(args, "git_timeout_minutes", None)
+        if getattr(args, "git_timeout_minutes", None) is not None
+        else mig_cfg.get("git_timeout_minutes", 60)
+    )
+    try:
+        git_timeout_minutes = max(0, int(raw_timeout))
+    except (ValueError, TypeError):
+        git_timeout_minutes = 60
+
     return {
         "db_path": db_path,
         "cache_db": cache_db,
@@ -240,6 +250,7 @@ def resolve_mirror_configuration(args: argparse.Namespace) -> Dict[str, Any]:
         "pat": pat,
         "target_dir": target_dir,
         "mode": mode,
+        "git_timeout_minutes": git_timeout_minutes,
         "forgejo_url": forgejo_url,
         "forgejo_token": forgejo_token,
         "forgejo_org": forgejo_org,
@@ -370,6 +381,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Custom lockfile path (defaults to <target-dir>/.mirror.lock).",
     )
     parser.add_argument(
+        "--git-timeout-minutes",
+        type=int,
+        default=None,
+        help="Per-step Git timeout in minutes (0 = unlimited, default: 60).",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug-level logging.",
@@ -416,6 +433,9 @@ def run_mirror_job(args: argparse.Namespace) -> int:
             project_id, mode, target_dir, cfg["db_path"] or "none",
         )
 
+        timeout_min = cfg.get("git_timeout_minutes", 60)
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
         mgr = LocalBackupManager(
             target_dir=target_dir,
             mode=mode,
@@ -423,6 +443,7 @@ def run_mirror_job(args: argparse.Namespace) -> int:
             project_id=project_id,
             pat=pat,
             cache_db=cache_db,
+            git_timeout_seconds=timeout_sec,
         )
         manifest = mgr.backup_all_repositories(force=bool(getattr(args, "force", False)))
 

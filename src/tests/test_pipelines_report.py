@@ -309,3 +309,168 @@ def test_reports_view_and_tabs_qml_load(tmp_path):
     assert not comp_rep.isError(), f"ReportsView.qml errors: {[e.toString() for e in comp_rep.errors()]}"
 
 
+def test_favorites_sort_first_and_tfs_urls(tmp_path):
+    """Verifies that favorite pipelines always sort first (even if healthy) and TFS web links are generated for pipelines and build jobs."""
+    db_path = str(tmp_path / "fav_urls.db")
+    db = AzureDevOpsCache(db_path=db_path)
+
+    # Save project config with SERVER and PROJECT so TFS fallback URLs can be built
+    db.set_config("AZURE_BASE_URL", "https://tfs.company.local/tfs/DefaultCollection")
+    db.set_config("PROJECT_NAME", "MyProject")
+
+    db.save_pipelines(
+        "proj-1",
+        [
+            {"id": 10, "name": "Zeta-Broken-CI", "folder": "\\CI"},
+            {"id": 20, "name": "Alpha-Healthy-CI", "folder": "\\CI"},
+            {
+                "id": 30,
+                "name": "Beta-Fav-Healthy-CI",
+                "folder": "\\Release",
+                "_links": {"web": {"href": "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build?definitionId=30"}},
+            },
+        ],
+    )
+
+    builds = [
+        {
+            "id": 1001,
+            "buildNumber": "20261101.1",
+            "status": "completed",
+            "result": "failed",
+            "queueTime": "2026-11-01T08:00:00Z",
+            "startTime": "2026-11-01T08:01:00Z",
+            "finishTime": "2026-11-01T08:04:00Z",
+            "sourceBranch": "refs/heads/main",
+            "definition": {"id": 10, "name": "Zeta-Broken-CI"},
+            "requestedFor": {"displayName": "Alice"},
+        },
+        {
+            "id": 2001,
+            "buildNumber": "20261101.2",
+            "status": "completed",
+            "result": "succeeded",
+            "queueTime": "2026-11-01T08:05:00Z",
+            "startTime": "2026-11-01T08:06:00Z",
+            "finishTime": "2026-11-01T08:08:00Z",
+            "sourceBranch": "refs/heads/main",
+            "definition": {"id": 20, "name": "Alpha-Healthy-CI"},
+            "requestedFor": {"displayName": "Bob"},
+        },
+        {
+            "id": 3001,
+            "buildNumber": "20261101.3",
+            "status": "completed",
+            "result": "succeeded",
+            "queueTime": "2026-11-01T08:10:00Z",
+            "startTime": "2026-11-01T08:11:00Z",
+            "finishTime": "2026-11-01T08:12:00Z",
+            "sourceBranch": "refs/heads/main",
+            "definition": {"id": 30, "name": "Beta-Fav-Healthy-CI"},
+            "requestedFor": {"displayName": "Charlie"},
+            "_links": {"web": {"href": "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build/results?buildId=3001"}},
+        },
+    ]
+    db.save_builds("proj-1", builds)
+
+    # Mark pipeline 30 (healthy) as favorite
+    analysis = analyze_pipelines_health(db, favorite_pipelines=["30"])
+    pipelines = analysis["pipelines"]
+    assert len(pipelines) == 3
+    assert analysis["summary"]["favorite_count"] == 1
+
+    # Pipeline 30 must be first because it is a favorite, followed by broken pipeline 10, then healthy 20
+    assert pipelines[0]["id"] == 30
+    assert pipelines[0]["is_favorite"] is True
+    assert pipelines[1]["id"] == 10
+    assert pipelines[1]["is_favorite"] is False
+    assert pipelines[2]["id"] == 20
+    assert pipelines[2]["is_favorite"] is False
+
+    # Verify TFS URLs on pipelines and build jobs
+    p30 = pipelines[0]
+    assert p30["web_url"] == "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build?definitionId=30"
+    assert p30["last_build_url"] == "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build/results?buildId=3001"
+    assert p30["last_success_url"] == "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build/results?buildId=3001"
+    assert p30["last_5_runs"][0]["web_url"] == "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build/results?buildId=3001"
+
+    p10 = pipelines[1]
+    assert p10["web_url"] == "https://tfs.company.local/tfs/DefaultCollection/MyProject/_build?definitionId=10"
+    assert "buildId=1001" in p10["last_build_url"]
+    assert "buildId=1001" in p10["last_failure_url"]
+    assert "buildId=1001" in p10["broken_since_url"]
+
+    # Markdown report should include clickable links and star icon for favorite
+    md = generate_markdown_report(analysis)
+    assert "⭐" in md
+    assert "[**Beta-Fav-Healthy-CI**](https://tfs.company.local/tfs/DefaultCollection/MyProject/_build?definitionId=30)" in md
+    assert "(https://tfs.company.local/tfs/DefaultCollection/MyProject/_build/results?buildId=1001" in md
+
+
+def test_backend_view_mode_favorites_and_independent_sync(tmp_path, monkeypatch):
+    """Tests default 'cards' view mode, switching to 'list', toggling favorites, and independent sync_pipelines_async."""
+    import gui.backend as backend_mod
+    from gui.backend import DevOpsBackend
+
+    mock_settings = {}
+    monkeypatch.setattr(backend_mod, "_load_user_settings", lambda: dict(mock_settings))
+    monkeypatch.setattr(backend_mod, "_save_user_settings", lambda cfg: mock_settings.update(cfg))
+
+    db_path = str(tmp_path / "backend_fav.db")
+    db = AzureDevOpsCache(db_path=db_path)
+    db.set_config("AZURE_BASE_URL", "https://tfs.example.com/DefaultCollection")
+    db.set_config("PROJECT_NAME", "DemoProj")
+    db.save_pipelines(
+        "proj-1",
+        [
+            {"id": 1, "name": "Broken-Pipe", "folder": "\\"},
+            {"id": 2, "name": "Fav-Healthy-Pipe", "folder": "\\"},
+        ],
+    )
+    db.save_builds(
+        "proj-1",
+        [
+            {
+                "id": 11,
+                "buildNumber": "1.0",
+                "status": "completed",
+                "result": "failed",
+                "definition": {"id": 1, "name": "Broken-Pipe"},
+            },
+            {
+                "id": 22,
+                "buildNumber": "2.0",
+                "status": "completed",
+                "result": "succeeded",
+                "definition": {"id": 2, "name": "Fav-Healthy-Pipe"},
+            },
+        ],
+    )
+
+    backend = DevOpsBackend()
+    backend._cache_db = db
+    backend._favorite_pipelines = []
+    backend._pipelines_view_mode = "cards"
+    backend._pipelines_data = analyze_pipelines_health(db, favorite_pipelines=backend._favorite_pipelines)
+
+    # 1. Default view mode must be "cards"
+    assert backend.pipelinesViewMode == "cards"
+    backend.setPipelinesViewMode("list")
+    assert backend.pipelinesViewMode == "list"
+    backend.setPipelinesViewMode("invalid_mode")
+    assert backend.pipelinesViewMode == "cards"
+
+    # 2. Toggle favorite on pipeline 2 and verify it moves to index 0
+    assert backend.isPipelineFavorite("2") is False
+    now_fav = backend.toggleFavoritePipeline("2", "Fav-Healthy-Pipe")
+    assert now_fav is True
+    assert backend.isPipelineFavorite("2") is True
+    assert backend.pipelinesData["pipelines"][0]["id"] == 2
+    assert backend.pipelinesData["pipelines"][0]["is_favorite"] is True
+
+    # 3. Verify TFS URL helpers on backend
+    assert "definitionId=2" in backend.get_pipeline_tfs_url(2)
+    assert "buildId=22" in backend.get_build_tfs_url(22)
+
+
+

@@ -798,6 +798,25 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
             raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
         logger.warning(f"Error synchronizing Git commits: {e}")
 
+    if _is_cancelled():
+        logger.info("Sync aborted by user before pipelines sync.")
+        return
+
+    # Synchronize build pipelines and recent build runs (including failed task timelines)
+    try:
+        if azHandler and hasattr(azHandler, "sync_pipelines_and_builds"):
+            logger.info("Synchronizing build pipelines and recent build executions...")
+            azHandler.sync_pipelines_and_builds(
+                AZURE_PROJECT_ID,
+                cache_db=cache_db,
+                progress_callback=progress_callback
+            )
+    except Exception as e:
+        if is_connection_error(e):
+            logger.error(f"Synchronization stopped: lost connection to repository server during pipelines sync: {e}")
+            raise AzureServerConnectionError(f"Lost connection to repository server: {e}", original_error=e) from e
+        logger.warning(f"Error synchronizing build pipelines: {e}")
+
     try:
         cache_db.update_project_last_synced(AZURE_PROJECT_ID, AZURE_PROJECT_ID)
     except Exception as e:

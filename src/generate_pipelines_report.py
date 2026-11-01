@@ -127,6 +127,229 @@ def _compute_duration(start_str, finish_str):
     return diff_sec, f"{seconds}s"
 
 
+def _normalize_favorites_set(favorite_pipelines):
+    """Normalizes a list/set of favorite pipeline identifiers (IDs or names) to a lowercase string set."""
+    fav_set = set()
+    if not favorite_pipelines:
+        return fav_set
+    if isinstance(favorite_pipelines, (str, bytes)):
+        try:
+            parsed = json.loads(favorite_pipelines)
+            if isinstance(parsed, (list, tuple, set)):
+                favorite_pipelines = parsed
+            else:
+                favorite_pipelines = [s.strip() for s in str(favorite_pipelines).split(",") if s.strip()]
+        except Exception:
+            favorite_pipelines = [s.strip() for s in str(favorite_pipelines).split(",") if s.strip()]
+    if isinstance(favorite_pipelines, (list, tuple, set)):
+        for item in favorite_pipelines:
+            if item is None:
+                continue
+            s = str(item).strip().lower()
+            if s:
+                fav_set.add(s)
+                if s.startswith("id:"):
+                    fav_set.add(s[3:].strip())
+                elif s.startswith("name:"):
+                    fav_set.add(s[5:].strip())
+    return fav_set
+
+
+def is_pipeline_favorite(pipeline_id, pipeline_name, favorites_collection):
+    """Checks whether a pipeline matches any entry in the favorites collection by ID or name."""
+    fav_set = (
+        favorites_collection
+        if isinstance(favorites_collection, set)
+        else _normalize_favorites_set(favorites_collection)
+    )
+    if not fav_set:
+        return False
+    if pipeline_id is not None and str(pipeline_id).strip() not in ("", "0"):
+        pid_str = str(pipeline_id).strip().lower()
+        if pid_str in fav_set or f"id:{pid_str}" in fav_set:
+            return True
+    pname_str = str(pipeline_name or "").strip().lower()
+    if pname_str and (pname_str in fav_set or f"name:{pname_str}" in fav_set):
+        return True
+    return False
+
+
+def _load_favorite_pipelines(cache_db=None, explicit_favorites=None):
+    """Loads favorite pipelines from explicit argument, SQLite project_config, or user_settings.yaml."""
+    if explicit_favorites is not None:
+        return _normalize_favorites_set(explicit_favorites)
+    favs = set()
+    if cache_db and hasattr(cache_db, "get_config"):
+        try:
+            raw_cfg = cache_db.get_config("FAVORITE_PIPELINES")
+            if raw_cfg is not None:
+                return _normalize_favorites_set(raw_cfg)
+        except Exception:
+            pass
+    try:
+        from gui.services.settings_service import load_user_settings
+        cfg = load_user_settings()
+        if isinstance(cfg, dict) and "favorite_pipelines" in cfg:
+            favs.update(_normalize_favorites_set(cfg.get("favorite_pipelines")))
+    except Exception:
+        pass
+    return favs
+
+
+def _extract_web_href_from_raw(raw_obj):
+    """Extracts _links.web.href or webUrl from a raw TFS JSON dict if present."""
+    if not isinstance(raw_obj, dict):
+        return ""
+    links = raw_obj.get("_links")
+    if isinstance(links, dict):
+        web_link = links.get("web")
+        if isinstance(web_link, dict) and web_link.get("href"):
+            return str(web_link["href"]).strip()
+        elif isinstance(web_link, str) and web_link.strip():
+            return web_link.strip()
+    if raw_obj.get("webUrl"):
+        return str(raw_obj["webUrl"]).strip()
+    return ""
+
+
+def _resolve_tfs_project_base_url(cache_db=None, project_id=None, pipe_rows=None, build_rows=None, repo_rows=None):
+    """
+    Determines the TFS / Azure DevOps project web base URL (e.g. 'https://tfs/DefaultCollection/MyProject')
+    from DB config, devops_helper environment, or cached repository/pipeline/build URLs.
+    """
+    base_url = ""
+    collection = ""
+    proj = str(project_id or "").strip()
+
+    if cache_db and hasattr(cache_db, "get_all_config"):
+        try:
+            db_cfg = cache_db.get_all_config() or {}
+            base_url = str(
+                db_cfg.get("AZURE_BASE_URL")
+                or db_cfg.get("TFS_URL")
+                or db_cfg.get("SERVER")
+                or ""
+            ).strip().rstrip("/")
+            collection = str(
+                db_cfg.get("AZURE_COLLECTION")
+                or db_cfg.get("TFS_COLLECTION")
+                or ""
+            ).strip().strip("/")
+            if not proj:
+                proj = str(
+                    db_cfg.get("PROJECT_NAME")
+                    or db_cfg.get("AZURE_PROJECT_ID")
+                    or db_cfg.get("PROJECT")
+                    or ""
+                ).strip()
+        except Exception:
+            pass
+
+    try:
+        import devops_helper
+        if not base_url:
+            base_url = str(getattr(devops_helper, "AZURE_BASE_URL", "") or "").strip().rstrip("/")
+        if not collection:
+            collection = str(getattr(devops_helper, "AZURE_COLLECTION", "") or "").strip().strip("/")
+        if not proj:
+            proj = str(getattr(devops_helper, "AZURE_PROJECT_ID", "") or "").strip()
+    except Exception:
+        pass
+
+    # Inspect rows for project_id or existing web URLs
+    for r in (repo_rows or []):
+        r_dict = dict(r) if not isinstance(r, dict) else r
+        if not proj and r_dict.get("project_id"):
+            proj = str(r_dict["project_id"]).strip()
+        w_url = str(r_dict.get("web_url") or r_dict.get("url") or "").strip()
+        if "/_git/" in w_url:
+            return w_url.split("/_git/")[0].rstrip("/")
+        if not base_url and w_url.startswith("http"):
+            m = re.match(r"^(https?://[^/]+)", w_url)
+            if m:
+                base_url = m.group(1)
+
+    for p in (pipe_rows or []):
+        p_dict = dict(p) if not isinstance(p, dict) else p
+        if not proj and p_dict.get("project_id"):
+            proj = str(p_dict["project_id"]).strip()
+        p_url = str(p_dict.get("url") or "").strip()
+        if "/_apis/" in p_url:
+            return p_url.split("/_apis/")[0].rstrip("/")
+
+    for b in (build_rows or []):
+        b_dict = dict(b) if not isinstance(b, dict) else b
+        if not proj and b_dict.get("project_id"):
+            proj = str(b_dict["project_id"]).strip()
+        b_url = str(b_dict.get("url") or "").strip()
+        if "/_apis/" in b_url:
+            return b_url.split("/_apis/")[0].rstrip("/")
+
+    if not proj:
+        proj = "DefaultProject"
+
+    if base_url:
+        if collection and not base_url.lower().endswith("/" + collection.lower()):
+            return f"{base_url}/{collection}/{proj}"
+        if not base_url.lower().endswith("/" + proj.lower()):
+            return f"{base_url}/{proj}"
+        return base_url
+
+    return f"https://tfs/{proj}"
+
+
+def _build_pipeline_web_url(pipeline_id, raw_url="", raw_json=None, project_base_url=""):
+    """Constructs or extracts a clickable TFS web URL for a build pipeline definition."""
+    raw_obj = {}
+    if raw_json:
+        try:
+            raw_obj = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+        except Exception:
+            raw_obj = {}
+    href = _extract_web_href_from_raw(raw_obj)
+    if href:
+        return href
+
+    u = str(raw_url or "").strip()
+    if u.startswith("http") and "/_apis/" not in u:
+        return u
+    if "/_apis/" in u:
+        prefix = u.split("/_apis/")[0].rstrip("/")
+        if pipeline_id:
+            return f"{prefix}/_build?definitionId={pipeline_id}"
+        return f"{prefix}/_build"
+
+    base = (project_base_url or "https://tfs/DefaultProject").rstrip("/")
+    if pipeline_id:
+        return f"{base}/_build?definitionId={pipeline_id}"
+    return f"{base}/_build"
+
+
+def _build_job_web_url(build_id, raw_url="", raw_json=None, project_base_url=""):
+    """Constructs or extracts a clickable TFS web URL for a specific build job execution."""
+    raw_obj = {}
+    if raw_json:
+        try:
+            raw_obj = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+        except Exception:
+            raw_obj = {}
+    href = _extract_web_href_from_raw(raw_obj)
+    if href:
+        return href
+
+    u = str(raw_url or "").strip()
+    if u.startswith("http") and "/_apis/" not in u:
+        return u
+    if "/_apis/" in u and build_id:
+        prefix = u.split("/_apis/")[0].rstrip("/")
+        return f"{prefix}/_build/results?buildId={build_id}&view=results"
+
+    if build_id:
+        base = (project_base_url or "https://tfs/DefaultProject").rstrip("/")
+        return f"{base}/_build/results?buildId={build_id}&view=results"
+    return ""
+
+
 def classify_jenkins_status(status_str, result_str, balls_map=None):
     """
     Maps Azure DevOps build status & result to classic Jenkins ball status:
@@ -369,9 +592,12 @@ def _extract_build_details(build_row, commits_by_sha, commits_by_prefix, prs_by_
     dur_sec, dur_str = _compute_duration(start_time, finish_time)
     finish_str = _format_timestamp(finish_time or start_time)
 
+    build_id_val = build_row.get("build_id") or build_row.get("id")
+    raw_url_val = build_row.get("url") or raw.get("url") or ""
+
     return {
-        "build_id": build_row.get("build_id") or build_row.get("id"),
-        "build_number": str(build_row.get("build_number") or build_row.get("buildNumber") or build_row.get("build_id") or ""),
+        "build_id": build_id_val,
+        "build_number": str(build_row.get("build_number") or build_row.get("buildNumber") or build_id_val or ""),
         "pipeline_id": build_row.get("pipeline_id"),
         "pipeline_name": build_row.get("pipeline_name") or "Unknown Pipeline",
         "repo_id": build_row.get("repo_id"),
@@ -401,11 +627,12 @@ def _extract_build_details(build_row, commits_by_sha, commits_by_prefix, prs_by_
         "finish_time_str": finish_str,
         "duration_seconds": dur_sec,
         "duration_str": dur_str,
-        "url": build_row.get("url") or raw.get("url") or "",
+        "url": raw_url_val,
+        "raw_obj": raw,
     }
 
 
-def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
+def analyze_pipelines_health(cache_db, project_id=None, config_path=None, favorite_pipelines=None):
     """
     Loads all pipelines, builds, commits, and pull requests from SQLite and computes
     a complete Jenkins-style Build Pipeline Monitor & Culprit Analysis structure.
@@ -413,6 +640,7 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
     status_icons_cfg = load_status_icons(custom_path=config_path)
     balls_map = status_icons_cfg.get("jenkins_balls") or JENKINS_BALLS_DEFAULT
     weather_map = status_icons_cfg.get("jenkins_weather") or JENKINS_WEATHER_DEFAULT
+    favorites_set = _load_favorite_pipelines(cache_db=cache_db, explicit_favorites=favorite_pipelines)
 
     with cache_db._connection() as conn:
         # 1. Load Pipelines
@@ -470,6 +698,31 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
             "SELECT id, repo_id, title, status, target_branch, source_branch, created_by, closed_by, closed_date, raw_json FROM pull_requests"
         ).fetchall()]
 
+        # 5. Load Repositories for TFS web URL construction
+        try:
+            repo_rows = [dict(r) for r in conn.execute(
+                "SELECT id, project_id, name, url, web_url FROM repositories"
+            ).fetchall()]
+        except Exception:
+            repo_rows = []
+
+    project_base_url = _resolve_tfs_project_base_url(
+        cache_db=cache_db,
+        project_id=project_id,
+        pipe_rows=pipe_rows,
+        build_rows=build_rows,
+        repo_rows=repo_rows,
+    )
+    repo_web_urls = {}
+    for rr in repo_rows:
+        r_name = (rr.get("name") or "").strip()
+        r_wurl = (rr.get("web_url") or rr.get("url") or "").strip()
+        if r_name:
+            if r_wurl and not ("/_apis/" in r_wurl):
+                repo_web_urls[r_name] = r_wurl
+            else:
+                repo_web_urls[r_name] = f"{project_base_url}/_git/{r_name}"
+
     commits_by_sha = {}
     commits_by_prefix = {}
     commits_by_repo = {}
@@ -512,11 +765,18 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
         pid = p_dict.get("id")
         pname = (p_dict.get("name") or f"Pipeline #{pid}").strip()
         pkey = f"id:{pid}" if pid is not None else f"name:{pname.lower()}"
+        p_web_url = _build_pipeline_web_url(
+            pid,
+            raw_url=p_dict.get("url") or "",
+            raw_json=p_dict.get("raw_json"),
+            project_base_url=project_base_url,
+        )
         pipelines_map[pkey] = {
             "pipeline_id": pid,
             "name": pname,
             "folder": p_dict.get("folder") or "\\",
-            "url": p_dict.get("url") or "",
+            "url": p_web_url,
+            "web_url": p_web_url,
             "builds": []
         }
         pipeline_name_to_key[pname.lower()] = pkey
@@ -528,6 +788,17 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
         eb["status_key"] = status_key
         eb["status_ball"] = status_ball
         eb["status_label"] = status_label
+        b_web_url = _build_job_web_url(
+            eb.get("build_id"),
+            raw_url=eb.get("url") or "",
+            raw_json=eb.get("raw_obj"),
+            project_base_url=project_base_url,
+        )
+        eb["web_url"] = b_web_url
+        eb["build_url"] = b_web_url
+        if not eb.get("url") or "/_apis/" in str(eb.get("url")):
+            eb["url"] = b_web_url
+        eb.pop("raw_obj", None)
         enriched_builds.append(eb)
 
         pid = eb.get("pipeline_id")
@@ -535,11 +806,18 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
         pkey = f"id:{pid}" if pid is not None and f"id:{pid}" in pipelines_map else pipeline_name_to_key.get(pname.lower())
         if not pkey:
             pkey = f"id:{pid}" if pid is not None else f"name:{pname.lower()}"
+            p_web_url = _build_pipeline_web_url(
+                pid,
+                raw_url="",
+                raw_json=None,
+                project_base_url=project_base_url,
+            )
             pipelines_map[pkey] = {
                 "pipeline_id": pid,
                 "name": pname,
                 "folder": "\\",
-                "url": "",
+                "url": p_web_url,
+                "web_url": p_web_url,
                 "builds": []
             }
             pipeline_name_to_key[pname.lower()] = pkey
@@ -551,16 +829,24 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
         p_builds = pinfo["builds"]
         pname = pinfo["name"]
         pid = pinfo["pipeline_id"]
+        p_web_url = pinfo.get("web_url") or _build_pipeline_web_url(pid, project_base_url=project_base_url)
+        is_fav = is_pipeline_favorite(pid, pname, favorites_set)
 
         if not p_builds:
             # Defined pipeline with 0 cached builds
             _, ball_nb, lbl_nb = classify_jenkins_status("", "", balls_map)
             w_score, w_key, w_icon, w_label = compute_jenkins_weather([], weather_map)
             pipeline_entries.append({
+                "id": pid or 0,
                 "pipeline_id": pid or 0,
                 "name": pname,
                 "folder": pinfo.get("folder") or "\\",
+                "is_favorite": is_fav,
+                "url": p_web_url,
+                "web_url": p_web_url,
+                "pipeline_url": p_web_url,
                 "repo_name": "-",
+                "repo_url": "",
                 "last_branch": "-",
                 "status_key": "not_built",
                 "status_ball": ball_nb,
@@ -575,19 +861,27 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
                 "failed_runs_count": 0,
                 "unstable_runs_count": 0,
                 "success_runs_count": 0,
+                "last_build_id": 0,
                 "last_build_number": "-",
                 "last_build_date": "-",
+                "last_build_url": "",
+                "last_success_id": 0,
                 "last_success_build": "",
                 "last_success_date": "",
                 "last_success_display": "Nie (Never)",
+                "last_success_url": "",
+                "last_failure_id": 0,
                 "last_failure_build": "",
                 "last_failure_date": "",
                 "last_failure_display": "Nie (Never)",
+                "last_failure_url": "",
                 "last_duration_seconds": 0,
                 "last_duration_str": "-",
                 "consecutive_failures": 0,
+                "broken_since_id": 0,
                 "broken_since_build": "",
                 "broken_since_date": "",
+                "broken_since_url": "",
                 "has_problem": False,
                 "culprit_who": "-",
                 "suspects": [],
@@ -598,7 +892,9 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
                 "error_messages": [],
                 "last_commit_sha": "",
                 "last_commit_comment": "",
+                "last_commit_url": "",
                 "last_pr_label": "",
+                "last_pr_url": "",
                 "hint_text": "Pipeline wurde noch nicht ausgeführt.",
             })
             continue
@@ -789,12 +1085,26 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
             hint_text = f"{streak_txt}. Mögliche(r) Verursacher: {who_hint}. {cause_txt}"
 
         suspects_str = ", ".join(suspects_names)
+        r_name_latest = latest.get("repo_name") or "-"
+        r_url_latest = repo_web_urls.get(r_name_latest) or (
+            f"{project_base_url}/_git/{r_name_latest}" if r_name_latest and r_name_latest not in ("-", "Unknown Repo") else ""
+        )
+        commit_full = latest.get("source_version") or latest.get("commit_short") or ""
+        last_commit_url = f"{r_url_latest}/commit/{commit_full}" if r_url_latest and commit_full else ""
+        pr_id_latest = latest.get("pr_id")
+        last_pr_url = f"{r_url_latest}/pullrequest/{pr_id_latest}" if r_url_latest and pr_id_latest else ""
 
         pipeline_entries.append({
+            "id": pid or 0,
             "pipeline_id": pid or 0,
             "name": pname,
             "folder": pinfo.get("folder") or "\\",
-            "repo_name": latest.get("repo_name") or "-",
+            "is_favorite": is_fav,
+            "url": p_web_url,
+            "web_url": p_web_url,
+            "pipeline_url": p_web_url,
+            "repo_name": r_name_latest,
+            "repo_url": r_url_latest,
             "last_branch": latest.get("branch_short") or "-",
             "status_key": status_key,
             "status_ball": status_ball,
@@ -816,6 +1126,8 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
                     "commit": r["commit_short"],
                     "who": r["who_summary"],
                     "what": r["what_summary"],
+                    "url": r.get("web_url") or r.get("url") or "",
+                    "web_url": r.get("web_url") or r.get("url") or "",
                 }
                 for r in last_5
             ],
@@ -824,19 +1136,27 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
             "failed_runs_count": sum(1 for b in p_builds if b["status_key"] == "failed"),
             "unstable_runs_count": sum(1 for b in p_builds if b["status_key"] == "unstable"),
             "success_runs_count": len(success_runs),
+            "last_build_id": latest.get("build_id") or 0,
             "last_build_number": latest.get("build_number") or "-",
             "last_build_date": latest.get("finish_time_str") or "-",
+            "last_build_url": latest.get("web_url") or latest.get("url") or "",
+            "last_success_id": last_success["build_id"] if last_success else 0,
             "last_success_build": last_success["build_number"] if last_success else "",
             "last_success_date": last_success["finish_time_str"] if last_success else "",
             "last_success_display": last_success_display,
+            "last_success_url": (last_success.get("web_url") or last_success.get("url") or "") if last_success else "",
+            "last_failure_id": last_failure["build_id"] if last_failure else 0,
             "last_failure_build": last_failure["build_number"] if last_failure else "",
             "last_failure_date": last_failure["finish_time_str"] if last_failure else "",
             "last_failure_display": last_failure_display,
+            "last_failure_url": (last_failure.get("web_url") or last_failure.get("url") or "") if last_failure else "",
             "last_duration_seconds": latest.get("duration_seconds") or 0,
             "last_duration_str": latest.get("duration_str") or "-",
             "consecutive_failures": consecutive_failures,
+            "broken_since_id": broken_since["build_id"] if broken_since else 0,
             "broken_since_build": broken_since_build,
             "broken_since_date": broken_since_date,
+            "broken_since_url": (broken_since.get("web_url") or broken_since.get("url") or "") if broken_since else "",
             "has_problem": has_problem,
             "culprit_who": culprit_who,
             "suspects": suspects,
@@ -847,11 +1167,13 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
             "error_messages": error_messages,
             "last_commit_sha": latest.get("commit_short") or "",
             "last_commit_comment": latest.get("commit_comment") or "",
+            "last_commit_url": last_commit_url,
             "last_pr_label": latest.get("pr_label") or "",
+            "last_pr_url": last_pr_url,
             "hint_text": hint_text,
         })
 
-    # Sort pipelines: failed first, then unstable, then by weather_score ascending, then name ascending
+    # Sort pipelines: favorites ALWAYS first, then failed, then unstable, then weather_score ascending, then name ascending
     status_sort_priority = {
         "failed": 0,
         "unstable": 1,
@@ -862,6 +1184,7 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
     }
     pipeline_entries.sort(
         key=lambda p: (
+            0 if p.get("is_favorite") else 1,
             status_sort_priority.get(p["status_key"], 9),
             0 if p["has_problem"] else 1,
             p["weather_score"],
@@ -871,6 +1194,7 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
 
     problem_pipelines = [p for p in pipeline_entries if p["has_problem"]]
     recent_failed_builds = [b for b in enriched_builds if b["status_key"] in ("failed", "unstable")][:30]
+    favorite_count = sum(1 for p in pipeline_entries if p.get("is_favorite"))
 
     total_pipelines = len(pipeline_entries)
     healthy_count = sum(1 for p in pipeline_entries if p["status_key"] == "success")
@@ -903,6 +1227,7 @@ def analyze_pipelines_health(cache_db, project_id=None, config_path=None):
 
     summary = {
         "total_pipelines": total_pipelines,
+        "favorite_count": favorite_count,
         "healthy_count": healthy_count,
         "unstable_count": unstable_count,
         "failed_count": failed_count,

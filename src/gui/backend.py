@@ -58,6 +58,8 @@ class DevOpsBackend(QObject):
     tagDayDataChanged = Signal()
     storageDataChanged = Signal()
     pipelinesDataChanged = Signal()
+    pipelinesViewModeChanged = Signal()
+    favoritePipelinesChanged = Signal()
     sprintReportGenerated = Signal(dict, str)  # data dict, markdown content
     workloadMatrixChanged = Signal()
     milestonesChanged = Signal()
@@ -128,7 +130,19 @@ class DevOpsBackend(QObject):
         if self._auto_sync_interval_minutes < 1:
             self._auto_sync_interval_minutes = 5
         self._auto_sync_scope = str(user_cfg.get("auto_sync_scope", "all"))
+        if self._auto_sync_scope not in ("all", "work_items", "pull_requests", "pipelines"):
+            self._auto_sync_scope = "all"
         self._seconds_until_next_sync = self._auto_sync_interval_minutes * 60
+
+        # Build Pipelines View Mode & Favorites
+        self._pipelines_view_mode = str(user_cfg.get("pipelines_view_mode", "cards") or "cards").lower()
+        if self._pipelines_view_mode not in ("cards", "list"):
+            self._pipelines_view_mode = "cards"
+        raw_fav_pipes = user_cfg.get("favorite_pipelines", [])
+        if isinstance(raw_fav_pipes, list):
+            self._favorite_pipelines = [str(x).strip() for x in raw_fav_pipes if str(x).strip()]
+        else:
+            self._favorite_pipelines = []
 
         self._auto_sync_timer = QTimer(self)
         self._auto_sync_timer.setInterval(1000)
@@ -398,7 +412,20 @@ class DevOpsBackend(QObject):
                 except Exception:
                     pass
             if "AUTO_SYNC_SCOPE" in db_cfg:
-                self._auto_sync_scope = db_cfg["AUTO_SYNC_SCOPE"]
+                scope_val = str(db_cfg["AUTO_SYNC_SCOPE"] or "all").lower()
+                self._auto_sync_scope = scope_val if scope_val in ("all", "work_items", "pull_requests", "pipelines") else "all"
+            if "PIPELINES_VIEW_MODE" in db_cfg:
+                pv_mode = str(db_cfg["PIPELINES_VIEW_MODE"] or "cards").lower()
+                if pv_mode in ("cards", "list"):
+                    self._pipelines_view_mode = pv_mode
+            if "FAVORITE_PIPELINES" in db_cfg:
+                try:
+                    raw_fp = db_cfg["FAVORITE_PIPELINES"]
+                    parsed_fp = json.loads(raw_fp) if isinstance(raw_fp, str) else raw_fp
+                    if isinstance(parsed_fp, list):
+                        self._favorite_pipelines = [str(x).strip() for x in parsed_fp if str(x).strip()]
+                except Exception:
+                    pass
             if "IGNORE_REPOS" in db_cfg:
                 devops_helper.IGNORE_REPOS = db_cfg["IGNORE_REPOS"]
             if "FILTER_REPOS" in db_cfg:
@@ -1047,7 +1074,7 @@ class DevOpsBackend(QObject):
     @Slot(str)
     def setAutoSyncScope(self, scope):
         val = (scope or "all").lower()
-        if val not in ("all", "work_items", "pull_requests"):
+        if val not in ("all", "work_items", "pull_requests", "pipelines"):
             val = "all"
         self._auto_sync_scope = val
         cfg = _load_user_settings()
@@ -1095,6 +1122,8 @@ class DevOpsBackend(QObject):
             self.sync_work_items_async()
         elif self._auto_sync_scope == "pull_requests":
             self.sync_pull_requests_async()
+        elif self._auto_sync_scope == "pipelines":
+            self.sync_pipelines_async()
         else:
             self.sync_all_async()
 
@@ -1128,6 +1157,8 @@ class DevOpsBackend(QObject):
                 self.sync_work_items_async()
             elif self._auto_sync_scope == "pull_requests":
                 self.sync_pull_requests_async()
+            elif self._auto_sync_scope == "pipelines":
+                self.sync_pipelines_async()
             else:
                 self.sync_all_async()
         else:
@@ -1650,6 +1681,202 @@ class DevOpsBackend(QObject):
     @Property(dict, notify=pipelinesDataChanged)
     def pipelinesData(self):
         return self._pipelines_data
+
+    @Property(str, notify=pipelinesViewModeChanged)
+    def pipelinesViewMode(self):
+        mode = getattr(self, "_pipelines_view_mode", "cards") or "cards"
+        return mode if mode in ("cards", "list") else "cards"
+
+    @Slot(str)
+    def setPipelinesViewMode(self, mode):
+        val = str(mode or "cards").strip().lower()
+        if val not in ("cards", "list"):
+            val = "cards"
+        self._pipelines_view_mode = val
+        cfg = _load_user_settings()
+        cfg["pipelines_view_mode"] = self._pipelines_view_mode
+        _save_user_settings(cfg)
+        if getattr(self, "_cache_db", None):
+            try:
+                self._cache_db.set_config("PIPELINES_VIEW_MODE", self._pipelines_view_mode)
+            except Exception:
+                pass
+        self.pipelinesViewModeChanged.emit()
+        self.settingsChanged.emit()
+
+    @Slot(str)
+    def set_pipelines_view_mode(self, mode):
+        self.setPipelinesViewMode(mode)
+
+    @Property(list, notify=favoritePipelinesChanged)
+    def favoritePipelines(self):
+        return list(getattr(self, "_favorite_pipelines", []))
+
+    def _apply_favorite_pipelines_in_memory(self):
+        """Updates is_favorite flags and re-sorts self._pipelines_data in place so favorites always appear first."""
+        pipes_data = getattr(self, "_pipelines_data", None)
+        if not isinstance(pipes_data, dict) or not isinstance(pipes_data.get("pipelines"), list):
+            return
+        import generate_pipelines_report
+        fav_list = getattr(self, "_favorite_pipelines", []) or []
+        fav_set = generate_pipelines_report._normalize_favorites_set(fav_list)
+        status_sort_priority = {
+            "failed": 0,
+            "unstable": 1,
+            "running": 2,
+            "success": 3,
+            "aborted": 4,
+            "not_built": 5,
+        }
+        for p in pipes_data["pipelines"]:
+            if isinstance(p, dict):
+                p["is_favorite"] = generate_pipelines_report.is_pipeline_favorite(
+                    p.get("pipeline_id"), p.get("name"), fav_set
+                )
+        pipes_data["pipelines"].sort(
+            key=lambda p: (
+                0 if p.get("is_favorite") else 1,
+                status_sort_priority.get(p.get("status_key"), 9),
+                0 if p.get("has_problem") else 1,
+                p.get("weather_score", 100),
+                str(p.get("name") or "").lower(),
+            )
+        )
+        pipes_data["problem_pipelines"] = [p for p in pipes_data["pipelines"] if p.get("has_problem")]
+        if isinstance(pipes_data.get("summary"), dict):
+            pipes_data["summary"]["favorite_count"] = sum(
+                1 for p in pipes_data["pipelines"] if p.get("is_favorite")
+            )
+
+    def _persist_favorite_pipelines(self):
+        favs = list(getattr(self, "_favorite_pipelines", []))
+        cfg = _load_user_settings()
+        cfg["favorite_pipelines"] = favs
+        _save_user_settings(cfg)
+        if getattr(self, "_cache_db", None):
+            try:
+                self._cache_db.set_config("FAVORITE_PIPELINES", json.dumps(favs))
+            except Exception:
+                pass
+
+    @Slot(str, result=bool)
+    def isPipelineFavorite(self, key_or_name):
+        import generate_pipelines_report
+        k = str(key_or_name or "").strip()
+        if not k:
+            return False
+        fav_list = getattr(self, "_favorite_pipelines", []) or []
+        pipes_data = getattr(self, "_pipelines_data", None)
+        if isinstance(pipes_data, dict):
+            for p in pipes_data.get("pipelines", []):
+                if str(p.get("pipeline_id")) == k or str(p.get("name") or "").strip().lower() == k.lower():
+                    return generate_pipelines_report.is_pipeline_favorite(
+                        p.get("pipeline_id"), p.get("name"), fav_list
+                    )
+        return generate_pipelines_report.is_pipeline_favorite(k, k, fav_list)
+
+    @Slot(str, bool, result=bool)
+    def setPipelineFavorite(self, key_or_name, is_fav):
+        import generate_pipelines_report
+        k = str(key_or_name or "").strip()
+        if not k:
+            return False
+        if not hasattr(self, "_favorite_pipelines") or not isinstance(self._favorite_pipelines, list):
+            self._favorite_pipelines = []
+
+        matched_pid = None
+        matched_name = None
+        pipes_data = getattr(self, "_pipelines_data", None)
+        if isinstance(pipes_data, dict):
+            for p in pipes_data.get("pipelines", []):
+                pid_val = p.get("pipeline_id")
+                pname_val = str(p.get("name") or "").strip()
+                if (pid_val and str(pid_val) == k) or (pname_val and pname_val.lower() == k.lower()):
+                    matched_pid = pid_val
+                    matched_name = pname_val
+                    break
+
+        remove_tokens = {k.lower(), f"id:{k.lower()}", f"name:{k.lower()}"}
+        if matched_pid:
+            remove_tokens.add(str(matched_pid).lower())
+            remove_tokens.add(f"id:{str(matched_pid).lower()}")
+        if matched_name:
+            remove_tokens.add(matched_name.lower())
+            remove_tokens.add(f"name:{matched_name.lower()}")
+
+        self._favorite_pipelines = [
+            x for x in self._favorite_pipelines if str(x).strip().lower() not in remove_tokens
+        ]
+        if is_fav:
+            canonical = matched_name or (str(matched_pid) if matched_pid else k)
+            if canonical not in self._favorite_pipelines:
+                self._favorite_pipelines.append(canonical)
+            if matched_pid and str(matched_pid) not in self._favorite_pipelines:
+                self._favorite_pipelines.append(str(matched_pid))
+
+        self._persist_favorite_pipelines()
+        self._apply_favorite_pipelines_in_memory()
+        self.favoritePipelinesChanged.emit()
+        self.pipelinesDataChanged.emit()
+        self.settingsChanged.emit()
+        return bool(is_fav)
+
+    @Slot(str, str, result=bool)
+    @Slot(str, result=bool)
+    def toggleFavoritePipeline(self, key_or_name, pipeline_name=""):
+        cur = self.isPipelineFavorite(key_or_name) or (
+            bool(pipeline_name) and self.isPipelineFavorite(pipeline_name)
+        )
+        return self.setPipelineFavorite(key_or_name or pipeline_name, not cur)
+
+    @Slot(str, str, result=bool)
+    @Slot(str, result=bool)
+    def toggle_favorite_pipeline(self, key_or_name, pipeline_name=""):
+        return self.toggleFavoritePipeline(key_or_name, pipeline_name)
+
+    @Slot(int, str, result=str)
+    @Slot(int, result=str)
+    def get_pipeline_tfs_url(self, pipeline_id, fallback_url=""):
+        import generate_pipelines_report
+        fb = str(fallback_url or "").strip()
+        if fb and fb.startswith("http") and "/_apis/" not in fb:
+            return fb
+        base_url = generate_pipelines_report._resolve_tfs_project_base_url(
+            cache_db=getattr(self, "_cache_db", None),
+            project_id=devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", ""),
+        )
+        return generate_pipelines_report._build_pipeline_web_url(
+            pipeline_id, raw_url=fb, project_base_url=base_url
+        )
+
+    @Slot(int, str)
+    @Slot(int)
+    def open_pipeline_in_tfs(self, pipeline_id, fallback_url=""):
+        url = self.get_pipeline_tfs_url(pipeline_id, fallback_url)
+        if url:
+            self.open_url(url)
+
+    @Slot(int, str, result=str)
+    @Slot(int, result=str)
+    def get_build_tfs_url(self, build_id, fallback_url=""):
+        import generate_pipelines_report
+        fb = str(fallback_url or "").strip()
+        if fb and fb.startswith("http") and "/_apis/" not in fb:
+            return fb
+        base_url = generate_pipelines_report._resolve_tfs_project_base_url(
+            cache_db=getattr(self, "_cache_db", None),
+            project_id=devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", ""),
+        )
+        return generate_pipelines_report._build_job_web_url(
+            build_id, raw_url=fb, project_base_url=base_url
+        )
+
+    @Slot(int, str)
+    @Slot(int)
+    def open_build_in_tfs(self, build_id, fallback_url=""):
+        url = self.get_build_tfs_url(build_id, fallback_url)
+        if url:
+            self.open_url(url)
 
     @Property(str, notify=reportsDirChanged)
     def reportsDir(self):
@@ -2460,7 +2687,10 @@ class DevOpsBackend(QObject):
         pipelines_data = {}
         try:
             import generate_pipelines_report
-            pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+            pipelines_data = generate_pipelines_report.analyze_pipelines_health(
+                self._cache_db,
+                favorite_pipelines=getattr(self, "_favorite_pipelines", None),
+            )
         except Exception as pe:
             logger.debug(f"Could not compute pipelines health data: {pe}")
             pipelines_data = {
@@ -2956,6 +3186,48 @@ class DevOpsBackend(QObject):
         self._run_worker(_work, "Syncing pull requests...")
 
     @Slot()
+    def sync_pipelines_async(self):
+        """Directly synchronizes build pipeline definitions, recent build runs, and failure timelines with TFS."""
+        if self._is_busy:
+            return
+
+        def _work(worker):
+            worker.log_message.emit("Connecting to TFS API for Build Pipelines synchronization...")
+            azHandler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+            if not azHandler:
+                raise RuntimeError("Failed to create Azure/TFS client. Check .env variables or Settings.")
+
+            project_id = devops_helper.AZURE_PROJECT_ID or getattr(self, "_project_id", "") or "default"
+            worker.log_message.emit(f"Syncing build pipelines and recent executions for project '{project_id}'...")
+
+            def _prog(msg, cur=0, tot=0):
+                worker.log_message.emit(msg)
+                if tot > 0:
+                    worker.report_progress(int((cur / tot) * 100), msg)
+
+            if hasattr(azHandler, "sync_pipelines_and_builds"):
+                summary = azHandler.sync_pipelines_and_builds(
+                    project_id,
+                    cache_db=self._cache_db,
+                    progress_callback=_prog,
+                )
+            else:
+                pipes = azHandler.GetTFSPipelines(project_id)
+                if pipes and self._cache_db:
+                    self._cache_db.save_pipelines(project_id, pipes)
+                summary = {"pipelines": pipes or [], "builds": [], "failed_builds": 0}
+
+            p_cnt = len(summary.get("pipelines", []))
+            b_cnt = len(summary.get("builds", []))
+            f_cnt = summary.get("failed_builds", 0)
+            worker.log_message.emit(
+                f"Pipeline sync complete: {p_cnt} pipelines, {b_cnt} build runs ({f_cnt} problem builds analyzed)."
+            )
+            return summary
+
+        self._run_worker(_work, "Syncing build pipelines...")
+
+    @Slot()
     def sync_all_async(self):
         """Triggers full sync of repos, work items, and pull requests with live progress reporting."""
         if self._is_busy:
@@ -3112,7 +3384,10 @@ class DevOpsBackend(QObject):
             # 3. Jenkins Build Pipelines Interactive Data
             try:
                 import generate_pipelines_report
-                self._pipelines_data = generate_pipelines_report.analyze_pipelines_health(self._cache_db)
+                self._pipelines_data = generate_pipelines_report.analyze_pipelines_health(
+                    self._cache_db,
+                    favorite_pipelines=getattr(self, "_favorite_pipelines", None),
+                )
                 pipe_sum = self._pipelines_data.get("summary", {})
                 self._stats["pipelines_count"] = pipe_sum.get("total_pipelines", 0)
                 self._stats["pipelines_healthy_count"] = pipe_sum.get("healthy_count", 0)
@@ -8950,6 +9225,50 @@ class DevOpsBackend(QObject):
         _save_user_settings(cfg)
         self.migrationSettingsChanged.emit()
 
+    @Property(int, notify=migrationSettingsChanged)
+    def backupGitTimeoutMinutes(self) -> int:
+        """
+        Returns the configured per-step Git timeout in minutes for repository backup/sync.
+        `0` means unlimited (no timeout). Defaults to `60` minutes.
+        """
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        raw_val = mig.get("git_timeout_minutes")
+        if raw_val is None and getattr(self, "_cache_db", None):
+            try:
+                raw_val = self._cache_db.get_config("BACKUP_GIT_TIMEOUT_MINUTES")
+            except Exception:
+                raw_val = None
+        if raw_val is None:
+            return 60
+        try:
+            val = int(raw_val)
+            return max(0, val)
+        except (ValueError, TypeError):
+            return 60
+
+    @backupGitTimeoutMinutes.setter
+    def backupGitTimeoutMinutes(self, value: int):
+        self.setBackupGitTimeoutMinutes(value)
+
+    @Slot(int)
+    def setBackupGitTimeoutMinutes(self, minutes: int):
+        try:
+            val = max(0, int(minutes))
+        except (ValueError, TypeError):
+            val = 60
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["git_timeout_minutes"] = val
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        if getattr(self, "_cache_db", None):
+            try:
+                self._cache_db.set_config("BACKUP_GIT_TIMEOUT_MINUTES", str(val))
+            except Exception:
+                pass
+        self.migrationSettingsChanged.emit()
+
     @Slot(result="QVariantList")
     def getSubmoduleAuditList(self) -> list:
         """Returns cached `.gitmodules` audit entries from SQLite."""
@@ -9059,6 +9378,48 @@ class DevOpsBackend(QObject):
 
         return self._run_worker(_task, "Converting submodule URLs to relative paths...", on_success=_on_done)
 
+    def _resolve_repo_dict_for_backup(self, repo_id_or_name: str, db=None, handler=None, proj: str = "") -> dict:
+        """Resolves a repository dictionary by ID or name from SQLite cache or TFS handler."""
+        key = str(repo_id_or_name or "").strip()
+        if not key:
+            return {}
+        key_lower = key.lower()
+        target_db = db or self._cache_db
+        if target_db:
+            try:
+                with target_db._connection() as conn:
+                    rows = conn.execute(
+                        "SELECT id, name, default_branch, web_url, last_push_id, is_disabled, raw_json FROM repositories"
+                    ).fetchall()
+                    for r in rows:
+                        if str(r["id"]).lower() == key_lower or str(r["name"] or "").lower() == key_lower:
+                            raw_d = {}
+                            if r["raw_json"]:
+                                try:
+                                    raw_d = json.loads(r["raw_json"])
+                                except Exception:
+                                    raw_d = {}
+                            return {
+                                "id": r["id"],
+                                "name": r["name"],
+                                "defaultBranch": r["default_branch"],
+                                "webUrl": r["web_url"] or raw_d.get("remoteUrl") or raw_d.get("webUrl") or "",
+                                "remoteUrl": raw_d.get("remoteUrl") or r["web_url"] or "",
+                                "last_push_id": r["last_push_id"],
+                                "isDisabled": bool(r["is_disabled"]),
+                            }
+            except Exception as e:
+                logger.warning("Could not lookup repo '%s' in cache DB: %s", key, e)
+
+        if handler and proj:
+            try:
+                for r in handler.get_repositories(proj) or []:
+                    if str(r.get("id") or "").lower() == key_lower or str(r.get("name") or "").lower() == key_lower:
+                        return dict(r)
+            except Exception:
+                pass
+        return {"id": key, "name": key}
+
     @Slot(str, str, bool)
     @Slot(str, str)
     @Slot(str)
@@ -9074,6 +9435,8 @@ class DevOpsBackend(QObject):
         handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
         pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
         db = self._cache_db
+        timeout_min = self.backupGitTimeoutMinutes
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
 
         def _task(progress_callback=None, cancel_token=None):
             mgr = LocalBackupManager(
@@ -9083,6 +9446,7 @@ class DevOpsBackend(QObject):
                 project_id=proj,
                 pat=pat,
                 cache_db=db,
+                git_timeout_seconds=timeout_sec,
             )
             return mgr.backup_all_repositories(
                 force=bool(force),
@@ -9095,6 +9459,129 @@ class DevOpsBackend(QObject):
                 self.repositoryBackupCompleted.emit(res)
 
         return self._run_worker(_task, f"Backing up repositories ({resolved_mode})...", on_success=_on_done)
+
+    @Slot(str, bool)
+    @Slot(str)
+    def backupSingleRepositoryAsync(self, repo_id_or_name: str, force: bool = True):
+        """
+        Runs Path 1 local backup (`worktree`, `mirror`, or `both`) for a single repository
+        directly from the Repository Backup & Standby Status list.
+        """
+        from azure.migration_service import LocalBackupManager
+        clean_target = str(repo_id_or_name or "").strip()
+        if not clean_target:
+            return
+        resolved_dir = self.backupTargetDir
+        resolved_mode = self.backupMode
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+        db = self._cache_db
+        timeout_min = self.backupGitTimeoutMinutes
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
+        def _task(progress_callback=None, cancel_token=None):
+            repo_dict = self._resolve_repo_dict_for_backup(clean_target, db=db, handler=handler, proj=proj)
+            r_name = repo_dict.get("name") or clean_target
+            if hasattr(progress_callback, "report_progress"):
+                progress_callback.report_progress(15, f"Backing up {r_name} [{resolved_mode}]...")
+            elif callable(progress_callback):
+                try:
+                    progress_callback(15, f"Backing up {r_name} [{resolved_mode}]...")
+                except Exception:
+                    pass
+            mgr = LocalBackupManager(
+                target_dir=resolved_dir,
+                mode=resolved_mode,
+                info_handler=handler,
+                project_id=proj,
+                pat=pat,
+                cache_db=db,
+                git_timeout_seconds=timeout_sec,
+            )
+            single_res = mgr.backup_single_repository(repo_dict, force=bool(force))
+            ok_cnt = 1 if single_res.get("status") == "OK" else 0
+            warn_cnt = 1 if single_res.get("status") == "SUBMODULE_WARN" else 0
+            fail_cnt = 1 if single_res.get("status") not in ("OK", "SUBMODULE_WARN") else 0
+            return {
+                "project_id": proj,
+                "backup_mode": resolved_mode,
+                "target_dir": resolved_dir,
+                "single_repo": r_name,
+                "total_repositories": 1,
+                "ok_count": ok_cnt,
+                "submodule_warning_count": warn_cnt,
+                "failed_count": fail_cnt,
+                "repositories": [single_res],
+            }
+
+        def _on_done(res):
+            self.migrationSettingsChanged.emit()
+            if isinstance(res, dict):
+                self.repositoryBackupCompleted.emit(res)
+
+        return self._run_worker(
+            _task,
+            f"Syncing repository '{clean_target}' ({resolved_mode})...",
+            on_success=_on_done,
+        )
+
+    @Slot(bool)
+    @Slot()
+    def retryFailedBackupsAsync(self, force: bool = True):
+        """
+        Re-runs Path 1 local backup only for repositories whose status is not 'OK'
+        (e.g. 'FAILED', 'SUBMODULE_WARN', or 'PENDING').
+        """
+        from azure.migration_service import LocalBackupManager
+        resolved_dir = self.backupTargetDir
+        resolved_mode = self.backupMode
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+        db = self._cache_db
+        timeout_min = self.backupGitTimeoutMinutes
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
+        status_entries = self.getMigrationStatusList()
+        non_ok_ids = {
+            str(e.get("repo_id") or e.get("repo_name"))
+            for e in status_entries
+            if e.get("local_status") != "OK"
+        }
+
+        def _task(progress_callback=None, cancel_token=None):
+            target_repos = [
+                self._resolve_repo_dict_for_backup(rid, db=db, handler=handler, proj=proj)
+                for rid in sorted(non_ok_ids)
+                if rid
+            ]
+            mgr = LocalBackupManager(
+                target_dir=resolved_dir,
+                mode=resolved_mode,
+                info_handler=handler,
+                project_id=proj,
+                pat=pat,
+                cache_db=db,
+                git_timeout_seconds=timeout_sec,
+            )
+            return mgr.backup_all_repositories(
+                repos=target_repos if target_repos else None,
+                force=bool(force),
+                progress_callback=progress_callback,
+                cancel_token=cancel_token,
+            )
+
+        def _on_done(res):
+            self.migrationSettingsChanged.emit()
+            if isinstance(res, dict):
+                self.repositoryBackupCompleted.emit(res)
+
+        return self._run_worker(
+            _task,
+            f"Retrying failed/pending repository backups ({len(non_ok_ids)})...",
+            on_success=_on_done,
+        )
 
     @Property(str, notify=migrationSettingsChanged)
     def forgejoUrl(self) -> str:
@@ -9217,6 +9704,9 @@ class DevOpsBackend(QObject):
         tfs_pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
         db = self._cache_db
 
+        timeout_min = self.backupGitTimeoutMinutes
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
         def _task(progress_callback=None, cancel_token=None):
             fg_client = ForgejoClient(url=resolved_url, token=resolved_token)
             sync_mgr = ForgejoStandbySyncManager(
@@ -9228,6 +9718,7 @@ class DevOpsBackend(QObject):
                 project_id=proj,
                 tfs_pat=tfs_pat,
                 cache_db=db,
+                git_timeout_seconds=timeout_sec,
             )
             return sync_mgr.sync_all_repositories(
                 force=bool(force),
@@ -9240,6 +9731,85 @@ class DevOpsBackend(QObject):
                 self.forgejoSyncCompleted.emit(res)
 
         return self._run_worker(_task, f"Syncing repositories to Forgejo ({resolved_org})...", on_success=_on_done)
+
+    @Slot(str, bool)
+    @Slot(str)
+    def syncSingleRepositoryForgejoAsync(self, repo_id_or_name: str, force: bool = True):
+        """
+        Synchronizes a single repository to the configured Forgejo instance directly from the Repository Backup list.
+        """
+        from azure.migration_service import ForgejoClient, ForgejoStandbySyncManager, LocalBackupManager
+        clean_target = str(repo_id_or_name or "").strip()
+        if not clean_target:
+            return
+        resolved_url = self.forgejoUrl
+        resolved_token = self.forgejoToken
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        resolved_org = self.forgejoOrg or proj or "TFS-Standby"
+        resolved_strat = self.forgejoStrategy
+        backup_dir = self.backupTargetDir
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        tfs_pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+        db = self._cache_db
+        timeout_min = self.backupGitTimeoutMinutes
+        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
+        def _task(progress_callback=None, cancel_token=None):
+            repo_dict = self._resolve_repo_dict_for_backup(clean_target, db=db, handler=handler, proj=proj)
+            r_name = repo_dict.get("name") or clean_target
+            if hasattr(progress_callback, "report_progress"):
+                progress_callback.report_progress(20, f"Syncing {r_name} to Forgejo [{resolved_org}]...")
+            fg_client = ForgejoClient(url=resolved_url, token=resolved_token)
+            fg_client.ensure_org(resolved_org)
+            local_backup_mgr = LocalBackupManager(
+                target_dir=backup_dir,
+                mode="mirror",
+                info_handler=handler,
+                project_id=proj,
+                pat=tfs_pat,
+                cache_db=db,
+                git_timeout_seconds=timeout_sec,
+            ) if backup_dir else None
+            sync_mgr = ForgejoStandbySyncManager(
+                forgejo_client=fg_client,
+                org_name=resolved_org,
+                strategy=resolved_strat,
+                backup_dir=backup_dir,
+                info_handler=handler,
+                project_id=proj,
+                tfs_pat=tfs_pat,
+                cache_db=db,
+                git_timeout_seconds=timeout_sec,
+            )
+            single_res = sync_mgr.sync_single_repository(
+                repo_dict,
+                local_backup_mgr=local_backup_mgr,
+                force=bool(force),
+            )
+            ok_cnt = 1 if single_res.get("status") == "OK" else 0
+            fail_cnt = 0 if ok_cnt == 1 else 1
+            return {
+                "project_id": proj,
+                "forgejo_url": resolved_url,
+                "org_name": resolved_org,
+                "strategy": resolved_strat,
+                "single_repo": r_name,
+                "total_repositories": 1,
+                "ok_count": ok_cnt,
+                "failed_count": fail_cnt,
+                "repositories": [single_res],
+            }
+
+        def _on_done(res):
+            self.migrationSettingsChanged.emit()
+            if isinstance(res, dict):
+                self.forgejoSyncCompleted.emit(res)
+
+        return self._run_worker(
+            _task,
+            f"Syncing '{clean_target}' to Forgejo ({resolved_org})...",
+            on_success=_on_done,
+        )
 
     @Slot(result=str)
     def browse_backup_dir(self) -> str:

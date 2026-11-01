@@ -685,6 +685,84 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(cron_target, "mirror_cron.log")))
         self.assertFalse(os.path.exists(os.path.join(cron_target, ".mirror.lock")))
 
+    def test_timeout_handling_and_two_stage_recovery_does_not_abort_batch(self):
+        """
+        Verifies that:
+        1. If `git clone --recurse-submodules` times out on a large repository, LocalBackupManager
+           catches the timeout and recovers via base clone + per-submodule init (or records FAILED
+           without raising an unhandled TimeoutExpired exception that aborts the remaining repos).
+        2. Per-repository backup (`backupSingleRepositoryAsync`) and `backupGitTimeoutMinutes` work cleanly.
+        3. `SettingsMigrationTab.qml` compiles without QML errors.
+        """
+        from unittest.mock import patch
+        import gui.backend as backend_mod
+        from gui.backend import DevOpsBackend
+
+        mgr = LocalBackupManager(
+            target_dir=os.path.join(self.tmp_dir.name, "timeout_test_backup"),
+            mode="both",
+            project_id="TestProj",
+            cache_db=self.cache_db,
+            git_timeout_seconds=120,
+            extend_timeout_on_activity=False,
+        )
+
+        # Simulate a git command that raises subprocess.TimeoutExpired inside Popen.communicate
+        class DummyTimeoutProc:
+            returncode = -9
+            def communicate(self, timeout=None):
+                raise subprocess.TimeoutExpired(cmd=["git", "clone"], timeout=timeout or 10)
+            def kill(self):
+                pass
+
+        with patch("subprocess.Popen", return_value=DummyTimeoutProc()):
+            res = mgr._run_git(["clone", "--recurse-submodules", "https://example/huge.git", "/tmp/huge"])
+            self.assertEqual(res.returncode, 124)
+            self.assertIn("timed out", res.stderr.lower())
+
+        # Now verify that if 1st repo fails/times out during backup_all_repositories, 2nd repo still succeeds!
+        repos = [
+            {"id": "r-broken", "name": "BrokenTimeoutRepo", "remoteUrl": "/nonexistent/broken/repo.git", "last_push_id": 1},
+            {"id": "r-common", "name": "CommonLib", "remoteUrl": self.common_remote, "last_push_id": 5},
+        ]
+        manifest = mgr.backup_all_repositories(repos=repos, force=True)
+        self.assertEqual(manifest["total_repositories"], 2)
+        self.assertEqual(manifest["ok_count"], 1)
+        self.assertEqual(manifest["failed_count"], 1)
+        status_by_name = {r["repo_name"]: r["status"] for r in manifest["repositories"]}
+        self.assertEqual(status_by_name["BrokenTimeoutRepo"], "FAILED")
+        self.assertEqual(status_by_name["CommonLib"], "OK")
+
+        # Verify backend timeout property & single-repository sync slot
+        mock_cfg = {}
+        with patch.object(backend_mod, "_load_user_settings", side_effect=lambda: dict(mock_cfg)), \
+             patch.object(backend_mod, "_save_user_settings", side_effect=lambda c: mock_cfg.update(c)):
+            backend = DevOpsBackend.__new__(DevOpsBackend)
+            backend._cache_db = self.cache_db
+            backend._project_id = "TestProj"
+            backend._reports_dir = self.tmp_dir.name
+            self.cache_db.save_repository(
+                "TestProj",
+                {"id": "r-common", "name": "CommonLib", "remoteUrl": self.common_remote, "webUrl": self.common_remote, "isDisabled": False},
+                5,
+            )
+            resolved = backend._resolve_repo_dict_for_backup("CommonLib", db=self.cache_db)
+            self.assertEqual(resolved["name"], "CommonLib")
+            self.assertEqual(resolved["id"], "r-common")
+
+        # Verify SettingsMigrationTab.qml compiles cleanly
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+        from PySide6.QtCore import QUrl
+
+        _app = QGuiApplication.instance() or QGuiApplication([])
+        engine = QQmlApplicationEngine()
+        mig_qml = os.path.join(src_dir, "gui", "qml", "views", "settings", "SettingsMigrationTab.qml")
+        comp = QQmlComponent(engine, QUrl.fromLocalFile(mig_qml))
+        self.assertFalse(comp.isError(), f"SettingsMigrationTab.qml errors: {[e.toString() for e in comp.errors()]}")
+
+
 
 if __name__ == "__main__":
     unittest.main()

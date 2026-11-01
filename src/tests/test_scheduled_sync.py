@@ -27,7 +27,7 @@ class TestScheduledSync(unittest.TestCase):
         """Test default auto-sync state and property values."""
         self.assertIsInstance(self.backend.autoSyncEnabled, bool)
         self.assertGreaterEqual(self.backend.autoSyncIntervalMinutes, 1)
-        self.assertIn(self.backend.autoSyncScope, ["all", "work_items", "pull_requests"])
+        self.assertIn(self.backend.autoSyncScope, ["all", "work_items", "pull_requests", "pipelines"])
         self.assertIsInstance(self.backend.nextAutoSyncSeconds, int)
         self.assertIsInstance(self.backend.nextAutoSyncText, str)
         self.assertIsInstance(self.backend.autoSyncStatusText, str)
@@ -63,12 +63,27 @@ class TestScheduledSync(unittest.TestCase):
         self.backend.setAutoSyncScope("pull_requests")
         self.assertEqual(self.backend.autoSyncScope, "pull_requests")
 
+        self.backend.setAutoSyncScope("pipelines")
+        self.assertEqual(self.backend.autoSyncScope, "pipelines")
+
         self.backend.setAutoSyncScope("all")
         self.assertEqual(self.backend.autoSyncScope, "all")
 
         # Invalid scope fallback
         self.backend.setAutoSyncScope("unknown_scope")
         self.assertEqual(self.backend.autoSyncScope, "all")
+
+    def test_timer_tick_triggers_pipelines_scope(self):
+        """Test timer tick triggers sync_pipelines_async when autoSyncScope is 'pipelines'."""
+        self.backend.setAutoSyncEnabled(True)
+        self.backend.setAutoSyncScope("pipelines")
+        self.backend.setAutoSyncInterval(5)
+        self.backend._seconds_until_next_sync = 1
+
+        with patch.object(self.backend, "sync_pipelines_async") as mock_pipe_sync:
+            self.backend._on_auto_sync_timer_tick()
+            mock_pipe_sync.assert_called_once()
+            self.assertEqual(self.backend.nextAutoSyncSeconds, 300)
 
     def test_timer_tick_countdown_and_trigger(self):
         """Test timer tick decrementing countdown and triggering sync at 0."""
