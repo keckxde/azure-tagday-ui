@@ -1092,6 +1092,181 @@ def generate_pipelines_report(db_path: Optional[str] = None, md_path: Optional[s
     )
 
 
+def check_submodules(
+    branch_name: Optional[str] = None,
+    cache_db: Optional[AzureDevOpsCache] = None,
+    info_handler: Optional[AzureInfoHandler] = None,
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Audits `.gitmodules` across all project repositories, classifies each submodule URL
+    (`RELATIVE_OK`, `ABSOLUTE_SAME_PROJECT`, `ABSOLUTE_CROSS_PROJECT`, `EXTERNAL_OR_MISSING`),
+    prints a summary report, and stores results in SQLite `submodule_audit`.
+    """
+    from azure.migration_service import SubmoduleAuditor
+    if cache_db is None:
+        _, cache_db = _getDBCacheHandler()
+    if info_handler is None:
+        info_handler = _getHandler()
+    proj = project_id or AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "")
+
+    auditor = SubmoduleAuditor(info_handler=info_handler, project_id=proj, cache_db=cache_db)
+    report = auditor.audit_project_submodules(branch_name=branch_name)
+
+    print(f"\n=== Submodule URL Audit for Project '{proj}' ===")
+    print(f"Repositories scanned          : {report['total_repos_scanned']}")
+    print(f"Repositories with .gitmodules : {report['repos_with_submodules']}")
+    print(f"Total submodules found        : {report['total_submodules']}")
+    print(f"  - Relative URLs (OK)        : {report['relative_ok_count']}")
+    print(f"  - Hardcoded TFS URLs (Fix)  : {report['needs_conversion_count']}")
+    print(f"  - External / Missing        : {report['external_or_missing_count']}")
+
+    if report["repos_needing_conversion"] > 0:
+        print(f"\nRepositories with non-relative submodule URLs ({report['repos_needing_conversion']}):")
+        for r_name, rep in report["repositories"].items():
+            if not rep.get("needs_conversion"):
+                continue
+            print(f"\n  [{r_name}] (branch: {rep.get('branch')})")
+            for ch in rep.get("changes", []):
+                print(f"    * {ch['submodule_path']}: {ch['old_url']}  -->  {ch['new_url']} ({ch['classification']})")
+        print("\nTip: Run with --fix-submodules to interactively review and convert these to relative URLs.")
+    return report
+
+
+def fix_submodules(
+    branch_name: Optional[str] = None,
+    dry_run: bool = False,
+    auto_confirm: bool = False,
+    repo_names: Optional[List[str]] = None,
+    cache_db: Optional[AzureDevOpsCache] = None,
+    info_handler: Optional[AzureInfoHandler] = None,
+    project_id: Optional[str] = None,
+    prompt_callback: Optional[ Any ] = None,
+) -> Dict[str, Any]:
+    """
+    Audits `.gitmodules` and converts hardcoded TFS submodule URLs to relative paths (`../<RepoName>`),
+    asking the user for confirmation per repository unless `auto_confirm=True`.
+    """
+    from azure.migration_service import SubmoduleAuditor
+    if cache_db is None:
+        _, cache_db = _getDBCacheHandler()
+    if info_handler is None:
+        info_handler = _getHandler()
+    proj = project_id or AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "")
+
+    auditor = SubmoduleAuditor(info_handler=info_handler, project_id=proj, cache_db=cache_db)
+    audit_report = auditor.audit_project_submodules(branch_name=branch_name)
+
+    if prompt_callback is None and not auto_confirm:
+        def _cli_prompt(r_name: str, diff_text: str, changes: List[Dict[str, Any]]) -> bool:
+            print(f"\n--- Proposed .gitmodules conversion for repository '{r_name}' ---")
+            print(diff_text.rstrip())
+            try:
+                ans = input(f"Convert {len(changes)} submodule URL(s) in '{r_name}' to relative paths? [y/N]: ").strip().lower()
+                return ans in ("y", "yes")
+            except EOFError:
+                return False
+        prompt_callback = _cli_prompt
+
+    res = auditor.convert_submodules_to_relative_in_tfs(
+        audit_report=audit_report,
+        repo_names=repo_names,
+        branch_name=branch_name,
+        dry_run=dry_run,
+        auto_confirm=auto_confirm,
+        prompt_callback=prompt_callback,
+    )
+    print(
+        f"\nSubmodule conversion summary: {len(res['updated_repos'])} updated, "
+        f"{len(res['skipped_repos'])} skipped, {len(res['failed_repos'])} failed."
+    )
+    return res
+
+
+def backup_repositories(
+    target_dir: str,
+    backup_mode: str = "both",
+    force: bool = False,
+    cache_db: Optional[AzureDevOpsCache] = None,
+    info_handler: Optional[AzureInfoHandler] = None,
+    project_id: Optional[str] = None,
+    pat: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Path 1 Entrypoint: Clones or incrementally updates all active repositories to `target_dir`
+    using the selected `backup_mode` (`'worktree'`, `'mirror'`, or `'both'`), snapshots the
+    SQLite database, and writes `backup_manifest.json`.
+    """
+    from azure.migration_service import LocalBackupManager
+    if cache_db is None:
+        _, cache_db = _getDBCacheHandler()
+    if info_handler is None:
+        info_handler = _getHandler()
+    proj = project_id or AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "")
+    token = pat if pat is not None else (AZURE_PERSONAL_ACCESS_TOKEN or os.getenv("AZURE_PERSONAL_ACCESS_TOKEN", ""))
+
+    mgr = LocalBackupManager(
+        target_dir=target_dir,
+        mode=backup_mode,
+        info_handler=info_handler,
+        project_id=proj,
+        pat=token,
+        cache_db=cache_db,
+    )
+    manifest = mgr.backup_all_repositories(force=force)
+    print(
+        f"\nLocal Backup Complete [{manifest['backup_mode']}] -> {manifest['target_dir']}\n"
+        f"  Total: {manifest['total_repositories']} | OK: {manifest['ok_count']} "
+        f"(Skipped up-to-date: {manifest['skipped_up_to_date_count']}) | "
+        f"Submodule Warnings: {manifest['submodule_warning_count']} | Failed: {manifest['failed_count']}"
+    )
+    return manifest
+
+
+def sync_forgejo_repositories(
+    forgejo_url: str,
+    forgejo_token: str = "",
+    forgejo_org: str = "",
+    strategy: str = "push",
+    backup_dir: Optional[str] = None,
+    force: bool = False,
+    cache_db: Optional[AzureDevOpsCache] = None,
+    info_handler: Optional[AzureInfoHandler] = None,
+    project_id: Optional[str] = None,
+    tfs_pat: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Path 2 Entrypoint: Synchronizes all active repositories and submodules to a local
+    Forgejo instance (`strategy='push'` or `'pull_mirror'`).
+    """
+    from azure.migration_service import ForgejoClient, ForgejoStandbySyncManager
+    if cache_db is None:
+        _, cache_db = _getDBCacheHandler()
+    if info_handler is None:
+        info_handler = _getHandler()
+    proj = project_id or AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "")
+    token_tfs = tfs_pat if tfs_pat is not None else (AZURE_PERSONAL_ACCESS_TOKEN or os.getenv("AZURE_PERSONAL_ACCESS_TOKEN", ""))
+    target_backup_dir = backup_dir or os.path.join(BASE_FOLDER, "backup")
+    org = forgejo_org or proj or "TFS-Standby"
+
+    fg_client = ForgejoClient(url=forgejo_url, token=forgejo_token)
+    sync_mgr = ForgejoStandbySyncManager(
+        forgejo_client=fg_client,
+        org_name=org,
+        strategy=strategy,
+        backup_dir=target_backup_dir,
+        info_handler=info_handler,
+        project_id=proj,
+        tfs_pat=token_tfs,
+        cache_db=cache_db,
+    )
+    res = sync_mgr.sync_all_repositories(force=force)
+    print(
+        f"\nForgejo Standby Sync Complete [{res['strategy']}] -> {res['forgejo_url']}/{res['org_name']}\n"
+        f"  Total: {res['total_repositories']} | OK: {res['ok_count']} | Failed: {res['failed_count']}"
+    )
+    return res
+
 
 def main_cli():
     """CLI entry point for devops-helper / tagday-cli command."""
@@ -1102,7 +1277,7 @@ def main_cli():
     parser.add_argument("--load-env", action="store_true", help="Explicitly load .env from repository root or current directory.")
     parser.add_argument("--reports-dir", type=str, default=None, help="Target directory for reading baseline reports and writing generated reports (defaults to current directory if not set).")
     parser.add_argument("--sync", action="store_true", help="Sync pipelines, repos, and tasks from TFS to local SQLite cache.")
-    parser.add_argument("--force", action="store_true", help="Force sync, bypassing file recency checks (use with --sync).")
+    parser.add_argument("--force", action="store_true", help="Force sync, bypassing file recency checks (use with --sync or --backup-repos).")
     parser.add_argument("--templates", action="store_true", help="Render Markdown pages from cached repository data.")
     parser.add_argument("--export-prs", type=str, metavar="OUTPUT_BASE", help="Export PRs per repo and branch to OUTPUT_BASE.xlsx and OUTPUT_BASE.md.")
     parser.add_argument("--revision", action="store_true", help="Generate and update the REVISION.md release history document.")
@@ -1112,6 +1287,19 @@ def main_cli():
     parser.add_argument("--report-pipelines", action="store_true", help="Generate Jenkins-style Build Pipelines Health & Culprit Markdown and CSV reports.")
     parser.add_argument("--report-tagday", action="store_true", help="Generate enhanced Tag Day report relative to reference tag baseline.")
     parser.add_argument("--untagged-repos", action="store_true", help="List all repositories where the latest pull request is either not closed or untagged.")
+    parser.add_argument("--check-submodules", action="store_true", help="Audit .gitmodules across all repositories and identify non-relative TFS URLs.")
+    parser.add_argument("--fix-submodules", action="store_true", help="Interactively convert hardcoded TFS submodule URLs in .gitmodules to relative paths.")
+    parser.add_argument("--submodule-branch", type=str, default=None, help="Target branch for --check-submodules or --fix-submodules (defaults to each repo's default branch).")
+    parser.add_argument("--dry-run", action="store_true", help="Preview .gitmodules changes without pushing commits to TFS (use with --fix-submodules).")
+    parser.add_argument("--yes", action="store_true", help="Automatically confirm .gitmodules relative-path conversions without prompting.")
+    parser.add_argument("--backup-repos", action="store_true", help="Path 1: Clone or incrementally update all project repositories to a local backup directory.")
+    parser.add_argument("--target-dir", type=str, default=None, help="Target local directory for --backup-repos (defaults to <reports_dir>/backup).")
+    parser.add_argument("--backup-mode", type=str, choices=["worktree", "mirror", "both"], default=None, help="Backup format mode for --backup-repos: 'worktree', 'mirror', or 'both' (default: 'both').")
+    parser.add_argument("--sync-forgejo", action="store_true", help="Path 2: Synchronize repositories to a local Forgejo standby instance.")
+    parser.add_argument("--forgejo-url", type=str, default=None, help="Base URL of the local Forgejo instance (e.g. http://localhost:3000).")
+    parser.add_argument("--forgejo-token", type=str, default=None, help="Forgejo Personal Access Token for API & Git push authentication.")
+    parser.add_argument("--forgejo-org", type=str, default=None, help="Target Forgejo Organization name (defaults to TFS project name).")
+    parser.add_argument("--forgejo-strategy", type=str, choices=["push", "pull_mirror"], default="push", help="Forgejo sync strategy: 'push' (from local mirror) or 'pull_mirror' (Forgejo pulls from TFS).")
 
     args = parser.parse_args()
 
@@ -1124,7 +1312,13 @@ def main_cli():
         utils.load_env_file(args.env_file)
 
     # If no arguments are provided, print help and exit
-    if not any(vars(args).values()):
+    action_flags = (
+        args.check_artifacts, args.report_artifacts, args.check_pipelines,
+        args.report_pipelines, args.report_tagday, args.sync, args.export_prs,
+        args.revision, args.untagged_repos, args.check_submodules,
+        args.fix_submodules, args.backup_repos, args.sync_forgejo,
+    )
+    if not any(action_flags):
         parser.print_help()
         sys.exit(0)
 
@@ -1154,6 +1348,36 @@ def main_cli():
 
     if args.untagged_repos:
         list_untagged_repos()
+
+    if args.check_submodules:
+        check_submodules(branch_name=args.submodule_branch)
+
+    if args.fix_submodules:
+        fix_submodules(
+            branch_name=args.submodule_branch,
+            dry_run=args.dry_run,
+            auto_confirm=args.yes,
+        )
+
+    if args.backup_repos:
+        target_backup_dir = args.target_dir or os.path.join(BASE_FOLDER, "backup")
+        mode = args.backup_mode or "both"
+        backup_repositories(target_dir=target_backup_dir, backup_mode=mode, force=args.force)
+
+    if args.sync_forgejo:
+        fg_url = args.forgejo_url or os.getenv("FORGEJO_URL", "")
+        fg_token = args.forgejo_token or os.getenv("FORGEJO_TOKEN", "")
+        fg_org = args.forgejo_org or os.getenv("FORGEJO_ORG", "") or AZURE_PROJECT_ID
+        target_backup_dir = args.target_dir or os.path.join(BASE_FOLDER, "backup")
+        sync_forgejo_repositories(
+            forgejo_url=fg_url,
+            forgejo_token=fg_token,
+            forgejo_org=fg_org,
+            strategy=args.forgejo_strategy or "push",
+            backup_dir=target_backup_dir,
+            force=args.force,
+        )
+
 
 
 if __name__ == "__main__":

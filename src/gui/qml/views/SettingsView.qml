@@ -290,6 +290,14 @@ Item {
                                     badgeColor: "#f0883e"
                                 },
                                 {
+                                    id: "migration",
+                                    icon: "🛡️",
+                                    label: "Backup & Migration",
+                                    desc: "Local Clones & Forgejo Standby",
+                                    badge: backend ? backend.backupMode.toUpperCase() : "BOTH",
+                                    badgeColor: "#3fb950"
+                                },
+                                {
                                     id: "general",
                                     icon: "⚙️",
                                     label: "General & Tools",
@@ -460,6 +468,7 @@ Item {
                                 if (root.activeTab === "categories") return "🏷️ Repository Categories & Classification Rules";
                                 if (root.activeTab === "aliases") return "👤 User Aliases & Identity Mapping";
                                 if (root.activeTab === "motivation") return "🏆 Team Motivation Point System & Gamification";
+                                if (root.activeTab === "migration") return "🛡️ Repository Backup & Forgejo Standby Migration";
                                 if (root.activeTab === "general") return "⚙️ General Preferences & Application Tools";
                                 return "Project Settings";
                             }
@@ -477,6 +486,7 @@ Item {
                                 if (root.activeTab === "categories") return "Define custom repository categories, color branding, prefix-matching classification rules, and explicit overrides.";
                                 if (root.activeTab === "aliases") return "Map Git committer identities to Azure DevOps TFS accounts and exclude automated system bots from leaderboards.";
                                 if (root.activeTab === "motivation") return "Customize gamification point weights, activity rewards, penalties, and preset scoring profiles for team members.";
+                                if (root.activeTab === "migration") return "Audit .gitmodules relative paths, clone local backups (worktree / bare mirror / both), and sync with a local Forgejo standby instance.";
                                 if (root.activeTab === "general") return "UI display scaling, database backup & export, diagnostic logs, and application metadata.";
                                 return "Configure your project environment and preferences.";
                             }
@@ -557,7 +567,8 @@ Item {
                                 if (root.activeTab === "categories") return 3;
                                 if (root.activeTab === "aliases") return 4;
                                 if (root.activeTab === "motivation") return 5;
-                                if (root.activeTab === "general") return 6;
+                                if (root.activeTab === "migration") return 6;
+                                if (root.activeTab === "general") return 7;
                                 return 0;
                             }
 
@@ -621,7 +632,17 @@ Item {
                                 onLoaded: _loaded = true
                             }
 
-                            // Tab 6: General & Tools
+                            // Tab 6: Backup & Migration
+                            Loader {
+                                Layout.fillWidth: true
+                                active: root.activeTab === "migration" || _loaded
+                                property bool _loaded: false
+                                asynchronous: true
+                                source: "settings/SettingsMigrationTab.qml"
+                                onLoaded: _loaded = true
+                            }
+
+                            // Tab 7: General & Tools
                             Loader {
                                 Layout.fillWidth: true
                                 active: root.activeTab === "general" || _loaded

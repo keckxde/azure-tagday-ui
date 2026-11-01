@@ -88,6 +88,11 @@ class DevOpsBackend(QObject):
     userProfilesChanged = Signal()
     systemUsersChanged = Signal()
     rightSidebarWidthChanged = Signal(int)
+    migrationSettingsChanged = Signal()
+    submoduleAuditCompleted = Signal(dict)
+    submoduleConversionCompleted = Signal(dict)
+    repositoryBackupCompleted = Signal(dict)
+    forgejoSyncCompleted = Signal(dict)
 
     @staticmethod
     def _scale_for_font_mode(mode):
@@ -8888,4 +8893,326 @@ class DevOpsBackend(QObject):
     def globalSearch(self, query: str = "", category_filter: str = "ALL", limit: int = 80) -> dict:
         """CamelCase alias for global_search."""
         return self.global_search(query=query, category_filter=category_filter, limit=limit)
+
+    # -------------------------------------------------------------------------
+    # Milestone 1 & Path 1: Submodule URL Auditor & Local Backup Manager
+    # -------------------------------------------------------------------------
+
+    @Property(str, notify=migrationSettingsChanged)
+    def backupMode(self) -> str:
+        """Returns the configured Path 1 backup format mode ('worktree', 'mirror', or 'both')."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        mode = str(mig.get("backup_mode") or cfg.get("backup_mode") or "both").lower()
+        return mode if mode in ("worktree", "mirror", "both") else "both"
+
+    @backupMode.setter
+    def backupMode(self, value: str):
+        clean_mode = str(value or "both").strip().lower()
+        if clean_mode not in ("worktree", "mirror", "both"):
+            clean_mode = "both"
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["backup_mode"] = clean_mode
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Property(str, notify=migrationSettingsChanged)
+    def backupTargetDir(self) -> str:
+        """Returns the configured local backup target directory for Path 1."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        return str(mig.get("backup_target_dir") or cfg.get("backup_target_dir") or os.path.join(self.reportsDir, "backup"))
+
+    @backupTargetDir.setter
+    def backupTargetDir(self, value: str):
+        clean_dir = str(value or "").strip()
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["backup_target_dir"] = clean_dir
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Slot(result="QVariantList")
+    def getSubmoduleAuditList(self) -> list:
+        """Returns cached `.gitmodules` audit entries from SQLite."""
+        if not self._cache_db or not hasattr(self._cache_db, "get_submodule_audit"):
+            return []
+        try:
+            return self._cache_db.get_submodule_audit()
+        except Exception as e:
+            logger.error("Failed to read submodule audit list: %s", e)
+            return []
+
+    @Slot(result="QVariantList")
+    def getMigrationStatusList(self) -> list:
+        """Returns per-repository backup and migration status entries from SQLite."""
+        if not self._cache_db or not hasattr(self._cache_db, "get_migration_status"):
+            return []
+        try:
+            proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or None
+            return self._cache_db.get_migration_status(project_id=proj)
+        except Exception as e:
+            logger.error("Failed to read migration status list: %s", e)
+            return []
+
+    @Slot(str)
+    @Slot()
+    def checkSubmodulesAsync(self, branch_name: str = ""):
+        """Runs Milestone 1 `.gitmodules` audit across project repositories in a background worker."""
+        from azure.migration_service import SubmoduleAuditor
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        db = self._cache_db
+
+        def _task(progress_callback=None, cancel_token=None):
+            auditor = SubmoduleAuditor(info_handler=handler, project_id=proj, cache_db=db)
+            return auditor.audit_project_submodules(
+                branch_name=branch_name.strip() or None,
+                progress_callback=progress_callback,
+            )
+
+        def _on_done(res):
+            if isinstance(res, dict):
+                self.submoduleAuditCompleted.emit(res)
+
+        return self._run_worker(_task, "Checking repository .gitmodules URLs...", on_success=_on_done)
+
+    @Slot("QVariantList", str, bool)
+    @Slot("QVariantList", str)
+    @Slot("QVariantList")
+    @Slot()
+    def convertSubmodulesToRelativeAsync(self, repo_names=None, branch_name: str = "", dry_run: bool = False):
+        """
+        Converts hardcoded TFS submodule URLs to relative paths (`../<RepoName>`) for the specified
+        repositories (or all repositories needing conversion if `repo_names` is empty) in a background worker.
+        """
+        from azure.migration_service import SubmoduleAuditor
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        db = self._cache_db
+        target_repos = [str(r) for r in (repo_names or []) if r] or None
+
+        def _task(progress_callback=None, cancel_token=None):
+            auditor = SubmoduleAuditor(info_handler=handler, project_id=proj, cache_db=db)
+            report = auditor.audit_project_submodules(
+                branch_name=branch_name.strip() or None,
+                progress_callback=progress_callback,
+            )
+            return auditor.convert_submodules_to_relative_in_tfs(
+                audit_report=report,
+                repo_names=target_repos,
+                branch_name=branch_name.strip() or None,
+                dry_run=bool(dry_run),
+                auto_confirm=True,
+            )
+
+        def _on_done(res):
+            if isinstance(res, dict):
+                self.submoduleConversionCompleted.emit(res)
+
+        return self._run_worker(_task, "Converting submodule URLs to relative paths...", on_success=_on_done)
+
+    @Slot(str, str, bool)
+    @Slot(str, str)
+    @Slot(str)
+    @Slot()
+    def backupRepositoriesAsync(self, target_dir: str = "", mode: str = "", force: bool = False):
+        """
+        Runs Path 1 local repository backup (`worktree`, `mirror`, or `both`) in a background worker.
+        """
+        from azure.migration_service import LocalBackupManager
+        resolved_dir = (target_dir or "").strip() or self.backupTargetDir
+        resolved_mode = (mode or "").strip().lower() or self.backupMode
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+        db = self._cache_db
+
+        def _task(progress_callback=None, cancel_token=None):
+            mgr = LocalBackupManager(
+                target_dir=resolved_dir,
+                mode=resolved_mode,
+                info_handler=handler,
+                project_id=proj,
+                pat=pat,
+                cache_db=db,
+            )
+            return mgr.backup_all_repositories(
+                force=bool(force),
+                progress_callback=progress_callback,
+                cancel_token=cancel_token,
+            )
+
+        def _on_done(res):
+            if isinstance(res, dict):
+                self.repositoryBackupCompleted.emit(res)
+
+        return self._run_worker(_task, f"Backing up repositories ({resolved_mode})...", on_success=_on_done)
+
+    @Property(str, notify=migrationSettingsChanged)
+    def forgejoUrl(self) -> str:
+        """Returns the configured local Forgejo server URL for Path 2 standby."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        return str(mig.get("forgejo_url") or cfg.get("forgejo_url") or "")
+
+    @forgejoUrl.setter
+    def forgejoUrl(self, value: str):
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["forgejo_url"] = str(value or "").strip().rstrip("/")
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Property(str, notify=migrationSettingsChanged)
+    def forgejoToken(self) -> str:
+        """Returns the configured Forgejo API token for Path 2 standby."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        return str(mig.get("forgejo_token") or cfg.get("forgejo_token") or "")
+
+    @forgejoToken.setter
+    def forgejoToken(self, value: str):
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["forgejo_token"] = str(value or "").strip()
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Property(str, notify=migrationSettingsChanged)
+    def forgejoOrg(self) -> str:
+        """Returns the target Forgejo Organization name (defaults to selected project)."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        return str(mig.get("forgejo_org") or cfg.get("forgejo_org") or self.selectedProject or "")
+
+    @forgejoOrg.setter
+    def forgejoOrg(self, value: str):
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["forgejo_org"] = str(value or "").strip()
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Property(str, notify=migrationSettingsChanged)
+    def forgejoStrategy(self) -> str:
+        """Returns the configured Forgejo standby strategy ('push' or 'pull_mirror')."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        s = str(mig.get("forgejo_strategy") or "push").strip().lower()
+        return s if s in ("push", "pull_mirror") else "push"
+
+    @forgejoStrategy.setter
+    def forgejoStrategy(self, value: str):
+        clean_s = str(value or "push").strip().lower()
+        if clean_s not in ("push", "pull_mirror"):
+            clean_s = "push"
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["forgejo_strategy"] = clean_s
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Property(bool, notify=migrationSettingsChanged)
+    def autoStandbySync(self) -> bool:
+        """Returns whether incremental local backup / Forgejo sync runs automatically after scheduled sync."""
+        cfg = _load_user_settings()
+        mig = cfg.get("migration") if isinstance(cfg.get("migration"), dict) else {}
+        return bool(mig.get("auto_standby_sync", False))
+
+    @autoStandbySync.setter
+    def autoStandbySync(self, value: bool):
+        cfg = _load_user_settings()
+        mig = dict(cfg.get("migration") or {})
+        mig["auto_standby_sync"] = bool(value)
+        cfg["migration"] = mig
+        _save_user_settings(cfg)
+        self.migrationSettingsChanged.emit()
+
+    @Slot(str, str, result="QVariantMap")
+    @Slot(str, result="QVariantMap")
+    @Slot(result="QVariantMap")
+    def testForgejoConnection(self, url: str = "", token: str = "") -> dict:
+        """Tests connectivity and authentication against the configured Forgejo instance."""
+        from azure.migration_service import ForgejoClient
+        target_url = (url or "").strip() or self.forgejoUrl
+        target_token = (token or "").strip() or self.forgejoToken
+        client = ForgejoClient(url=target_url, token=target_token)
+        return client.test_connection()
+
+    @Slot(str, str, str, str, bool)
+    @Slot(str, str, str, str)
+    @Slot(str, str, str)
+    @Slot()
+    def syncForgejoAsync(
+        self,
+        forgejo_url: str = "",
+        forgejo_token: str = "",
+        forgejo_org: str = "",
+        strategy: str = "",
+        force: bool = False,
+    ):
+        """
+        Runs Path 2 Forgejo standby repository synchronization in a background worker.
+        """
+        from azure.migration_service import ForgejoClient, ForgejoStandbySyncManager
+        resolved_url = (forgejo_url or "").strip() or self.forgejoUrl
+        resolved_token = (forgejo_token or "").strip() or self.forgejoToken
+        proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or ""
+        resolved_org = (forgejo_org or "").strip() or self.forgejoOrg or proj or "TFS-Standby"
+        resolved_strat = (strategy or "").strip().lower() or self.forgejoStrategy
+        backup_dir = self.backupTargetDir
+        handler = getattr(self, "_info_handler", None) or devops_helper._getHandler()
+        tfs_pat = self.tfsToken or devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+        db = self._cache_db
+
+        def _task(progress_callback=None, cancel_token=None):
+            fg_client = ForgejoClient(url=resolved_url, token=resolved_token)
+            sync_mgr = ForgejoStandbySyncManager(
+                forgejo_client=fg_client,
+                org_name=resolved_org,
+                strategy=resolved_strat,
+                backup_dir=backup_dir,
+                info_handler=handler,
+                project_id=proj,
+                tfs_pat=tfs_pat,
+                cache_db=db,
+            )
+            return sync_mgr.sync_all_repositories(
+                force=bool(force),
+                progress_callback=progress_callback,
+                cancel_token=cancel_token,
+            )
+
+        def _on_done(res):
+            if isinstance(res, dict):
+                self.forgejoSyncCompleted.emit(res)
+
+        return self._run_worker(_task, f"Syncing repositories to Forgejo ({resolved_org})...", on_success=_on_done)
+
+    @Slot(result=str)
+    def browse_backup_dir(self) -> str:
+        """Opens a native folder selection dialog to pick the Path 1 local backup directory."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            start_dir = self.backupTargetDir
+            if not start_dir or not os.path.isdir(start_dir):
+                start_dir = os.getcwd()
+            chosen = QFileDialog.getExistingDirectory(None, "Select Local Repository Backup Directory", start_dir)
+            if chosen:
+                norm_chosen = os.path.normpath(chosen)
+                self.backupTargetDir = norm_chosen
+                return norm_chosen
+        except Exception as e:
+            logger.warning("Could not open folder dialog for backup directory: %s", e)
+        return ""
+
+
 
