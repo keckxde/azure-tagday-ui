@@ -650,6 +650,41 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
             self.assertEqual(summary["total_repos_scanned"], 2)
             self.assertEqual(summary["total_submodules"], 0)
 
+    def test_file_mirror_cli_cronjob_execution_and_lockfile(self):
+        """
+        Verifies that src/file_mirror_cli.py resolves configuration from a SQLite project DB,
+        creates/cleans up .mirror.lock, mirrors repositories, and writes mirror_cron.log.
+        """
+        import file_mirror_cli
+        src_repo_url = self.common_remote
+        self.cache_db.set_many_config({
+            "AZURE_BASE_URL": "https://tfs.simdev.defence.ruag.com/tfs",
+            "AZURE_COLLECTION": "DefaultCollection",
+            "AZURE_PROJECT_ID": "CH_ELSA",
+            "PROJECT_NAME": "CH_ELSA",
+            "AZURE_PERSONAL_ACCESS_TOKEN": "dummy-pat",
+        })
+        self.cache_db.save_repository(
+            "CH_ELSA",
+            {"id": "sub-1", "name": "CommonLib", "remoteUrl": src_repo_url, "webUrl": src_repo_url, "isDisabled": False},
+            101,
+        )
+
+        cron_target = os.path.join(self.tmp_dir.name, "cron_backup")
+        parser = file_mirror_cli.build_arg_parser()
+        args = parser.parse_args([
+            "--db-path", self.db_path,
+            "--target-dir", cron_target,
+            "--mode", "mirror",
+            "--offline-cache",
+        ])
+
+        exit_code = file_mirror_cli.run_mirror_job(args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(os.path.isdir(os.path.join(cron_target, "mirrors", "CommonLib.git")))
+        self.assertTrue(os.path.isfile(os.path.join(cron_target, "mirror_cron.log")))
+        self.assertFalse(os.path.exists(os.path.join(cron_target, ".mirror.lock")))
+
 
 if __name__ == "__main__":
     unittest.main()

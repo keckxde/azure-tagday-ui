@@ -273,7 +273,25 @@ uv run python src/devops_helper.py --backup-repos --target-dir D:\TFS_Backup --b
 uv run python src/devops_helper.py --sync-forgejo --forgejo-url http://forgejo.local:3000 --forgejo-org MyProject
 ```
 
-### 7.2 Desktop GUI View (`MigrationView.qml` / Settings & Reports Integration)
+### 7.2 Unattended Cronjob / Systemd File-Mirror CLI ([`src/file_mirror_cli.py`](src/file_mirror_cli.py))
+
+For unattended scheduled execution (e.g. Linux `cron` or `systemd` timer), the dedicated [`src/file_mirror_cli.py`](src/file_mirror_cli.py) (`azure-tagday-mirror`) provides:
+- **Zero-Secret Crontab Support**: Automatically reads `AZURE_BASE_URL`, `AZURE_COLLECTION`, `AZURE_PROJECT_ID`, and `AZURE_PERSONAL_ACCESS_TOKEN` from an existing project SQLite database (`--db-path reports/tfs_cache_CH_ELSA.db`), `user_settings.yaml`, or `.env`.
+- **PID Lockfile Protection (`<target_dir>/.mirror.lock`)**: Prevents overlapping runs if a mirror job takes longer than the cron interval, and cleans up stale lockfiles automatically.
+- **Timestamped Log File (`<target_dir>/mirror_cron.log`)** & **Exit Codes** (`0` = OK, `1` = one or more repositories failed).
+
+```bash
+# Mirror all project repositories using credentials & settings stored in the project SQLite DB:
+.venv/bin/python src/file_mirror_cli.py \
+  --db-path reports/tfs_cache_CH_ELSA.db \
+  --target-dir reports/backup/CH_ELSA \
+  --mode both
+
+# Example Linux Crontab (crontab -e): Mirror every 2 hours (relative to azure-tagday-ui root)
+0 */2 * * * cd /path/to/azure-tagday-ui && .venv/bin/python src/file_mirror_cli.py --db-path reports/tfs_cache_CH_ELSA.db --target-dir reports/backup/CH_ELSA --mode both
+```
+
+### 7.3 Desktop GUI View (`SettingsMigrationTab.qml` / Settings & Reports Integration)
 
 1. **Configuration & Mode Header Bar**:
    - **Path 1 Controls**: Target Backup Folder selector, Backup Format segmented toggle (`📁 Worktree`, `🪞 Bare Mirror`, `⚡ Both`), and `🔄 Run Local Backup` action button.
