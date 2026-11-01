@@ -577,6 +577,41 @@ class AzureDevOpsCache:
                 UNIQUE(project, iteration_name)
             )""")
 
+            # Table: migration_status (tracks Path 1 local backup & Path 2 Forgejo standby status per repo)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS migration_status (
+                repo_id TEXT PRIMARY KEY,
+                repo_name TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                backup_mode TEXT,
+                local_mirror_path TEXT,
+                local_worktree_path TEXT,
+                last_tfs_push_id INTEGER,
+                last_backup_at TEXT,
+                local_status TEXT DEFAULT 'PENDING',
+                submodules_total INTEGER DEFAULT 0,
+                submodules_non_relative INTEGER DEFAULT 0,
+                forgejo_repo_url TEXT,
+                last_forgejo_sync_at TEXT,
+                forgejo_status TEXT DEFAULT 'PENDING',
+                last_error TEXT
+            )""")
+
+            # Table: submodule_audit (stores .gitmodules audit and relative-URL conversion proposals)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS submodule_audit (
+                parent_repo_id TEXT NOT NULL,
+                parent_repo_name TEXT NOT NULL,
+                submodule_name TEXT NOT NULL,
+                submodule_path TEXT NOT NULL,
+                current_url TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                proposed_relative_url TEXT,
+                target_repo_exists INTEGER DEFAULT 0,
+                audited_at TEXT,
+                PRIMARY KEY (parent_repo_id, submodule_path)
+            )""")
+
             # Indices
             conn.execute("CREATE INDEX IF NOT EXISTS idx_pipelines_project ON pipelines(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_builds_project ON builds(project_id)")
@@ -590,6 +625,8 @@ class AzureDevOpsCache:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_state_events_changer ON work_item_state_events(changed_by)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_proj ON cached_iterations(project)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cached_iter_name ON cached_iterations(iteration_name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_migration_status_proj ON migration_status(project_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_submodule_audit_repo ON submodule_audit(parent_repo_id)")
 
             # View: v_branches
             conn.execute("""
@@ -2122,6 +2159,133 @@ class AzureDevOpsCache:
                 INSERT OR REPLACE INTO submodules (parent_repo_id, path, url, commit_id, raw_json)
                 VALUES (?, ?, ?, ?, ?)
                 """, (repo_id, sub["path"], sub["url"], commit_id, raw_json))
+
+    def save_submodule_audit(self, parent_repo_id, parent_repo_name, audit_entries):
+        """
+        Saves `.gitmodules` audit results for a repository into `submodule_audit`,
+        and updates submodule counts on `migration_status` if a row exists.
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+        entries = list(audit_entries or [])
+        non_rel = sum(1 for e in entries if e.get("classification") != "RELATIVE_OK")
+        with self._connection() as conn:
+            conn.execute("DELETE FROM submodule_audit WHERE parent_repo_id = ?", (parent_repo_id,))
+            for entry in entries:
+                conn.execute("""
+                INSERT OR REPLACE INTO submodule_audit (
+                    parent_repo_id, parent_repo_name, submodule_name, submodule_path,
+                    current_url, classification, proposed_relative_url, target_repo_exists, audited_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    parent_repo_id,
+                    parent_repo_name,
+                    entry.get("submodule_name") or entry.get("name") or entry.get("path") or "",
+                    entry.get("submodule_path") or entry.get("path") or "",
+                    entry.get("current_url") or entry.get("url") or "",
+                    entry.get("classification") or "EXTERNAL_OR_MISSING",
+                    entry.get("proposed_relative_url") or "",
+                    1 if entry.get("target_repo_exists") else 0,
+                    entry.get("audited_at") or now_iso,
+                ))
+            conn.execute("""
+            UPDATE migration_status
+            SET submodules_total = ?, submodules_non_relative = ?
+            WHERE repo_id = ?
+            """, (len(entries), non_rel, parent_repo_id))
+
+    def get_submodule_audit(self, parent_repo_id=None):
+        """
+        Retrieves cached `.gitmodules` audit entries, optionally filtered by `parent_repo_id`.
+        """
+        with self._connection() as conn:
+            if parent_repo_id:
+                rows = conn.execute(
+                    "SELECT * FROM submodule_audit WHERE parent_repo_id = ? ORDER BY submodule_path",
+                    (parent_repo_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM submodule_audit ORDER BY parent_repo_name, submodule_path"
+                ).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["target_repo_exists"] = bool(d.get("target_repo_exists"))
+                result.append(d)
+            return result
+
+    def save_migration_status(self, status_dict):
+        """
+        Inserts or updates a repository's backup and standby migration status in `migration_status`.
+        Preserves existing fields when omitted in `status_dict`.
+        """
+        repo_id = status_dict.get("repo_id")
+        if not repo_id:
+            raise ValueError("repo_id is required in save_migration_status")
+        with self._connection() as conn:
+            existing = conn.execute("SELECT * FROM migration_status WHERE repo_id = ?", (repo_id,)).fetchone()
+            merged = dict(existing) if existing else {
+                "repo_id": repo_id,
+                "repo_name": "",
+                "project_id": "",
+                "backup_mode": "",
+                "local_mirror_path": "",
+                "local_worktree_path": "",
+                "last_tfs_push_id": None,
+                "last_backup_at": None,
+                "local_status": "PENDING",
+                "submodules_total": 0,
+                "submodules_non_relative": 0,
+                "forgejo_repo_url": "",
+                "last_forgejo_sync_at": None,
+                "forgejo_status": "PENDING",
+                "last_error": "",
+            }
+            for k, v in status_dict.items():
+                if k in merged and v is not None:
+                    merged[k] = v
+
+            conn.execute("""
+            INSERT OR REPLACE INTO migration_status (
+                repo_id, repo_name, project_id, backup_mode,
+                local_mirror_path, local_worktree_path, last_tfs_push_id,
+                last_backup_at, local_status, submodules_total, submodules_non_relative,
+                forgejo_repo_url, last_forgejo_sync_at, forgejo_status, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                merged["repo_id"],
+                merged["repo_name"],
+                merged["project_id"],
+                merged["backup_mode"],
+                merged["local_mirror_path"],
+                merged["local_worktree_path"],
+                merged["last_tfs_push_id"],
+                merged["last_backup_at"],
+                merged["local_status"],
+                int(merged.get("submodules_total") or 0),
+                int(merged.get("submodules_non_relative") or 0),
+                merged["forgejo_repo_url"],
+                merged["last_forgejo_sync_at"],
+                merged["forgejo_status"],
+                merged["last_error"],
+            ))
+
+    def get_migration_status(self, project_id=None, repo_id=None):
+        """
+        Retrieves migration/backup status records from `migration_status`.
+        """
+        with self._connection() as conn:
+            if repo_id:
+                row = conn.execute("SELECT * FROM migration_status WHERE repo_id = ?", (repo_id,)).fetchone()
+                return dict(row) if row else None
+            if project_id:
+                rows = conn.execute(
+                    "SELECT * FROM migration_status WHERE project_id = ? ORDER BY repo_name",
+                    (project_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM migration_status ORDER BY repo_name").fetchall()
+            return [dict(r) for r in rows]
 
     def save_commits(self, repo_id, commits):
         """

@@ -732,23 +732,36 @@ class AzureInfoHandler(AzureBaseClient):
                     prs.append(pr)
         return prs
 
-    def ParseSubmodules(self, repo, project_id):
+    def ParseSubmodules(self, repo, project_id, branch_name=None, fetch_item_info=True):
         """
         Parses the `.gitmodules` file in a repository to find submodule mappings and queries their metadata.
 
         Args:
             repo (dict): Repository info dictionary (containing 'id' and 'name').
             project_id (str): The project ID or name.
+            branch_name (str, optional): Specific branch name to read `.gitmodules` from.
+            fetch_item_info (bool, optional): Whether to query per-submodule item metadata. Defaults to True.
 
         Returns:
-            list: List of parsed submodules with path, url, and metadata info.
+            list: List of parsed submodules with name, path, url, and metadata info.
         """
         submodules = []
+        params = {"$format": "text"}
+        if branch_name:
+            clean_branch = str(branch_name).replace("refs/heads/", "").strip()
+            if clean_branch:
+                params["versionDescriptor.version"] = clean_branch
+                params["versionDescriptor.versionType"] = "branch"
         try:
             # GET {projectID}/_apis/git/repositories/{repositoryId}/items?path={path}&$format=text&api-version=6.0
-            content = self.get_repository_items(
-                project_id, repo['id'], ".gitmodules", params={"$format": "text"}, raw_text=True
-            )
+            try:
+                content = self.get_repository_items(
+                    project_id, repo['id'], ".gitmodules", params=params, raw_text=True, suppress_error_log=True
+                )
+            except TypeError:
+                content = self.get_repository_items(
+                    project_id, repo['id'], ".gitmodules", params=params, raw_text=True
+                )
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return submodules
@@ -756,41 +769,69 @@ class AzureInfoHandler(AzureBaseClient):
         except Exception:
             return submodules
 
-        if content:
-            submodule = {"path": "", "url": ""}
-            for line in content.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
+        if content and isinstance(content, str):
+            submodule = {"name": "", "path": "", "url": ""}
+            for raw_line in content.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or line.startswith(";"):
                     continue
-                params = line.split("=", 1)
-                if len(params) < 2:
-                    if submodule["url"] != "":
-                        path = submodule["path"].strip().strip("/")
-                        try:
-                            # GET item metadata info
-                            info = self.get_repository_items(project_id, repo['id'], path)
-                            submodule["info"] = info
-                        except Exception as e:
-                            logger.error("Error getting submodule info for %s: %s", path, e)
-                            submodule["info"] = {"commitId": ""}
+                sec_match = re.match(r'^\[submodule\s+"([^"]+)"\]', line, re.IGNORECASE)
+                if sec_match:
+                    if submodule.get("url", "") != "":
+                        path = submodule.get("path", "").strip().strip("/")
+                        if fetch_item_info and path:
+                            try:
+                                info = self.get_repository_items(project_id, repo['id'], path)
+                                submodule["info"] = info
+                            except Exception as e:
+                                logger.error("Error getting submodule info for %s: %s", path, e)
+                                submodule["info"] = {"commitId": ""}
+                        else:
+                            submodule.setdefault("info", {"commitId": ""})
                         submodule["path"] = path
+                        if not submodule.get("name"):
+                            submodule["name"] = path
                         submodules.append(submodule)
-                    submodule = {"path": "", "url": ""}
+                    submodule = {"name": sec_match.group(1).strip(), "path": "", "url": ""}
                     continue
-                key = params[0].strip()
-                val = params[1].strip()
+
+                kv = line.split("=", 1)
+                if len(kv) < 2:
+                    if submodule.get("url", "") != "":
+                        path = submodule.get("path", "").strip().strip("/")
+                        if fetch_item_info and path:
+                            try:
+                                info = self.get_repository_items(project_id, repo['id'], path)
+                                submodule["info"] = info
+                            except Exception as e:
+                                logger.error("Error getting submodule info for %s: %s", path, e)
+                                submodule["info"] = {"commitId": ""}
+                        else:
+                            submodule.setdefault("info", {"commitId": ""})
+                        submodule["path"] = path
+                        if not submodule.get("name"):
+                            submodule["name"] = path
+                        submodules.append(submodule)
+                    submodule = {"name": "", "path": "", "url": ""}
+                    continue
+                key = kv[0].strip()
+                val = kv[1].strip()
                 submodule[key] = val
 
-            if submodule["url"] != "":
-                path = submodule["path"].strip().strip("/")
-                try:
-                    # GET item metadata info
-                    info = self.get_repository_items(project_id, repo['id'], path)
-                    submodule["info"] = info
-                except Exception as e:
-                    logger.error("Error getting submodule info for %s: %s", path, e)
-                    submodule["info"] = {"commitId": ""}
+            if submodule.get("url", "") != "":
+                path = submodule.get("path", "").strip().strip("/")
+                if fetch_item_info and path:
+                    try:
+                        info = self.get_repository_items(project_id, repo['id'], path)
+                        submodule["info"] = info
+                    except Exception as e:
+                        logger.error("Error getting submodule info for %s: %s", path, e)
+                        submodule["info"] = {"commitId": ""}
+                else:
+                    submodule.setdefault("info", {"commitId": ""})
                 submodule["path"] = path
+                if not submodule.get("name"):
+                    submodule["name"] = path
                 submodules.append(submodule)
 
         return submodules

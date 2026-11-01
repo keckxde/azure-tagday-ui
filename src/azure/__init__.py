@@ -9,6 +9,19 @@ from .azure_db import AzureDevOpsCache, DateTimeEncoder, is_work_item_in_area_pa
 from .azure_info_base_client import AzureBaseClient as AzureInfoBaseClient
 from .azure_info_handler import AzureInfoHandler
 from .azure_helper import AzureInfoHandler as AzureHelperInfoHandler
+from .migration_service import (
+    SubmoduleAuditor,
+    LocalBackupManager,
+    ForgejoClient,
+    ForgejoStandbySyncManager,
+    parse_gitmodules_content,
+    classify_submodule_url,
+    rewrite_gitmodules_to_relative,
+    sort_repos_topologically,
+    build_git_auth_args,
+    VALID_BACKUP_MODES,
+    VALID_FORGEJO_STRATEGIES,
+)
 
 __all__ = [
     "AzureBaseClient",
@@ -21,4 +34,15 @@ __all__ = [
     "AzureInfoBaseClient",
     "AzureInfoHandler",
     "AzureHelperInfoHandler",
+    "SubmoduleAuditor",
+    "LocalBackupManager",
+    "ForgejoClient",
+    "ForgejoStandbySyncManager",
+    "parse_gitmodules_content",
+    "classify_submodule_url",
+    "rewrite_gitmodules_to_relative",
+    "sort_repos_topologically",
+    "build_git_auth_args",
+    "VALID_BACKUP_MODES",
+    "VALID_FORGEJO_STRATEGIES",
 ]

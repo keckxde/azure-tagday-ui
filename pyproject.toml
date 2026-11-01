@@ -33,6 +33,7 @@ azure-tagday-ui = "gui.main:main"
 tagday-gui = "gui.main:main"
 tagday = "devops_helper:main_cli"
 devops-helper = "devops_helper:main_cli"
+azure-tagday-mirror = "file_mirror_cli:main"
 
 [build-system]
 requires = ["setuptools>=64.0", "setuptools-scm>=8.0", "wheel"]
@@ -44,6 +45,7 @@ py-modules = [
     "version",
     "_version_scm",
     "devops_helper",
+    "file_mirror_cli",
     "utils",
     "generate_artifacts_report",
     "generate_pipelines_report",

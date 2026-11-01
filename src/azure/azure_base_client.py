@@ -908,7 +908,7 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories", params={"api-version": "6.0"})
         return res.get("value", [])
 
-    def get_repository_items(self, project_id, repo_id, path, params=None, raw_text=False):
+    def get_repository_items(self, project_id, repo_id, path, params=None, raw_text=False, suppress_error_log=False):
         """
         Retrieves details or content of a file/folder in a repository.
 
@@ -918,6 +918,7 @@ class AzureBaseClient:
             path (str): The path to the item inside the repository.
             params (dict, optional): Additional request parameters. Defaults to None.
             raw_text (bool, optional): If True, returns file content as text instead of JSON metadata. Defaults to False.
+            suppress_error_log (bool, optional): If True, suppresses error logging on HTTP 404/non-fatal errors. Defaults to False.
 
         Returns:
             dict/str: The response containing file content or metadata.
@@ -925,7 +926,13 @@ class AzureBaseClient:
         req_params = {"path": path, "api-version": "6.0"}
         if params:
             req_params.update(params)
-        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/items", params=req_params, raw_text=raw_text)
+        res, _ = self._request(
+            "GET",
+            f"{project_id}/_apis/git/repositories/{repo_id}/items",
+            params=req_params,
+            raw_text=raw_text,
+            suppress_error_log=suppress_error_log,
+        )
         return res
 
     def get_repository_refs(self, project_id, repo_id, filter_str):
@@ -1187,4 +1194,66 @@ class AzureBaseClient:
             logger.debug(f"Failed to query commits for branch {branch_name}: {e}")
 
         return ""
+
+    def push_file_update(self, project_id, repo_id, branch_name, file_path, new_content, commit_message=None, old_commit_id=None):
+        """
+        Commits and pushes an updated file (such as `.gitmodules`) to a branch in Azure DevOps / TFS
+        via the Git Pushes REST API.
+
+        Args:
+            project_id (str): The project ID or name.
+            repo_id (str): The repository ID or name.
+            branch_name (str): Target branch name (e.g. 'dev', 'main', 'refs/heads/dev').
+            file_path (str): Path to the file inside the repository (e.g. '.gitmodules' or '/.gitmodules').
+            new_content (str): Full updated text content of the file.
+            commit_message (str, optional): Commit message.
+            old_commit_id (str, optional): Expected current HEAD commit SHA of the branch.
+                                           If None, resolved automatically via get_branch_commit_id.
+
+        Returns:
+            dict: The push response object from the TFS REST API.
+        """
+        clean_branch = str(branch_name or "dev").replace("refs/heads/", "").strip()
+        if not old_commit_id:
+            old_commit_id = self.get_branch_commit_id(project_id, repo_id, clean_branch)
+        if not old_commit_id:
+            raise ValueError(f"Could not resolve current commit SHA for branch '{clean_branch}' in repository '{repo_id}'.")
+
+        norm_path = str(file_path or "").strip()
+        if not norm_path.startswith("/"):
+            norm_path = f"/{norm_path}"
+
+        payload = {
+            "refUpdates": [
+                {
+                    "name": f"refs/heads/{clean_branch}",
+                    "oldObjectId": old_commit_id
+                }
+            ],
+            "commits": [
+                {
+                    "comment": commit_message or f"Update {norm_path.lstrip('/')} to use relative submodule URLs",
+                    "changes": [
+                        {
+                            "changeType": "edit",
+                            "item": {
+                                "path": norm_path
+                            },
+                            "newContent": {
+                                "content": new_content,
+                                "contentType": "rawtext"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        res, _ = self._request(
+            "POST",
+            f"{project_id}/_apis/git/repositories/{repo_id}/pushes",
+            params={"api-version": "6.0"},
+            data=payload
+        )
+        return res
+
 
