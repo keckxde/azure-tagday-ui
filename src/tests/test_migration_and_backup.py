@@ -571,6 +571,26 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         self.assertEqual(res_pull["ok_count"], 2)
         self.assertEqual(client.migrate_pull_mirror.call_count, 2)
 
+    def test_devops_backend_get_migration_status_list_on_existing_project(self):
+        """
+        Verifies that opening an existing project database on DevOpsBackend and calling
+        getMigrationStatusList() / getSubmoduleAuditList() / selectedProject / tfsToken
+        succeeds without AttributeError and lists cached active repositories.
+        """
+        from gui.backend import DevOpsBackend
+        self.cache_db.save_repository("LegacyProj", {"id": "leg-1", "name": "LegacyRepoA", "isDisabled": False}, 42)
+        backend = DevOpsBackend()
+        backend._cache_db = self.cache_db
+        backend._project_id = "LegacyProj"
+
+        self.assertEqual(backend.selectedProject, backend.selectedProject)
+        self.assertIsInstance(backend.tfsToken, str)
+        status_list = backend.getMigrationStatusList()
+        self.assertEqual(len(status_list), 1)
+        self.assertEqual(status_list[0]["repo_name"], "LegacyRepoA")
+        self.assertEqual(status_list[0]["local_status"], "PENDING")
+        self.assertEqual(backend.getSubmoduleAuditList(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

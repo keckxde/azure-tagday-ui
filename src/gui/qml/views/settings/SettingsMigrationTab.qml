@@ -27,6 +27,14 @@ ColumnLayout {
     Connections {
         target: backend
 
+        function onSettingsChanged() {
+            migrationTabRoot.refreshMigrationModels();
+        }
+
+        function onRepositoriesChanged() {
+            migrationTabRoot.refreshMigrationModels();
+        }
+
         function onSubmoduleAuditCompleted(report) {
             migrationTabRoot.refreshMigrationModels();
             if (report) {

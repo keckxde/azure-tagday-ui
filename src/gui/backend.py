@@ -453,6 +453,16 @@ class DevOpsBackend(QObject):
     def projectName(self):
         return self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or "N/A"
 
+    @Property(str, notify=settingsChanged)
+    def selectedProject(self) -> str:
+        """Returns the active project ID/name (alias for projectName without 'N/A' placeholder)."""
+        p = (
+            getattr(devops_helper, "AZURE_PROJECT_ID", "")
+            or getattr(self, "_project_id", "")
+            or self._stats.get("project_name", "")
+        )
+        return "" if p in ("N/A", None) else str(p).strip()
+
     @Property(dict, notify=statsChanged)
     def appVersionInfo(self):
         """Returns comprehensive version and Git tag / describe metadata."""
@@ -905,6 +915,11 @@ class DevOpsBackend(QObject):
 
     @Property(str, notify=settingsChanged)
     def tfsPat(self):
+        return devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
+
+    @Property(str, notify=settingsChanged)
+    def tfsToken(self) -> str:
+        """Alias for tfsPat returning the active Personal Access Token."""
         return devops_helper.AZURE_PERSONAL_ACCESS_TOKEN or ""
 
     @Property(str, notify=settingsChanged)
@@ -8948,12 +8963,41 @@ class DevOpsBackend(QObject):
 
     @Slot(result="QVariantList")
     def getMigrationStatusList(self) -> list:
-        """Returns per-repository backup and migration status entries from SQLite."""
+        """
+        Returns per-repository backup and migration status entries from SQLite,
+        merging any cached active repositories from the current project database.
+        """
         if not self._cache_db or not hasattr(self._cache_db, "get_migration_status"):
             return []
         try:
-            proj = self.selectedProject or devops_helper.AZURE_PROJECT_ID or None
-            return self._cache_db.get_migration_status(project_id=proj)
+            rows = self._cache_db.get_migration_status()
+            by_id = {r["repo_id"]: dict(r) for r in (rows or []) if r.get("repo_id")}
+            proj = getattr(self, "selectedProject", "") or getattr(devops_helper, "AZURE_PROJECT_ID", "") or ""
+            with self._cache_db._connection() as conn:
+                repo_rows = conn.execute(
+                    "SELECT id, name, project_id FROM repositories WHERE is_disabled = 0 ORDER BY name"
+                ).fetchall()
+                for rr in repo_rows:
+                    rid = rr["id"]
+                    if rid and rid not in by_id:
+                        by_id[rid] = {
+                            "repo_id": rid,
+                            "repo_name": rr["name"],
+                            "project_id": rr["project_id"] or proj,
+                            "backup_mode": self.backupMode,
+                            "local_mirror_path": "",
+                            "local_worktree_path": "",
+                            "last_tfs_push_id": None,
+                            "last_backup_at": None,
+                            "local_status": "PENDING",
+                            "submodules_total": 0,
+                            "submodules_non_relative": 0,
+                            "forgejo_repo_url": "",
+                            "last_forgejo_sync_at": None,
+                            "forgejo_status": "PENDING",
+                            "last_error": "",
+                        }
+            return sorted(by_id.values(), key=lambda x: (x.get("repo_name") or "").lower())
         except Exception as e:
             logger.error("Failed to read migration status list: %s", e)
             return []
