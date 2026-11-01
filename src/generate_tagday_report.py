@@ -117,8 +117,9 @@ def load_tagday_data(cache_db, project_id=None, ignore_repos=None, patch_titles=
         # 1. Fetch all repositories
         repos_query = "SELECT id, name, default_branch, web_url, is_disabled FROM repositories"
         if project_id:
-            repos_query += " WHERE project_id = ?"
-            repos_rows = conn.execute(repos_query, (project_id,)).fetchall()
+            repos_rows = conn.execute(repos_query + " WHERE project_id = ?", (project_id,)).fetchall()
+            if not repos_rows:
+                repos_rows = conn.execute(repos_query).fetchall()
         else:
             repos_rows = conn.execute(repos_query).fetchall()
 

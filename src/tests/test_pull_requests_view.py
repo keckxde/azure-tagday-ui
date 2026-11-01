@@ -556,7 +556,7 @@ class TestPullRequestsViewData(unittest.TestCase):
         # 2. Verify Backend TagDay summary and PullRequests view
         backend = DevOpsBackend()
         backend._db_path = self.db_path
-        backend._cache_db = self.cache
+        backend.set_cache_db(self.cache)
         backend.refresh_all_data()
 
         pr_1002_ui = next(p for p in backend.pullRequests if p["id"] == 1002)
