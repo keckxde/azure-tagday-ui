@@ -323,19 +323,80 @@ def _getHandler():
     azure_url = f"{base_url}/{collection}" if collection else base_url
     return AzureInfoHandler(azure_url, pat)
     
-def _getDBCacheHandler() -> Tuple[str, AzureDevOpsCache]:
+def _get_default_db_directory() -> str:
+    """
+    Returns the directory where SQLite cache database files should be located:
+    always the directory of the original/configured database file (`db_path` in
+    user settings or `AZURE_DB_PATH` if the file exists), falling back to `os.getcwd()` —
+    never the Markdown output directory (`BASE_FOLDER` / `reports_dir`).
+    """
+    try:
+        cfg = utils._load_active_user_settings()
+        if isinstance(cfg, dict):
+            cfg_db = cfg.get("db_path")
+            if cfg_db and str(cfg_db).strip() and cfg_db != ":memory:":
+                abs_cfg = os.path.abspath(str(cfg_db).strip())
+                if os.path.isfile(abs_cfg):
+                    d = os.path.dirname(abs_cfg)
+                    if d:
+                        return d
+    except Exception:
+        pass
+    env_db = os.getenv("AZURE_DB_PATH", "").strip()
+    if env_db and env_db != ":memory:" and os.path.isfile(env_db):
+        d = os.path.dirname(os.path.abspath(env_db))
+        if d:
+            return d
+    return os.getcwd()
+
+
+def _getDBCacheHandler(db_path: Optional[str] = None) -> Tuple[str, AzureDevOpsCache]:
     """
     Create and return the database file path and AzureDevOpsCache instance.
+    Always opens or creates the SQLite file in the directory of the original/configured
+    database file (never in the Markdown output directory BASE_FOLDER / reports_dir).
 
     Returns:
         Tuple[str, AzureDevOpsCache]: Database file path and connected cache client.
     """
     global AZURE_PROJECT_ID
     project_id = AZURE_PROJECT_ID or os.getenv("AZURE_PROJECT_ID", "default")
-    if BASE_FOLDER and not os.path.exists(BASE_FOLDER):
-        os.makedirs(BASE_FOLDER, exist_ok=True)
-    db_path = os.path.join(BASE_FOLDER, f"tfs_cache_{project_id}.db")
-    return db_path, AzureDevOpsCache(db_path)
+
+    if db_path and str(db_path).strip():
+        resolved = os.path.abspath(str(db_path).strip()) if db_path != ":memory:" else ":memory:"
+        if resolved != ":memory:":
+            parent_dir = os.path.dirname(resolved)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+        return resolved, AzureDevOpsCache(resolved)
+
+    try:
+        cfg = utils._load_active_user_settings()
+        if isinstance(cfg, dict):
+            cfg_db = cfg.get("db_path")
+            if cfg_db and str(cfg_db).strip() and cfg_db != ":memory:":
+                abs_cfg_db = os.path.abspath(str(cfg_db).strip())
+                cfg_proj = (cfg.get("project_id") or cfg.get("project_name") or "").strip()
+                if os.path.exists(abs_cfg_db) and (
+                    not project_id
+                    or project_id == "default"
+                    or project_id == cfg_proj
+                    or os.path.basename(abs_cfg_db) == f"tfs_cache_{project_id}.db"
+                ):
+                    return abs_cfg_db, AzureDevOpsCache(abs_cfg_db)
+    except Exception:
+        pass
+
+    env_db = os.getenv("AZURE_DB_PATH", "").strip()
+    if env_db and env_db != ":memory:" and os.path.exists(env_db):
+        abs_env_db = os.path.abspath(env_db)
+        return abs_env_db, AzureDevOpsCache(abs_env_db)
+
+    db_dir = _get_default_db_directory()
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+    resolved_db_path = os.path.abspath(os.path.join(db_dir, f"tfs_cache_{project_id}.db"))
+    return resolved_db_path, AzureDevOpsCache(resolved_db_path)
 
 
 SCHEMATIC_BRACKETED_PATTERN: re.Pattern = re.compile(r'\[([A-Za-z]{2,15})[_\-\s](\d+)\]')

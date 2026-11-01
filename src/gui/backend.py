@@ -314,9 +314,99 @@ class DevOpsBackend(QObject):
         self._cached_repo_cat_overrides = None
         self._cached_change_filter_patterns = None
 
+    def _prune_missing_database_references(self, cfg=None, persist=True) -> dict:
+        """
+        Removes references to non-existent SQLite database files from `db_path`,
+        `recent_databases`, and `recent_projects` in user settings.
+        """
+        if cfg is None:
+            cfg = _load_user_settings()
+        if not isinstance(cfg, dict):
+            return {}
+
+        changed = False
+
+        raw_recent_dbs = cfg.get("recent_databases")
+        if isinstance(raw_recent_dbs, list):
+            valid_recent_dbs = [
+                p for p in raw_recent_dbs
+                if isinstance(p, str) and p.strip() and os.path.isfile(p.strip())
+            ]
+            if len(valid_recent_dbs) != len(raw_recent_dbs):
+                cfg["recent_databases"] = valid_recent_dbs
+                changed = True
+
+        raw_recent_projs = cfg.get("recent_projects")
+        if isinstance(raw_recent_projs, list):
+            valid_recent_projs = [
+                p for p in raw_recent_projs
+                if isinstance(p, dict)
+                and p.get("db_path")
+                and isinstance(p.get("db_path"), str)
+                and os.path.isfile(p["db_path"].strip())
+            ]
+            if len(valid_recent_projs) != len(raw_recent_projs):
+                cfg["recent_projects"] = valid_recent_projs
+                changed = True
+
+        custom_db = cfg.get("db_path")
+        if custom_db and isinstance(custom_db, str) and custom_db.strip() != ":memory:":
+            if not os.path.isfile(custom_db.strip()):
+                valid_dbs = cfg.get("recent_databases") if isinstance(cfg.get("recent_databases"), list) else []
+                if valid_dbs:
+                    cfg["db_path"] = valid_dbs[0]
+                else:
+                    cfg.pop("db_path", None)
+                changed = True
+
+        if changed and persist:
+            _save_user_settings(cfg)
+
+        return cfg
+
+    def _get_db_directory(self) -> str:
+        """
+        Returns the directory of the original / currently configured SQLite database file.
+        Never uses the Markdown reports output directory (BASE_FOLDER / reports_dir).
+        """
+        if getattr(self, "_db_path", None) and str(self._db_path).strip() and self._db_path != ":memory:":
+            abs_cur = os.path.abspath(str(self._db_path).strip())
+            if os.path.isfile(abs_cur) or not getattr(self, "_is_ephemeral_init_cache", False):
+                d = os.path.dirname(abs_cur)
+                if d and os.path.isdir(d):
+                    return d
+        try:
+            cfg = self._prune_missing_database_references()
+            if isinstance(cfg, dict):
+                cfg_db = cfg.get("db_path")
+                if cfg_db and str(cfg_db).strip() and cfg_db != ":memory:":
+                    abs_cfg = os.path.abspath(str(cfg_db).strip())
+                    if os.path.isfile(abs_cfg):
+                        d = os.path.dirname(abs_cfg)
+                        if d:
+                            return d
+        except Exception:
+            pass
+        env_db = os.getenv("AZURE_DB_PATH", "").strip()
+        if env_db and env_db != ":memory:" and os.path.isfile(env_db):
+            d = os.path.dirname(os.path.abspath(env_db))
+            if d:
+                return d
+        return os.getcwd()
+
+    def _ensure_file_cache_db(self):
+        """Materializes the on-disk SQLite cache in _db_path if still using an ephemeral startup cache."""
+        if getattr(self, "_is_ephemeral_init_cache", False) and self._db_path and self._db_path != ":memory:":
+            parent_dir = os.path.dirname(os.path.abspath(self._db_path))
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+            self._cache_db = AzureDevOpsCache(self._db_path)
+            self._is_ephemeral_init_cache = False
+
     def _init_cache(self):
         try:
-            cfg = _load_user_settings()
+            self._is_ephemeral_init_cache = False
+            cfg = self._prune_missing_database_references()
             if cfg.get("custom_deadline_field"):
                 self._custom_deadline_field = cfg["custom_deadline_field"]
             if cfg.get("reports_dir"):
@@ -337,11 +427,26 @@ class DevOpsBackend(QObject):
                 if cfg.get("pat"):
                     devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = cfg["pat"]
             else:
-                db_path, cache_db = devops_helper._getDBCacheHandler()
-                abs_default_db = os.path.abspath(db_path)
+                project_id = (
+                    cfg.get("project_id")
+                    or cfg.get("project_name")
+                    or devops_helper.AZURE_PROJECT_ID
+                    or os.getenv("AZURE_PROJECT_ID", "default")
+                    or "default"
+                )
+                if custom_db and str(custom_db).strip() and custom_db != ":memory:":
+                    abs_default_db = os.path.abspath(str(custom_db).strip())
+                else:
+                    db_dir = self._get_db_directory()
+                    abs_default_db = os.path.abspath(os.path.join(db_dir, f"tfs_cache_{project_id}.db"))
                 self._db_path = abs_default_db
-                self._cache_db = cache_db
                 self._stats["db_path"] = abs_default_db
+                if os.path.exists(abs_default_db):
+                    self._cache_db = AzureDevOpsCache(abs_default_db)
+                else:
+                    # Do not create stray empty .db files on disk until an actual sync or project creation runs
+                    self._cache_db = AzureDevOpsCache(":memory:")
+                    self._is_ephemeral_init_cache = True
 
             # Load project configuration stored inside the SQLite database if available
             if self._cache_db:
@@ -355,6 +460,11 @@ class DevOpsBackend(QObject):
     def set_cache_db(self, cache_db):
         """Sets the cache database instance (used for dependency injection and testing)."""
         self._cache_db = cache_db
+        self._is_ephemeral_init_cache = False
+        if cache_db and getattr(cache_db, "db_path", None) and cache_db.db_path != ":memory:":
+            self._db_path = os.path.abspath(cache_db.db_path)
+            if isinstance(getattr(self, "_stats", None), dict):
+                self._stats["db_path"] = self._db_path
         self._invalidate_all_db_property_caches()
         if cache_db:
             self._load_project_config_from_db(cache_db)
@@ -1205,12 +1315,12 @@ class DevOpsBackend(QObject):
 
     @Property(list, notify=settingsChanged)
     def recentDatabases(self):
-        cfg = _load_user_settings()
+        cfg = self._prune_missing_database_references()
         return cfg.get("recent_databases", [])
 
     @Property(list, notify=settingsChanged)
     def recentProjects(self):
-        cfg = _load_user_settings()
+        cfg = self._prune_missing_database_references()
         return cfg.get("recent_projects", [])
 
     # Properties
@@ -3144,6 +3254,7 @@ class DevOpsBackend(QObject):
         """Triggers direct TFS API WIQL sync for work items with real-time progress logging."""
         if self._is_busy:
             return
+        self._ensure_file_cache_db()
 
         def _work(worker):
             worker.log_message.emit("Connecting to TFS API...")
@@ -3170,6 +3281,7 @@ class DevOpsBackend(QObject):
         """Directly reconciles pull request statuses with TFS API (updates closed/abandoned PRs)."""
         if self._is_busy:
             return
+        self._ensure_file_cache_db()
 
         def _work(worker):
             worker.log_message.emit("Connecting to TFS API for Pull Request reconciliation...")
@@ -3208,6 +3320,7 @@ class DevOpsBackend(QObject):
         """Directly synchronizes build pipeline definitions, recent build runs, and failure timelines with TFS."""
         if self._is_busy:
             return
+        self._ensure_file_cache_db()
 
         def _work(worker):
             worker.log_message.emit("Connecting to TFS API for Build Pipelines synchronization...")
@@ -3250,6 +3363,7 @@ class DevOpsBackend(QObject):
         """Triggers full sync of repos, work items, and pull requests with live progress reporting."""
         if self._is_busy:
             return
+        self._ensure_file_cache_db()
 
         def _work(worker):
             worker.log_message.emit("Checking Azure DevOps / TFS credentials...")
@@ -6008,15 +6122,27 @@ class DevOpsBackend(QObject):
 
     @Slot(result=list)
     def get_available_databases(self):
-        """Scans workspace directory for SQLite cache databases quickly."""
+        """Scans database directory and workspace root for SQLite cache databases quickly."""
         if not hasattr(self, "_db_scan_cache"):
             self._db_scan_cache = {}
 
-        search_dirs = [devops_helper.BASE_FOLDER, os.getcwd()]
-        if getattr(self, "_db_path", None) and os.path.dirname(self._db_path):
-            db_dir = os.path.dirname(os.path.abspath(self._db_path))
-            if db_dir not in search_dirs:
-                search_dirs.append(db_dir)
+        search_dirs = []
+        primary_db_dir = self._get_db_directory()
+        if primary_db_dir:
+            search_dirs.append(primary_db_dir)
+        cwd_dir = os.getcwd()
+        if cwd_dir not in search_dirs:
+            search_dirs.append(cwd_dir)
+        try:
+            cfg = self._prune_missing_database_references()
+            if isinstance(cfg, dict):
+                for rdb in cfg.get("recent_databases", []) or []:
+                    if rdb and os.path.isfile(rdb) and os.path.dirname(rdb):
+                        rdir = os.path.dirname(os.path.abspath(rdb))
+                        if rdir not in search_dirs:
+                            search_dirs.append(rdir)
+        except Exception:
+            pass
         found = {}
         for sdir in search_dirs:
             if not sdir or not os.path.exists(sdir):
@@ -6083,6 +6209,20 @@ class DevOpsBackend(QObject):
                             }
             except Exception as e:
                 logger.warning(f"Error scanning directory {sdir} for db files: {e}")
+
+        if not found and getattr(self, "_db_path", None) and self._db_path != ":memory:":
+            full_path = os.path.abspath(self._db_path)
+            fname = os.path.basename(full_path)
+            bname = os.path.splitext(fname)[0]
+            proj_name = self.selectedProject or (bname.replace("tfs_cache_", "") if bname.startswith("tfs_cache_") else "Default")
+            found[full_path] = {
+                "name": fname,
+                "path": full_path,
+                "size_mb": "0.00 MB",
+                "modified": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "project": proj_name,
+                "is_active": True,
+            }
         return list(found.values())
 
     @Slot(result=str)
@@ -6090,7 +6230,8 @@ class DevOpsBackend(QObject):
         """Opens native file dialog to select an existing SQLite database."""
         try:
             from PySide6.QtWidgets import QFileDialog
-            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            db_dir = self._get_db_directory()
+            initial_dir = db_dir if db_dir and os.path.exists(db_dir) else os.getcwd()
             file_path, _ = QFileDialog.getOpenFileName(
                 None, "Select SQLite Database", initial_dir, "SQLite Database Files (*.db);;All Files (*.*)"
             )
@@ -6126,9 +6267,9 @@ class DevOpsBackend(QObject):
 
     @Slot(str, result=str)
     def get_default_db_path(self, project_name=""):
-        """Returns the default SQLite cache database path in the configured reports/base folder for a given project."""
+        """Returns the default SQLite cache database path in the same folder as the original database file."""
         clean_pname = (project_name or "").strip() or "new"
-        base_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER else os.getcwd()
+        base_dir = self._get_db_directory()
         return os.path.abspath(os.path.join(base_dir, f"tfs_cache_{clean_pname}.db"))
 
     @Slot(str, result=str)
@@ -6136,7 +6277,8 @@ class DevOpsBackend(QObject):
         """Opens native file dialog to choose path for a new database."""
         try:
             from PySide6.QtWidgets import QFileDialog
-            initial_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER and os.path.exists(devops_helper.BASE_FOLDER) else os.getcwd()
+            db_dir = self._get_db_directory()
+            initial_dir = db_dir if db_dir and os.path.exists(db_dir) else os.getcwd()
             if not suggested_name:
                 suggested_name = "tfs_cache_new.db"
             elif not suggested_name.endswith(".db"):
@@ -6200,10 +6342,13 @@ class DevOpsBackend(QObject):
         abs_path = os.path.abspath(new_db_path)
         if not os.path.exists(abs_path):
             logger.error(f"Database file does not exist: {abs_path}")
+            self._prune_missing_database_references()
+            self.settingsChanged.emit()
             return False
 
         try:
             self._stop_active_worker_for_db_switch()
+            self._is_ephemeral_init_cache = False
             self._db_path = abs_path
             self._cache_db = AzureDevOpsCache(abs_path)
             self._stats["db_path"] = abs_path
@@ -6225,11 +6370,11 @@ class DevOpsBackend(QObject):
                         devops_helper.AZURE_PROJECT_ID = p_name
                         self._stats["project_name"] = p_name
 
-            cfg = _load_user_settings()
+            cfg = self._prune_missing_database_references(persist=False)
             cfg["db_path"] = abs_path
             cfg["project_id"] = self._stats["project_name"]
             cfg["project_name"] = self._stats["project_name"]
-            recent_dbs = cfg.get("recent_databases", [])
+            recent_dbs = [p for p in cfg.get("recent_databases", []) if os.path.isfile(p)]
             if abs_path in recent_dbs:
                 recent_dbs.remove(abs_path)
             recent_dbs.insert(0, abs_path)
@@ -7671,7 +7816,7 @@ class DevOpsBackend(QObject):
         if not clean_pname:
             return {"success": False, "error": "Project name cannot be empty"}
 
-        base_dir = devops_helper.BASE_FOLDER or os.getcwd()
+        base_dir = self._get_db_directory()
         if not db_path or not db_path.strip():
             db_path = os.path.join(base_dir, f"tfs_cache_{clean_pname}.db")
         else:
@@ -7692,8 +7837,12 @@ class DevOpsBackend(QObject):
                 devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = clean_pat
             devops_helper.AZURE_PROJECT_ID = clean_pname
 
-            # 2. Save to user_settings.json
-            cfg = _load_user_settings()
+            # 2. Initialize SQLite Cache Database and store project & env configuration
+            os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
+            new_cache = AzureDevOpsCache(abs_db_path)
+
+            # 3. Save to user_settings (pruning any non-existent database references)
+            cfg = self._prune_missing_database_references(persist=False)
             cfg["tfs_url"] = clean_url
             cfg["collection"] = clean_col
             cfg["store_pat"] = store_pat
@@ -7703,14 +7852,16 @@ class DevOpsBackend(QObject):
             cfg["project_name"] = clean_pname
             cfg["db_path"] = abs_db_path
 
-            recent_dbs = cfg.get("recent_databases", [])
+            recent_dbs = [p for p in cfg.get("recent_databases", []) if os.path.isfile(p)]
             if abs_db_path in recent_dbs:
                 recent_dbs.remove(abs_db_path)
             recent_dbs.insert(0, abs_db_path)
             cfg["recent_databases"] = recent_dbs[:10]
 
-            recent_projs = cfg.get("recent_projects", [])
-            recent_projs = [p for p in recent_projs if p.get("name") != clean_pname]
+            recent_projs = [
+                p for p in cfg.get("recent_projects", [])
+                if isinstance(p, dict) and p.get("name") != clean_pname and p.get("db_path") and os.path.isfile(p["db_path"])
+            ]
             recent_projs.insert(0, {
                 "name": clean_pname,
                 "id": clean_pid,
@@ -7721,10 +7872,6 @@ class DevOpsBackend(QObject):
             })
             cfg["recent_projects"] = recent_projs[:10]
             _save_user_settings(cfg)
-
-            # 3. Initialize SQLite Cache Database and store project & env configuration
-            os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
-            new_cache = AzureDevOpsCache(abs_db_path)
             with new_cache._connection() as conn:
                 conn.execute("""
                 INSERT INTO projects (id, name, last_synced_at)
@@ -7766,6 +7913,7 @@ class DevOpsBackend(QObject):
 
             # 4. Switch active backend cache
             self._stop_active_worker_for_db_switch()
+            self._is_ephemeral_init_cache = False
             self._db_path = abs_db_path
             self._cache_db = new_cache
             self._stats["db_path"] = abs_db_path
