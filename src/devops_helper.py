@@ -633,7 +633,14 @@ def main(run_templates: bool = False) -> None:
     """Entry point for devops sync operations. Does not generate reports by default."""
     sync(run_templates_flag=run_templates)
 
-def sync(force_sync=False, run_templates_flag=False, progress_callback=None, cancel_token=None):
+def sync(
+    force_sync=False,
+    run_templates_flag=False,
+    progress_callback=None,
+    cancel_token=None,
+    db_path: Optional[str] = None,
+    cache_db: Optional[AzureDevOpsCache] = None,
+):
     """
     Synchronizes repositories, branches, tags, PRs, and work items from TFS to SQLite.
 
@@ -642,6 +649,8 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
         run_templates_flag (bool): If True, render Tag Day templates after sync. Defaults to False.
         progress_callback (callable, optional): Optional callback for live progress updates.
         cancel_token (callable/object, optional): Cancellation token / predicate.
+        db_path (str, optional): Explicit target database path. Defaults to None.
+        cache_db (AzureDevOpsCache, optional): Explicit target database cache instance. Defaults to None.
     """
     azHandler = _getHandler()
     if not azHandler:
@@ -655,7 +664,16 @@ def sync(force_sync=False, run_templates_flag=False, progress_callback=None, can
 
     repos_all = {}
     
-    db_path, cache_db = _getDBCacheHandler()
+    if cache_db is not None and db_path:
+        pass
+    elif cache_db is not None:
+        db_path = getattr(cache_db, "db_path", None)
+        if not db_path:
+            db_path, _ = _getDBCacheHandler()
+    elif db_path:
+        cache_db = AzureDevOpsCache(db_path)
+    else:
+        db_path, cache_db = _getDBCacheHandler()
     if not force_sync and isFileRecent(db_path):
         logger.info(f"Read Repo Details from SQLite Database Cache {db_path}")
         try:

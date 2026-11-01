@@ -338,9 +338,10 @@ class DevOpsBackend(QObject):
                     devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = cfg["pat"]
             else:
                 db_path, cache_db = devops_helper._getDBCacheHandler()
-                self._db_path = db_path
+                abs_default_db = os.path.abspath(db_path)
+                self._db_path = abs_default_db
                 self._cache_db = cache_db
-                self._stats["db_path"] = db_path
+                self._stats["db_path"] = abs_default_db
 
             # Load project configuration stored inside the SQLite database if available
             if self._cache_db:
@@ -3254,7 +3255,9 @@ class DevOpsBackend(QObject):
             devops_helper.sync(
                 force_sync=True,
                 progress_callback=_progress_cb,
-                cancel_token=worker.is_cancelled
+                cancel_token=worker.is_cancelled,
+                db_path=self._db_path,
+                cache_db=self._cache_db,
             )
             return "Full synchronization finished successfully"
 
@@ -6079,6 +6082,38 @@ class DevOpsBackend(QObject):
             logger.error(f"Error opening file dialog: {e}")
             return ""
 
+    def _stop_active_worker_for_db_switch(self):
+        """Cancels and detaches any running background worker before switching the active database."""
+        if getattr(self, "_worker", None) is not None:
+            old_worker = self._worker
+            self._worker = None
+            try:
+                old_worker.cancel()
+            except Exception:
+                pass
+            for sig_name in ("progress", "log_message", "finished_task"):
+                sig = getattr(old_worker, sig_name, None)
+                if sig is not None:
+                    try:
+                        sig.disconnect()
+                    except Exception:
+                        pass
+            if not hasattr(self, "_retired_workers"):
+                self._retired_workers = []
+            if old_worker.isRunning():
+                self._retired_workers.append(old_worker)
+                old_worker.finished.connect(
+                    lambda w=old_worker: self._retired_workers.remove(w) if w in self._retired_workers else None
+                )
+        self._set_busy(False, "Ready")
+
+    @Slot(str, result=str)
+    def get_default_db_path(self, project_name=""):
+        """Returns the default SQLite cache database path in the configured reports/base folder for a given project."""
+        clean_pname = (project_name or "").strip() or "new"
+        base_dir = devops_helper.BASE_FOLDER if devops_helper.BASE_FOLDER else os.getcwd()
+        return os.path.abspath(os.path.join(base_dir, f"tfs_cache_{clean_pname}.db"))
+
     @Slot(str, result=str)
     def browse_new_db_path(self, suggested_name=""):
         """Opens native file dialog to choose path for a new database."""
@@ -6151,9 +6186,11 @@ class DevOpsBackend(QObject):
             return False
 
         try:
+            self._stop_active_worker_for_db_switch()
             self._db_path = abs_path
             self._cache_db = AzureDevOpsCache(abs_path)
             self._stats["db_path"] = abs_path
+            self._invalidate_all_db_property_caches()
 
             # Load project configuration stored in the database if available
             self._load_project_config_from_db(self._cache_db)
@@ -7617,12 +7654,15 @@ class DevOpsBackend(QObject):
         if not clean_pname:
             return {"success": False, "error": "Project name cannot be empty"}
 
+        base_dir = devops_helper.BASE_FOLDER or os.getcwd()
         if not db_path or not db_path.strip():
-            db_path = os.path.join(devops_helper.BASE_FOLDER, f"tfs_cache_{clean_pname}.db")
+            db_path = os.path.join(base_dir, f"tfs_cache_{clean_pname}.db")
         else:
             db_path = db_path.strip()
             if not db_path.endswith(".db"):
                 db_path += ".db"
+            if not os.path.isabs(db_path) and not os.path.dirname(db_path):
+                db_path = os.path.join(base_dir, db_path)
 
         abs_db_path = os.path.abspath(db_path)
         logger.info(f"Creating new database for project '{clean_pname}' at: {abs_db_path}")
@@ -7708,10 +7748,13 @@ class DevOpsBackend(QObject):
             new_cache.set_many_config(db_config)
 
             # 4. Switch active backend cache
+            self._stop_active_worker_for_db_switch()
             self._db_path = abs_db_path
             self._cache_db = new_cache
             self._stats["db_path"] = abs_db_path
             self._stats["project_name"] = clean_pname
+            self._project_id = clean_pname
+            self._invalidate_all_db_property_caches()
 
             # 5. Reload GUI state
             self.refresh_all_data()
