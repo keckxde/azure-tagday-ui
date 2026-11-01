@@ -258,15 +258,35 @@ def resolve_mirror_configuration(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def setup_logging(log_file: Optional[str] = None, verbose: bool = False):
+def setup_logging(log_file: Optional[str] = None, verbose: bool = False) -> list:
     """Configures console and optional file logging for cron execution."""
     level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    handlers = [logging.StreamHandler(sys.stdout)]
+    handlers: list = [logging.StreamHandler(sys.stdout)]
     if log_file:
         os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
     logging.basicConfig(level=level, format=fmt, handlers=handlers, force=True)
+    return handlers
+
+
+def _close_file_handlers(handlers: list) -> None:
+    """Closes and detaches any FileHandler instances so log files are not locked on Windows."""
+    root_logger = logging.getLogger()
+    for h in list(handlers or []):
+        if isinstance(h, logging.FileHandler):
+            try:
+                h.flush()
+            except Exception:
+                pass
+            try:
+                root_logger.removeHandler(h)
+            except Exception:
+                pass
+            try:
+                h.close()
+            except Exception:
+                pass
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -407,73 +427,76 @@ def run_mirror_job(args: argparse.Namespace) -> int:
     log_file = None
     if not getattr(args, "no_log_file", False):
         log_file = getattr(args, "log_file", None) or os.path.join(target_dir, "mirror_cron.log")
-    setup_logging(log_file=log_file, verbose=getattr(args, "verbose", False))
+    active_handlers = setup_logging(log_file=log_file, verbose=getattr(args, "verbose", False))
 
-    lock_path = getattr(args, "lock_file", None) or os.path.join(target_dir, ".mirror.lock")
-    with MirrorLockFile(lock_path) as lock:
-        if not lock.acquired:
-            return 0
+    try:
+        lock_path = getattr(args, "lock_file", None) or os.path.join(target_dir, ".mirror.lock")
+        with MirrorLockFile(lock_path) as lock:
+            if not lock.acquired:
+                return 0
 
-        project_id = cfg["project_id"]
-        full_tfs_url = cfg["full_tfs_url"]
-        pat = cfg["pat"]
-        cache_db = cfg["cache_db"]
-        mode = cfg["mode"]
+            project_id = cfg["project_id"]
+            full_tfs_url = cfg["full_tfs_url"]
+            pat = cfg["pat"]
+            cache_db = cfg["cache_db"]
+            mode = cfg["mode"]
 
-        if not project_id:
-            logger.error("No project_id configured. Pass --project <NAME> or --db-path <DB>.")
-            return 1
-
-        info_handler: Optional[AzureInfoHandler] = None
-        if full_tfs_url and pat and not getattr(args, "offline_cache", False):
-            info_handler = AzureInfoHandler(full_tfs_url, pat)
-
-        logger.info(
-            "=== TFS File-Mirror Job Started [project=%s, mode=%s, target=%s, db=%s] ===",
-            project_id, mode, target_dir, cfg["db_path"] or "none",
-        )
-
-        timeout_min = cfg.get("git_timeout_minutes", 60)
-        timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
-
-        mgr = LocalBackupManager(
-            target_dir=target_dir,
-            mode=mode,
-            info_handler=info_handler,
-            project_id=project_id,
-            pat=pat,
-            cache_db=cache_db,
-            git_timeout_seconds=timeout_sec,
-        )
-        manifest = mgr.backup_all_repositories(force=bool(getattr(args, "force", False)))
-
-        exit_code = 0 if manifest.get("failed_count", 0) == 0 else 1
-
-        if getattr(args, "also_sync_forgejo", False):
-            fg_url = cfg["forgejo_url"]
-            fg_token = cfg["forgejo_token"]
-            fg_org = cfg["forgejo_org"] or project_id
-            fg_strat = cfg["forgejo_strategy"] or "push"
-            if not fg_url:
-                logger.error("--also-sync-forgejo requested, but no Forgejo URL is configured.")
+            if not project_id:
+                logger.error("No project_id configured. Pass --project <NAME> or --db-path <DB>.")
                 return 1
-            fg_client = ForgejoClient(url=fg_url, token=fg_token)
-            sync_mgr = ForgejoStandbySyncManager(
-                forgejo_client=fg_client,
-                org_name=fg_org,
-                strategy=fg_strat,
-                backup_dir=target_dir,
+
+            info_handler: Optional[AzureInfoHandler] = None
+            if full_tfs_url and pat and not getattr(args, "offline_cache", False):
+                info_handler = AzureInfoHandler(full_tfs_url, pat)
+
+            logger.info(
+                "=== TFS File-Mirror Job Started [project=%s, mode=%s, target=%s, db=%s] ===",
+                project_id, mode, target_dir, cfg["db_path"] or "none",
+            )
+
+            timeout_min = cfg.get("git_timeout_minutes", 60)
+            timeout_sec = timeout_min * 60 if timeout_min > 0 else 0
+
+            mgr = LocalBackupManager(
+                target_dir=target_dir,
+                mode=mode,
                 info_handler=info_handler,
                 project_id=project_id,
-                tfs_pat=pat,
+                pat=pat,
                 cache_db=cache_db,
+                git_timeout_seconds=timeout_sec,
             )
-            fg_res = sync_mgr.sync_all_repositories(force=bool(getattr(args, "force", False)))
-            if fg_res.get("failed_count", 0) > 0:
-                exit_code = 1
+            manifest = mgr.backup_all_repositories(force=bool(getattr(args, "force", False)))
 
-        logger.info("=== TFS File-Mirror Job Finished (exit_code=%d) ===", exit_code)
-        return exit_code
+            exit_code = 0 if manifest.get("failed_count", 0) == 0 else 1
+
+            if getattr(args, "also_sync_forgejo", False):
+                fg_url = cfg["forgejo_url"]
+                fg_token = cfg["forgejo_token"]
+                fg_org = cfg["forgejo_org"] or project_id
+                fg_strat = cfg["forgejo_strategy"] or "push"
+                if not fg_url:
+                    logger.error("--also-sync-forgejo requested, but no Forgejo URL is configured.")
+                    return 1
+                fg_client = ForgejoClient(url=fg_url, token=fg_token)
+                sync_mgr = ForgejoStandbySyncManager(
+                    forgejo_client=fg_client,
+                    org_name=fg_org,
+                    strategy=fg_strat,
+                    backup_dir=target_dir,
+                    info_handler=info_handler,
+                    project_id=project_id,
+                    tfs_pat=pat,
+                    cache_db=cache_db,
+                )
+                fg_res = sync_mgr.sync_all_repositories(force=bool(getattr(args, "force", False)))
+                if fg_res.get("failed_count", 0) > 0:
+                    exit_code = 1
+
+            logger.info("=== TFS File-Mirror Job Finished (exit_code=%d) ===", exit_code)
+            return exit_code
+    finally:
+        _close_file_handlers(active_handlers)
 
 
 def main():
