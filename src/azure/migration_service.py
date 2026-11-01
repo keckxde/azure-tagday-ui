@@ -515,19 +515,28 @@ class SubmoduleAuditor:
                 if target_branch:
                     params["versionDescriptor.version"] = target_branch
                     params["versionDescriptor.versionType"] = "branch"
+
+                def _fetch_gitmodules(req_params):
+                    try:
+                        return self.info_handler.get_repository_items(
+                            self.project_id, repo_id, ".gitmodules",
+                            params=req_params, raw_text=True, suppress_error_log=True
+                        )
+                    except TypeError:
+                        return self.info_handler.get_repository_items(
+                            self.project_id, repo_id, ".gitmodules",
+                            params=req_params, raw_text=True
+                        )
+
                 try:
-                    res = self.info_handler.get_repository_items(
-                        self.project_id, repo_id, ".gitmodules", params=params, raw_text=True
-                    )
+                    res = _fetch_gitmodules(params)
                     if isinstance(res, str):
                         content = res
                 except urllib.error.HTTPError as he:
                     if he.code != 404 and target_branch:
                         # Fallback to default item query without versionDescriptor
                         try:
-                            res = self.info_handler.get_repository_items(
-                                self.project_id, repo_id, ".gitmodules", params={"$format": "text"}, raw_text=True
-                            )
+                            res = _fetch_gitmodules({"$format": "text"})
                             if isinstance(res, str):
                                 content = res
                         except Exception:
@@ -1612,6 +1621,28 @@ class ForgejoStandbySyncManager:
         Pushes all branches (`refs/heads/*`) and tags (`refs/tags/*`) from a local bare mirror
         to the target Forgejo repository using ephemeral HTTP Basic Auth headers.
         """
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+
+        # Check if the bare mirror is completely empty (no branches/tags, e.g. VS403403 empty TFS repo)
+        ref_check = subprocess.run(
+            [self.git_executable, "show-ref"],
+            cwd=mirror_path,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if not (ref_check.stdout or "").strip():
+            return subprocess.CompletedProcess(
+                args=[self.git_executable, "push"],
+                returncode=0,
+                stdout="Empty repository (no refs to push).",
+                stderr="",
+            )
+
         cmd = [
             self.git_executable,
             "-c", "http.sslVerify=false",
@@ -1629,8 +1660,6 @@ class ForgejoStandbySyncManager:
             "+refs/tags/*:refs/tags/*",
         ])
 
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
         return subprocess.run(
             cmd,
             cwd=mirror_path,

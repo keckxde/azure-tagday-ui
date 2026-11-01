@@ -754,9 +754,14 @@ class AzureInfoHandler(AzureBaseClient):
                 params["versionDescriptor.versionType"] = "branch"
         try:
             # GET {projectID}/_apis/git/repositories/{repositoryId}/items?path={path}&$format=text&api-version=6.0
-            content = self.get_repository_items(
-                project_id, repo['id'], ".gitmodules", params=params, raw_text=True
-            )
+            try:
+                content = self.get_repository_items(
+                    project_id, repo['id'], ".gitmodules", params=params, raw_text=True, suppress_error_log=True
+                )
+            except TypeError:
+                content = self.get_repository_items(
+                    project_id, repo['id'], ".gitmodules", params=params, raw_text=True
+                )
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return submodules

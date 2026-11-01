@@ -908,7 +908,7 @@ class AzureBaseClient:
         res, _ = self._request("GET", f"{project_id}/_apis/git/repositories", params={"api-version": "6.0"})
         return res.get("value", [])
 
-    def get_repository_items(self, project_id, repo_id, path, params=None, raw_text=False):
+    def get_repository_items(self, project_id, repo_id, path, params=None, raw_text=False, suppress_error_log=False):
         """
         Retrieves details or content of a file/folder in a repository.
 
@@ -918,6 +918,7 @@ class AzureBaseClient:
             path (str): The path to the item inside the repository.
             params (dict, optional): Additional request parameters. Defaults to None.
             raw_text (bool, optional): If True, returns file content as text instead of JSON metadata. Defaults to False.
+            suppress_error_log (bool, optional): If True, suppresses error logging on HTTP 404/non-fatal errors. Defaults to False.
 
         Returns:
             dict/str: The response containing file content or metadata.
@@ -925,7 +926,13 @@ class AzureBaseClient:
         req_params = {"path": path, "api-version": "6.0"}
         if params:
             req_params.update(params)
-        res, _ = self._request("GET", f"{project_id}/_apis/git/repositories/{repo_id}/items", params=req_params, raw_text=raw_text)
+        res, _ = self._request(
+            "GET",
+            f"{project_id}/_apis/git/repositories/{repo_id}/items",
+            params=req_params,
+            raw_text=raw_text,
+            suppress_error_log=suppress_error_log,
+        )
         return res
 
     def get_repository_refs(self, project_id, repo_id, filter_str):

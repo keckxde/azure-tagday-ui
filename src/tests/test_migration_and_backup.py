@@ -591,6 +591,65 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         self.assertEqual(status_list[0]["local_status"], "PENDING")
         self.assertEqual(backend.getSubmoduleAuditList(), [])
 
+    def test_submodule_audit_suppresses_http_404_error_logs_for_repos_without_gitmodules_or_branches(self):
+        """
+        Verifies that repositories without a .gitmodules file (TF401174 HTTP 404) or
+        empty repositories without branches (VS403403 HTTP 404) do not log ERRORs on
+        azure.azure_base_client during ParseSubmodules or SubmoduleAuditor scans.
+        """
+        import io
+        import urllib.error
+        from unittest.mock import patch
+        from azure.azure_info_handler import AzureInfoHandler
+
+        handler = AzureInfoHandler(
+            url="https://tfs.simdev.defence.ruag.com/tfs/DefaultCollection",
+            token="dummy-pat",
+        )
+
+        repos_payload = {
+            "value": [
+                {
+                    "id": "cda45509-6465-454b-ad76-a3d6b3b8302f",
+                    "name": "elsa-tdp",
+                    "defaultBranch": "refs/heads/dev",
+                    "remoteUrl": "https://tfs.simdev.defence.ruag.com/tfs/DefaultCollection/CH_ELSA/_git/elsa-tdp",
+                },
+                {
+                    "id": "94b47644-40fc-400e-a745-00655132186b",
+                    "name": "CH_ELSA",
+                    "defaultBranch": "",
+                    "remoteUrl": "https://tfs.simdev.defence.ruag.com/tfs/DefaultCollection/CH_ELSA/_git/CH_ELSA",
+                },
+            ]
+        }
+
+        def fake_urlopen(req, *args, **kwargs):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if "path=.gitmodules" in url:
+                if "94b47644" in url:
+                    err_body = b'{"$id":"1","message":"VS403403: Cannot find any branches for the CH_ELSA repository.","typeKey":"GitItemNotFoundException"}'
+                else:
+                    err_body = b'{"$id":"1","message":"TF401174: The item \'.gitmodules\' could not be found in the repository \'elsa-tdp\'","typeKey":"GitItemNotFoundException"}'
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, io.BytesIO(err_body))
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with patch.object(handler, "get_repositories", return_value=repos_payload["value"]), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             self.assertNoLogs("azure.azure_base_client", level="ERROR"):
+            parsed = handler.ParseSubmodules(
+                repo=repos_payload["value"][0],
+                project_id="CH_ELSA",
+                branch_name="dev",
+                fetch_item_info=True,
+            )
+            self.assertEqual(parsed, [])
+
+            auditor = SubmoduleAuditor(info_handler=handler, project_id="CH_ELSA", cache_db=self.cache_db)
+            summary = auditor.audit_project_submodules()
+            self.assertEqual(summary["total_repos_scanned"], 2)
+            self.assertEqual(summary["total_submodules"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
