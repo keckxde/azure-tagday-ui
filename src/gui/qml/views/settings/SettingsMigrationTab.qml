@@ -421,6 +421,31 @@ ColumnLayout {
                         }
                     }
                 }
+
+                Button {
+                    text: "🛡️ Trust Safe Dir"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Bereitet 'git config --global --add safe.directory' für das gewählte Backup-Verzeichnis, alle Mirrors/Worktrees und UNC-Netzwerkpfade vor (wird auch automatisch beim Backup ausgeführt)."
+                    contentItem: Text {
+                        text: parent.text; font: parent.font; color: "#58a6ff"
+                        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        implicitHeight: 34; implicitWidth: 135; radius: 6
+                        color: parent.hovered ? "#1f324d" : "#16243b"
+                        border.color: "#388bfd"; border.width: 1
+                    }
+                    onClicked: {
+                        if (backend) {
+                            backend.backupTargetDir = backupDirInput.text;
+                            var added = backend.configureGitSafeDirectory(backupDirInput.text);
+                            root.bannerMsg = "🛡️ Global Git safe.directory konfiguriert für '" + backupDirInput.text + "' (" + (added ? added.length : 0) + " neue Einträge hinzugefügt, inkl. Mirrors & UNC-Freigaben).";
+                            root.bannerType = "success";
+                        }
+                    }
+                }
             }
 
             // Backup Format Toggle (Worktree | Bare Mirror | Both) + Run Actions

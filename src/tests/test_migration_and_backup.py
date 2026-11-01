@@ -27,8 +27,11 @@ from azure.migration_service import (
     ForgejoStandbySyncManager,
     LocalBackupManager,
     SubmoduleAuditor,
+    _candidate_safe_directory_patterns,
     build_git_auth_args,
     classify_submodule_url,
+    ensure_git_safe_directories,
+    extract_dubious_ownership_paths,
     parse_gitmodules_content,
     rewrite_gitmodules_to_relative,
     sort_repos_topologically,
@@ -761,6 +764,61 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         mig_qml = os.path.join(src_dir, "gui", "qml", "views", "settings", "SettingsMigrationTab.qml")
         comp = QQmlComponent(engine, QUrl.fromLocalFile(mig_qml))
         self.assertFalse(comp.isError(), f"SettingsMigrationTab.qml errors: {[e.toString() for e in comp.errors()]}")
+
+    def test_safe_directory_global_config_and_dubious_ownership_self_healing(self):
+        """
+        Verifies that:
+        1. `build_git_auth_args` includes `-c safe.directory=*`.
+        2. `extract_dubious_ownership_paths` extracts UNC and `%(prefix)///...` paths from Git's error output.
+        3. `_run_git` automatically adds global `safe.directory` and retries when Git outputs
+           `fatal: detected dubious ownership in repository`.
+        """
+        from unittest.mock import patch
+
+        auth_args = build_git_auth_args(pat="dummy")
+        self.assertIn("safe.directory=*", auth_args)
+
+        sample_err = (
+            "fatal: detected dubious ownership in repository at '//192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git'\n"
+            "'//192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git' may refer to a non-local directory\n"
+            "To add an exception for this directory, call:\n\n"
+            "\tgit config --global --add safe.directory '%(prefix)///192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git'\n"
+        )
+        extracted = extract_dubious_ownership_paths(sample_err)
+        self.assertIn("%(prefix)///192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git", extracted)
+        self.assertIn("//192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git", extracted)
+
+        cands = _candidate_safe_directory_patterns("//192.168.1.151/share/ELSA/mirrors")
+        self.assertIn("%(prefix)///192.168.1.151/share/ELSA/mirrors", cands)
+        self.assertIn("%(prefix)///192.168.1.151/share/ELSA/mirrors/*", cands)
+
+        # Simulate _run_git encountering dubious ownership on 1st attempt, auto-configuring safe.directory, and succeeding on retry
+        call_count = {"n": 0}
+        class FakeProc:
+            def __init__(self):
+                call_count["n"] += 1
+                self.attempt = call_count["n"]
+                self.returncode = 128 if self.attempt == 1 else 0
+            def communicate(self, timeout=None):
+                if self.attempt == 1:
+                    return ("", sample_err)
+                return ("ok\n", "")
+
+        mgr = LocalBackupManager(
+            target_dir=os.path.join(self.tmp_dir.name, "safe_dir_backup"),
+            mode="mirror",
+            project_id="TestProj",
+            cache_db=self.cache_db,
+            auto_configure_safe_directory=False,
+        )
+
+        with patch("subprocess.Popen", side_effect=lambda *a, **kw: FakeProc()), \
+             patch("azure.migration_service.ensure_git_safe_directories", return_value=["*"]) as mock_ensure:
+            res = mgr._run_git(["remote", "update", "--prune"], cwd="//192.168.1.151/share/ELSA/mirrors/elsa-spz2000-plc.git")
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(call_count["n"], 2)
+            mock_ensure.assert_called_once()
+
 
 
 

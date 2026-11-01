@@ -9223,7 +9223,37 @@ class DevOpsBackend(QObject):
         mig["backup_target_dir"] = clean_dir
         cfg["migration"] = mig
         _save_user_settings(cfg)
+        if clean_dir:
+            try:
+                self.configureGitSafeDirectory(clean_dir)
+            except Exception:
+                pass
         self.migrationSettingsChanged.emit()
+
+    @Slot(str, result="QVariantList")
+    @Slot(result="QVariantList")
+    def configureGitSafeDirectory(self, target_dir: str = "") -> list:
+        """
+        Prepares global Git `safe.directory` configuration (`git config --global --add safe.directory ...`)
+        for the selected backup directory, its `mirrors` and `worktrees` subdirectories, any existing
+        mirror repositories, and `*` so network/UNC shares never fail with `detected dubious ownership`.
+        """
+        from azure.migration_service import ensure_git_safe_directories
+        resolved_dir = (target_dir or "").strip() or self.backupTargetDir
+        if not resolved_dir:
+            return []
+        mirrors_sub = os.path.join(resolved_dir, "mirrors")
+        worktrees_sub = os.path.join(resolved_dir, "worktrees")
+        paths = [resolved_dir, mirrors_sub, worktrees_sub]
+        if os.path.isdir(mirrors_sub):
+            try:
+                with os.scandir(mirrors_sub) as it:
+                    for entry in it:
+                        if entry.is_dir():
+                            paths.append(entry.path)
+            except OSError:
+                pass
+        return ensure_git_safe_directories(paths=paths, include_wildcard=True)
 
     @Property(int, notify=migrationSettingsChanged)
     def backupGitTimeoutMinutes(self) -> int:

@@ -863,7 +863,8 @@ def build_git_auth_args(
     """
     Builds ephemeral Git CLI `-c` configuration arguments so PAT credentials
     are never persisted to `.git/config` on disk, SSL verification is relaxed
-    for self-signed TFS certificates, and local/file submodule protocols work.
+    for self-signed TFS certificates, `safe.directory=*` is enabled for network/UNC
+    shares, and local/file submodule protocols work.
 
     Args:
         pat (str, optional): Personal Access Token for HTTP Basic auth.
@@ -874,6 +875,7 @@ def build_git_auth_args(
         List[str]: List of `-c <key>=<value>` arguments for `git`.
     """
     args = [
+        "-c", "safe.directory=*",
         "-c", "http.sslVerify=false",
         "-c", "protocol.file.allow=always",
     ]
@@ -888,6 +890,150 @@ def build_git_auth_args(
             args.extend(["-c", f"url.{base_dst}.insteadOf={base_src}"])
 
     return args
+
+
+def _candidate_safe_directory_patterns(raw_path: str) -> List[str]:
+    """
+    Produces normalized Git `safe.directory` entries for a local or mapped-network/UNC path,
+    including `%(prefix)///server/share/...` forms required by Git for Windows on UNC shares.
+    """
+    if not raw_path or not str(raw_path).strip():
+        return []
+    raw_s = str(raw_path).strip().strip("'\"")
+    if raw_s == "*":
+        return ["*"]
+
+    out: List[str] = []
+
+    def _add(val: str):
+        if val and val not in out:
+            out.append(val)
+
+    variants = [raw_s]
+    try:
+        abs_p = os.path.abspath(raw_s)
+        if abs_p not in variants:
+            variants.append(abs_p)
+    except Exception:
+        pass
+    try:
+        real_p = os.path.realpath(raw_s)
+        if real_p not in variants:
+            variants.append(real_p)
+    except Exception:
+        pass
+
+    for v in variants:
+        if v.startswith("%(prefix)/"):
+            _add(v)
+            continue
+        norm = v.replace("\\", "/").rstrip("/")
+        if not norm:
+            continue
+        _add(norm)
+        # If UNC path (//server/share/...), Git on Windows requires '%(prefix)///server/share/...'
+        if norm.startswith("//"):
+            _add(f"%(prefix)/{norm}")
+            _add(f"%(prefix)/{norm}/*")
+        else:
+            _add(f"{norm}/*")
+
+    return out
+
+
+def extract_dubious_ownership_paths(stderr_text: str) -> List[str]:
+    """
+    Extracts the exact `safe.directory` path(s) suggested by Git when a
+    `fatal: detected dubious ownership in repository` error occurs.
+    """
+    if not stderr_text:
+        return []
+    found: List[str] = []
+
+    def _add(p: str):
+        clean = p.strip().strip("'\"")
+        if clean and clean not in found:
+            found.append(clean)
+            if clean.startswith("//") and not clean.startswith("%(prefix)/"):
+                pref = f"%(prefix)/{clean}"
+                if pref not in found:
+                    found.append(pref)
+
+    for m in re.finditer(r"safe\.directory\s+['\"]?([^'\"\r\n]+)['\"]?", stderr_text):
+        _add(m.group(1))
+    for m in re.finditer(r"dubious ownership in repository at\s+['\"]([^'\"\r\n]+)['\"]", stderr_text):
+        _add(m.group(1))
+
+    return found
+
+
+def ensure_git_safe_directories(
+    paths: Iterable[str],
+    git_executable: str = "git",
+    include_wildcard: bool = True,
+) -> List[str]:
+    """
+    Prepares global Git configuration (`git config --global --add safe.directory ...`)
+    for the chosen backup directory, `mirrors`, `worktrees`, UNC paths (`%(prefix)///...`),
+    and `*` so Git never rejects repositories or mirrors on network drives with
+    `fatal: detected dubious ownership`.
+
+    Returns:
+        List[str]: Newly added `safe.directory` entries.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
+    existing: set = set()
+    try:
+        res = subprocess.run(
+            [git_executable, "config", "--global", "--get-all", "safe.directory"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.splitlines():
+                if line.strip():
+                    existing.add(line.strip())
+    except Exception as exc:
+        logger.debug("Could not read existing global git safe.directory list: %s", exc)
+
+    desired: List[str] = []
+    if include_wildcard:
+        desired.append("*")
+
+    for p in (paths or []):
+        for cand in _candidate_safe_directory_patterns(p):
+            if cand not in desired:
+                desired.append(cand)
+
+    added: List[str] = []
+    for entry in desired:
+        if entry in existing:
+            continue
+        try:
+            add_res = subprocess.run(
+                [git_executable, "config", "--global", "--add", "safe.directory", entry],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if add_res.returncode == 0:
+                existing.add(entry)
+                added.append(entry)
+        except Exception as exc:
+            logger.debug("Could not add global git safe.directory '%s': %s", entry, exc)
+
+    if added:
+        logger.info("🛡️ Prepared global git safe.directory config (%d entries added)", len(added))
+    return added
 
 
 class LocalBackupManager:
@@ -911,6 +1057,7 @@ class LocalBackupManager:
         git_executable: str = "git",
         git_timeout_seconds: Optional[int] = DEFAULT_GIT_TIMEOUT_SECONDS,
         extend_timeout_on_activity: bool = True,
+        auto_configure_safe_directory: bool = True,
     ):
         norm_mode = str(mode or "both").strip().lower()
         if norm_mode not in VALID_BACKUP_MODES:
@@ -926,6 +1073,34 @@ class LocalBackupManager:
             None if (git_timeout_seconds is None or int(git_timeout_seconds) <= 0) else int(git_timeout_seconds)
         )
         self.extend_timeout_on_activity = bool(extend_timeout_on_activity)
+        self.auto_configure_safe_directory = bool(auto_configure_safe_directory)
+        if self.auto_configure_safe_directory:
+            self.ensure_global_safe_directories()
+
+    def ensure_global_safe_directories(self, extra_paths: Optional[Iterable[str]] = None) -> List[str]:
+        """
+        Ensures global Git `safe.directory` configuration is prepared for `target_dir`,
+        `mirrors_dir`, `worktrees_dir`, any existing `.git` mirrors/worktrees, and `extra_paths`.
+        """
+        paths = [self.target_dir, self.mirrors_dir, self.worktrees_dir]
+        if extra_paths:
+            for ep in extra_paths:
+                if ep and ep not in paths:
+                    paths.append(ep)
+        # Also include existing mirror directories if present on disk
+        if os.path.isdir(self.mirrors_dir):
+            try:
+                with os.scandir(self.mirrors_dir) as it:
+                    for entry in it:
+                        if entry.is_dir():
+                            paths.append(entry.path)
+            except OSError:
+                pass
+        return ensure_git_safe_directories(
+            paths=paths,
+            git_executable=self.git_executable,
+            include_wildcard=True,
+        )
 
     @property
     def mirrors_dir(self) -> str:
@@ -985,14 +1160,16 @@ class LocalBackupManager:
         extra_config_args: Optional[List[str]] = None,
         timeout: Optional[int] = -1,
         watch_path: Optional[str] = None,
+        _retried_safe_dir: bool = False,
     ) -> subprocess.CompletedProcess:
         """
         Executes a git command with ephemeral auth/config flags and captures output.
         Supports unlimited timeout (`timeout=None` or `0`), automatic timeout extension
-        when disk I/O is still active on slow network shares, and catches `TimeoutExpired`
-        cleanly so a slow command never crashes the caller with an unhandled exception.
+        when disk I/O is still active on slow network shares, automatic global `safe.directory`
+        self-healing on `dubious ownership`, and catches `TimeoutExpired` cleanly so a slow
+        command never crashes the caller with an unhandled exception.
         """
-        cmd = [self.git_executable]
+        cmd = [self.git_executable, "-c", "safe.directory=*"]
         if extra_config_args:
             cmd.extend(extra_config_args)
         cmd.extend(git_args)
@@ -1039,11 +1216,39 @@ class LocalBackupManager:
         while True:
             try:
                 stdout_str, stderr_str = proc.communicate(timeout=effective_timeout)
+                err_txt = stderr_str or ""
+                if (
+                    proc.returncode != 0
+                    and not _retried_safe_dir
+                    and ("dubious ownership" in err_txt or "safe.directory" in err_txt)
+                ):
+                    extracted = extract_dubious_ownership_paths(err_txt)
+                    if cwd:
+                        extracted.append(cwd)
+                    if target_watch:
+                        extracted.append(target_watch)
+                    logger.info(
+                        "🛡️ Detected Git dubious ownership on network/mirror directory; adding to global safe.directory and retrying: %s",
+                        extracted,
+                    )
+                    ensure_git_safe_directories(
+                        paths=extracted,
+                        git_executable=self.git_executable,
+                        include_wildcard=True,
+                    )
+                    return self._run_git(
+                        git_args=git_args,
+                        cwd=cwd,
+                        extra_config_args=extra_config_args,
+                        timeout=timeout,
+                        watch_path=watch_path,
+                        _retried_safe_dir=True,
+                    )
                 return subprocess.CompletedProcess(
                     args=cmd,
                     returncode=proc.returncode,
                     stdout=stdout_str or "",
-                    stderr=stderr_str or "",
+                    stderr=err_txt,
                 )
             except subprocess.TimeoutExpired as te:
                 cur_activity = self._probe_disk_activity(target_watch)
@@ -1137,6 +1342,9 @@ class LocalBackupManager:
 
         want_mirror = self.mode in ("mirror", "both")
         want_worktree = self.mode in ("worktree", "both")
+
+        if self.auto_configure_safe_directory:
+            self.ensure_global_safe_directories([mirror_path, worktree_path])
 
         # Check Standby Delta: skip network fetch if push_id matches and required folders already exist
         if not force and self.cache_db and remote_push_id is not None:
@@ -1926,7 +2134,7 @@ class ForgejoStandbySyncManager:
 
         # Check if the bare mirror is completely empty (no branches/tags, e.g. VS403403 empty TFS repo)
         ref_check = subprocess.run(
-            [self.git_executable, "show-ref"],
+            [self.git_executable, "-c", "safe.directory=*", "show-ref"],
             cwd=mirror_path,
             env=env,
             stdout=subprocess.PIPE,
@@ -1945,6 +2153,7 @@ class ForgejoStandbySyncManager:
 
         cmd = [
             self.git_executable,
+            "-c", "safe.directory=*",
             "-c", "http.sslVerify=false",
             "-c", "protocol.file.allow=always",
         ]
