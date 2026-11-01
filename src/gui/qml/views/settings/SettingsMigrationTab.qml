@@ -35,6 +35,12 @@ ColumnLayout {
             migrationTabRoot.refreshMigrationModels();
         }
 
+        function onProgressChanged() {
+            if (backend && backend.isBusy) {
+                migrationTabRoot.refreshMigrationModels();
+            }
+        }
+
         function onSubmoduleAuditCompleted(report) {
             migrationTabRoot.refreshMigrationModels();
             if (report) {

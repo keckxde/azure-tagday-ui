@@ -487,12 +487,19 @@ class SubmoduleAuditor:
         repos = list(repos or [])
         known_repo_names = [r.get("name", "") for r in repos if r.get("name")]
         total = len(repos)
+        logger.info("🔍 Scanning .gitmodules across %d repositories in project '%s'...", total, self.project_id or "default")
 
         def _notify(cur: int, r_name: str):
-            if not callable(progress_callback):
-                return
             pct = int((cur / total) * 100) if total > 0 else 100
             msg = f"Checking .gitmodules in {r_name} ({cur}/{total})..."
+            if hasattr(progress_callback, "report_progress"):
+                try:
+                    progress_callback.report_progress(pct, msg)
+                    return
+                except Exception:
+                    pass
+            if not callable(progress_callback):
+                return
             try:
                 progress_callback(pct, msg)
             except TypeError:
@@ -660,6 +667,11 @@ class SubmoduleAuditor:
                     needs_conv += 1
                 else:
                     ext_or_missing += 1
+
+        logger.info(
+            "🏁 Submodule audit complete: %d repositories scanned, %d submodule(s) found (%d relative OK, %d needing conversion).",
+            total, total_subs, rel_ok, needs_conv,
+        )
 
         return {
             "project_id": self.project_id,
@@ -1030,6 +1042,7 @@ class LocalBackupManager:
             os.makedirs(self.mirrors_dir, exist_ok=True)
             if os.path.isdir(mirror_path) and os.path.isfile(os.path.join(mirror_path, "HEAD")):
                 action_taken = "UPDATED"
+                logger.info("  ↳ [%s] Updating bare mirror (%s)...", repo_name, mirror_path)
                 self._run_git(["remote", "set-url", "origin", clone_url], cwd=mirror_path, extra_config_args=auth_args)
                 res = self._run_git(["remote", "update", "--prune"], cwd=mirror_path, extra_config_args=auth_args)
                 if res.returncode != 0:
@@ -1037,6 +1050,7 @@ class LocalBackupManager:
             else:
                 if os.path.exists(mirror_path):
                     shutil.rmtree(mirror_path, ignore_errors=True)
+                logger.info("  ↳ [%s] Cloning bare mirror (%s)...", repo_name, mirror_path)
                 res = self._run_git(["clone", "--mirror", clone_url, mirror_path], extra_config_args=auth_args)
                 if res.returncode != 0:
                     errors.append(f"Mirror clone failed: {res.stderr.strip()}")
@@ -1054,6 +1068,7 @@ class LocalBackupManager:
 
             if os.path.isdir(worktree_path) and os.path.exists(git_dir_marker):
                 action_taken = "UPDATED"
+                logger.info("  ↳ [%s] Fetching & updating worktree (%s)...", repo_name, worktree_path)
                 self._run_git(["remote", "set-url", "origin", clone_url], cwd=worktree_path, extra_config_args=wt_auth_args)
                 fetch_res = self._run_git(["fetch", "--all", "--tags", "--prune"], cwd=worktree_path, extra_config_args=wt_auth_args)
                 if fetch_res.returncode != 0:
@@ -1062,6 +1077,7 @@ class LocalBackupManager:
                     # Fast-forward current branch if tracking upstream
                     self._run_git(["pull", "--ff-only"], cwd=worktree_path, extra_config_args=wt_auth_args)
                     if os.path.isfile(os.path.join(worktree_path, ".gitmodules")):
+                        logger.info("  ↳ [%s] Updating recursive submodules in worktree...", repo_name)
                         self._run_git(["submodule", "sync", "--recursive"], cwd=worktree_path, extra_config_args=wt_auth_args)
                         sub_res = self._run_git(
                             ["submodule", "update", "--init", "--recursive"],
@@ -1074,6 +1090,7 @@ class LocalBackupManager:
             else:
                 if os.path.exists(worktree_path):
                     shutil.rmtree(worktree_path, ignore_errors=True)
+                logger.info("  ↳ [%s] Cloning worktree with recursive submodules (%s)...", repo_name, worktree_path)
                 clone_cmd = ["clone", "--recurse-submodules"]
                 if want_mirror and os.path.isdir(mirror_path):
                     clone_cmd.extend(["--reference-if-able", mirror_path])
@@ -1262,6 +1279,10 @@ class LocalBackupManager:
 
         ordered_repos = sort_repos_topologically(repos, submodule_map=submodule_map)
         total = len(ordered_repos)
+        logger.info(
+            "📦 Starting local repository backup [mode=%s, force=%s] for %d repositories -> %s",
+            self.mode, force, total, self.target_dir,
+        )
 
         # Auto-derive tfs_project_git_base if not supplied
         if not tfs_project_git_base and self.info_handler and getattr(self.info_handler, "url", "") and self.project_id:
@@ -1270,16 +1291,25 @@ class LocalBackupManager:
         # If backing up mirrors too and no explicit local_override_base was passed, allow resolving TFS URLs
         def _is_cancelled() -> bool:
             if not cancel_token:
+                if hasattr(progress_callback, "is_cancelled") and callable(progress_callback.is_cancelled):
+                    return bool(progress_callback.is_cancelled())
                 return False
             if callable(cancel_token):
                 return bool(cancel_token())
             return bool(getattr(cancel_token, "is_cancelled", lambda: False)())
 
         def _notify(cur: int, r_name: str):
-            if not callable(progress_callback):
-                return
             pct = int((cur / total) * 100) if total > 0 else 100
             msg = f"Backing up {r_name} [{self.mode}] ({cur}/{total})..."
+            logger.info("⏳ [%d/%d] (%d%%) %s", cur, total, pct, msg)
+            if hasattr(progress_callback, "report_progress"):
+                try:
+                    progress_callback.report_progress(pct, msg)
+                    return
+                except Exception:
+                    pass
+            if not callable(progress_callback):
+                return
             try:
                 progress_callback(pct, msg)
             except TypeError:
@@ -1296,7 +1326,7 @@ class LocalBackupManager:
 
         for idx, repo in enumerate(ordered_repos, start=1):
             if _is_cancelled():
-                logger.info("Local backup cancelled at repository %d/%d", idx, total)
+                logger.info("⏹️ Local backup cancelled at repository %d/%d", idx, total)
                 break
             r_name = repo.get("name", "")
             _notify(idx, r_name)
@@ -1308,16 +1338,39 @@ class LocalBackupManager:
             )
             results.append(res)
             st = res.get("status")
+            action = res.get("action", "")
+            short_sha = (res.get("head_commit") or "")[:8] or "empty"
+            sub_cnt = len(res.get("submodule_details") or [])
+            sub_note = f", {sub_cnt} submodule(s)" if sub_cnt else ""
             if st == "OK":
                 ok_count += 1
-                if res.get("action") == "SKIPPED_UP_TO_DATE":
+                if action == "SKIPPED_UP_TO_DATE":
                     skipped_count += 1
+                    logger.info(
+                        "⏭️ [%d/%d] '%s' skipped (already up to date, push_id=%s)",
+                        idx, total, r_name, repo.get("last_push_id") or repo.get("lastPushId") or "-",
+                    )
+                else:
+                    logger.info(
+                        "✅ [%d/%d] '%s' %s successfully [HEAD=%s%s]",
+                        idx, total, r_name, action.lower() or "backed up", short_sha, sub_note,
+                    )
             elif st == "SUBMODULE_WARN":
                 warn_count += 1
+                logger.warning(
+                    "⚠️ [%d/%d] '%s' backed up with submodule warning [HEAD=%s]: %s",
+                    idx, total, r_name, short_sha, res.get("error"),
+                )
             else:
                 failed_count += 1
+                logger.error(
+                    "❌ [%d/%d] '%s' backup failed: %s",
+                    idx, total, r_name, res.get("error"),
+                )
 
         snapshot_path = self.snapshot_sqlite_cache()
+        if snapshot_path:
+            logger.info("💾 SQLite cache snapshot saved to: %s", snapshot_path)
 
         manifest = {
             "project_id": self.project_id,
@@ -1339,6 +1392,10 @@ class LocalBackupManager:
         except Exception as e:
             logger.error("Failed to write backup_manifest.json: %s", e)
 
+        logger.info(
+            "🏁 Local repository backup completed: %d/%d OK (%d skipped up-to-date), %d warnings, %d failed. Manifest: %s",
+            ok_count, total, skipped_count, warn_count, failed_count, self.manifest_path,
+        )
         return manifest
 
 
@@ -1864,19 +1921,32 @@ class ForgejoStandbySyncManager:
 
         ordered_repos = sort_repos_topologically(repos, submodule_map=submodule_map)
         total = len(ordered_repos)
+        logger.info(
+            "🚀 Starting Forgejo standby sync [strategy=%s, org=%s] for %d repositories -> %s",
+            self.strategy, self.org_name, total, self.forgejo.url,
+        )
 
         def _is_cancelled() -> bool:
             if not cancel_token:
+                if hasattr(progress_callback, "is_cancelled") and callable(progress_callback.is_cancelled):
+                    return bool(progress_callback.is_cancelled())
                 return False
             if callable(cancel_token):
                 return bool(cancel_token())
             return bool(getattr(cancel_token, "is_cancelled", lambda: False)())
 
         def _notify(cur: int, r_name: str):
-            if not callable(progress_callback):
-                return
             pct = int((cur / total) * 100) if total > 0 else 100
             msg = f"Syncing {r_name} to Forgejo [{self.org_name}] ({cur}/{total})..."
+            logger.info("⏳ [%d/%d] (%d%%) %s", cur, total, pct, msg)
+            if hasattr(progress_callback, "report_progress"):
+                try:
+                    progress_callback.report_progress(pct, msg)
+                    return
+                except Exception:
+                    pass
+            if not callable(progress_callback):
+                return
             try:
                 progress_callback(pct, msg)
             except TypeError:
@@ -1891,6 +1961,7 @@ class ForgejoStandbySyncManager:
 
         for idx, repo in enumerate(ordered_repos, start=1):
             if _is_cancelled():
+                logger.info("⏹️ Forgejo standby sync cancelled at repository %d/%d", idx, total)
                 break
             r_name = repo.get("name", "")
             _notify(idx, r_name)
@@ -1902,9 +1973,12 @@ class ForgejoStandbySyncManager:
             results.append(res)
             if res.get("status") == "OK":
                 ok_count += 1
+                logger.info("✅ [%d/%d] '%s' synced -> %s", idx, total, r_name, res.get("forgejo_repo_url"))
             else:
                 failed_count += 1
+                logger.error("❌ [%d/%d] '%s' Forgejo sync failed: %s", idx, total, r_name, res.get("error"))
 
+        logger.info("🏁 Forgejo standby sync completed: %d/%d OK, %d failed.", ok_count, total, failed_count)
         return {
             "project_id": self.project_id,
             "forgejo_url": self.forgejo.url,
