@@ -352,12 +352,19 @@ class DevOpsBackend(QObject):
         try:
             db_cfg = cache_db.get_all_config()
             if not db_cfg:
-                # Fallback to check projects table for project name if no config table yet
+                # Fallback to check projects or repositories table for project name if no config table yet
                 with cache_db._connection() as conn:
                     p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
                     if p_row and p_row["name"]:
                         devops_helper.AZURE_PROJECT_ID = p_row["name"]
                         self._stats["project_name"] = p_row["name"]
+                    else:
+                        r_row = conn.execute(
+                            "SELECT project_id FROM repositories WHERE project_id IS NOT NULL AND project_id != '' LIMIT 1"
+                        ).fetchone()
+                        if r_row and r_row["project_id"]:
+                            devops_helper.AZURE_PROJECT_ID = r_row["project_id"]
+                            self._stats["project_name"] = r_row["project_id"]
                 return
 
             if db_cfg.get("AZURE_BASE_URL"):

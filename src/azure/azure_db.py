@@ -2349,7 +2349,12 @@ class AzureDevOpsCache:
         """
         result = {}
         with self._connection() as conn:
-            repos = conn.execute("SELECT * FROM repositories WHERE project_id = ? AND is_disabled = 0", (project_id,)).fetchall()
+            if project_id:
+                repos = conn.execute("SELECT * FROM repositories WHERE project_id = ? AND is_disabled = 0", (project_id,)).fetchall()
+            else:
+                repos = []
+            if not repos:
+                repos = conn.execute("SELECT * FROM repositories WHERE is_disabled = 0").fetchall()
             if not repos:
                 return result
 
