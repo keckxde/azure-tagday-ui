@@ -934,9 +934,14 @@ ColumnLayout {
                             }
                             onClicked: {
                                 if (backend && modelData.db_path) {
-                                    backend.switch_database(modelData.db_path);
-                                    root.bannerMsg = "Switched to project: " + modelData.name;
-                                    root.bannerType = "success";
+                                    var switched = backend.switch_database(modelData.db_path);
+                                    if (switched) {
+                                        root.bannerMsg = "Switched to project: " + modelData.name;
+                                        root.bannerType = "success";
+                                    } else {
+                                        root.bannerMsg = "Database file no longer exists and was removed from recent list: " + modelData.db_path;
+                                        root.bannerType = "error";
+                                    }
                                     root.loadDatabasesList();
                                 }
                             }

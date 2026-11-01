@@ -26,6 +26,9 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
             cls.app = QCoreApplication.instance()
 
     def setUp(self):
+        import devops_helper
+        self._orig_project_id = devops_helper.AZURE_PROJECT_ID
+        self._orig_base_folder = devops_helper.BASE_FOLDER
         # Backup original user settings if file exists
         self.original_settings = None
         if os.path.exists(USER_SETTINGS_PATH):
@@ -38,11 +41,14 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
         self.backend = DevOpsBackend()
 
     def tearDown(self):
+        import devops_helper
         if hasattr(self, "backend") and self.backend:
             if hasattr(self.backend, "_auto_sync_timer") and self.backend._auto_sync_timer:
                 self.backend._auto_sync_timer.stop()
             if getattr(self.backend, "_worker", None) and self.backend._worker.isRunning():
                 self.backend._worker.wait(500)
+        devops_helper.AZURE_PROJECT_ID = self._orig_project_id
+        devops_helper.BASE_FOLDER = self._orig_base_folder
         # Restore original user settings
         if self.original_settings is not None:
             os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)
@@ -299,22 +305,28 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
     def test_create_project_creates_single_cache_and_stays_on_it(self):
         """
         Verify that connecting a new TFS project with a default/bare filename
-        creates only ONE database cache in BASE_FOLDER (not a duplicate in cwd),
-        immediately activates that cache, and syncs directly into it.
+        creates and opens the SQLite database in the SAME folder where the original
+        database file was located (never in the Markdown output directory BASE_FOLDER
+        or a random cwd), immediately activates that cache, and syncs directly into it.
         """
         import shutil
         import devops_helper
 
-        temp_base = tempfile.mkdtemp()
+        orig_db_dir = tempfile.mkdtemp()
+        markdown_output_dir = tempfile.mkdtemp()
         temp_cwd = tempfile.mkdtemp()
         orig_base_folder = devops_helper.BASE_FOLDER
         orig_cwd = os.getcwd()
         try:
-            devops_helper.BASE_FOLDER = temp_base
+            # Simulate an existing original database in orig_db_dir and Markdown output in markdown_output_dir
+            orig_db_file = os.path.join(orig_db_dir, "tfs_cache_OriginalProj.db")
+            AzureDevOpsCache(orig_db_file)
+            self.backend.switch_database(orig_db_file)
+            self.backend.set_reports_dir(markdown_output_dir)
             os.chdir(temp_cwd)
 
             default_path = self.backend.get_default_db_path("SingleCacheProj")
-            expected_db_path = os.path.abspath(os.path.join(temp_base, "tfs_cache_SingleCacheProj.db"))
+            expected_db_path = os.path.abspath(os.path.join(orig_db_dir, "tfs_cache_SingleCacheProj.db"))
             self.assertEqual(default_path, expected_db_path)
 
             mock_handler = MagicMock()
@@ -344,11 +356,13 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
             self.assertEqual(os.path.abspath(self.backend.dbPath), expected_db_path)
             self.assertTrue(os.path.exists(expected_db_path))
 
-            # Ensure no duplicate DB cache was created in cwd
+            # Ensure NO database file was created in the Markdown output directory or cwd
+            wrong_md_dir_db = os.path.join(markdown_output_dir, "tfs_cache_SingleCacheProj.db")
             wrong_cwd_db = os.path.join(temp_cwd, "tfs_cache_SingleCacheProj.db")
+            self.assertFalse(os.path.exists(wrong_md_dir_db))
             self.assertFalse(os.path.exists(wrong_cwd_db))
 
-            # Ensure sync wrote directly to the active cache instance
+            # Ensure sync wrote directly to the active cache instance in orig_db_dir
             mock_handler.GetTFSRepositories.assert_called_once()
             synced_cache = mock_handler.GetTFSRepositories.call_args.kwargs.get("cache_db")
             self.assertIsNotNone(synced_cache)
@@ -356,8 +370,47 @@ class TestSettingsAndProjectSwitch(unittest.TestCase):
         finally:
             os.chdir(orig_cwd)
             devops_helper.BASE_FOLDER = orig_base_folder
-            shutil.rmtree(temp_base, ignore_errors=True)
+            shutil.rmtree(orig_db_dir, ignore_errors=True)
+            shutil.rmtree(markdown_output_dir, ignore_errors=True)
             shutil.rmtree(temp_cwd, ignore_errors=True)
+
+    def test_prune_missing_recent_database_references(self):
+        """
+        Verify that references to recently used database files (in recent_databases,
+        recent_projects, and db_path) are deleted if those files no longer exist on disk.
+        """
+        import shutil
+        temp_dir = tempfile.mkdtemp()
+        try:
+            existing_db = os.path.join(temp_dir, "tfs_cache_Existing.db")
+            missing_db = os.path.join(temp_dir, "tfs_cache_Deleted.db")
+            AzureDevOpsCache(existing_db)
+
+            os.makedirs(os.path.dirname(USER_SETTINGS_PATH), exist_ok=True)
+            with open(USER_SETTINGS_PATH, "w", encoding="utf-8") as f:
+                yaml.safe_dump({
+                    "db_path": missing_db,
+                    "recent_databases": [missing_db, existing_db],
+                    "recent_projects": [
+                        {"name": "DeletedProj", "id": "p-del", "db_path": missing_db},
+                        {"name": "ExistingProj", "id": "p-ok", "db_path": existing_db},
+                    ],
+                }, f)
+
+            # Accessing recentDatabases / recentProjects or switching to a missing DB prunes stale entries
+            self.assertFalse(self.backend.switch_database(missing_db))
+            self.assertEqual(self.backend.recentDatabases, [existing_db])
+            self.assertEqual(len(self.backend.recentProjects), 1)
+            self.assertEqual(self.backend.recentProjects[0]["name"], "ExistingProj")
+
+            with open(USER_SETTINGS_PATH, "r", encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            self.assertEqual(saved.get("recent_databases"), [existing_db])
+            self.assertEqual(len(saved.get("recent_projects", [])), 1)
+            self.assertEqual(saved["recent_projects"][0]["db_path"], existing_db)
+            self.assertEqual(saved.get("db_path"), existing_db)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
