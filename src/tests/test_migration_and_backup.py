@@ -46,6 +46,15 @@ class TestMilestone1SubmoduleAuditor(unittest.TestCase):
         self.known_repos = ["CoreEngine", "CommonLib", "UiWidgets", "DriversPkg"]
 
     def tearDown(self):
+        import logging
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, logging.FileHandler):
+                try:
+                    root_logger.removeHandler(h)
+                    h.close()
+                except Exception:
+                    pass
         self.tmp_dir.cleanup()
 
     def test_parse_gitmodules_content(self):
@@ -265,6 +274,15 @@ class TestPath1LocalBackupManager(unittest.TestCase):
         self._init_source_repos()
 
     def tearDown(self):
+        import logging
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, logging.FileHandler):
+                try:
+                    root_logger.removeHandler(h)
+                    h.close()
+                except Exception:
+                    pass
         self.tmp_dir.cleanup()
 
     def _run_git(self, args, cwd):
@@ -443,6 +461,15 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         self._init_source_repos()
 
     def tearDown(self):
+        import logging
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            if isinstance(h, logging.FileHandler):
+                try:
+                    root_logger.removeHandler(h)
+                    h.close()
+                except Exception:
+                    pass
         self.tmp_dir.cleanup()
 
     def _run_git(self, args, cwd):
@@ -687,6 +714,11 @@ class TestPath2ForgejoStandbySync(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(cron_target, "mirrors", "CommonLib.git")))
         self.assertTrue(os.path.isfile(os.path.join(cron_target, "mirror_cron.log")))
         self.assertFalse(os.path.exists(os.path.join(cron_target, ".mirror.lock")))
+        import logging
+        open_file_handlers = [
+            h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
+        ]
+        self.assertEqual(open_file_handlers, [])
 
     def test_timeout_handling_and_two_stage_recovery_does_not_abort_batch(self):
         """

@@ -377,6 +377,8 @@ class DevOpsBackend(QObject):
                     p_row = conn.execute("SELECT name FROM projects ORDER BY last_synced_at DESC LIMIT 1").fetchone()
                     if p_row and p_row["name"]:
                         devops_helper.AZURE_PROJECT_ID = p_row["name"]
+                        self._project_id = p_row["name"]
+                        self._selected_project = ""
                         self._stats["project_name"] = p_row["name"]
                     else:
                         r_row = conn.execute(
@@ -384,6 +386,8 @@ class DevOpsBackend(QObject):
                         ).fetchone()
                         if r_row and r_row["project_id"]:
                             devops_helper.AZURE_PROJECT_ID = r_row["project_id"]
+                            self._project_id = r_row["project_id"]
+                            self._selected_project = ""
                             self._stats["project_name"] = r_row["project_id"]
                 return
 
@@ -394,6 +398,8 @@ class DevOpsBackend(QObject):
             if db_cfg.get("AZURE_PROJECT_ID") or db_cfg.get("PROJECT_NAME"):
                 p_name = db_cfg.get("PROJECT_NAME") or db_cfg.get("AZURE_PROJECT_ID")
                 devops_helper.AZURE_PROJECT_ID = p_name
+                self._project_id = p_name
+                self._selected_project = ""
                 self._stats["project_name"] = p_name
             if db_cfg.get("AZURE_PERSONAL_ACCESS_TOKEN"):
                 devops_helper.AZURE_PERSONAL_ACCESS_TOKEN = db_cfg["AZURE_PERSONAL_ACCESS_TOKEN"]
@@ -481,15 +487,26 @@ class DevOpsBackend(QObject):
     def projectName(self):
         return self._stats.get("project_name") or devops_helper.AZURE_PROJECT_ID or "N/A"
 
-    @Property(str, notify=settingsChanged)
-    def selectedProject(self) -> str:
+    def _get_selected_project(self) -> str:
         """Returns the active project ID/name (alias for projectName without 'N/A' placeholder)."""
         p = (
-            getattr(devops_helper, "AZURE_PROJECT_ID", "")
+            getattr(self, "_selected_project", "")
+            or getattr(devops_helper, "AZURE_PROJECT_ID", "")
             or getattr(self, "_project_id", "")
             or self._stats.get("project_name", "")
         )
         return "" if p in ("N/A", None) else str(p).strip()
+
+    def _set_selected_project(self, value: str) -> None:
+        val = "" if value in ("N/A", None) else str(value).strip()
+        self._selected_project = val
+        self._project_id = val
+        if val:
+            devops_helper.AZURE_PROJECT_ID = val
+            if isinstance(getattr(self, "_stats", None), dict):
+                self._stats["project_name"] = val
+
+    selectedProject = Property(str, _get_selected_project, _set_selected_project, notify=settingsChanged)
 
     @Property(dict, notify=statsChanged)
     def appVersionInfo(self):
